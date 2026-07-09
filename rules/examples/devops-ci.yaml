@@ -1,0 +1,155 @@
+# DevOps/CI 配置审计规则集
+# 场景：扫描 CI/CD 配置、Dockerfile、部署脚本中的安全配置缺失与风险
+# 适用：DevOps 流水线门禁、容器镜像构建前检查、基础设施配置审计
+version: "1.0"
+
+ignore_dirs:
+  - .git
+  - node_modules
+  - __pycache__
+  - .venv
+  - venv
+
+ignore_extensions:
+  - pyc
+  - pyo
+  - lock
+
+rules:
+  # Dockerfile 中使用 latest 标签（不可复现构建）
+  - name: Dockerfile 使用 latest 标签
+    description: 检测 Dockerfile 中 FROM ...:latest（应使用具体版本号）
+    severity: warning
+    file_extensions:
+      - ""
+      - dockerfile
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: regex
+          pattern: '(^|/)Dockerfile(\.\w+)?$'
+          case_sensitive: true
+        - type: content
+          mode: regex
+          pattern: 'FROM\s+\S+:latest'
+          case_sensitive: true
+
+  # Dockerfile 中以 root 用户运行
+  - name: Dockerfile 以 root 运行
+    description: 检测 Dockerfile 未创建非 root 用户（应使用 USER 指定非特权用户）
+    severity: warning
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: regex
+          pattern: '(^|/)Dockerfile(\.\w+)?$'
+          case_sensitive: true
+        - type: not
+          child:
+            type: content
+            mode: regex
+            pattern: 'USER\s+\S+'
+            case_sensitive: true
+
+  # GitHub Actions 中使用 pull_request_target（有令牌泄露风险）
+  - name: GitHub Actions pull_request_target 风险
+    description: 检测 GitHub Actions 使用 pull_request_target 触发器（可能泄露 GITHUB_TOKEN）
+    severity: critical
+    file_extensions:
+      - yml
+      - yaml
+    match:
+      type: and
+      children:
+        - type: path
+          mode: regex
+          pattern: '\.github/workflows/.*\.ya?ml$'
+          case_sensitive: false
+        - type: content
+          mode: contains
+          pattern: "pull_request_target"
+          case_sensitive: true
+
+  # CI 配置中硬编码密钥
+  - name: CI 配置硬编码密钥
+    description: 检测 CI 配置文件中的硬编码 secret/token
+    severity: critical
+    file_extensions:
+      - yml
+      - yaml
+    match:
+      type: content
+      mode: regex
+      pattern: '(secret|token|api_key)\s*:\s*[''"][^''"$\{]+[''"]'
+      case_sensitive: false
+
+  # 部署脚本中 sudo 滥用
+  - name: 部署脚本 sudo 滥用
+    description: 检测 shell 脚本中的 sudo 使用（应通过 systemd 等机制管理权限）
+    severity: info
+    file_extensions:
+      - sh
+      - bash
+    match:
+      type: content
+      mode: regex
+      pattern: '^\s*sudo\s+'
+      case_sensitive: false
+
+  # Kubernetes 配置中未设置资源限制
+  - name: K8s 缺少资源限制
+    description: 检测 K8s 部署清单未设置 resources.limits
+    severity: warning
+    file_extensions:
+      - yaml
+      - yml
+    match:
+      type: and
+      children:
+        - type: content
+          mode: regex
+          pattern: 'kind:\s*(Deployment|StatefulSet|DaemonSet|Pod)'
+          case_sensitive: true
+        - type: not
+          child:
+            type: content
+            mode: contains
+            pattern: "resources:"
+            case_sensitive: true
+
+  # .env 文件提交到仓库
+  - name: .env 文件入库
+    description: 检测 .env 文件被提交到仓库（应通过 .gitignore 排除）
+    severity: critical
+    match:
+      type: filename
+      mode: regex
+      pattern: '^\.env(\.\w+)?$'
+      case_sensitive: true
+
+  # docker-compose 未指定容器资源限制
+  - name: docker-compose 无资源限制
+    description: 检测 docker-compose 服务定义未设置 deploy.resources.limits
+    severity: info
+    file_extensions:
+      - yml
+      - yaml
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: regex
+          pattern: 'docker-compose.*\.ya?ml$'
+          case_sensitive: false
+        - type: content
+          mode: regex
+          pattern: '^\s{2,}\w+:'
+          case_sensitive: false
+        - type: not
+          child:
+            type: content
+            mode: contains
+            pattern: "deploy:"
+            case_sensitive: true

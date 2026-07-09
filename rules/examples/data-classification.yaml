@@ -1,0 +1,155 @@
+# 数据分类标记规则集
+# 场景：根据文件内容自动识别数据等级（公开/内部/机密/绝密）
+# 适用：数据治理、DLP（数据泄露防护）前置分类、文档权限管理
+#
+# 特点：使用不同 severity 表示数据等级
+#   - info      = 公开数据（可外发）
+#   - warning   = 内部数据（仅限内部流转）
+#   - critical  = 机密/绝密数据（需严格控制）
+version: "1.0"
+
+ignore_dirs:
+  - .git
+  - node_modules
+  - __pycache__
+  - .venv
+  - venv
+
+ignore_extensions:
+  - pyc
+  - pyo
+  - tmp
+  - swp
+
+rules:
+  # 公开数据：版权声明/许可协议
+  - name: 公开版权声明文档
+    description: 检测包含开源许可证或版权声明的文档（标记为公开数据）
+    severity: info
+    match:
+      type: or
+      children:
+        - type: content
+          mode: contains
+          pattern: "Apache License"
+          case_sensitive: true
+        - type: content
+          mode: contains
+          pattern: "MIT License"
+          case_sensitive: true
+        - type: content
+          mode: contains
+          pattern: "Copyright (c)"
+          case_sensitive: true
+
+  # 公开数据：README/CHANGELOG 等文档
+  - name: 公开文档（README/CHANGELOG）
+    description: 检测 README、CHANGELOG、CONTRIBUTING 等公开文档
+    severity: info
+    match:
+      type: filename
+      mode: regex
+      pattern: '(README|CHANGELOG|CONTRIBUTING|LICENSE|NOTICE)(\.\w+)?$'
+      case_sensitive: true
+
+  # 内部数据：内部备忘录
+  - name: 内部备忘录
+    description: 检测标记为"内部"的文档
+    severity: warning
+    match:
+      type: or
+      children:
+        - type: content
+          mode: regex
+          pattern: '\[内部\]|【内部】|INTERNAL ONLY'
+          case_sensitive: false
+        - type: filename
+          mode: regex
+          pattern: 'internal[-_]'
+          case_sensitive: false
+
+  # 机密数据：财务报表
+  - name: 财务报表文档
+    description: 检测疑似财务报表文档（文件名包含财务/报表/audit）
+    severity: critical
+    match:
+      type: or
+      children:
+        - type: filename
+          mode: regex
+          pattern: '(财务|报表|audit|financial|balance[_-]?sheet)'
+          case_sensitive: false
+        - type: content
+          mode: regex
+          pattern: '(营业收入|净利润|资产负债|revenue|net income)'
+          case_sensitive: false
+
+  # 机密数据：合同/协议
+  - name: 合同协议文档
+    description: 检测合同/协议类文档
+    severity: critical
+    match:
+      type: or
+      children:
+        - type: filename
+          mode: regex
+          pattern: '(合同|协议|contract|agreement|nda)'
+          case_sensitive: false
+        - type: content
+          mode: regex
+          pattern: '(甲方|乙方|合同金额|署代表|signing party)'
+          case_sensitive: false
+
+  # 绝密数据：源代码（生产仓库）
+  - name: 生产源代码
+    description: 检测生产环境源代码文件
+    severity: critical
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: regex
+          pattern: '\.(py|java|go|rs|c|cpp|cs|rb|php|js|ts)$'
+          case_sensitive: false
+        - type: path
+          mode: contains
+          pattern: src
+          case_sensitive: false
+        - type: not
+          child:
+            type: path
+            mode: regex
+            pattern: '(test|example|sample|demo|docs)/'
+            case_sensitive: false
+
+  # 机密数据：人事档案
+  - name: 人事档案文档
+    description: 检测疑似人事档案文档
+    severity: critical
+    match:
+      type: or
+      children:
+        - type: filename
+          mode: regex
+          pattern: '(人事|员工|hr|employee|payroll|薪酬)'
+          case_sensitive: false
+        - type: content
+          mode: regex
+          pattern: '(身份证号|入职时间|薪资|employee id|salary)'
+          case_sensitive: false
+
+  # 机密数据：客户名单
+  - name: 客户名单文档
+    description: 检测疑似客户名单/CRM 导出文档
+    severity: critical
+    match:
+      type: or
+      children:
+        - type: filename
+          mode: regex
+          pattern: '(客户|customer|client|crm)'
+          case_sensitive: false
+        - type: content
+          mode: regex
+          pattern: '(联系方式|客户编号|customer id|contact info)'
+          case_sensitive: false

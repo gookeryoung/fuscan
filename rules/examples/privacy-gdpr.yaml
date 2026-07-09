@@ -1,0 +1,199 @@
+# GDPR/隐私合规规则集
+# 场景：检测违反 GDPR、个保法等隐私法规的数据处理行为
+# 适用：面向欧盟/中国市场的应用合规检查、隐私影响评估（PIA）、数据处理审计
+version: "1.0"
+
+ignore_dirs:
+  - .git
+  - node_modules
+  - __pycache__
+  - .venv
+  - venv
+
+ignore_extensions:
+  - pyc
+  - pyo
+
+rules:
+  # 个人身份信息（PII）- 姓名 + 联系方式组合
+  - name: PII 姓名与联系方式组合
+    description: 检测文档中同时包含姓名与手机号/邮箱的组合（GDPR 个人数据）
+    severity: critical
+    match:
+      type: and
+      children:
+        - type: content
+          mode: regex
+          pattern: '(姓名|name)\s*[：:]\s*[\u4e00-\u9fa5A-Za-z]+'
+          case_sensitive: false
+        - type: or
+          children:
+            - type: content
+              mode: regex
+              pattern: '(手机|电话|phone|mobile)\s*[：:]\s*\d+'
+              case_sensitive: false
+            - type: content
+              mode: regex
+              pattern: '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+              case_sensitive: false
+
+  # 健康数据（特殊类别数据，GDPR 第 9 条）
+  - name: 健康数据检测
+    description: 检测疑似健康/医疗数据（GDPR 特殊类别，需明确同意）
+    severity: critical
+    match:
+      type: or
+      children:
+        - type: content
+          mode: regex
+          pattern: '(诊断|病历|处方|血压|血糖|diagnosis|medical record)'
+          case_sensitive: false
+        - type: filename
+          mode: regex
+          pattern: '(病历|诊断|medical|health|病历)'
+          case_sensitive: false
+
+  # 种族/宗教/政治倾向（特殊类别数据）
+  - name: 特殊类别数据
+    description: 检测种族、宗教、政治倾向等特殊类别数据
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '(种族|民族|宗教|政治倾向|sexual orientation|race|religion)'
+      case_sensitive: false
+
+  # 未成年人数据（需家长同意）
+  - name: 未成年人数据
+    description: 检测疑似未成年人数据（需家长同意，GDPR 第 8 条）
+    severity: warning
+    match:
+      type: or
+      children:
+        - type: content
+          mode: regex
+          pattern: '(出生日期|年龄|birthday|age)\s*[：:]\s*\d+'
+          case_sensitive: false
+        - type: filename
+          mode: regex
+          pattern: '(未成年|minor|child|student)'
+          case_sensitive: false
+
+  # 数据处理记录缺失
+  - name: 数据处理缺少目的说明
+    description: 检测数据处理代码缺少目的说明（GDPR 第 5 条）
+    severity: info
+    file_extensions:
+      - py
+      - js
+      - ts
+      - java
+    match:
+      type: and
+      children:
+        - type: content
+          mode: regex
+          pattern: '(collect|gather|store)\s+(user|personal)?\s*data'
+          case_sensitive: false
+        - type: not
+          child:
+            type: content
+            mode: regex
+            pattern: '#.*(purpose|目的|for|used for)|//.*(purpose|目的|for|used for)'
+            case_sensitive: false
+
+  # 数据跨境传输
+  - name: 数据跨境传输配置
+    description: 检测数据可能跨境传输的配置（需 adequacy decision 或适当保障措施）
+    severity: warning
+    match:
+      type: or
+      children:
+        - type: content
+          mode: regex
+          pattern: 'upload.*(overseas|abroad|跨境|境外)'
+          case_sensitive: false
+        - type: content
+          mode: regex
+          pattern: 'sync.*\.eu-west-|sync.*\.us-east-|sync.*\.ap-northeast-'
+          case_sensitive: false
+
+  # Cookie 未获同意即设置
+  - name: Cookie 未获同意
+    description: 检测前端代码在用户同意前设置非必要 Cookie
+    severity: warning
+    file_extensions:
+      - js
+      - ts
+      - html
+    match:
+      type: and
+      children:
+        - type: content
+          mode: regex
+          pattern: 'document\.cookie\s*='
+          case_sensitive: false
+        - type: not
+          child:
+            type: content
+            mode: regex
+            pattern: '(consent|同意|gdpr|cookie.?banner)'
+            case_sensitive: false
+
+  # 数据保留期未设置
+  - name: 数据保留期缺失
+    description: 检测数据存储配置未设置保留期（GDPR 存储限制原则）
+    severity: info
+    file_extensions:
+      - py
+      - yaml
+      - yml
+    match:
+      type: and
+      children:
+        - type: content
+          mode: regex
+          pattern: '(database|storage|bucket|table)\s*[=:]'
+          case_sensitive: false
+        - type: not
+          child:
+            type: content
+            mode: regex
+            pattern: '(retention|expire|ttl|保留期|过期)'
+            case_sensitive: false
+
+  # 被遗忘权处理入口
+  - name: 被遗忘权处理入口
+    description: 检测疑似被遗忘权（删除用户数据）处理代码（需确保完整删除）
+    severity: info
+    file_extensions:
+      - py
+      - js
+      - ts
+      - java
+      - go
+    match:
+      type: or
+      children:
+        - type: content
+          mode: regex
+          pattern: '(delete.?user|erase.?data|right.?to.?be.?forgotten|被遗忘权)'
+          case_sensitive: false
+        - type: content
+          mode: regex
+          pattern: 'def\s+delete_user|function\s+deleteUser|func\s+DeleteUser'
+          case_sensitive: false
+
+  # 日志中记录敏感数据
+  - name: 日志记录敏感数据
+    description: 检测日志中疑似记录个人数据（应脱敏）
+    severity: critical
+    file_extensions:
+      - py
+      - js
+      - ts
+    match:
+      type: content
+      mode: regex
+      pattern: 'log(ger)?\.(info|debug|warn|error)\s*\([^)]*(password|email|phone|身份证)'
+      case_sensitive: false

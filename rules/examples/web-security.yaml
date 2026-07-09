@@ -1,0 +1,166 @@
+# Web 应用安全规则集
+# 场景：扫描前端代码、配置文件中的 Web 安全风险
+# 适用：Web 应用上线前检查、前端代码审计、安全扫描 CI 集成
+version: "1.0"
+
+ignore_dirs:
+  - .git
+  - node_modules
+  - __pycache__
+  - dist
+  - build
+  - .venv
+  - venv
+
+ignore_extensions:
+  - pyc
+  - pyo
+  - min.js
+  - min.css
+  - map
+
+rules:
+  # innerHTML 赋值（XSS 风险）
+  - name: innerHTML XSS 风险
+    description: 检测 JavaScript 中使用 innerHTML 赋值（可能导致 XSS）
+    severity: critical
+    file_extensions:
+      - js
+      - ts
+      - jsx
+      - tsx
+      - vue
+      - html
+    match:
+      type: content
+      mode: regex
+      pattern: '\.innerHTML\s*='
+      case_sensitive: false
+
+  # document.write（XSS 风险）
+  - name: document.write 风险
+    description: 检测使用 document.write（可能导致 XSS）
+    severity: warning
+    file_extensions:
+      - js
+      - ts
+      - jsx
+      - tsx
+      - vue
+      - html
+    match:
+      type: content
+      mode: regex
+      pattern: 'document\.write\s*\('
+      case_sensitive: false
+
+  # eval/Function 构造器（代码注入）
+  - name: eval 与 Function 构造器
+    description: 检测 eval() 或 new Function() 调用（代码注入风险）
+    severity: critical
+    file_extensions:
+      - js
+      - ts
+      - jsx
+      - tsx
+      - vue
+    match:
+      type: content
+      mode: regex
+      pattern: '\beval\s*\(|new\s+Function\s*\('
+      case_sensitive: false
+
+  # CORS 配置过于宽松
+  - name: CORS Access-Control-Allow-Origin *
+    description: 检测 CORS 配置允许任意来源（应限制白名单）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: 'Access-Control-Allow-Origin\s*[:=]\s*[''"]?\*[''"]?'
+      case_sensitive: false
+
+  # CSP 禁用或过于宽松
+  - name: CSP 缺失或 unsafe-inline
+    description: 检测 Content-Security-Policy 中使用 unsafe-inline/unsafe-eval
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: 'Content-Security-Policy.*unsafe-(inline|eval)'
+      case_sensitive: false
+
+  # 硬编码 API 端点
+  - name: 硬编码 API 端点
+    description: 检测代码中硬编码的 API 端点（应通过环境变量配置）
+    severity: info
+    file_extensions:
+      - js
+      - ts
+      - jsx
+      - tsx
+      - vue
+    match:
+      type: content
+      mode: regex
+      pattern: '(https?://|//)(api|gateway)\.[\w.-]+'
+      case_sensitive: false
+
+  # cookie 未设置安全属性
+  - name: Cookie 缺少安全属性
+    description: 检测 Set-Cookie 未设置 Secure/HttpOnly/SameSite
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: 'Set-Cookie\s*:\s*[^;]+(?![^;]*Secure)(?![^;]*HttpOnly)'
+      case_sensitive: false
+
+  # localStorage 存储 token（XSS 可窃取）
+  - name: localStorage 存储敏感信息
+    description: 检测使用 localStorage 存储 token/secret（XSS 可窃取）
+    severity: warning
+    file_extensions:
+      - js
+      - ts
+      - jsx
+      - tsx
+      - vue
+    match:
+      type: content
+      mode: regex
+      pattern: 'localStorage\.setItem\s*\(\s*[''"](token|secret|password|api_key)'
+      case_sensitive: false
+
+  # HTTP 明文传输敏感数据
+  - name: HTTP 明文传输
+    description: 检测代码中使用 http:// 传输数据（应使用 https://）
+    severity: warning
+    file_extensions:
+      - js
+      - ts
+      - jsx
+      - tsx
+      - vue
+      - json
+    match:
+      type: content
+      mode: regex
+      pattern: 'http://[^/\s]+\.(com|cn|org|net)'
+      case_sensitive: false
+
+  # 前端代码中的调试器语句
+  - name: 调试器语句残留
+    description: 检测前端代码中的 debugger 语句（生产环境应移除）
+    severity: info
+    file_extensions:
+      - js
+      - ts
+      - jsx
+      - tsx
+      - vue
+    match:
+      type: content
+      mode: regex
+      pattern: '^\s*debugger\s*;?\s*$'
+      case_sensitive: false

@@ -1,0 +1,169 @@
+# 知识产权保护规则集
+# 场景：检测源码泄露、商业机密文档、版权信息缺失等问题
+# 适用：代码外发审查、开源前合规检查、商业机密保护
+version: "1.0"
+
+ignore_dirs:
+  - .git
+  - .svn
+  - node_modules
+  - __pycache__
+  - .venv
+  - venv
+  - vendor
+  - third_party
+
+ignore_extensions:
+  - pyc
+  - pyo
+  - min.js
+  - min.css
+
+rules:
+  # 源代码文件缺少版权头
+  - name: 源码缺少版权头
+    description: 检测 src 目录下的源码文件缺少版权声明
+    severity: info
+    file_extensions:
+      - py
+      - java
+      - go
+      - c
+      - cpp
+    match:
+      type: and
+      children:
+        - type: path
+          mode: contains
+          pattern: src
+          case_sensitive: false
+        - type: not
+          child:
+            type: content
+            mode: regex
+            pattern: '(Copyright|版权|Licensed under|SPDX-License)'
+            case_sensitive: false
+
+  # 商业机密标记
+  - name: 商业机密标记
+    description: 检测标记为商业机密的文档
+    severity: critical
+    match:
+      type: or
+      children:
+        - type: content
+          mode: regex
+          pattern: '(商业机密|机密文档|CONFIDENTIAL|TRADE SECRET|PROPRIETARY)'
+          case_sensitive: false
+        - type: filename
+          mode: regex
+          pattern: '(confidential|proprietary|机密)'
+          case_sensitive: false
+
+  # 源码文件出现在非代码目录（疑似外发）
+  - name: 源码出现在非代码目录
+    description: 检测源码文件出现在 Desktop/Downloads/Documents 等目录
+    severity: warning
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: regex
+          pattern: '\.(py|java|go|c|cpp|cs|rs)$'
+          case_sensitive: false
+        - type: path
+          mode: regex
+          pattern: '(Desktop|Downloads|Documents|桌面|下载|文档)/'
+          case_sensitive: false
+
+  # 第三方代码未标注来源
+  - name: 第三方代码未标注来源
+    description: 检测 vendor/third_party 目录中的代码缺少来源说明
+    severity: info
+    match:
+      type: and
+      children:
+        - type: path
+          mode: regex
+          pattern: '(vendor|third_party|3rdparty)/'
+          case_sensitive: false
+        - type: not
+          child:
+            type: content
+            mode: regex
+            pattern: '(Source:|From:|Origin:|@see|@link|来源:)'
+            case_sensitive: false
+
+  # 竞品/客户名称泄露
+  - name: 竞品名称提及
+    description: 检测代码/文档中提及竞品名称（外发前需审查）
+    severity: info
+    match:
+      type: content
+      mode: regex
+      pattern: '(竞品|竞争对手|competitor)[：:]\s*\S+'
+      case_sensitive: false
+
+  # 未脱敏的生产数据
+  - name: 生产数据疑似入仓
+    description: 检测仓库中疑似包含生产环境数据（连接串、真实用户数据）
+    severity: critical
+    match:
+      type: or
+      children:
+        - type: content
+          mode: regex
+          pattern: '(prod|production)://[^@]+@[\d.]+:\d+'
+          case_sensitive: false
+        - type: content
+          mode: regex
+          pattern: 'mysql://(root|admin)@[\d.]+:\d+'
+          case_sensitive: false
+
+  # 设计文档/架构图
+  - name: 架构设计文档
+    description: 检测架构/设计类文档（外发需审查）
+    severity: warning
+    match:
+      type: or
+      children:
+        - type: filename
+          mode: regex
+          pattern: '(架构|设计|architecture|design|ADR)[-_]?\w*'
+          case_sensitive: false
+        - type: content
+          mode: regex
+          pattern: '(系统架构|技术方案|design doc|architecture review)'
+          case_sensitive: false
+
+  # 测试数据包含真实用户信息
+  - name: 测试数据疑似真实用户
+    description: 检测测试目录中的文件疑似包含真实用户数据
+    severity: warning
+    match:
+      type: and
+      children:
+        - type: path
+          mode: contains
+          pattern: test
+          case_sensitive: false
+        - type: content
+          mode: regex
+          pattern: '(姓名|手机号|身份证|name|phone|id_card)\s*[：:]\s*[\u4e00-\u9fa5]'
+          case_sensitive: false
+
+  # 源码中的内部 API 端点
+  - name: 内部 API 端点泄露
+    description: 检测代码中硬编码的内部 API 端点（外发会暴露架构）
+    severity: warning
+    file_extensions:
+      - py
+      - js
+      - ts
+      - java
+      - go
+    match:
+      type: content
+      mode: regex
+      pattern: '(internal|intranet|staging|dev)\.[\w-]+\.(com|cn|net)'
+      case_sensitive: false

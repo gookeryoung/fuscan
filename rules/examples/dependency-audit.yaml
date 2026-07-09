@@ -1,0 +1,149 @@
+# 依赖安全扫描规则集
+# 场景：扫描项目依赖清单文件，检测已知风险包、过时版本、可疑来源
+# 适用：CI 流水线依赖检查、供应链安全审计、上线前依赖审查
+version: "1.0"
+
+ignore_dirs:
+  - .git
+  - node_modules
+  - __pycache__
+  - .venv
+  - venv
+  - site-packages
+
+ignore_extensions:
+  - pyc
+  - pyo
+
+rules:
+  # Python requirements 中已知风险包
+  - name: Python 风险依赖包
+    description: 检测 requirements.txt 中已知有漏洞的包名
+    severity: critical
+    file_extensions:
+      - txt
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: regex
+          pattern: 'requirements.*\.txt$'
+          case_sensitive: false
+        - type: content
+          mode: regex
+          pattern: '^(django|flask|requests|urllib3|cryptography|pillow|pyyaml)=='
+          case_sensitive: false
+
+  # Python setup.py 中使用 eval/install_requires 风险
+  - name: setup.py 不安全写法
+    description: 检测 setup.py 中的不安全写法
+    severity: warning
+    file_extensions:
+      - py
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: equals
+          pattern: setup.py
+          case_sensitive: true
+        - type: content
+          mode: regex
+          pattern: 'eval\s*\(|exec\s*\(|os\.system\s*\('
+          case_sensitive: false
+
+  # package.json 中使用 http:// 而非 https:// 仓库
+  - name: package.json 不安全仓库 URL
+    description: 检测 package.json 中使用 http:// 的仓库地址（应使用 https://）
+    severity: warning
+    file_extensions:
+      - json
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: equals
+          pattern: package.json
+          case_sensitive: true
+        - type: content
+          mode: regex
+          pattern: '"repository"\s*:\s*\{[^}]*"url"\s*:\s*"http://'
+          case_sensitive: false
+
+  # npm shrinkwrap.lock / package-lock.json 过大
+  - name: 锁文件疑似异常大
+    description: 检测 lock 文件名（用于审计依赖锁定状态）
+    severity: info
+    match:
+      type: filename
+      mode: regex
+      pattern: '(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|Pipfile\.lock)$'
+      case_sensitive: true
+
+  # Go mod 中使用 replace 指令（可能引入非官方版本）
+  - name: Go mod replace 指令
+    description: 检测 go.mod 中的 replace 指令（可能引入非官方或本地版本）
+    severity: warning
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: equals
+          pattern: go.mod
+          case_sensitive: true
+        - type: content
+          mode: regex
+          pattern: '^replace\s+'
+          case_sensitive: false
+
+  # Maven pom.xml 中使用 SNAPSHOT 版本
+  - name: Maven SNAPSHOT 依赖
+    description: 检测 pom.xml 中的 SNAPSHOT 版本（生产环境不应使用）
+    severity: warning
+    file_extensions:
+      - xml
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: equals
+          pattern: pom.xml
+          case_sensitive: true
+        - type: content
+          mode: regex
+          pattern: '<version>.*-SNAPSHOT</version>'
+          case_sensitive: false
+
+  # requirements.txt 无版本锁定
+  - name: Python 依赖未锁定版本
+    description: 检测 requirements.txt 中未指定版本的包（应使用 == 锁定）
+    severity: info
+    file_extensions:
+      - txt
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: regex
+          pattern: 'requirements.*\.txt$'
+          case_sensitive: false
+        - type: content
+          mode: regex
+          pattern: '^\w[\w-]*(\s*#.*)?$'
+          case_sensitive: false
+
+  # Dockerfile 中 apt-get 未锁定版本
+  - name: Dockerfile apt-get 未锁定版本
+    description: 检测 Dockerfile 中 apt-get install 未指定版本
+    severity: info
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: regex
+          pattern: '(^|/)Dockerfile(\.\w+)?$'
+          case_sensitive: true
+        - type: content
+          mode: regex
+          pattern: 'apt-get install\s+[^=]*\s+(?!--no-install-recommends)'
+          case_sensitive: false

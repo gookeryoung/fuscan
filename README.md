@@ -65,19 +65,36 @@ GUI 提供：
 
 ## 规则示例
 
-基础示例见 [rules/example.yaml](rules/example.yaml)。
+基础示例见 [rules/example.yaml](rules/example.yaml)。场景化示例见 [rules/examples/](rules/examples/)，共 12 个场景、101 条规则。
 
-场景化示例见 [rules/examples/](rules/examples/)：
+### 安全审计类
 
 | 文件 | 场景 | 适用范围 |
 |------|------|---------|
 | [sensitive-data.yaml](rules/examples/sensitive-data.yaml) | 敏感数据检测 | PII 扫描（身份证、手机号、银行卡、邮箱） |
-| [security-audit.yaml](rules/examples/security-audit.yaml) | 安全审计 | 硬编码密钥、凭证、私钥检测 |
-| [code-security.yaml](rules/examples/code-security.yaml) | 代码安全 | 危险函数、调试残留、不安全写法 |
-| [log-analysis.yaml](rules/examples/log-analysis.yaml) | 日志分析 | 错误日志、异常堆栈、慢查询 |
-| [compliance.yaml](rules/examples/compliance.yaml) | 合规审计 | GDPR、等保、PCI-DSS 自检 |
+| [security-audit.yaml](rules/examples/security-audit.yaml) | 凭证与密钥审计 | 硬编码密钥、私钥、JWT、数据库连接串 |
+| [code-security.yaml](rules/examples/code-security.yaml) | 代码安全扫描 | 危险函数、调试残留、SQL 拼接 |
+| [web-security.yaml](rules/examples/web-security.yaml) | Web 应用安全 | XSS、CORS、CSP、Cookie 安全 |
+| [dependency-audit.yaml](rules/examples/dependency-audit.yaml) | 依赖安全审计 | 风险包、版本锁定、SNAPSHOT 依赖 |
 
-规则编写要点见 [rules/examples/README.md](rules/examples/README.md)。
+### 合规与治理类
+
+| 文件 | 场景 | 适用范围 |
+|------|------|---------|
+| [compliance.yaml](rules/examples/compliance.yaml) | 合规审计 | 明文密码、未脱敏数据、凭证文件 |
+| [privacy-gdpr.yaml](rules/examples/privacy-gdpr.yaml) | 隐私合规 | GDPR、个保法、PII、特殊类别数据 |
+| [data-classification.yaml](rules/examples/data-classification.yaml) | 数据分类标记 | 公开/内部/机密/绝密分级 |
+| [ip-protection.yaml](rules/examples/ip-protection.yaml) | 知识产权保护 | 源码泄露、机密文档、版权缺失 |
+
+### 运维与基础设施类
+
+| 文件 | 场景 | 适用范围 |
+|------|------|---------|
+| [log-analysis.yaml](rules/examples/log-analysis.yaml) | 日志分析 | 错误日志、异常堆栈、慢查询、OOM |
+| [devops-ci.yaml](rules/examples/devops-ci.yaml) | DevOps/CI 审计 | Dockerfile、GitHub Actions、K8s 配置 |
+| [infrastructure-as-code.yaml](rules/examples/infrastructure-as-code.yaml) | IaC 安全 | Terraform、K8s、Ansible、CloudFormation |
+
+规则配置字段详解与编写最佳实践见 [rules/examples/README.md](rules/examples/README.md)。
 
 ## 代码集成示例
 

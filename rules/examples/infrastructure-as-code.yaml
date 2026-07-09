@@ -1,0 +1,180 @@
+# 基础设施即代码（IaC）安全规则集
+# 场景：扫描 Terraform/Ansible/Kubernetes/CloudFormation 配置中的安全风险
+# 适用：基础设施部署前检查、云资源安全审计、配置漂移检测
+version: "1.0"
+
+ignore_dirs:
+  - .git
+  - .terraform
+  - node_modules
+  - __pycache__
+
+ignore_extensions:
+  - pyc
+  - pyo
+  - tfstate
+  - tfstate.backup
+
+rules:
+  # Terraform AWS S3 存储桶公开访问
+  - name: S3 存储桶公开访问
+    description: 检测 Terraform 中 S3 bucket 设置为公开访问
+    severity: critical
+    file_extensions:
+      - tf
+    match:
+      type: content
+      mode: regex
+      pattern: 'acl\s*=\s*"public-read"'
+      case_sensitive: false
+
+  # Terraform 安全组开放所有端口
+  - name: 安全组开放所有端口
+    description: 检测 Terraform 中安全组 ingress 规则开放 0.0.0.0/0 到所有端口
+    severity: critical
+    file_extensions:
+      - tf
+    match:
+      type: and
+      children:
+        - type: content
+          mode: contains
+          pattern: "0.0.0.0/0"
+          case_sensitive: true
+        - type: content
+          mode: regex
+          pattern: '(from_port|to_port)\s*=\s*0'
+          case_sensitive: false
+
+  # Terraform 资源未打标签
+  - name: Terraform 资源缺少标签
+    description: 检测 Terraform resource 块未设置 tags（成本归属与治理缺失）
+    severity: info
+    file_extensions:
+      - tf
+    match:
+      type: and
+      children:
+        - type: content
+          mode: regex
+          pattern: '^resource\s+'
+          case_sensitive: false
+        - type: not
+          child:
+            type: content
+            mode: regex
+            pattern: '^\s*tags\s*='
+            case_sensitive: false
+
+  # Terraform 使用明文密钥
+  - name: Terraform 明文密钥
+    description: 检测 Terraform 配置中硬编码密钥（应使用变量或 secrets manager）
+    severity: critical
+    file_extensions:
+      - tf
+    match:
+      type: content
+      mode: regex
+      pattern: '(password|secret|api_key|token)\s*=\s*"[^"$\{]+'
+      case_sensitive: false
+
+  # K8s Secret 使用明文数据
+  - name: K8s Secret 明文数据
+    description: 检测 K8s Secret 使用 stringData 明文存储（应使用 data + base64）
+    severity: warning
+    file_extensions:
+      - yaml
+      - yml
+    match:
+      type: and
+      children:
+        - type: content
+          mode: regex
+          pattern: 'kind:\s*Secret'
+          case_sensitive: true
+        - type: content
+          mode: contains
+          pattern: "stringData:"
+          case_sensitive: true
+
+  # K8s 镜像使用 latest 标签
+  - name: K8s 镜像使用 latest
+    description: 检测 K8s 部署清单中镜像使用 latest 标签
+    severity: warning
+    file_extensions:
+      - yaml
+      - yml
+    match:
+      type: content
+      mode: regex
+      pattern: 'image:\s*\S+:latest'
+      case_sensitive: false
+
+  # K8s privileged 容器
+  - name: K8s 特权容器
+    description: 检测 K8s 部署中启用 privileged=true（容器逃逸风险）
+    severity: critical
+    file_extensions:
+      - yaml
+      - yml
+    match:
+      type: content
+      mode: regex
+      pattern: 'privileged:\s*true'
+      case_sensitive: false
+
+  # K8s hostPath 挂载
+  - name: K8s hostPath 挂载
+    description: 检测 K8s 使用 hostPath 挂载宿主机路径（容器逃逸风险）
+    severity: warning
+    file_extensions:
+      - yaml
+      - yml
+    match:
+      type: content
+      mode: regex
+      pattern: 'hostPath:\s*\n\s*path:\s*\S+'
+      case_sensitive: false
+
+  # Ansible play 中明文密码
+  - name: Ansible 明文密码
+    description: 检测 Ansible playbook 中的明文密码字段
+    severity: critical
+    file_extensions:
+      - yaml
+      - yml
+    match:
+      type: and
+      children:
+        - type: content
+          mode: regex
+          pattern: '(password|passwd|ansible_ssh_pass)\s*:\s*[^$]\S+'
+          case_sensitive: false
+        - type: not
+          child:
+            type: content
+            mode: regex
+            pattern: 'vault_password|ansible-vault'
+            case_sensitive: false
+
+  # CloudFormation 资源未启用加密
+  - name: AWS 资源未启用加密
+    description: 检测 CloudFormation 中 S3/RDS 未启用加密
+    severity: warning
+    file_extensions:
+      - json
+      - yaml
+      - yml
+    match:
+      type: and
+      children:
+        - type: content
+          mode: regex
+          pattern: '"?Type"?\s*:\s*(AWS::S3::Bucket|AWS::RDS::DBInstance)'
+          case_sensitive: false
+        - type: not
+          child:
+            type: content
+            mode: regex
+            pattern: 'BucketEncryption|StorageEncrypted'
+            case_sensitive: false

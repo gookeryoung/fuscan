@@ -1,0 +1,151 @@
+# 代码安全扫描规则集
+# 场景：扫描代码中的危险函数、调试残留、不安全写法
+# 适用：代码评审前检查、CI 门禁
+version: "1.0"
+
+ignore_dirs:
+  - .git
+  - .svn
+  - __pycache__
+  - node_modules
+  - .venv
+  - venv
+  - dist
+  - build
+  - target
+
+ignore_extensions:
+  - pyc
+  - pyo
+  - class
+  - lock
+
+rules:
+  # Python eval/exec 危险函数
+  - name: Python 危险函数 eval
+    description: 检测 Python 代码中的 eval() 调用
+    severity: critical
+    file_extensions:
+      - py
+    match:
+      type: content
+      mode: regex
+      pattern: '\beval\s*\('
+      case_sensitive: false
+
+  - name: Python 危险函数 exec
+    description: 检测 Python 代码中的 exec() 调用
+    severity: critical
+    file_extensions:
+      - py
+    match:
+      type: content
+      mode: regex
+      pattern: '\bexec\s*\('
+      case_sensitive: false
+
+  # shell=True 的 subprocess 调用
+  - name: subprocess shell=True
+    description: 检测 subprocess 调用中使用 shell=True（命令注入风险）
+    severity: warning
+    file_extensions:
+      - py
+    match:
+      type: content
+      mode: contains
+      pattern: "shell=True"
+      case_sensitive: true
+
+  # JavaScript eval
+  - name: JavaScript eval 调用
+    description: 检测 JS 代码中的 eval() 调用
+    severity: warning
+    file_extensions:
+      - js
+      - ts
+      - jsx
+      - tsx
+      - vue
+    match:
+      type: content
+      mode: regex
+      pattern: '\beval\s*\('
+      case_sensitive: false
+
+  # SQL 拼接（简单启发式）
+  - name: SQL 字符串拼接
+    description: 检测 Python 代码中通过字符串拼接构造 SQL
+    severity: warning
+    file_extensions:
+      - py
+    match:
+      type: content
+      mode: regex
+      pattern: '(SELECT|INSERT|UPDATE|DELETE)\s+.*[''"].*%s.*[''"]'
+      case_sensitive: false
+
+  # 调试残留：print 语句（仅生产代码目录）
+  - name: 生产代码 print 调试残留
+    description: 检测 src 目录下的 print 调试语句
+    severity: info
+    file_extensions:
+      - py
+    match:
+      type: and
+      children:
+        - type: path
+          mode: contains
+          pattern: src
+          case_sensitive: false
+        - type: content
+          mode: regex
+          pattern: '^\s*print\s*\('
+          case_sensitive: false
+
+  # TODO/FIXME/HACK 标记
+  - name: TODO 标记
+    description: 检测代码中的 TODO 标记
+    severity: info
+    file_extensions:
+      - py
+      - js
+      - ts
+      - java
+      - go
+      - c
+      - cpp
+    match:
+      type: content
+      mode: regex
+      pattern: '#\s*TODO|#\s*FIXME|#\s*HACK|//\s*TODO|//\s*FIXME|//\s*HACK'
+      case_sensitive: true
+
+  # 硬编码 IP（疑似内网地址）
+  - name: 硬编码内网 IP
+    description: 检测代码中硬编码的内网 IP 地址
+    severity: info
+    match:
+      type: content
+      mode: regex
+      pattern: '(?<!\d)(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)\d{1,3}\.\d{1,3}(?!\d)'
+      case_sensitive: false
+
+  # 调试断言残留（非测试目录）
+  - name: 生产代码 assert 残留
+    description: 检测非测试目录中的 assert 语句（生产代码应用 raise）
+    severity: info
+    file_extensions:
+      - py
+    match:
+      type: and
+      children:
+        - type: content
+          mode: regex
+          pattern: '^\s*assert\s+'
+          case_sensitive: false
+        - type: not
+          child:
+            type: path
+            mode: contains
+            pattern: test
+            case_sensitive: false

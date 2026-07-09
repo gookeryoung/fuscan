@@ -1,0 +1,80 @@
+# 敏感数据检测规则集
+# 场景：扫描文档/代码/配置中泄露的个人敏感信息（PII）
+# 适用：金融、医疗、政府等行业的合规扫描
+version: "1.0"
+
+ignore_dirs:
+  - .git
+  - .svn
+  - __pycache__
+  - node_modules
+  - .venv
+  - venv
+  - dist
+  - build
+
+ignore_extensions:
+  - pyc
+  - pyo
+  - class
+  - lock
+  - sum
+
+rules:
+  # 中国大陆身份证号（18 位，最后一位可能是 X）
+  - name: 身份证号泄露
+    description: 检测 18 位身份证号（最后一位为数字或 X）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '[1-9]\d{5}(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]'
+      case_sensitive: false
+
+  # 中国大陆手机号（11 位，1 开头）
+  - name: 手机号泄露
+    description: 检测 11 位中国大陆手机号
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: '(?<!\d)1[3-9]\d{9}(?!\d)'
+      case_sensitive: false
+
+  # 银行卡号（16-19 位连续数字，简单启发式）
+  - name: 银行卡号泄露
+    description: 检测 16-19 位连续数字（疑似银行卡号）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '(?<!\d)\d{16,19}(?!\d)'
+      case_sensitive: false
+
+  # 邮箱地址
+  - name: 邮箱地址泄露
+    description: 检测文档中包含的邮箱地址
+    severity: info
+    match:
+      type: content
+      mode: regex
+      pattern: '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+      case_sensitive: false
+
+  # 仅扫描 .log/.csv/.txt 中的手机号（避免误报）
+  - name: 日志文件中的手机号
+    description: 仅在日志/CSV/文本文件中检测手机号，降低误报率
+    severity: warning
+    file_extensions:
+      - log
+      - csv
+      - txt
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: regex
+          pattern: '\.(log|csv|txt)$'
+        - type: content
+          mode: regex
+          pattern: '(?<!\d)1[3-9]\d{9}(?!\d)'

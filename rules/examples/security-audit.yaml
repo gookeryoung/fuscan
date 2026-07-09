@@ -1,0 +1,134 @@
+# 安全审计规则集
+# 场景：扫描代码与配置中的硬编码密钥、凭证、私钥等敏感信息
+# 适用：上线前安全检查、CI/CD 集成、代码审计
+version: "1.0"
+
+ignore_dirs:
+  - .git
+  - .svn
+  - __pycache__
+  - node_modules
+  - .venv
+  - venv
+  - vendor
+  - third_party
+
+ignore_extensions:
+  - pyc
+  - pyo
+  - min.js
+  - min.css
+
+rules:
+  # AWS Access Key ID（AKIA 开头 + 16 位字母数字）
+  - name: AWS Access Key 泄露
+    description: 检测 AKIA 开头的 AWS Access Key ID
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: 'AKIA[0-9A-Z]{16}'
+      case_sensitive: true
+
+  # AWS Secret Access Key（40 位 base64 字符，启发式）
+  - name: AWS Secret Key 疑似泄露
+    description: 检测疑似 AWS Secret Access Key 的 40 位字符串
+    severity: critical
+    match:
+      type: and
+      children:
+        - type: content
+          mode: regex
+          pattern: 'aws_secret_access_key\s*[=:]\s*[''"]?[A-Za-z0-9/+=]{40}[''"]?'
+        - type: not
+          child:
+            type: path
+            mode: contains
+            pattern: test
+            case_sensitive: false
+
+  # 私钥文件头（PEM 格式）
+  - name: PEM 私钥泄露
+    description: 检测 PEM 格式私钥的文件头
+    severity: critical
+    match:
+      type: content
+      mode: contains
+      pattern: "-----BEGIN RSA PRIVATE KEY-----"
+      case_sensitive: true
+
+  # 通用私钥头（RSA/EC/OPENSSH/PGP 等）
+  - name: 通用私钥头检测
+    description: 检测 RSA/EC/OPENSSH/PGP 等格式的私钥头
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '-----BEGIN (RSA |EC |OPENSSH |PGP |DSA )?PRIVATE KEY-----'
+      case_sensitive: true
+
+  # JWT Token（三段式 base64.base64.base64）
+  - name: JWT Token 泄露
+    description: 检测 JWT Token（ey 开头的三段式字符串）
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: 'eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'
+      case_sensitive: true
+
+  # GitHub Token（ghp_ 开头 + 36 位字符）
+  - name: GitHub Token 泄露
+    description: 检测 ghp_ 开头的 GitHub Personal Access Token
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: 'ghp_[A-Za-z0-9]{36}'
+      case_sensitive: true
+
+  # 硬编码密码赋值（仅扫描代码文件）
+  - name: 硬编码密码赋值
+    description: 检测代码中直接赋值的 password 变量
+    severity: warning
+    file_extensions:
+      - py
+      - js
+      - ts
+      - java
+      - go
+      - rb
+      - php
+    match:
+      type: content
+      mode: regex
+      pattern: '(password|passwd|pwd)\s*[=:]\s*[''"][^''"]{4,}[''"]'
+      case_sensitive: false
+
+  # 数据库连接串中的密码
+  - name: 数据库连接串密码
+    description: 检测数据库连接串中的明文密码
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '(mongodb|mysql|postgres|redis)://[^:]+:[^@]+@'
+      case_sensitive: false
+
+  # 排除测试目录中的密码赋值
+  - name: 非测试目录的硬编码密码
+    description: 检测非测试目录中的硬编码密码赋值
+    severity: warning
+    match:
+      type: and
+      children:
+        - type: content
+          mode: regex
+          pattern: '(password|passwd|pwd)\s*[=:]\s*[''"][^''"]{4,}[''"]'
+          case_sensitive: false
+        - type: not
+          child:
+            type: path
+            mode: regex
+            pattern: '(test|tests|__tests__|spec)/'
+            case_sensitive: false

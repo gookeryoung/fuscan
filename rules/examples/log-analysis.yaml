@@ -1,0 +1,118 @@
+# 日志分析规则集
+# 场景：扫描日志文件中的错误、异常、慢查询等
+# 适用：运维巡检、故障排查、安全日志分析
+version: "1.0"
+
+ignore_dirs:
+  - .git
+  - node_modules
+  - __pycache__
+
+ignore_extensions:
+  - pyc
+  - pyo
+  - log.gz
+  - log.bz2
+
+rules:
+  # ERROR 级别日志
+  - name: ERROR 级别日志
+    description: 检测日志文件中的 ERROR 级别条目
+    severity: warning
+    file_extensions:
+      - log
+      - txt
+    match:
+      type: content
+      mode: regex
+      pattern: '\bERROR\b|\bFATAL\b'
+      case_sensitive: true
+
+  # Java 异常堆栈
+  - name: Java 异常堆栈
+    description: 检测日志中的 Java 异常堆栈信息
+    severity: warning
+    file_extensions:
+      - log
+      - txt
+    match:
+      type: content
+      mode: regex
+      pattern: '(java\.lang\.|org\.springframework\.|com\.)\w+\.\w+Exception'
+      case_sensitive: true
+
+  # Python Traceback
+  - name: Python Traceback
+    description: 检测 Python 异常 Traceback
+    severity: warning
+    file_extensions:
+      - log
+      - txt
+    match:
+      type: content
+      mode: contains
+      pattern: "Traceback (most recent call last)"
+      case_sensitive: true
+
+  # SQL 慢查询（执行时间 > 1s）
+  - name: SQL 慢查询
+    description: 检测执行时间超过 1 秒的 SQL 查询
+    severity: info
+    file_extensions:
+      - log
+    match:
+      type: content
+      mode: regex
+      pattern: '(slow query|elapsed)[:\s]+(\d{4,}|[1-9]\d*\.\d+\s*s)'
+      case_sensitive: false
+
+  # OOM 错误
+  - name: 内存溢出错误
+    description: 检测 OutOfMemory 相关错误
+    severity: critical
+    file_extensions:
+      - log
+      - txt
+    match:
+      type: content
+      mode: regex
+      pattern: 'OutOfMemoryError|OOM|Killed process|Cannot allocate memory'
+      case_sensitive: false
+
+  # 连接超时/拒绝
+  - name: 连接异常
+    description: 检测连接超时或被拒绝
+    severity: warning
+    file_extensions:
+      - log
+      - txt
+    match:
+      type: content
+      mode: regex
+      pattern: 'Connection (refused|timed out|reset)|ECONNREFUSED|ETIMEDOUT'
+      case_sensitive: false
+
+  # 磁盘空间不足
+  - name: 磁盘空间不足
+    description: 检测磁盘空间告警
+    severity: critical
+    file_extensions:
+      - log
+      - txt
+    match:
+      type: content
+      mode: regex
+      pattern: 'No space left on device|Disk full|disk space'
+      case_sensitive: false
+
+  # 登录失败（暴力破解迹象）
+  - name: 登录失败告警
+    description: 检测认证失败记录（可能是暴力破解）
+    severity: warning
+    file_extensions:
+      - log
+    match:
+      type: content
+      mode: regex
+      pattern: '(authentication failed|login failed|auth failure|invalid password)'
+      case_sensitive: false

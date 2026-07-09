@@ -1,0 +1,111 @@
+# 合规审计规则集
+# 场景：检测违反合规策略的文件（如明文存储敏感字段、未脱敏日志等）
+# 适用：GDPR、等保、PCI-DSS 等合规要求的自检
+version: "1.0"
+
+ignore_dirs:
+  - .git
+  - .svn
+  - __pycache__
+  - node_modules
+  - .venv
+  - venv
+
+ignore_extensions:
+  - pyc
+  - pyo
+
+rules:
+  # 配置文件中明文存储密码字段
+  - name: 配置文件明文密码
+    description: 检测 .conf/.ini/.env/.yaml 中的明文密码字段
+    severity: critical
+    file_extensions:
+      - conf
+      - ini
+      - env
+      - yaml
+      - yml
+      - properties
+    match:
+      type: content
+      mode: regex
+      pattern: '(password|passwd|pwd|secret|api_key|token)\s*[=:]\s*\S+'
+      case_sensitive: false
+
+  # 日志中未脱敏的卡号
+  - name: 日志未脱敏卡号
+    description: 检测日志中出现未脱敏的银行卡号（连续 13+ 位数字）
+    severity: critical
+    file_extensions:
+      - log
+      - txt
+    match:
+      type: content
+      mode: regex
+      pattern: '(?<!\d)\d{13,19}(?!\d)'
+      case_sensitive: false
+
+  # 日志中未脱敏的身份证号
+  - name: 日志未脱敏身份证
+    description: 检测日志中的身份证号
+    severity: critical
+    file_extensions:
+      - log
+      - txt
+    match:
+      type: content
+      mode: regex
+      pattern: '[1-9]\d{5}(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]'
+      case_sensitive: false
+
+  # 排除测试/示例目录的明文密码
+  - name: 生产配置明文密码
+    description: 检测非测试目录中的配置文件明文密码
+    severity: critical
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: regex
+          pattern: '\.(conf|ini|env|ya?ml|properties)$'
+        - type: content
+          mode: regex
+          pattern: '(password|passwd|pwd)\s*[=:]\s*[^$\{]'
+          case_sensitive: false
+        - type: not
+          child:
+            type: path
+            mode: regex
+            pattern: '(test|example|sample|demo)/'
+            case_sensitive: false
+
+  # 敏感文件名（疑似凭证文件）
+  - name: 疑似凭证文件
+    description: 检测文件名疑似包含凭证信息
+    severity: warning
+    match:
+      type: filename
+      mode: regex
+      pattern: '(?i)(id_rsa|id_dsa|private_key|credentials|secrets)\.(pem|key|txt|ini)$'
+      case_sensitive: false
+
+  # 数据库导出文件
+  - name: 数据库导出文件
+    description: 检测可能包含敏感数据的数据库导出文件
+    severity: info
+    match:
+      type: filename
+      mode: regex
+      pattern: '\.(sql|dump|bak|backup)$'
+      case_sensitive: false
+
+  # 临时文件/交换文件（可能包含未保存的敏感数据）
+  - name: 编辑器临时文件
+    description: 检测 vim/emacs 等编辑器的临时/交换文件
+    severity: info
+    match:
+      type: filename
+      mode: regex
+      pattern: '(^\.#.*|#.*#$|.*~$|\.swp$|\.swo$)'
+      case_sensitive: false

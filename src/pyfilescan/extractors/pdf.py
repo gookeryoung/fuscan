@@ -15,6 +15,9 @@ __all__ = ["PdfExtractor"]
 
 logger = logging.getLogger(__name__)
 
+# 抑制 pypdf 的 MediaBox 等重复定义警告（不影响文本提取）
+logging.getLogger("pypdf").setLevel(logging.ERROR)
+
 
 class PdfExtractor(Extractor):
     """PDF 文档文本提取器。"""

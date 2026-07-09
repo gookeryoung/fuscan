@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from pyfilescan.extractors import extract_content
 from pyfilescan.rules.model import Rule, RuleSet
@@ -13,6 +13,9 @@ from pyfilescan.scanner.context import ContentProvider, FileEntry, MatchContext
 from pyfilescan.scanner.matchers import Matcher, build_matcher
 from pyfilescan.scanner.result import RuleHit, ScanReport, ScanResult, ScanStats
 from pyfilescan.scanner.walker import FileWalker
+
+if TYPE_CHECKING:
+    from pyfilescan.archive import ArchiveScanner
 
 __all__ = ["Scanner", "default_extract_content"]
 
@@ -46,6 +49,8 @@ class Scanner:
         content_provider: Optional[ContentProvider] = None,
         max_depth: Optional[int] = None,
         follow_symlinks: bool = False,
+        scan_archives: bool = False,
+        archive_password: Optional[str] = None,
     ) -> None:
         self.ruleset = ruleset
         self._content_provider: ContentProvider = content_provider or default_extract_content
@@ -56,6 +61,16 @@ class Scanner:
             max_depth=max_depth,
             follow_symlinks=follow_symlinks,
         )
+        self._scan_archives = scan_archives
+        self._archive_scanner: Optional[ArchiveScanner] = None
+        if scan_archives:
+            # 惰性导入避免与 archive.scanner 模块的循环依赖
+            from pyfilescan.archive import ArchiveScanner
+
+            self._archive_scanner = ArchiveScanner(
+                ruleset=ruleset,
+                password=archive_password,
+            )
 
     def scan(self, root: Path) -> ScanReport:
         """扫描根目录，返回完整报告。"""
@@ -84,6 +99,20 @@ class Scanner:
                 scanned += 1
                 logger.warning("扫描文件失败 %s", entry.path, exc_info=True)
 
+            # 递归扫描压缩包内条目
+            if self._scan_archives and self._archive_scanner is not None:
+                # 惰性导入避免循环依赖
+                from pyfilescan.archive import get_reader
+
+                if get_reader(entry.path) is not None:
+                    archive_results = self._archive_scanner.scan_archive(entry.path)
+                    for ar in archive_results:
+                        scanned += 1
+                        if ar.has_hit:
+                            matched += 1
+                        errors += ar.errors
+                        results.append(ar)
+
         duration = time.perf_counter() - start
         stats = ScanStats(
             total_files=total,
@@ -99,6 +128,15 @@ class Scanner:
         """扫描单个文件。"""
         entry = FileEntry.from_path(path)
         return self._scan_entry(entry)
+
+    def scan_archive(self, path: Path) -> Tuple[ScanResult, ...]:
+        """扫描压缩包内所有条目。
+
+        :raises RuntimeError: 未启用 scan_archives 选项
+        """
+        if self._archive_scanner is None:
+            raise RuntimeError("未启用 scan_archives，无法扫描压缩包")
+        return self._archive_scanner.scan_archive(path)
 
     def _should_scan(self, entry: FileEntry) -> bool:
         """根据规则集的 file_extensions 限制决定是否扫描该文件。

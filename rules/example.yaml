@@ -1,0 +1,89 @@
+# pyfilescan 规则文件示例
+# 规则集合：每条规则定义匹配条件、作用域与元信息
+version: "1.0"
+
+# 全局忽略目录（适用于所有规则）
+ignore_dirs:
+  - .git
+  - .svn
+  - __pycache__
+  - node_modules
+  - .venv
+  - venv
+
+# 全局忽略文件扩展名（可选）
+ignore_extensions:
+  - pyc
+  - pyo
+  - class
+
+# 规则列表
+rules:
+  # 示例 1：检测文件名包含敏感关键字
+  - name: 敏感文件名检测
+    description: 检测文件名中包含 password/secret/credential 等敏感词
+    severity: warning
+    match:
+      type: filename
+      mode: contains        # contains | equals | startswith | endswith | regex
+      pattern: password
+      case_sensitive: false
+
+  # 示例 2：检测文件内容包含特定字符串
+  - name: 密钥泄露检测
+    description: 检测文件内容中包含 AKIA 开头的 AWS Access Key
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: 'AKIA[0-9A-Z]{16}'
+      case_sensitive: true
+
+  # 示例 3：使用 AND 逻辑组合
+  - name: 配置文件敏感词
+    description: .conf/.ini/.yaml 文件中同时包含 password 和 database
+    severity: warning
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: regex
+          pattern: '\.(conf|ini|ya?ml)$'
+        - type: content
+          mode: contains
+          pattern: password
+          case_sensitive: false
+
+  # 示例 4：使用 OR 逻辑组合
+  - name: 多敏感词任一命中
+    description: 内容中包含 token 或 api_key
+    severity: info
+    match:
+      type: or
+      children:
+        - type: content
+          mode: contains
+          pattern: token
+          case_sensitive: false
+        - type: content
+          mode: contains
+          pattern: api_key
+          case_sensitive: false
+
+  # 示例 5：使用 NOT 逻辑组合
+  - name: 非备份目录的密码文件
+    description: 文件名含 password 但不在 backup 目录中
+    severity: warning
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: contains
+          pattern: password
+          case_sensitive: false
+        - type: not
+          child:
+            type: path
+            mode: contains
+            pattern: backup
+            case_sensitive: false

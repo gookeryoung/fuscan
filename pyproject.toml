@@ -1,0 +1,135 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyfilescan"
+version = "0.1.0"
+description = "通用文件扫描器：基于 YAML 规则的多格式内容扫描工具，支持 CLI/GUI 与托盘驻守"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "pyfilescan contributors" }]
+keywords = ["scanner", "file", "yaml", "rules", "pyside2", "gui", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Security",
+    "Topic :: System :: Filesystems",
+]
+
+dependencies = [
+    "PySide2>=5.15.2",
+    "PyYAML>=6.0",
+    "watchdog>=3.0.0",
+    "python-docx>=1.1.0",
+    "python-pptx>=0.6.23",
+    "openpyxl>=3.1.0",
+    "odfpy>=1.4.1",
+    "pypdf>=4.0.0",
+    "rarfile>=4.1",
+    "charset-normalizer>=3.3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.4.0",
+    "mypy>=1.8",
+    "pre-commit>=3.5",
+]
+
+[project.scripts]
+pyfilescan = "pyfilescan.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pyfilescan = ["py.typed", "assets/*.png", "assets/*.ico"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py38"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",   # pycodestyle / pyflakes
+    "I",   # isort
+    "B",   # bugbear
+    "UP",  # pyupgrade
+    "C4",  # comprehensions
+    "SIM", # simplify
+    "RUF", # ruff-specific
+    "PTH", # use pathlib
+    "PL",  # pylint
+]
+ignore = [
+    "E501",    # 行长由 formatter 处理
+    "PLR0913", # 函数参数数目前放宽
+    "PLR2004", # 魔术数字放宽
+    "PLR0911", # 返回语句数量放宽
+    "B008",    # argparse 默认值在函数参数中常见
+    "RUF001",  # 字符串中全角字符（中文项目风格）
+    "RUF002",  # docstring 中全角字符
+    "RUF003",  # 注释中全角字符
+    "UP006",   # 保留 typing.List 等以兼容 3.8 注解读取
+    "UP045",   # 保留 Optional[X] 以兼容 3.8
+    "PLC0415", # 测试中允许局部 import
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ARG001", "ARG002", "PLR2004", "S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.pytest.ini_options]
+minversion = "7.4"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=pyfilescan",
+    "--cov-branch",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-fail-under=80",
+]
+markers = ["slow: 耗时测试标记，CI 可使用 -m 'not slow' 跳过", "gui: 需要 GUI 环境的测试"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/pyfilescan"]
+concurrency = ["thread"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+
+[tool.mypy]
+python_version = "3.8"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+files = ["src/pyfilescan"]

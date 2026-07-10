@@ -20,10 +20,10 @@ pytestmark = pytest.mark.gui
 try:
     from PySide2.QtWidgets import QApplication
 
-    from pyfilescan.gui.main_window import MainWindow
-    from pyfilescan.gui.worker import ScanWorker
-    from pyfilescan.rules import load_ruleset
-    from pyfilescan.rules.model import (
+    from uniscan.gui.main_window import MainWindow
+    from uniscan.gui.worker import ScanWorker
+    from uniscan.rules import load_ruleset
+    from uniscan.rules.model import (
         LeafMatch,
         MatchMode,
         MatchTarget,
@@ -50,8 +50,8 @@ def qapp() -> QApplication:  # type: ignore[misc]
 @pytest.fixture(autouse=True)
 def _isolate_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """隔离配置文件，避免测试读写用户主目录 ~/.pyfilescan/config.yaml。"""
-    from pyfilescan.config import load_config as _load_impl
-    from pyfilescan.config import save_config as _save_impl
+    from uniscan.config import load_config as _load_impl
+    from uniscan.config import save_config as _save_impl
 
     config_path = tmp_path / "config.yaml"
     monkeypatch.setattr(
@@ -119,7 +119,7 @@ rules:
 
     def test_populate_results_displays_hits(self, qapp: QApplication, tmp_path: Path) -> None:
         """结果树应展示命中项。"""
-        from pyfilescan.scanner import Scanner
+        from uniscan.scanner import Scanner
 
         # 准备测试文件
         (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
@@ -138,7 +138,7 @@ rules:
 
     def test_export_csv(self, qapp: QApplication, tmp_path: Path) -> None:
         """CSV 导出应写入文件。"""
-        from pyfilescan.scanner import Scanner
+        from uniscan.scanner import Scanner
 
         (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
         rs = _build_ruleset()
@@ -157,7 +157,7 @@ rules:
 
     def test_export_json(self, qapp: QApplication, tmp_path: Path) -> None:
         """JSON 导出应写入文件。"""
-        from pyfilescan.scanner import Scanner
+        from uniscan.scanner import Scanner
 
         (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
         rs = _build_ruleset()
@@ -654,8 +654,8 @@ class TestConfigPersistence:
 
     def test_rules_paths_restored_on_startup(self, qapp: QApplication, tmp_path: Path) -> None:
         """启动时从配置恢复规则文件列表。"""
-        from pyfilescan.config import Config
-        from pyfilescan.config import save_config as _save_impl
+        from uniscan.config import Config
+        from uniscan.config import save_config as _save_impl
 
         r1 = tmp_path / "r1.yaml"
         r1.write_text(
@@ -675,8 +675,8 @@ class TestConfigPersistence:
 
     def test_nonexistent_rules_paths_skipped(self, qapp: QApplication, tmp_path: Path) -> None:
         """配置中不存在的规则文件路径应被跳过。"""
-        from pyfilescan.config import Config
-        from pyfilescan.config import save_config as _save_impl
+        from uniscan.config import Config
+        from uniscan.config import save_config as _save_impl
 
         config = Config(rules_paths=[str(tmp_path / "nonexistent.yaml")], use_builtin=False)
         _save_impl(config, tmp_path / "config.yaml")
@@ -687,8 +687,8 @@ class TestConfigPersistence:
 
     def test_use_builtin_restored(self, qapp: QApplication, tmp_path: Path) -> None:
         """通用规则开关状态从配置恢复。"""
-        from pyfilescan.config import Config
-        from pyfilescan.config import save_config as _save_impl
+        from uniscan.config import Config
+        from uniscan.config import save_config as _save_impl
 
         config = Config(use_builtin=False)
         _save_impl(config, tmp_path / "config.yaml")
@@ -700,8 +700,8 @@ class TestConfigPersistence:
 
     def test_scan_paths_history_restored(self, qapp: QApplication, tmp_path: Path) -> None:
         """扫描路径历史从配置恢复到下拉框。"""
-        from pyfilescan.config import Config
-        from pyfilescan.config import save_config as _save_impl
+        from uniscan.config import Config
+        from uniscan.config import save_config as _save_impl
 
         (tmp_path / "dir_a").mkdir()
         (tmp_path / "dir_b").mkdir()
@@ -720,7 +720,7 @@ class TestConfigPersistence:
         window._use_builtin_checkbox.setChecked(False)
         window.close()
 
-        from pyfilescan.config import load_config as _load_impl
+        from uniscan.config import load_config as _load_impl
 
         config = _load_impl(tmp_path / "config.yaml")
         assert config.use_builtin is False
@@ -737,7 +737,7 @@ class TestConfigPersistence:
         window._rules_paths = [r1]
         window.close()
 
-        from pyfilescan.config import load_config as _load_impl
+        from uniscan.config import load_config as _load_impl
 
         config = _load_impl(tmp_path / "config.yaml")
         assert str(r1) in config.rules_paths
@@ -749,7 +749,7 @@ class TestConfigPersistence:
         window._add_scan_path_history(str(tmp_path / "scan_dir"))
         window.close()
 
-        from pyfilescan.config import load_config as _load_impl
+        from uniscan.config import load_config as _load_impl
 
         config = _load_impl(tmp_path / "config.yaml")
         assert str(tmp_path / "scan_dir") in config.scan_paths
@@ -774,7 +774,7 @@ class TestConfigPersistence:
 
     def test_path_history_limit(self, qapp: QApplication, tmp_path: Path) -> None:
         """历史路径超过上限时自动截断。"""
-        from pyfilescan.config import MAX_HISTORY
+        from uniscan.config import MAX_HISTORY
 
         window = MainWindow()
         for i in range(MAX_HISTORY + 5):
@@ -786,8 +786,8 @@ class TestConfigPersistence:
 
     def test_window_geometry_restored(self, qapp: QApplication, tmp_path: Path) -> None:
         """窗口几何从配置恢复。"""
-        from pyfilescan.config import Config
-        from pyfilescan.config import save_config as _save_impl
+        from uniscan.config import Config
+        from uniscan.config import save_config as _save_impl
 
         config = Config(window_geometry=[50, 60, 800, 500])
         _save_impl(config, tmp_path / "config.yaml")
@@ -803,8 +803,8 @@ class TestConfigPersistence:
 
     def test_splitter_sizes_restored(self, qapp: QApplication, tmp_path: Path) -> None:
         """分割器大小从配置恢复（按比例）。"""
-        from pyfilescan.config import Config
-        from pyfilescan.config import save_config as _save_impl
+        from uniscan.config import Config
+        from uniscan.config import save_config as _save_impl
 
         config = Config(window_geometry=[0, 0, 1000, 700], splitter_sizes=[400, 600])
         _save_impl(config, tmp_path / "config.yaml")
@@ -822,8 +822,8 @@ class TestConfigPersistence:
 
     def test_valid_scan_path_enables_button_on_startup(self, qapp: QApplication, tmp_path: Path) -> None:
         """配置中有有效路径时启动后扫描按钮应启用。"""
-        from pyfilescan.config import Config
-        from pyfilescan.config import save_config as _save_impl
+        from uniscan.config import Config
+        from uniscan.config import save_config as _save_impl
 
         scan_dir = tmp_path / "scan_target"
         scan_dir.mkdir()
@@ -837,8 +837,8 @@ class TestConfigPersistence:
 
     def test_invalid_scan_path_disables_button_on_startup(self, qapp: QApplication, tmp_path: Path) -> None:
         """配置中路径无效时启动后扫描按钮应禁用。"""
-        from pyfilescan.config import Config
-        from pyfilescan.config import save_config as _save_impl
+        from uniscan.config import Config
+        from uniscan.config import save_config as _save_impl
 
         config = Config(scan_paths=[str(tmp_path / "nonexistent")], use_builtin=False)
         _save_impl(config, tmp_path / "config.yaml")
@@ -850,8 +850,8 @@ class TestConfigPersistence:
 
     def test_no_scan_path_disables_button_on_startup(self, qapp: QApplication, tmp_path: Path) -> None:
         """配置中无路径时启动后扫描按钮应禁用。"""
-        from pyfilescan.config import Config
-        from pyfilescan.config import save_config as _save_impl
+        from uniscan.config import Config
+        from uniscan.config import save_config as _save_impl
 
         config = Config(scan_paths=[], use_builtin=False)
         _save_impl(config, tmp_path / "config.yaml")
@@ -915,7 +915,7 @@ class TestScanWorker:
 class TestLaunchApp:
     def test_launch_creates_window_and_returns(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """launch 应创建 QApplication 与 MainWindow 并进入事件循环。"""
-        from pyfilescan.gui import app as app_module
+        from uniscan.gui import app as app_module
 
         created: list = []
 
@@ -956,7 +956,7 @@ class TestLaunchApp:
 
     def test_launch_reuses_existing_app(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """已有 QApplication 实例时复用，不创建新实例。"""
-        from pyfilescan.gui import app as app_module
+        from uniscan.gui import app as app_module
 
         existing_app = type("ExistingApp", (), {"exec_": lambda self: 0, "setApplicationName": lambda self, n: None})()
         created: list = []
@@ -1000,31 +1000,31 @@ class TestHitDetailDialogHelpers:
     """详情对话框辅助函数测试。"""
 
     def test_format_size_bytes(self) -> None:
-        from pyfilescan.gui.detail_dialog import _format_size
+        from uniscan.gui.detail_dialog import _format_size
 
         assert _format_size(0) == "0 B"
         assert _format_size(512) == "512 B"
         assert _format_size(1023) == "1023 B"
 
     def test_format_size_kb(self) -> None:
-        from pyfilescan.gui.detail_dialog import _format_size
+        from uniscan.gui.detail_dialog import _format_size
 
         assert _format_size(1024) == "1.0 KB"
         assert _format_size(2048) == "2.0 KB"
 
     def test_format_size_mb(self) -> None:
-        from pyfilescan.gui.detail_dialog import _format_size
+        from uniscan.gui.detail_dialog import _format_size
 
         assert _format_size(1024 * 1024) == "1.0 MB"
 
     def test_format_size_gb(self) -> None:
-        from pyfilescan.gui.detail_dialog import _format_size
+        from uniscan.gui.detail_dialog import _format_size
 
         assert "GB" in _format_size(1024 * 1024 * 1024)
 
     def test_extract_keywords_contains(self) -> None:
-        from pyfilescan.gui.detail_dialog import _extract_keywords
-        from pyfilescan.scanner import RuleHit
+        from uniscan.gui.detail_dialog import _extract_keywords
+        from uniscan.scanner import RuleHit
 
         hits = (
             RuleHit("r1", Severity.WARNING, "包含 'password'"),
@@ -1035,16 +1035,16 @@ class TestHitDetailDialogHelpers:
         assert "secret" in kws
 
     def test_extract_keywords_regex(self) -> None:
-        from pyfilescan.gui.detail_dialog import _extract_keywords
-        from pyfilescan.scanner import RuleHit
+        from uniscan.gui.detail_dialog import _extract_keywords
+        from uniscan.scanner import RuleHit
 
         hits = (RuleHit("r", Severity.CRITICAL, "正则命中: 'AKIA1234'"),)
         kws = _extract_keywords(hits)
         assert "AKIA1234" in kws
 
     def test_extract_keywords_dedup(self) -> None:
-        from pyfilescan.gui.detail_dialog import _extract_keywords
-        from pyfilescan.scanner import RuleHit
+        from uniscan.gui.detail_dialog import _extract_keywords
+        from uniscan.scanner import RuleHit
 
         hits = (
             RuleHit("r1", Severity.WARNING, "包含 'password'"),
@@ -1054,36 +1054,36 @@ class TestHitDetailDialogHelpers:
         assert kws.count("password") == 1
 
     def test_extract_keywords_no_match(self) -> None:
-        from pyfilescan.gui.detail_dialog import _extract_keywords
-        from pyfilescan.scanner import RuleHit
+        from uniscan.gui.detail_dialog import _extract_keywords
+        from uniscan.scanner import RuleHit
 
         hits = (RuleHit("r", Severity.INFO, "完全相等"),)
         kws = _extract_keywords(hits)
         assert kws == []
 
     def test_build_preview_html_no_keywords(self) -> None:
-        from pyfilescan.gui.detail_dialog import _build_preview_html
+        from uniscan.gui.detail_dialog import _build_preview_html
 
         result = _build_preview_html("hello world", [])
         assert "hello" in result
         assert "<span" not in result
 
     def test_build_preview_html_with_keywords(self) -> None:
-        from pyfilescan.gui.detail_dialog import _build_preview_html
+        from uniscan.gui.detail_dialog import _build_preview_html
 
         result = _build_preview_html("hello password world", ["password"])
         assert "span" in result
         assert "background-color: yellow" in result
 
     def test_build_preview_html_escapes_html(self) -> None:
-        from pyfilescan.gui.detail_dialog import _build_preview_html
+        from uniscan.gui.detail_dialog import _build_preview_html
 
         result = _build_preview_html("<script>alert(1)</script>", [])
         assert "<script>" not in result
         assert "&lt;script&gt;" in result
 
     def test_build_preview_html_case_insensitive(self) -> None:
-        from pyfilescan.gui.detail_dialog import _build_preview_html
+        from uniscan.gui.detail_dialog import _build_preview_html
 
         result = _build_preview_html("PASSWORD password Password", ["password"])
         # 所有大小的 password 都应被高亮（3 次匹配 = 6 个 span 标签：开+关）
@@ -1219,7 +1219,7 @@ class TestScanWorkerProgress:
         """progress_info 携带 ProgressInfo 对象且字段类型正确。"""
         from PySide2.QtCore import QEventLoop, QTimer
 
-        from pyfilescan.scanner.result import ProgressInfo
+        from uniscan.scanner.result import ProgressInfo
 
         (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
 
@@ -1310,7 +1310,7 @@ class TestScanWorkerDirect:
 
     def test_on_progress_emits_cumulative(self, qapp: QApplication) -> None:
         """_on_progress 应累加 _cum_* 字段后 emit。"""
-        from pyfilescan.scanner.result import ProgressInfo
+        from uniscan.scanner.result import ProgressInfo
 
         rs = _build_ruleset()
         worker = ScanWorker(ruleset=rs, roots=[Path("/tmp")])
@@ -1342,7 +1342,7 @@ class TestScanWorkerDirect:
         self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Scanner.scan 抛异常时 run() 应 emit failed 信号。"""
-        from pyfilescan.scanner.scanner import Scanner
+        from uniscan.scanner.scanner import Scanner
 
         rs = _build_ruleset()
         worker = ScanWorker(ruleset=rs, roots=[tmp_path])
@@ -1364,7 +1364,7 @@ class TestScanWorkerDirect:
 
     def test_on_progress_zero_cumulative(self, qapp: QApplication) -> None:
         """_cum_* 全为 0 时 _on_progress 应原样传递 info 值。"""
-        from pyfilescan.scanner.result import ProgressInfo
+        from uniscan.scanner.result import ProgressInfo
 
         rs = _build_ruleset()
         worker = ScanWorker(ruleset=rs, roots=[Path("/tmp")])
@@ -1448,7 +1448,7 @@ class TestScanMode:
 
     def test_build_scan_roots_full_mode(self, qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
         """full 模式应返回所有盘符。"""
-        from pyfilescan.gui import main_window as mw_mod
+        from uniscan.gui import main_window as mw_mod
 
         fake_drives = [Path("C:\\"), Path("D:\\")]
         monkeypatch.setattr(mw_mod, "list_drives", lambda: fake_drives)
@@ -1492,8 +1492,8 @@ class TestScanModePersistence:
 
     def test_scan_mode_restored_on_startup(self, qapp: QApplication, tmp_path: Path) -> None:
         """启动时从配置恢复扫描模式。"""
-        from pyfilescan.config import Config
-        from pyfilescan.config import save_config as _save_impl
+        from uniscan.config import Config
+        from uniscan.config import save_config as _save_impl
 
         config = Config(scan_mode="full")
         _save_impl(config, tmp_path / "config.yaml")
@@ -1505,8 +1505,8 @@ class TestScanModePersistence:
 
     def test_drive_mode_restored_on_startup(self, qapp: QApplication, tmp_path: Path) -> None:
         """启动时从配置恢复 drive 模式。"""
-        from pyfilescan.config import Config
-        from pyfilescan.config import save_config as _save_impl
+        from uniscan.config import Config
+        from uniscan.config import save_config as _save_impl
 
         config = Config(scan_mode="drive")
         _save_impl(config, tmp_path / "config.yaml")
@@ -1523,15 +1523,15 @@ class TestScanModePersistence:
         window._on_scan_mode_changed(window._full_btn)
         window.close()
 
-        from pyfilescan.config import load_config as _load_impl
+        from uniscan.config import load_config as _load_impl
 
         config = _load_impl(tmp_path / "config.yaml")
         assert config.scan_mode == "full"
 
     def test_last_drive_restored_on_startup(self, qapp: QApplication, tmp_path: Path) -> None:
         """启动时从配置恢复上次选择的盘符。"""
-        from pyfilescan.config import Config
-        from pyfilescan.config import save_config as _save_impl
+        from uniscan.config import Config
+        from uniscan.config import save_config as _save_impl
 
         # 使用存在的盘符
         window = MainWindow()
@@ -1555,8 +1555,8 @@ class TestHitDetailDialog:
 
     def test_dialog_shows_file_info(self, qapp: QApplication, tmp_path: Path) -> None:
         """对话框应展示文件路径、大小等信息。"""
-        from pyfilescan.gui.detail_dialog import HitDetailDialog
-        from pyfilescan.scanner import RuleHit, ScanResult
+        from uniscan.gui.detail_dialog import HitDetailDialog
+        from uniscan.scanner import RuleHit, ScanResult
 
         path = tmp_path / "secret.txt"
         path.write_text("my password here", encoding="utf-8")
@@ -1574,8 +1574,8 @@ class TestHitDetailDialog:
 
     def test_dialog_hits_table(self, qapp: QApplication, tmp_path: Path) -> None:
         """命中规则表应正确显示。"""
-        from pyfilescan.gui.detail_dialog import HitDetailDialog
-        from pyfilescan.scanner import RuleHit, ScanResult
+        from uniscan.gui.detail_dialog import HitDetailDialog
+        from uniscan.scanner import RuleHit, ScanResult
 
         path = tmp_path / "test.txt"
         path.write_text("content", encoding="utf-8")
@@ -1595,8 +1595,8 @@ class TestHitDetailDialog:
 
     def test_dialog_preview_highlights_keywords(self, qapp: QApplication, tmp_path: Path) -> None:
         """内容预览应高亮关键词。"""
-        from pyfilescan.gui.detail_dialog import HitDetailDialog
-        from pyfilescan.scanner import RuleHit, ScanResult
+        from uniscan.gui.detail_dialog import HitDetailDialog
+        from uniscan.scanner import RuleHit, ScanResult
 
         path = tmp_path / "data.txt"
         path.write_text("the password is secret123", encoding="utf-8")
@@ -1616,8 +1616,8 @@ class TestHitDetailDialog:
 
     def test_dialog_preview_empty_file(self, qapp: QApplication, tmp_path: Path) -> None:
         """空文件预览应显示提示。"""
-        from pyfilescan.gui.detail_dialog import HitDetailDialog
-        from pyfilescan.scanner import RuleHit, ScanResult
+        from uniscan.gui.detail_dialog import HitDetailDialog
+        from uniscan.scanner import RuleHit, ScanResult
 
         path = tmp_path / "empty.txt"
         path.write_text("", encoding="utf-8")
@@ -1633,8 +1633,8 @@ class TestHitDetailDialog:
 
     def test_dialog_preview_nonexistent_file(self, qapp: QApplication, tmp_path: Path) -> None:
         """文件不存在时预览应显示错误提示。"""
-        from pyfilescan.gui.detail_dialog import HitDetailDialog
-        from pyfilescan.scanner import RuleHit, ScanResult
+        from uniscan.gui.detail_dialog import HitDetailDialog
+        from uniscan.scanner import RuleHit, ScanResult
 
         result = ScanResult(
             path=tmp_path / "nonexistent.txt",
@@ -1649,8 +1649,8 @@ class TestHitDetailDialog:
         self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """双击结果项应弹出详情对话框。"""
-        from pyfilescan.gui import main_window as mw_module
-        from pyfilescan.scanner import Scanner
+        from uniscan.gui import main_window as mw_module
+        from uniscan.scanner import Scanner
 
         (tmp_path / "secret.txt").write_text("password", encoding="utf-8")
         rs = _build_ruleset()

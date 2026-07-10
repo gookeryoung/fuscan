@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pyfilescan.config import Config, load_config, save_config
+from uniscan.config import Config, load_config, save_config
 
 
 class TestConfig:

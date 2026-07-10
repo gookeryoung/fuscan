@@ -8,7 +8,7 @@ from typing import List
 
 import pytest
 
-from pyfilescan.rules.model import (
+from uniscan.rules.model import (
     LeafMatch,
     MatchMode,
     MatchTarget,
@@ -16,9 +16,9 @@ from pyfilescan.rules.model import (
     RuleSet,
     Severity,
 )
-from pyfilescan.watcher.ignore_dirs import default_ignore_dirs
-from pyfilescan.watcher.incremental import IncrementalScanner
-from pyfilescan.watcher.monitor import (
+from uniscan.watcher.ignore_dirs import default_ignore_dirs
+from uniscan.watcher.incremental import IncrementalScanner
+from uniscan.watcher.monitor import (
     FileEvent,
     FileEventType,
     FileMonitor,
@@ -68,7 +68,7 @@ class TestIgnoreDirs:
 class TestWatcherLazyImport:
     def test_trayapp_lazy_import(self) -> None:
         """TrayApp 通过 __getattr__ 懒加载，避免无 GUI 环境 import 失败。"""
-        import pyfilescan.watcher as watcher_pkg
+        import uniscan.watcher as watcher_pkg
 
         tray_cls = watcher_pkg.TrayApp
         assert tray_cls is not None
@@ -76,7 +76,7 @@ class TestWatcherLazyImport:
 
     def test_watcher_getattr_unknown_attribute_raises(self) -> None:
         """访问不存在的属性应抛出 AttributeError。"""
-        import pyfilescan.watcher as watcher_pkg
+        import uniscan.watcher as watcher_pkg
 
         with pytest.raises(AttributeError, match="has no attribute"):
             _ = watcher_pkg.NonExistent  # type: ignore[attr-defined]

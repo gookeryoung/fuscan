@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pyfilescan.rules.model import (
+from uniscan.rules.model import (
     AndMatch,
     LeafMatch,
     MatchMode,
@@ -15,8 +15,8 @@ from pyfilescan.rules.model import (
     RuleSet,
     Severity,
 )
-from pyfilescan.scanner import Scanner, ScanReport, ScanResult
-from pyfilescan.scanner.result import ProgressInfo
+from uniscan.scanner import Scanner, ScanReport, ScanResult
+from uniscan.scanner.result import ProgressInfo
 
 
 def _build_ruleset(*rules: Rule) -> RuleSet:
@@ -190,7 +190,7 @@ class TestScannerRules:
 
 class TestScanResult:
     def test_has_hit(self) -> None:
-        from pyfilescan.scanner.result import RuleHit
+        from uniscan.scanner.result import RuleHit
 
         result = ScanResult(path=Path("/x"), size=0, hits=(RuleHit("r", Severity.INFO, "d"),))
         assert result.has_hit is True
@@ -200,7 +200,7 @@ class TestScanResult:
         assert result.has_hit is False
 
     def test_max_severity(self) -> None:
-        from pyfilescan.scanner.result import RuleHit
+        from uniscan.scanner.result import RuleHit
 
         result = ScanResult(
             path=Path("/x"),
@@ -220,7 +220,7 @@ class TestScanResult:
 
 class TestScanReport:
     def test_hits_filters_matched(self, tmp_path: Path) -> None:
-        from pyfilescan.scanner.result import RuleHit, ScanStats
+        from uniscan.scanner.result import RuleHit, ScanStats
 
         results = (
             ScanResult(path=tmp_path / "a", size=0, hits=(RuleHit("r", Severity.INFO, "d"),)),
@@ -234,7 +234,7 @@ class TestScanReport:
 class TestScannerErrorHandling:
     def test_scan_continues_on_content_error(self, tmp_path: Path) -> None:
         """当内容提供器抛异常时，扫描器应记录错误并继续。"""
-        from pyfilescan.scanner.context import FileEntry
+        from uniscan.scanner.context import FileEntry
 
         (tmp_path / "good.txt").write_text("password", encoding="utf-8")
         (tmp_path / "bad.txt").write_text("password", encoding="utf-8")
@@ -306,7 +306,7 @@ class TestScannerConcurrency:
 
     def test_concurrent_error_handling(self, tmp_path: Path) -> None:
         """多线程模式下错误处理应正常工作。"""
-        from pyfilescan.scanner.context import FileEntry
+        from uniscan.scanner.context import FileEntry
 
         for i in range(10):
             (tmp_path / f"file_{i}.txt").write_text("password", encoding="utf-8")

@@ -23,8 +23,8 @@ import sys
 import time
 from pathlib import Path
 
-from pyfilescan.rules import load_ruleset
-from pyfilescan.watcher import IncrementalScanner
+from uniscan.rules import load_ruleset
+from uniscan.watcher import IncrementalScanner
 
 
 def main(scan_path: Path, rules_path: Path) -> int:

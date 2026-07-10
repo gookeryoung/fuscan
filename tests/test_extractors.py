@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from pyfilescan.extractors import (
+from uniscan.extractors import (
     DocxExtractor,
     ExtractorError,
     ExtractorRegistry,
@@ -24,7 +24,7 @@ from pyfilescan.extractors import (
     extract_content,
     get_extractor,
 )
-from pyfilescan.extractors.spreadsheet import OdsExtractor
+from uniscan.extractors.spreadsheet import OdsExtractor
 
 # ---------------------------------------------------------------------------
 # Fixture 工厂
@@ -623,7 +623,7 @@ class TestExtractContent:
 
 class TestScannerWithExtractors:
     def test_scan_docx_content(self, docx_file: Path) -> None:
-        from pyfilescan.rules.model import (
+        from uniscan.rules.model import (
             LeafMatch,
             MatchMode,
             MatchTarget,
@@ -631,7 +631,7 @@ class TestScannerWithExtractors:
             RuleSet,
             Severity,
         )
-        from pyfilescan.scanner import Scanner
+        from uniscan.scanner import Scanner
 
         rule = Rule(
             name="敏感词",
@@ -645,7 +645,7 @@ class TestScannerWithExtractors:
         assert result.hits[0].rule_name == "敏感词"
 
     def test_scan_xlsx_content(self, xlsx_file: Path) -> None:
-        from pyfilescan.rules.model import (
+        from uniscan.rules.model import (
             LeafMatch,
             MatchMode,
             MatchTarget,
@@ -653,7 +653,7 @@ class TestScannerWithExtractors:
             RuleSet,
             Severity,
         )
-        from pyfilescan.scanner import Scanner
+        from uniscan.scanner import Scanner
 
         rule = Rule(
             name="敏感词",

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from pyfilescan.archive import (
+from uniscan.archive import (
     ArchiveEntry,
     ArchiveError,
     ArchiveReader,
@@ -18,7 +18,7 @@ from pyfilescan.archive import (
     get_reader,
     register_all,
 )
-from pyfilescan.rules.model import (
+from uniscan.rules.model import (
     AndMatch,
     LeafMatch,
     MatchMode,
@@ -28,7 +28,7 @@ from pyfilescan.rules.model import (
     RuleSet,
     Severity,
 )
-from pyfilescan.scanner import Scanner
+from uniscan.scanner import Scanner
 
 # ----------------------------- 工具函数 -----------------------------
 
@@ -478,7 +478,7 @@ class TestArchiveEdgeCases:
         assert len(hits) == 1
 
     def test_factory_register_custom(self) -> None:
-        from pyfilescan.archive.base import ArchiveReaderFactory
+        from uniscan.archive.base import ArchiveReaderFactory
 
         class FakeReader(ArchiveReader):
             @property
@@ -565,7 +565,7 @@ class TestArchiveContentExtraction:
             def read_entry(self, entry_name: str) -> bytes:
                 raise ArchiveError("mocked failure")
 
-        from pyfilescan.archive import scanner as scanner_module
+        from uniscan.archive import scanner as scanner_module
 
         original_get_reader = scanner_module.get_reader
         scanner_module.get_reader = lambda path, password=None: FailingReader()  # type: ignore[assignment]

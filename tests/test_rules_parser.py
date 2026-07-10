@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from pyfilescan.rules import (
+from uniscan.rules import (
     AndMatch,
     LeafMatch,
     MatchMode,

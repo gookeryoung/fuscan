@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from pyfilescan import __version__
-from pyfilescan.cli import build_parser, main
+from uniscan import __version__
+from uniscan.cli import build_parser, main
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -424,7 +424,7 @@ class TestTrayCommand:
                 called["show_window"] = show_window
                 return 0
 
-        import pyfilescan.watcher.tray as tray_mod
+        import uniscan.watcher.tray as tray_mod
 
         monkeypatch.setattr(tray_mod, "TrayApp", FakeTrayApp)
 
@@ -461,6 +461,6 @@ class TestMainErrorHandling:
 class TestMainModuleImport:
     def test_main_module_importable(self) -> None:
         """``python -m pyfilescan`` 入口模块可被导入。"""
-        import pyfilescan.__main__ as main_mod
+        import uniscan.__main__ as main_mod
 
         assert hasattr(main_mod, "main")

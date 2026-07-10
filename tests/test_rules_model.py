@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from pyfilescan.rules.model import (
+from uniscan.rules.model import (
     AndMatch,
     LeafMatch,
     MatchMode,

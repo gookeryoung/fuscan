@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pyfilescan.rules.merge import merge_multiple_rulesets, merge_rulesets
-from pyfilescan.rules.model import (
+from uniscan.rules.merge import merge_multiple_rulesets, merge_rulesets
+from uniscan.rules.model import (
     LeafMatch,
     MatchMode,
     MatchTarget,

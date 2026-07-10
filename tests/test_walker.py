@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pyfilescan.scanner.walker import FileWalker
+from uniscan.scanner.walker import FileWalker
 
 
 def _create_tree(root: Path) -> None:

@@ -16,8 +16,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from pyfilescan.rules import load_ruleset
-from pyfilescan.scanner import Scanner
+from uniscan.rules import load_ruleset
+from uniscan.scanner import Scanner
 
 
 def main(scan_path: Path, rules_path: Path) -> int:

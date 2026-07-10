@@ -19,9 +19,9 @@ import sys
 from pathlib import Path
 from typing import Tuple
 
-from pyfilescan.extractors import Extractor, ExtractorError, default_registry
-from pyfilescan.rules import load_ruleset
-from pyfilescan.scanner import Scanner
+from uniscan.extractors import Extractor, ExtractorError, default_registry
+from uniscan.rules import load_ruleset
+from uniscan.scanner import Scanner
 
 
 class IniExtractor(Extractor):

@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from pyfilescan.builtin import BUILTIN_RULES_PATH, load_builtin_ruleset, load_with_builtin
-from pyfilescan.rules import RuleError, RuleSet
+from uniscan.builtin import BUILTIN_RULES_PATH, load_builtin_ruleset, load_with_builtin
+from uniscan.rules import RuleError, RuleSet
 
 
 class TestBuiltinRuleset:

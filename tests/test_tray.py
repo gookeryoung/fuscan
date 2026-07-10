@@ -20,7 +20,7 @@ pytestmark = pytest.mark.gui
 try:
     from PySide2.QtWidgets import QApplication
 
-    from pyfilescan.rules.model import (
+    from uniscan.rules.model import (
         LeafMatch,
         MatchMode,
         MatchTarget,
@@ -28,9 +28,9 @@ try:
         RuleSet,
         Severity,
     )
-    from pyfilescan.watcher.incremental import IncrementalScanner
-    from pyfilescan.watcher.monitor import FileEvent, FileEventType
-    from pyfilescan.watcher.tray import TrayApp
+    from uniscan.watcher.incremental import IncrementalScanner
+    from uniscan.watcher.monitor import FileEvent, FileEventType
+    from uniscan.watcher.tray import TrayApp
 
     PYSIDE2_AVAILABLE = True
 except ImportError:
@@ -219,8 +219,8 @@ class TestTrayAppScanHandling:
         assert app._pending_paths == []
 
     def test_handle_scan_result_emits_signals(self, qapp: QApplication, tmp_path: Path) -> None:
-        from pyfilescan.scanner import ScanReport, ScanResult, ScanStats
-        from pyfilescan.scanner.result import RuleHit
+        from uniscan.scanner import ScanReport, ScanResult, ScanStats
+        from uniscan.scanner.result import RuleHit
 
         rs = _build_ruleset()
         app = TrayApp(ruleset=rs)
@@ -254,7 +254,7 @@ class TestTrayAppScanHandling:
         assert hit_paths[0] == (str(tmp_path / "a.txt"), 1)
 
     def test_handle_scan_result_no_hits_no_signal(self, qapp: QApplication, tmp_path: Path) -> None:
-        from pyfilescan.scanner import ScanReport, ScanResult, ScanStats
+        from uniscan.scanner import ScanReport, ScanResult, ScanStats
 
         rs = _build_ruleset()
         app = TrayApp(ruleset=rs)
@@ -280,7 +280,7 @@ class TestTrayAppScanHandling:
         assert hit_paths == []
 
     def test_handle_scan_result_persists_state(self, qapp: QApplication, tmp_path: Path) -> None:
-        from pyfilescan.scanner import ScanReport, ScanResult, ScanStats
+        from uniscan.scanner import ScanReport, ScanResult, ScanStats
 
         state_file = tmp_path.parent / f"state_{tmp_path.name}.json"
         rs = _build_ruleset()
@@ -338,7 +338,7 @@ class TestTrayAppFullScan:
             def start(self) -> None:
                 pass
 
-        import pyfilescan.gui.worker as worker_mod
+        import uniscan.gui.worker as worker_mod
 
         monkeypatch.setattr(worker_mod, "ScanWorker", FakeWorker)
 

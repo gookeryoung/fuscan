@@ -1,6 +1,6 @@
-# pyfilescan 代码集成示例
+# uniscan 代码集成示例
 
-本目录提供程序化使用 pyfilescan 的示例脚本，覆盖常见使用场景。
+本目录提供程序化使用 uniscan 的示例脚本，覆盖常见使用场景。
 
 ## 示例列表
 
@@ -14,7 +14,7 @@
 
 ## 运行方式
 
-所有脚本均可独立运行，需先安装 pyfilescan：
+所有脚本均可独立运行，需先安装 uniscan：
 
 ```bash
 pip install -e ".[dev]"
@@ -55,8 +55,8 @@ YAML 规则文件通过 `load_ruleset` 加载为不可变 `RuleSet` 对象，包
 `Scanner` 是核心扫描入口：
 
 ```python
-from pyfilescan.rules import load_ruleset
-from pyfilescan.scanner import Scanner
+from uniscan.rules import load_ruleset
+from uniscan.scanner import Scanner
 
 ruleset = load_ruleset("rules/example.yaml")
 scanner = Scanner(ruleset, max_depth=None, scan_archives=False)
@@ -68,7 +68,7 @@ report = scanner.scan(Path("/path/to/scan"))
 `default_registry` 按扩展名分发到对应提取器。注册自定义提取器：
 
 ```python
-from pyfilescan.extractors import Extractor, default_registry
+from uniscan.extractors import Extractor, default_registry
 
 
 class MyExtractor(Extractor):
@@ -88,7 +88,7 @@ default_registry.register(MyExtractor())
 跳过 mtime 未变化的文件，适合持续监控：
 
 ```python
-from pyfilescan.watcher import IncrementalScanner
+from uniscan.watcher import IncrementalScanner
 
 scanner = IncrementalScanner(ruleset)
 scanner.load_state(Path("state.json"))  # 加载历史状态
@@ -101,7 +101,7 @@ scanner.save_state(Path("state.json"))  # 持久化状态
 基于 watchdog 的实时监控：
 
 ```python
-from pyfilescan.watcher import FileMonitor, MonitorConfig
+from uniscan.watcher import FileMonitor, MonitorConfig
 
 config = MonitorConfig(watch_paths=[Path("/watch")], ignore_dirs=[".git"])
 monitor = FileMonitor(config)

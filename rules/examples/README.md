@@ -38,16 +38,16 @@
 
 ```bash
 # 校验规则文件
-pyfilescan rules -r rules/examples/security-audit.yaml
+uniscan rules -r rules/examples/security-audit.yaml
 
 # 使用指定规则集扫描
-pyfilescan scan /path/to/project -r rules/examples/security-audit.yaml
+uniscan scan /path/to/project -r rules/examples/security-audit.yaml
 
 # 输出 JSON 报告
-pyfilescan scan /path/to/project -r rules/examples/sensitive-data.yaml -o json -f report.json
+uniscan scan /path/to/project -r rules/examples/sensitive-data.yaml -o json -f report.json
 
 # 托盘驻守模式（监控新增文件）
-pyfilescan tray -r rules/examples/security-audit.yaml -w /path/to/watch
+uniscan tray -r rules/examples/security-audit.yaml -w /path/to/watch
 ```
 
 ## 规则配置字段详解

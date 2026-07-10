@@ -49,17 +49,17 @@ def qapp() -> QApplication:  # type: ignore[misc]
 
 @pytest.fixture(autouse=True)
 def _isolate_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """隔离配置文件，避免测试读写用户主目录 ~/.pyfilescan/config.yaml。"""
+    """隔离配置文件，避免测试读写用户主目录 ~/.uniscan/config.yaml。"""
     from uniscan.config import load_config as _load_impl
     from uniscan.config import save_config as _save_impl
 
     config_path = tmp_path / "config.yaml"
     monkeypatch.setattr(
-        "pyfilescan.gui.main_window.load_config",
+        "uniscan.gui.main_window.load_config",
         lambda path=None: _load_impl(config_path),
     )
     monkeypatch.setattr(
-        "pyfilescan.gui.main_window.save_config",
+        "uniscan.gui.main_window.save_config",
         lambda config, path=None: _save_impl(config, config_path),
     )
 
@@ -80,7 +80,7 @@ def _build_ruleset() -> RuleSet:
 class TestMainWindow:
     def test_window_creation(self, qapp: QApplication) -> None:
         window = MainWindow()
-        assert window.windowTitle().startswith("pyfilescan")
+        assert window.windowTitle().startswith("uniscan")
         assert window._scan_btn is not None
         assert window._rules_tree is not None
         assert window._result_tree is not None
@@ -190,7 +190,7 @@ rules:
 
         # mock QFileDialog.getOpenFileName 返回规则文件路径
         monkeypatch.setattr(
-            "pyfilescan.gui.main_window.QFileDialog.getOpenFileName",
+            "uniscan.gui.main_window.QFileDialog.getOpenFileName",
             lambda *args, **kwargs: (str(rules_yaml), ""),
         )
 
@@ -207,7 +207,7 @@ rules:
         # 启动时已加载通用规则
         assert window._ruleset is not None
         monkeypatch.setattr(
-            "pyfilescan.gui.main_window.QFileDialog.getOpenFileName",
+            "uniscan.gui.main_window.QFileDialog.getOpenFileName",
             lambda *args, **kwargs: ("", ""),
         )
         window._on_load_rules()
@@ -229,12 +229,12 @@ rules:
         window._use_builtin_checkbox.setChecked(False)
         assert window._ruleset is None
         monkeypatch.setattr(
-            "pyfilescan.gui.main_window.QFileDialog.getOpenFileName",
+            "uniscan.gui.main_window.QFileDialog.getOpenFileName",
             lambda *args, **kwargs: (str(bad_rules), ""),
         )
         warned = {"called": False}
         monkeypatch.setattr(
-            "pyfilescan.gui.main_window.QMessageBox.warning",
+            "uniscan.gui.main_window.QMessageBox.warning",
             lambda *args, **kwargs: warned.update(called=True),
         )
         window._on_load_rules()
@@ -246,7 +246,7 @@ rules:
         """通过模拟对话框选择扫描路径。"""
         window = MainWindow()
         monkeypatch.setattr(
-            "pyfilescan.gui.main_window.QFileDialog.getExistingDirectory",
+            "uniscan.gui.main_window.QFileDialog.getExistingDirectory",
             lambda *args, **kwargs: str(tmp_path),
         )
         window._on_select_path()
@@ -345,7 +345,7 @@ class TestBuiltinRulesToggle:
         builtin_count = window._rules_tree.topLevelItemCount()
 
         monkeypatch.setattr(
-            "pyfilescan.gui.main_window.QFileDialog.getOpenFileName",
+            "uniscan.gui.main_window.QFileDialog.getOpenFileName",
             lambda *args, **kwargs: (str(rules_yaml), ""),
         )
         window._on_load_rules()
@@ -399,7 +399,7 @@ class TestMultiRulesList:
         # 先返回 r1，再返回 r2
         paths_iter = iter([str(r1), str(r2)])
         monkeypatch.setattr(
-            "pyfilescan.gui.main_window.QFileDialog.getOpenFileName",
+            "uniscan.gui.main_window.QFileDialog.getOpenFileName",
             lambda *args, **kwargs: (next(paths_iter), ""),
         )
         window._on_load_rules()
@@ -427,12 +427,12 @@ class TestMultiRulesList:
         window._use_builtin_checkbox.setChecked(False)
 
         monkeypatch.setattr(
-            "pyfilescan.gui.main_window.QFileDialog.getOpenFileName",
+            "uniscan.gui.main_window.QFileDialog.getOpenFileName",
             lambda *args, **kwargs: (str(r1), ""),
         )
         # 抑制提示框
         monkeypatch.setattr(
-            "pyfilescan.gui.main_window.QMessageBox.information",
+            "uniscan.gui.main_window.QMessageBox.information",
             lambda *args, **kwargs: None,
         )
         window._on_load_rules()

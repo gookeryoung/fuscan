@@ -8,19 +8,19 @@
 
 ### 核心逻辑
 
-- `src/pyfilescan/rules/merge.py`：新增 `merge_multiple_rulesets(*rulesets)`，按顺序链式合并多个规则集
-- `src/pyfilescan/rules/__init__.py`：导出 `merge_multiple_rulesets`
-- `src/pyfilescan/builtin/__init__.py`：`load_with_builtin` 参数从 `Optional[Path]` 改为 `Optional[Sequence[Path]]`，支持多文件顺序合并
+- `src/uniscan/rules/merge.py`：新增 `merge_multiple_rulesets(*rulesets)`，按顺序链式合并多个规则集
+- `src/uniscan/rules/__init__.py`：导出 `merge_multiple_rulesets`
+- `src/uniscan/builtin/__init__.py`：`load_with_builtin` 参数从 `Optional[Path]` 改为 `Optional[Sequence[Path]]`，支持多文件顺序合并
 
 ### CLI
 
-- `src/pyfilescan/cli.py`：
+- `src/uniscan/cli.py`：
   - `scan`/`tray` 子命令的 `-r/--rules` 改为 `action="append"`，支持重复指定
   - 新增 `_load_ruleset_from_args(args)` 辅助函数，统一处理 `--no-builtin` + 多 `-r` 的加载逻辑
 
 ### GUI
 
-- `src/pyfilescan/gui/main_window.py`：
+- `src/uniscan/gui/main_window.py`：
   - `_rules_path: Optional[Path]` → `_rules_paths: List[Path]`
   - `_init_ui` 拆分为 `_build_top_controls` / `_build_main_splitter` / `_build_left_panel` 三个子方法（避免 PLR0915）
   - 左侧面板新增 `QListWidget`（规则文件列表）+ 上移/下移/移除按钮

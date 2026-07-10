@@ -26,7 +26,7 @@ def launch(argv: Optional[Sequence[str]] = None) -> int:
     """
     args = list(argv) if argv is not None else sys.argv
     app = QApplication.instance() or QApplication(args)
-    app.setApplicationName("pyfilescan")
+    app.setApplicationName("uniscan")
 
     window = MainWindow()
     window.show()

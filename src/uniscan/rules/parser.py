@@ -1,6 +1,6 @@
 """规则 YAML 解析器。
 
-将字典形式（来自 YAML）转换为 :mod:`pyfilescan.rules.model` 中的不可变数据结构。
+将字典形式（来自 YAML）转换为 :mod:`uniscan.rules.model` 中的不可变数据结构。
 
 YAML 结构示例见 ``rules/example.yaml``。
 """

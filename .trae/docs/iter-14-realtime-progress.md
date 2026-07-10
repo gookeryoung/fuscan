@@ -9,11 +9,11 @@
 
 | 文件 | 改动 |
 |------|------|
-| `src/pyfilescan/scanner/result.py` | 新增 `ProgressInfo` frozen dataclass，加入 `__all__` |
-| `src/pyfilescan/scanner/__init__.py` | 导出 `ProgressInfo` |
-| `src/pyfilescan/scanner/scanner.py` | `Scanner.__init__` 新增 `on_progress`/`progress_interval` 参数；新增 `_emit_progress` 方法（时间节流 + `force=True` 跳过节流）；`scan()` 在遍历阶段每 200 条 emit、扫描阶段逐文件 emit、压缩包阶段逐包 emit、最终 `force=True` emit；`_scan_sequential`/`_scan_concurrent` 签名新增 `start, total, skipped` |
-| `src/pyfilescan/gui/worker.py` | 信号 `progress = Signal(int)` → `progress_info = Signal(object)`；新增累计字段 `_cum_*` 与 `_start_time`；新增 `_on_progress` 回调累加前序根路径统计后 emit；`run()` 传 `on_progress` 给 Scanner |
-| `src/pyfilescan/gui/main_window.py` | 新增 `_current_file_label`（QLabel#currentFileLabel）；`_build_scan_control_area` 拆分为 `_build_rules_row` + `_build_target_row`（修复 PLR0915）；`_on_scan` 连接 `progress_info` 信号、显示当前文件标签；`_on_scan_progress` 重写为接收 `ProgressInfo`，更新进度条/当前文件/详细统计；`_on_scan_finished`/`_on_scan_failed` 隐藏当前文件标签；QSS 字体层级：scanBtn 18px > modeCard 14px > statsLabel 13px > currentFileLabel 12px |
+| `src/uniscan/scanner/result.py` | 新增 `ProgressInfo` frozen dataclass，加入 `__all__` |
+| `src/uniscan/scanner/__init__.py` | 导出 `ProgressInfo` |
+| `src/uniscan/scanner/scanner.py` | `Scanner.__init__` 新增 `on_progress`/`progress_interval` 参数；新增 `_emit_progress` 方法（时间节流 + `force=True` 跳过节流）；`scan()` 在遍历阶段每 200 条 emit、扫描阶段逐文件 emit、压缩包阶段逐包 emit、最终 `force=True` emit；`_scan_sequential`/`_scan_concurrent` 签名新增 `start, total, skipped` |
+| `src/uniscan/gui/worker.py` | 信号 `progress = Signal(int)` → `progress_info = Signal(object)`；新增累计字段 `_cum_*` 与 `_start_time`；新增 `_on_progress` 回调累加前序根路径统计后 emit；`run()` 传 `on_progress` 给 Scanner |
+| `src/uniscan/gui/main_window.py` | 新增 `_current_file_label`（QLabel#currentFileLabel）；`_build_scan_control_area` 拆分为 `_build_rules_row` + `_build_target_row`（修复 PLR0915）；`_on_scan` 连接 `progress_info` 信号、显示当前文件标签；`_on_scan_progress` 重写为接收 `ProgressInfo`，更新进度条/当前文件/详细统计；`_on_scan_finished`/`_on_scan_failed` 隐藏当前文件标签；QSS 字体层级：scanBtn 18px > modeCard 14px > statsLabel 13px > currentFileLabel 12px |
 | `tests/test_scanner.py` | 新增 `TestScannerProgress`（6 个测试：回调触发、并发、节流、None 安全、最终 force、字段填充） |
 | `tests/test_gui.py` | 新增 `TestScanWorkerProgress`（3 个测试：信号 emit、多根累计、字段类型）；修复 `test_window_geometry_restored` 高度断言为 ±2px |
 

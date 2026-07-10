@@ -1,4 +1,4 @@
-"""模块入口，支持 `python -m pyfilescan` 调用。"""
+"""模块入口，支持 `python -m uniscan` 调用。"""
 
 from __future__ import annotations
 

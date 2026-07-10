@@ -1,6 +1,6 @@
 """配置持久化。
 
-在用户主目录 ``~/.pyfilescan/config.yaml`` 存储窗口状态、历史扫描路径、
+在用户主目录 ``~/.uniscan/config.yaml`` 存储窗口状态、历史扫描路径、
 规则文件列表、通用规则开关等配置，应用启动时自动恢复，关闭时自动保存。
 
 公共 API：
@@ -23,7 +23,7 @@ __all__ = ["CONFIG_DIR", "CONFIG_PATH", "Config", "load_config", "save_config"]
 
 logger = logging.getLogger(__name__)
 
-CONFIG_DIR = Path.home() / ".pyfilescan"
+CONFIG_DIR = Path.home() / ".uniscan"
 CONFIG_PATH = CONFIG_DIR / "config.yaml"
 
 # 历史记录最大保留条数

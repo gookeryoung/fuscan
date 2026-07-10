@@ -1,6 +1,6 @@
 """匹配引擎：将规则规格转化为可执行的匹配器。
 
-匹配器层次与 :mod:`pyfilescan.rules.model` 中的 MatchSpec 一一对应：
+匹配器层次与 :mod:`uniscan.rules.model` 中的 MatchSpec 一一对应：
 
 - :class:`FileNameMatcher` / :class:`ContentMatcher` / :class:`PathMatcher`
   对应 :class:`LeafMatch`，按 target 分发

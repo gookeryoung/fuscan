@@ -67,7 +67,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("pyfilescan 通用文件扫描器")
+        self.setWindowTitle("uniscan 通用文件扫描器")
         self.resize(1200, 800)
 
         self._config: Config = load_config()
@@ -699,7 +699,7 @@ class MainWindow(QMainWindow):
             return
 
         filter_str = "CSV 文件 (*.csv)" if fmt == "csv" else "JSON 文件 (*.json)"
-        default_name = f"pyfilescan_report.{fmt}"
+        default_name = f"uniscan_report.{fmt}"
         path_str, _ = QFileDialog.getSaveFileName(
             self,
             "导出扫描结果",
@@ -722,8 +722,8 @@ class MainWindow(QMainWindow):
 
         QMessageBox.about(
             self,
-            "关于 pyfilescan",
-            f"pyfilescan {__version__}\n\n通用文件扫描器\n支持多格式与压缩文件扫描\n\n技术栈: Python + PySide2",
+            "关于 uniscan",
+            f"uniscan {__version__}\n\n通用文件扫描器\n支持多格式与压缩文件扫描\n\n技术栈: Python + PySide2",
         )
 
     # ----------------------------- 辅助方法 -----------------------------

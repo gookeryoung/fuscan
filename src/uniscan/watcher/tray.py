@@ -105,7 +105,7 @@ class TrayApp(QObject):
         :return: 退出码
         """
         app = QApplication.instance() or QApplication([])
-        app.setApplicationName("pyfilescan")
+        app.setApplicationName("uniscan")
         app.setQuitOnLastWindowClosed(False)  # 关闭窗口不退出，驻留托盘
 
         self._init_tray()
@@ -121,7 +121,7 @@ class TrayApp(QObject):
         # 使用内置图标（无资源文件时）
         icon = QIcon.fromTheme("document-search", QIcon())
         self._tray = QSystemTrayIcon(icon, self)
-        self._tray.setToolTip("pyfilescan 文件扫描器")
+        self._tray.setToolTip("uniscan 文件扫描器")
 
         self._tray_menu = QMenu()
 
@@ -246,7 +246,7 @@ class TrayApp(QObject):
         if self._tray is not None and self._tray.isVisible():
             count = len(report.hits)
             self._tray.showMessage(
-                "pyfilescan 发现命中",
+                "uniscan 发现命中",
                 f"发现 {count} 个文件命中规则",
                 QSystemTrayIcon.Information,
                 3000,

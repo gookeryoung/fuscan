@@ -9,12 +9,12 @@
 
 | 文件 | 改动类型 | 说明 |
 |------|---------|------|
-| `src/pyfilescan/scanner/walker.py` | 修改 | 新增 `list_drives()` 跨平台盘符枚举 |
-| `src/pyfilescan/scanner/__init__.py` | 修改 | 导出 `list_drives` |
-| `src/pyfilescan/gui/worker.py` | 重写 | `ScanWorker` 参数从 `root: Path` 改为 `roots: List[Path]`，支持多根路径扫描与结果合并 |
-| `src/pyfilescan/config.py` | 修改 | 新增 `scan_mode` 与 `last_drive` 字段（注：`window_geometry`/`window_state`/`splitter_sizes` 的默认值由用户提交 `38fbc0a` 改为 `default_factory`） |
-| `src/pyfilescan/gui/main_window.py` | 重写 | 杀毒软件风格 UI：模式卡片 + 醒目扫描按钮 + 大进度条 + QSS 样式 |
-| `src/pyfilescan/watcher/tray.py` | 修改 | `_init_main_window(show=False)` 时显式 `hide()`，避免 `showMaximized` 副作用 |
+| `src/uniscan/scanner/walker.py` | 修改 | 新增 `list_drives()` 跨平台盘符枚举 |
+| `src/uniscan/scanner/__init__.py` | 修改 | 导出 `list_drives` |
+| `src/uniscan/gui/worker.py` | 重写 | `ScanWorker` 参数从 `root: Path` 改为 `roots: List[Path]`，支持多根路径扫描与结果合并 |
+| `src/uniscan/config.py` | 修改 | 新增 `scan_mode` 与 `last_drive` 字段（注：`window_geometry`/`window_state`/`splitter_sizes` 的默认值由用户提交 `38fbc0a` 改为 `default_factory`） |
+| `src/uniscan/gui/main_window.py` | 重写 | 杀毒软件风格 UI：模式卡片 + 醒目扫描按钮 + 大进度条 + QSS 样式 |
+| `src/uniscan/watcher/tray.py` | 修改 | `_init_main_window(show=False)` 时显式 `hide()`，避免 `showMaximized` 副作用 |
 | `tests/test_gui.py` | 修改 | 更新 `ScanWorker` 测试为 `roots` 参数；新增 `TestScanWorkerMultiRoot`、`TestScanMode`、`TestScanModePersistence` |
 | `tests/test_config.py` | 修改 | 更新默认值断言以匹配 `default_factory` 变更 |
 
@@ -75,4 +75,4 @@
 
 ## 遗留事项
 
-- 无（iter-06～10 已归档至 `.trae/skills/pyfilescan-development.md`）
+- 无（iter-06～10 已归档至 `.trae/skills/uniscan-development.md`）

@@ -2,7 +2,7 @@
 
 ## 本轮目标
 
-实现配置文件持久化，存储在 `~/.pyfilescan/config.yaml` 中，包括窗口几何、
+实现配置文件持久化，存储在 `~/.uniscan/config.yaml` 中，包括窗口几何、
 历史扫描文件夹、加载规则文件列表、通用规则开关等。应用启动时自动恢复，
 关闭时自动保存。
 
@@ -10,18 +10,18 @@
 
 ### 新增
 
-- `src/pyfilescan/config.py`：配置持久化模块
+- `src/uniscan/config.py`：配置持久化模块
   - `Config` dataclass：窗口几何、窗口状态、分割器大小、扫描路径历史、
     规则文件路径列表、通用规则开关
   - `load_config(path)`：从 YAML 加载配置，文件不存在或解析失败返回默认值
   - `save_config(config, path)`：保存配置到 YAML，自动创建父目录
-  - `CONFIG_PATH`：默认路径 `~/.pyfilescan/config.yaml`
+  - `CONFIG_PATH`：默认路径 `~/.uniscan/config.yaml`
   - `MAX_HISTORY`：历史记录上限 15 条
 - `tests/test_config.py`：配置模块单元测试（12 个测试）
 
 ### 修改
 
-- `src/pyfilescan/gui/main_window.py`：
+- `src/uniscan/gui/main_window.py`：
   - 导入 `Config`、`load_config`、`save_config`、`MAX_HISTORY`、`QComboBox`
   - `__init__` 中调用 `load_config()` 加载配置，新增 `_apply_config()` 恢复状态
   - 顶部路径标签 `QLabel` 改为 `QComboBox`（`_path_combo`），支持历史下拉选择
@@ -42,7 +42,7 @@
 
 ## 关键决策与依据
 
-1. **配置位置**：用户主目录 `~/.pyfilescan/config.yaml`，跨平台、多用户隔离
+1. **配置位置**：用户主目录 `~/.uniscan/config.yaml`，跨平台、多用户隔离
 2. **保存时机**：`closeEvent` 中自动保存，无需手动操作
 3. **路径标签→下拉框**：用 `QComboBox` 替换 `QLabel`，用户可从历史记录中
    直接选择扫描路径，不必每次打开对话框浏览

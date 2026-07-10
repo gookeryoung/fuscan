@@ -12,8 +12,8 @@
 
 .. code-block:: bash
 
-    pyfilescan scan /path/to/scan -r rules/custom.yaml -o json -f report.json
-    pyfilescan rules -r rules/custom.yaml
+    uniscan scan /path/to/scan -r rules/custom.yaml -o json -f report.json
+    uniscan rules -r rules/custom.yaml
 """
 
 from __future__ import annotations
@@ -35,17 +35,17 @@ from uniscan.scanner import Scanner, ScanReport
 
 __all__ = ["build_parser", "main"]
 
-logger = logging.getLogger("pyfilescan")
+logger = logging.getLogger("uniscan")
 
 
 def build_parser() -> argparse.ArgumentParser:
     """构造 CLI 参数解析器。"""
     parser = argparse.ArgumentParser(
-        prog="pyfilescan",
+        prog="uniscan",
         description="通用文件扫描器：基于 YAML 规则的多格式内容扫描工具",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("-V", "--version", action="version", version=f"pyfilescan {__version__}")
+    parser.add_argument("-V", "--version", action="version", version=f"uniscan {__version__}")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="增加日志详细度（-v INFO, -vv DEBUG）")
 
     subparsers = parser.add_subparsers(dest="command", metavar="<command>", required=True)
@@ -122,7 +122,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.command == "tray":
             return _cmd_tray(args)
         if args.command == "version":
-            print(f"pyfilescan {__version__}")
+            print(f"uniscan {__version__}")
             return 0
     except RuleError as exc:
         print(f"规则错误: {exc}", file=sys.stderr)

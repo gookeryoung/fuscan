@@ -341,13 +341,13 @@ class TestGuiCommand:
             called["launch"] = True
             return 0
 
-        # 注入 fake launch 到 pyfilescan.gui 命名空间
+        # 注入 fake launch 到 uniscan.gui 命名空间
         import sys
         import types
 
-        fake_gui = types.ModuleType("pyfilescan.gui")
+        fake_gui = types.ModuleType("uniscan.gui")
         fake_gui.launch = fake_launch  # type: ignore[attr-defined]
-        monkeypatch.setitem(sys.modules, "pyfilescan.gui", fake_gui)
+        monkeypatch.setitem(sys.modules, "uniscan.gui", fake_gui)
 
         rc = main(["gui"])
         assert rc == 0
@@ -364,7 +364,7 @@ class TestGuiCommand:
         original_import = builtins.__import__
 
         def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
-            if name == "pyfilescan.gui":
+            if name == "uniscan.gui":
                 raise ImportError("No module named 'PySide2'")
             return original_import(name, *args, **kwargs)
 
@@ -460,7 +460,7 @@ class TestMainErrorHandling:
 
 class TestMainModuleImport:
     def test_main_module_importable(self) -> None:
-        """``python -m pyfilescan`` 入口模块可被导入。"""
+        """``python -m uniscan`` 入口模块可被导入。"""
         import uniscan.__main__ as main_mod
 
         assert hasattr(main_mod, "main")

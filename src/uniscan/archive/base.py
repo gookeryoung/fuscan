@@ -9,7 +9,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
 
 __all__ = [
     "ArchiveEntry",
@@ -60,7 +59,7 @@ class ArchiveReader(ABC):
         """支持的压缩文件扩展名。"""
 
     @abstractmethod
-    def list_entries(self) -> List[ArchiveEntry]:
+    def list_entries(self) -> list[ArchiveEntry]:
         """列出压缩包内所有条目。"""
 
     @abstractmethod
@@ -80,10 +79,10 @@ class ArchiveReaderFactory:
     def register(self, extension: str, reader_cls: type[ArchiveReader]) -> None:
         self._factories[extension.lower().lstrip(".")] = reader_cls
 
-    def get(self, extension: str) -> Optional[type[ArchiveReader]]:
+    def get(self, extension: str) -> type[ArchiveReader] | None:
         return self._factories.get(extension.lower().lstrip("."))
 
-    def create(self, path: Path, password: Optional[str] = None) -> Optional[ArchiveReader]:
+    def create(self, path: Path, password: str | None = None) -> ArchiveReader | None:
         """按扩展名创建读取器实例。"""
         ext = path.suffix.lower().lstrip(".")
         reader_cls = self._factories.get(ext)
@@ -98,6 +97,6 @@ class ArchiveReaderFactory:
 default_factory = ArchiveReaderFactory()
 
 
-def get_reader(path: Path, password: Optional[str] = None) -> Optional[ArchiveReader]:
+def get_reader(path: Path, password: str | None = None) -> ArchiveReader | None:
     """从默认工厂创建读取器。"""
     return default_factory.create(path, password=password)

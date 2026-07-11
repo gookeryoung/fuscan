@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from typing import List, Optional, Pattern, Tuple
+from typing import Pattern
 
 from uniscan.rules.model import (
     AndMatch,
@@ -46,7 +46,7 @@ class Matcher(ABC):
     def matches(self, context: MatchContext) -> MatchResult:
         """对上下文求值，返回匹配结果。"""
 
-    def match_all(self, context: MatchContext) -> List[MatchResult]:
+    def match_all(self, context: MatchContext) -> list[MatchResult]:
         """收集所有子匹配器的结果（默认仅返回自身结果，组合器覆写）。"""
         return [self.matches(context)]
 
@@ -56,7 +56,7 @@ class LeafMatcher(Matcher):
 
     def __init__(self, spec: LeafMatch) -> None:
         self.spec = spec
-        self._compiled: Optional[Pattern[str]] = None
+        self._compiled: Pattern[str] | None = None
         if spec.mode == MatchMode.REGEX:
             flags = 0 if spec.case_sensitive else re.IGNORECASE
             try:
@@ -100,11 +100,11 @@ class PathMatcher(LeafMatcher):
 class AndMatcher(Matcher):
     """逻辑与：所有子匹配器均命中才算命中。"""
 
-    def __init__(self, children: Tuple[Matcher, ...]) -> None:
+    def __init__(self, children: tuple[Matcher, ...]) -> None:
         self.children = children
 
     def matches(self, context: MatchContext) -> MatchResult:
-        details: List[str] = []
+        details: list[str] = []
         for child in self.children:
             result = child.matches(context)
             if not result.matched:
@@ -113,8 +113,8 @@ class AndMatcher(Matcher):
                 details.append(result.detail)
         return MatchResult(matched=True, detail=" AND ".join(details) if details else "全部命中")
 
-    def match_all(self, context: MatchContext) -> List[MatchResult]:
-        results: List[MatchResult] = []
+    def match_all(self, context: MatchContext) -> list[MatchResult]:
+        results: list[MatchResult] = []
         for child in self.children:
             results.extend(child.match_all(context))
         return results
@@ -123,7 +123,7 @@ class AndMatcher(Matcher):
 class OrMatcher(Matcher):
     """逻辑或：任一子匹配器命中即算命中。"""
 
-    def __init__(self, children: Tuple[Matcher, ...]) -> None:
+    def __init__(self, children: tuple[Matcher, ...]) -> None:
         self.children = children
 
     def matches(self, context: MatchContext) -> MatchResult:
@@ -133,8 +133,8 @@ class OrMatcher(Matcher):
                 return MatchResult(matched=True, detail=result.detail or "任一命中")
         return MatchResult(matched=False)
 
-    def match_all(self, context: MatchContext) -> List[MatchResult]:
-        results: List[MatchResult] = []
+    def match_all(self, context: MatchContext) -> list[MatchResult]:
+        results: list[MatchResult] = []
         for child in self.children:
             results.extend(child.match_all(context))
         return results
@@ -153,7 +153,7 @@ class NotMatcherImpl(Matcher):
         return MatchResult(matched=True, detail="子条件未命中")
 
 
-def _apply_leaf(text: str, spec: LeafMatch, compiled: Optional[Pattern[str]]) -> MatchResult:
+def _apply_leaf(text: str, spec: LeafMatch, compiled: Pattern[str] | None) -> MatchResult:
     """对文本应用叶子匹配规格。"""
     if spec.mode == MatchMode.REGEX:
         if compiled is None:

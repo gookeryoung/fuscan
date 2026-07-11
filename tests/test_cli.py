@@ -76,18 +76,20 @@ class TestBuildParser:
 
     def test_parse_scan_with_options(self) -> None:
         parser = build_parser()
-        args = parser.parse_args([
-            "scan",
-            "scan_path",
-            "-r",
-            "r.yaml",
-            "-o",
-            "json",
-            "-f",
-            "out.json",
-            "--max-depth",
-            "3",
-        ])
+        args = parser.parse_args(
+            [
+                "scan",
+                "scan_path",
+                "-r",
+                "r.yaml",
+                "-o",
+                "json",
+                "-f",
+                "out.json",
+                "--max-depth",
+                "3",
+            ]
+        )
         assert args.output_format == "json"
         assert args.max_depth == 3
 
@@ -207,14 +209,16 @@ class TestScanCommand:
         extra_dir.mkdir()
         (extra_dir / "password.txt").write_text("", encoding="utf-8")
 
-        rc = main([
-            "scan",
-            str(scan_root),
-            "-r",
-            str(rules_file),
-            "--ignore-dir",
-            "exclude_me",
-        ])
+        rc = main(
+            [
+                "scan",
+                str(scan_root),
+                "-r",
+                str(rules_file),
+                "--ignore-dir",
+                "exclude_me",
+            ]
+        )
         assert rc == 0
         out = capsys.readouterr().out
         # exclude_me 内的 password.txt 应被忽略
@@ -432,15 +436,17 @@ class TestTrayCommand:
         watch_dir.mkdir()
         state_file = tmp_path / "state.json"
 
-        rc = main([
-            "tray",
-            "-r",
-            str(rules_file),
-            "-w",
-            str(watch_dir),
-            "--state",
-            str(state_file),
-        ])
+        rc = main(
+            [
+                "tray",
+                "-r",
+                str(rules_file),
+                "-w",
+                str(watch_dir),
+                "--state",
+                str(state_file),
+            ]
+        )
         assert rc == 0
         assert called["show_window"] is False
         kwargs = called["kwargs"]
@@ -464,3 +470,111 @@ class TestMainModuleImport:
         import uniscan.__main__ as main_mod
 
         assert hasattr(main_mod, "main")
+
+
+class TestCliErrorPaths:
+    """CLI 异常路径覆盖。"""
+
+    def test_keyboard_interrupt_returns_130(
+        self,
+        scan_root: Path,
+        rules_file: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """KeyboardInterrupt 时返回 130。"""
+        import uniscan.cli as cli_mod
+
+        def raise_keyboard_interrupt(*args, **kwargs):  # type: ignore[no-untyped-def]
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(cli_mod, "load_with_builtin", raise_keyboard_interrupt)
+        rc = main(["scan", str(scan_root), "-r", str(rules_file)])
+        assert rc == 130
+        err = capsys.readouterr().err
+        assert "已中断" in err
+
+    def test_generic_exception_returns_1(
+        self,
+        scan_root: Path,
+        rules_file: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """未预期异常时返回 1。"""
+        import uniscan.cli as cli_mod
+
+        def raise_exception(*args, **kwargs):  # type: ignore[no-untyped-def]
+            raise RuntimeError("模拟未知错误")
+
+        monkeypatch.setattr(cli_mod, "load_with_builtin", raise_exception)
+        rc = main(["scan", str(scan_root), "-r", str(rules_file)])
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert "错误" in err
+
+    def test_rule_with_description_displayed(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """rules 子命令应显示规则描述。"""
+        rules_file = tmp_path / "rules.yaml"
+        rules_file.write_text(
+            'version: "1.0"\n'
+            "rules:\n"
+            "  - name: 带描述的规则\n"
+            "    severity: warning\n"
+            "    description: 这是一个描述信息\n"
+            "    match:\n"
+            "      type: filename\n"
+            "      mode: contains\n"
+            "      pattern: password\n",
+            encoding="utf-8",
+        )
+        rc = main(["rules", "-r", str(rules_file)])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "这是一个描述信息" in out
+
+    def test_format_text_path_not_relative_to_root(self) -> None:
+        """命中路径不在扫描根下时 _format_text 回退到绝对路径。"""
+        from uniscan.cli import _format_text
+        from uniscan.rules.model import Severity
+        from uniscan.scanner.result import RuleHit, ScanReport, ScanResult, ScanStats
+
+        report = ScanReport(
+            root=Path("C:/scan"),
+            results=(
+                ScanResult(
+                    path=Path("D:/other/path/file.txt"),
+                    size=10,
+                    hits=(RuleHit(rule_name="r", severity=Severity.WARNING, detail="命中"),),
+                ),
+            ),
+            stats=ScanStats(total_files=1, scanned_files=1, matched_files=1),
+        )
+        text = _format_text(report)
+        assert "D:/other/path/file.txt" in text or "D:\\other\\path\\file.txt" in text
+
+    def test_configure_logging_verbose_levels(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """_configure_logging 不同 verbose 级别传入不同日志级别到 basicConfig。"""
+        import logging
+
+        from uniscan.cli import _configure_logging
+
+        calls: list = []
+
+        def mock_basic_config(**kwargs):  # type: ignore[no-untyped-def]
+            calls.append(kwargs)
+
+        monkeypatch.setattr(logging, "basicConfig", mock_basic_config)
+
+        _configure_logging(0)
+        assert calls[-1]["level"] == logging.WARNING
+
+        _configure_logging(1)
+        assert calls[-1]["level"] == logging.INFO
+
+        _configure_logging(2)
+        assert calls[-1]["level"] == logging.DEBUG

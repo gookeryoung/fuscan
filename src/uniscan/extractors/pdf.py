@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Tuple
 
 from uniscan.extractors.base import Extractor, ExtractorError
 
@@ -23,7 +22,7 @@ class PdfExtractor(Extractor):
     """PDF 文档文本提取器。"""
 
     @property
-    def supported_extensions(self) -> Tuple[str, ...]:
+    def supported_extensions(self) -> tuple[str, ...]:
         return ("pdf",)
 
     def extract(self, path: Path) -> str:

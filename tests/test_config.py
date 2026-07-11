@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from uniscan.config import Config, load_config, save_config
 
 
@@ -144,3 +146,33 @@ class TestSaveConfig:
         save_config(original, config_file)
         loaded = load_config(config_file)
         assert loaded.scan_paths == ["/用户/文档/扫描目录"]
+
+    def test_load_config_os_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """文件打开失败时返回默认配置。"""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text("use_builtin: false\n", encoding="utf-8")
+
+        original_open = Path.open
+
+        def mock_open(self: Path, *args: object, **kwargs: object) -> object:
+            if self == config_file:
+                raise OSError("模拟权限错误")
+            return original_open(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "open", mock_open)
+        config = load_config(config_file)
+        assert config.use_builtin is True
+
+    def test_save_config_os_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """保存失败时记录日志不抛异常。"""
+        config_file = tmp_path / "config.yaml"
+
+        original_open = Path.open
+
+        def mock_open(self: Path, *args: object, **kwargs: object) -> object:
+            if self == config_file:
+                raise OSError("模拟写入错误")
+            return original_open(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "open", mock_open)
+        save_config(Config(), config_file)  # 不应抛异常

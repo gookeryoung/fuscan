@@ -6,6 +6,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from uniscan.rules.model import (
     AndMatch,
     LeafMatch,
@@ -555,3 +557,109 @@ class TestScannerControl:
         assert report is not None
         assert not report.cancelled
         assert report.stats.matched_files == 20
+
+
+class TestScannerExtraCoverage:
+    """补充覆盖 scanner.py 异常路径与边界。"""
+
+    def test_default_extract_content_fallback(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """extract_content 抛异常时回退到 read_text。"""
+        from uniscan.scanner.context import FileEntry
+        from uniscan.scanner.scanner import default_extract_content
+
+        path = tmp_path / "a.txt"
+        path.write_text("password fallback", encoding="utf-8")
+        entry = FileEntry.from_path(path)
+
+        def raise_extract(p: Path) -> str:
+            raise RuntimeError("提取失败")
+
+        monkeypatch.setattr("uniscan.scanner.scanner.extract_content", raise_extract)
+        content = default_extract_content(entry)
+        assert "password fallback" in content
+
+    def test_scan_single_entry_exception_counts_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """_scan_entry 抛异常时单线程扫描应计 error 并继续。"""
+        (tmp_path / "a.txt").write_text("x", encoding="utf-8")
+        (tmp_path / "b.txt").write_text("x", encoding="utf-8")
+        rs = _build_ruleset(_filename_rule("r", "x"))
+        scanner = Scanner(rs)
+
+        original_scan_entry = scanner._scan_entry
+        call_count = {"n": 0}
+
+        def fake_scan_entry(entry):  # type: ignore[no-untyped-def]
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("模拟扫描失败")
+            return original_scan_entry(entry)
+
+        monkeypatch.setattr(scanner, "_scan_entry", fake_scan_entry)
+        report = scanner.scan(tmp_path)
+        assert report.stats.errors >= 1
+
+    def test_scan_concurrent_entry_exception_counts_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """并发扫描中 _scan_entry 抛异常应计 error。"""
+        for i in range(5):
+            (tmp_path / f"f{i}.txt").write_text("x", encoding="utf-8")
+        rs = _build_ruleset(_filename_rule("r", "x"))
+        scanner = Scanner(rs, max_workers=2)
+
+        original_scan_entry = scanner._scan_entry
+        call_count = {"n": 0}
+
+        def fake_scan_entry(entry):  # type: ignore[no-untyped-def]
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("模拟并发扫描失败")
+            return original_scan_entry(entry)
+
+        monkeypatch.setattr(scanner, "_scan_entry", fake_scan_entry)
+        report = scanner.scan(tmp_path)
+        assert report.stats.errors >= 1
+
+    def test_should_scan_dir_returns_false(self) -> None:
+        """_should_scan 对目录返回 False。"""
+        from uniscan.scanner.context import FileEntry
+
+        rs = _build_ruleset(_filename_rule("r", "x"))
+        scanner = Scanner(rs)
+        entry = FileEntry(path=Path("/tmp/somedir"), name="somedir", size=0, mtime=0.0, extension="", is_dir=True)
+        assert scanner._should_scan(entry) is False
+
+    def test_scan_archive_phase_exception_counts_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """压缩包扫描抛异常时计 error 并继续。"""
+        import zipfile
+
+        zip_path = tmp_path / "a.zip"
+        with zipfile.ZipFile(str(zip_path), "w") as zf:
+            zf.writestr("secret.txt", "x")
+
+        rs = _build_ruleset(_filename_rule("r", "secret"))
+        scanner = Scanner(rs, scan_archives=True)
+
+        from uniscan.archive import scanner as archive_scanner_mod
+
+        def fake_scan_archive(self, path):  # type: ignore[no-untyped-def]
+            raise RuntimeError("模拟压缩包扫描失败")
+
+        monkeypatch.setattr(archive_scanner_mod.ArchiveScanner, "scan_archive", fake_scan_archive)
+        report = scanner.scan(tmp_path)
+        assert report.stats.errors >= 1
+
+    def test_scan_archive_phase_cancel_breaks(self, tmp_path: Path) -> None:
+        """压缩包扫描阶段取消应中断。"""
+        import zipfile
+
+        for i in range(3):
+            with zipfile.ZipFile(str(tmp_path / f"a{i}.zip"), "w") as zf:
+                zf.writestr("secret.txt", "x")
+
+        rs = _build_ruleset(_filename_rule("r", "secret"))
+        scanner = Scanner(rs, scan_archives=True, progress_interval=0.0)
+
+        scanner.cancel()
+        report = scanner.scan(tmp_path)
+        assert report.cancelled

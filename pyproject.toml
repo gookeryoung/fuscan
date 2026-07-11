@@ -91,7 +91,7 @@ show_missing = true
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
-markers                            = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
+markers                            = ["slow: marks tests as slow (deselect with '-m \"not slow\"')", "gui: marks tests requiring GUI environment (Qt)"]
 testpaths                          = ["tests"]
 
 # Ruff 配置 - 与 .pre-commit-config.yaml 保持一致
@@ -127,7 +127,12 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"**/tests/**" = ["ARG001", "ARG002"]
+"**/tests/**" = ["ARG001", "ARG002", "ARG005", "PLR0913"]
+"**/*_ui.py" = ["F401", "F403", "F405"]
+"src/uniscan/cli.py" = ["PLR0911"]
+"src/uniscan/scanner/matchers.py" = ["PLR0911"]
+"src/uniscan/scanner/scanner.py" = ["PLR0913"]
+"src/uniscan/gui/worker.py" = ["PLR0913"]
 
 [tool.pyrefly]
 preset           = "strict"

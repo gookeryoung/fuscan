@@ -28,10 +28,10 @@ import logging
 import re
 from dataclasses import asdict
 from pathlib import Path
-from typing import List, Optional, Sequence, Set, Tuple
+from typing import Sequence
 
 from PySide2.QtCore import Qt
-from PySide2.QtGui import QColor, QTextCharFormat, QTextCursor
+from PySide2.QtGui import QColor, QIcon, QTextCharFormat, QTextCursor
 from PySide2.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -77,6 +77,13 @@ _PREVIEW_STYLE = (
 # 关键词高亮 span 样式
 _HIGHLIGHT_STYLE = "background-color: yellow; color: black;"
 
+# 图标路径（assets/icons 目录下）
+_ICONS_DIR = Path(__file__).parent.parent / "assets" / "icons"
+_ICON_SCAN = str(_ICONS_DIR / "scan.svg")
+_ICON_PAUSE = str(_ICONS_DIR / "pause.svg")
+_ICON_RESCAN = str(_ICONS_DIR / "rescan.svg")
+_ICON_STOP = str(_ICONS_DIR / "stop.svg")
+
 
 def _format_size(size: int) -> str:
     """将字节数格式化为人类可读字符串。"""
@@ -89,14 +96,14 @@ def _format_size(size: int) -> str:
     return f"{size / (1024 * 1024 * 1024):.2f} GB"
 
 
-def _extract_keywords(hits: Sequence[RuleHit]) -> List[str]:
+def _extract_keywords(hits: Sequence[RuleHit]) -> list[str]:
     """从命中规则的 detail 字段中提取关键词。
 
     detail 形如 "包含 'password'" / "正则命中: 'AKIA...'"，
     提取单引号内的模式用于内容高亮。
     """
-    keywords: List[str] = []
-    seen: Set[str] = set()
+    keywords: list[str] = []
+    seen: set[str] = set()
     for hit in hits:
         for match in _KEYWORD_RE.finditer(hit.detail):
             kw = match.group(1)
@@ -139,27 +146,27 @@ class ScanState(enum.Enum):
 class MainWindow(QMainWindow):
     """主窗口：扫描器 GUI 入口，GitHub Desktop 风格 5 区布局。"""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._ui = Ui_MainWindow()
         self._ui.setupUi(self)
 
         self._config: Config = load_config()
-        self._ruleset: Optional[RuleSet] = None
-        self._rules_paths: List[Path] = []
-        self._scan_root: Optional[Path] = None
-        self._last_report: Optional[ScanReport] = None
-        self._worker: Optional[ScanWorker] = None
+        self._ruleset: RuleSet | None = None
+        self._rules_paths: list[Path] = []
+        self._scan_root: Path | None = None
+        self._last_report: ScanReport | None = None
+        self._worker: ScanWorker | None = None
         self._scan_state: ScanState = ScanState.IDLE
         self._use_builtin: bool = True
         # 扫描模式："full"（全盘）、"drive"（盘符）、"folder"（文件夹）
         self._scan_mode: str = "folder"
         # 详情区命中导航状态
-        self._detail_hit_positions: List[Tuple[int, int]] = []
+        self._detail_hit_positions: list[tuple[int, int]] = []
         self._detail_current_hit_index: int = -1
-        self._detail_current_result: Optional[ScanResult] = None
+        self._detail_current_result: ScanResult | None = None
         # 扫描历史记录
-        self._scan_history: List[str] = []
+        self._scan_history: list[str] = []
 
         self._bind_widgets()
         self._configure_ui()
@@ -298,6 +305,15 @@ class MainWindow(QMainWindow):
         ui.detail_nonempty_main_layout.setStretch(2, 1)
         ui.detail_nonempty_main_layout.setStretch(3, 0)
         ui.detail_nonempty_main_layout.setStretch(4, 2)
+
+        # 加载图标并为扫描控制按钮设置
+        self._icon_scan = QIcon(_ICON_SCAN)
+        self._icon_pause = QIcon(_ICON_PAUSE)
+        self._icon_rescan = QIcon(_ICON_RESCAN)
+        self._icon_stop = QIcon(_ICON_STOP)
+        self._scan_btn.setIcon(self._icon_scan)
+        self._stop_btn.setIcon(self._icon_stop)
+        self._detail_start_btn.setIcon(self._icon_scan)
 
         # 信号槽连接
         self._scan_btn.clicked.connect(self._on_scan)
@@ -529,7 +545,7 @@ class MainWindow(QMainWindow):
         """盘符选择变更。"""
         self._update_scan_button()
 
-    def _build_scan_roots(self) -> List[Path]:
+    def _build_scan_roots(self) -> list[Path]:
         """根据扫描模式构造根路径列表。"""
         if self._scan_mode == "full":
             return list_drives()
@@ -607,6 +623,17 @@ class MainWindow(QMainWindow):
         self._scan_action.setText(text)
         self._detail_start_btn.setText(text)
 
+    def _update_scan_button_icon(self) -> None:
+        """根据扫描状态切换扫描按钮图标。"""
+        if self._scan_state == ScanState.RUNNING:
+            icon = self._icon_pause
+        elif self._scan_state == ScanState.PAUSED:
+            icon = self._icon_rescan
+        else:
+            icon = self._icon_scan
+        self._scan_btn.setIcon(icon)
+        self._detail_start_btn.setIcon(icon)
+
     def _on_scan(self) -> None:
         """扫描按钮：根据当前状态执行开始/暂停/继续。"""
         if self._scan_state == ScanState.RUNNING:
@@ -628,6 +655,7 @@ class MainWindow(QMainWindow):
         self._detail_clear()
         self._scan_state = ScanState.RUNNING
         self._set_scan_controls_text("暂停扫描")
+        self._update_scan_button_icon()
         self._stop_btn.setVisible(True)
         self._progress.setVisible(True)
         self._progress.setRange(0, 0)
@@ -653,6 +681,7 @@ class MainWindow(QMainWindow):
             self._worker.pause()
         self._scan_state = ScanState.PAUSED
         self._set_scan_controls_text("继续扫描")
+        self._update_scan_button_icon()
         self._stats_label.setText("已暂停")
 
     def _resume_scan(self) -> None:
@@ -661,6 +690,7 @@ class MainWindow(QMainWindow):
             self._worker.resume()
         self._scan_state = ScanState.RUNNING
         self._set_scan_controls_text("暂停扫描")
+        self._update_scan_button_icon()
         self._stats_label.setText("扫描中...")
 
     def _on_stop(self) -> None:
@@ -686,6 +716,7 @@ class MainWindow(QMainWindow):
         self._current_file_label.setVisible(False)
         self._stop_btn.setVisible(False)
         self._set_scan_controls_text("开始扫描")
+        self._update_scan_button_icon()
         self._cleanup_worker()
         self._update_scan_button()
 
@@ -903,7 +934,7 @@ class MainWindow(QMainWindow):
         if not keywords:
             return
         doc = self._detail_preview.document()
-        seen: Set[Tuple[int, int]] = set()
+        seen: set[tuple[int, int]] = set()
         for kw in sorted(set(keywords), key=len, reverse=True):
             cursor = doc.find(kw)
             while not cursor.isNull():
@@ -1278,7 +1309,7 @@ class MainWindow(QMainWindow):
                 top.addChild(child)
             self._result_tree.addTopLevelItem(top)
 
-    def _on_result_double_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+    def _on_result_double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
         """双击结果项：在新窗口打开详情对话框。
 
         选中变化已通过 itemSelectionChanged 触发详情区更新，

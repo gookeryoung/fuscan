@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List, Tuple
 
 from uniscan.extractors.base import Extractor, ExtractorError
 
@@ -21,7 +20,7 @@ class DocxExtractor(Extractor):
     """DOCX 文档文本提取器。"""
 
     @property
-    def supported_extensions(self) -> Tuple[str, ...]:
+    def supported_extensions(self) -> tuple[str, ...]:
         return ("docx",)
 
     def extract(self, path: Path) -> str:
@@ -35,7 +34,7 @@ class DocxExtractor(Extractor):
         except Exception as exc:
             raise ExtractorError(f"DOCX 解析失败: {path}: {exc}") from exc
 
-        parts: List[str] = []
+        parts: list[str] = []
 
         for para in doc.paragraphs:
             text = para.text.strip()
@@ -62,7 +61,7 @@ class PptxExtractor(Extractor):
     """PPTX 演示文稿文本提取器。"""
 
     @property
-    def supported_extensions(self) -> Tuple[str, ...]:
+    def supported_extensions(self) -> tuple[str, ...]:
         return ("pptx",)
 
     def extract(self, path: Path) -> str:
@@ -76,7 +75,7 @@ class PptxExtractor(Extractor):
         except Exception as exc:
             raise ExtractorError(f"PPTX 解析失败: {path}: {exc}") from exc
 
-        parts: List[str] = []
+        parts: list[str] = []
         for slide_index, slide in enumerate(prs.slides, 1):
             slide_texts = self._extract_slide(slide)
             if slide_texts:
@@ -85,9 +84,9 @@ class PptxExtractor(Extractor):
 
         return "\n".join(parts)
 
-    def _extract_slide(self, slide: object) -> List[str]:
+    def _extract_slide(self, slide: object) -> list[str]:
         """提取单张幻灯片的文本。"""
-        texts: List[str] = []
+        texts: list[str] = []
         for shape in slide.shapes:
             if shape.has_text_frame:
                 for para in shape.text_frame.paragraphs:

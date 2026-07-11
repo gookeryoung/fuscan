@@ -9,8 +9,6 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
-
 from uniscan.rules.model import Rule, RuleSet
 
 __all__ = ["merge_multiple_rulesets", "merge_rulesets"]
@@ -26,7 +24,7 @@ def merge_rulesets(base: RuleSet, override: RuleSet) -> RuleSet:
     override_names = {r.name for r in override.rules}
 
     # 保留 base 中未被覆盖的规则，再追加 override 的全部规则
-    merged_rules: List[Rule] = [r for r in base.rules if r.name not in override_names]
+    merged_rules: list[Rule] = [r for r in base.rules if r.name not in override_names]
     merged_rules.extend(override.rules)
 
     return RuleSet(
@@ -55,9 +53,9 @@ def merge_multiple_rulesets(*rulesets: RuleSet) -> RuleSet:
     return merged
 
 
-def _union(*tuples: Tuple[str, ...]) -> Tuple[str, ...]:
+def _union(*tuples: tuple[str, ...]) -> tuple[str, ...]:
     """合并多个元组，去重并保持插入顺序。"""
-    seen: Dict[str, None] = {}
+    seen: dict[str, None] = {}
     for t in tuples:
         for item in t:
             if item not in seen:

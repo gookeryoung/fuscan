@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List, Optional
 
 from PySide2.QtCore import QObject, QTimer, Signal
 from PySide2.QtGui import QIcon
@@ -52,9 +51,9 @@ class TrayApp(QObject):
     def __init__(
         self,
         ruleset: RuleSet,
-        watch_paths: Optional[List[Path]] = None,
-        state_file: Optional[Path] = None,
-        parent: Optional[QObject] = None,
+        watch_paths: list[Path] | None = None,
+        state_file: Path | None = None,
+        parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._ruleset = ruleset
@@ -69,16 +68,16 @@ class TrayApp(QObject):
             ignore_dirs=ignore_dirs,
             ignore_extensions=list(ruleset.ignore_extensions),
         )
-        self._monitor: Optional[FileMonitor] = None
+        self._monitor: FileMonitor | None = None
         self._scanner = IncrementalScanner(ruleset=ruleset)
 
-        self._tray: Optional[QSystemTrayIcon] = None
-        self._tray_menu: Optional[QMenu] = None
+        self._tray: QSystemTrayIcon | None = None
+        self._tray_menu: QMenu | None = None
         self._main_window = None
         self._scan_worker = None
 
         # 增量扫描队列与定时器（批量处理文件事件，避免频繁扫描）
-        self._pending_paths: List[Path] = []
+        self._pending_paths: list[Path] = []
         self._scan_timer = QTimer(self)
         self._scan_timer.setSingleShot(True)
         self._scan_timer.setInterval(2000)  # 2 秒内的事件批量处理

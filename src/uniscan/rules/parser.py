@@ -8,7 +8,7 @@ YAML 结构示例见 ``rules/example.yaml``。
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import yaml
 
@@ -169,7 +169,7 @@ def parse_ruleset(data: Any) -> RuleSet:
 def _as_str_tuple(value: Any, *, field: str, strip_dot: bool = False) -> tuple[str, ...]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise RuleParseError(f"{field} 必须是列表")
-    items: List[str] = []
+    items: list[str] = []
     for item in value:
         if not isinstance(item, str):
             raise RuleParseError(f"{field} 中的元素必须是字符串，得到 {type(item).__name__}")

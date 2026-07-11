@@ -12,7 +12,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable
 
 from uniscan.extractors import extract_content
 from uniscan.rules.model import Rule, RuleSet
@@ -54,18 +54,18 @@ class Scanner:
     def __init__(
         self,
         ruleset: RuleSet,
-        content_provider: Optional[ContentProvider] = None,
-        max_depth: Optional[int] = None,
+        content_provider: ContentProvider | None = None,
+        max_depth: int | None = None,
         follow_symlinks: bool = False,
         scan_archives: bool = False,
-        archive_password: Optional[str] = None,
-        max_workers: Optional[int] = None,
-        on_progress: Optional[Callable[[ProgressInfo], None]] = None,
+        archive_password: str | None = None,
+        max_workers: int | None = None,
+        on_progress: Callable[[ProgressInfo], None] | None = None,
         progress_interval: float = 0.15,
     ) -> None:
         self.ruleset = ruleset
         self._content_provider: ContentProvider = content_provider or default_extract_content
-        self._compiled: List[Tuple[Rule, Matcher]] = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
+        self._compiled: list[tuple[Rule, Matcher]] = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
         self._walker = FileWalker(
             ignore_dirs=ruleset.ignore_dirs,
             ignore_extensions=ruleset.ignore_extensions,
@@ -75,7 +75,7 @@ class Scanner:
         )
         self._scan_archives = scan_archives
         self._max_workers = max_workers
-        self._archive_scanner: Optional[ArchiveScanner] = None
+        self._archive_scanner: ArchiveScanner | None = None
         if scan_archives:
             # 惰性导入避免与 archive.scanner 模块的循环依赖
             from uniscan.archive import ArchiveScanner
@@ -138,7 +138,7 @@ class Scanner:
         self._progress_start = time.perf_counter()
 
         # 阶段 1：遍历收集待扫描 entry（单线程，I/O 轻量）
-        entries: List[FileEntry] = []
+        entries: list[FileEntry] = []
         total = 0
         skipped = 0
         for entry in self._walker.walk(root):
@@ -156,7 +156,7 @@ class Scanner:
         self._progress_skipped = skipped
 
         # 阶段 2：扫描文件（单线程或并发）
-        results: List[ScanResult] = []
+        results: list[ScanResult] = []
         scanned = 0
         matched = 0
         errors = 0
@@ -223,9 +223,9 @@ class Scanner:
 
     def _scan_sequential(
         self,
-        entries: List[FileEntry],
-        results: List[ScanResult],
-    ) -> Tuple[int, int, int]:
+        entries: list[FileEntry],
+        results: list[ScanResult],
+    ) -> tuple[int, int, int]:
         """单线程顺序扫描，返回 (scanned, matched, errors)。"""
         scanned = 0
         matched = 0
@@ -249,9 +249,9 @@ class Scanner:
 
     def _scan_concurrent(
         self,
-        entries: List[FileEntry],
-        results: List[ScanResult],
-    ) -> Tuple[int, int, int]:
+        entries: list[FileEntry],
+        results: list[ScanResult],
+    ) -> tuple[int, int, int]:
         """多线程并发扫描，返回 (scanned, matched, errors)。
 
         每个文件的提取+匹配作为独立任务提交到线程池，
@@ -283,9 +283,9 @@ class Scanner:
 
     def _scan_archive_phase(
         self,
-        entries: List[FileEntry],
-        results: List[ScanResult],
-    ) -> Tuple[int, int, int]:
+        entries: list[FileEntry],
+        results: list[ScanResult],
+    ) -> tuple[int, int, int]:
         """顺序扫描压缩包内条目，返回 (scanned, matched, errors) 增量。
 
         压缩包扫描始终顺序执行以避免 ArchiveScanner 的线程安全问题。
@@ -326,7 +326,7 @@ class Scanner:
         entry = FileEntry.from_path(path)
         return self._scan_entry(entry)
 
-    def scan_archive(self, path: Path) -> Tuple[ScanResult, ...]:
+    def scan_archive(self, path: Path) -> tuple[ScanResult, ...]:
         """扫描压缩包内所有条目。
 
         :raises RuntimeError: 未启用 scan_archives 选项
@@ -351,7 +351,7 @@ class Scanner:
     def _scan_entry(self, entry: FileEntry) -> ScanResult:
         """对单个文件应用所有规则，返回扫描结果。"""
         context = MatchContext(entry, content_provider=self._content_provider)
-        hits: List[RuleHit] = []
+        hits: list[RuleHit] = []
         rule_errors = 0
 
         for rule, matcher in self._compiled:

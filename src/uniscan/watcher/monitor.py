@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set
+from typing import Callable
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -57,9 +57,9 @@ class FileEvent:
 class MonitorConfig:
     """监控配置。"""
 
-    watch_paths: List[Path] = field(default_factory=list)
-    ignore_dirs: List[str] = field(default_factory=list)
-    ignore_extensions: List[str] = field(default_factory=list)
+    watch_paths: list[Path] = field(default_factory=list)
+    ignore_dirs: list[str] = field(default_factory=list)
+    ignore_extensions: list[str] = field(default_factory=list)
     dedup_interval_seconds: float = 1.0
     recursive: bool = True
 
@@ -70,15 +70,15 @@ class _EventHandler(FileSystemEventHandler):
     def __init__(
         self,
         callback: Callable[[FileEvent], None],
-        ignore_dirs: Set[str],
-        ignore_extensions: Set[str],
+        ignore_dirs: set[str],
+        ignore_extensions: set[str],
         dedup_interval: float,
     ) -> None:
         self._callback = callback
         self._ignore_dirs = ignore_dirs
         self._ignore_extensions = ignore_extensions
         self._dedup_interval = dedup_interval
-        self._last_events: Dict[Path, float] = {}
+        self._last_events: dict[Path, float] = {}
         self._lock = threading.Lock()
 
     def on_any_event(self, event: FileSystemEvent) -> None:
@@ -132,7 +132,7 @@ class _EventHandler(FileSystemEventHandler):
             return True
 
     @staticmethod
-    def _map_event_type(raw: str) -> Optional[FileEventType]:
+    def _map_event_type(raw: str) -> FileEventType | None:
         """watchdog 事件类型映射到 FileEventType。"""
         mapping = {
             "created": FileEventType.CREATED,
@@ -158,8 +158,8 @@ class FileMonitor:
 
     def __init__(self, config: MonitorConfig) -> None:
         self._config = config
-        self._observer: Optional[Observer] = None
-        self._handler: Optional[_EventHandler] = None
+        self._observer: Observer | None = None
+        self._handler: _EventHandler | None = None
         self._running = False
         self._lock = threading.Lock()
 
@@ -174,7 +174,7 @@ class FileMonitor:
         return self._running
 
     @property
-    def watch_paths(self) -> List[Path]:
+    def watch_paths(self) -> list[Path]:
         """监控路径列表。"""
         return list(self._config.watch_paths)
 

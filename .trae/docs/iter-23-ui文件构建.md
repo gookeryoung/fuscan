@@ -63,13 +63,43 @@ pyside2-uic 不支持 QBoxLayout 的 `<property name="stretch"><vector>..</vecto
 
 ## 验证结果
 
-- **ruff check**：main_window.py 和 detail_dialog.py 有预先存在的 UP006/UP045 类型注解风格警告（与重构前一致），rule_editor.py 全部通过
-- **pytest**：565 passed, 2 skipped（全部通过）
-- **覆盖率**：90.61%（高于基线 90.32%）
-- **GUI 测试**：192 passed, 1 skipped（全部通过）
+- **ruff check**：全部通过（UP006/UP045 已修复，*_ui.py 生成文件已排除）
+- **ruff format**：全部通过
+- **pytest**：649 passed, 2 skipped（全部通过）
+- **覆盖率**：95.61%（达到 95% 门槛）
 
-## 遗留事项
+## 遗留事项处理（iter-23 后续补充）
 
-1. UP006/UP045 类型注解风格警告（`List` → `list`、`Optional` → `X | None`）在 main_window.py 和 detail_dialog.py 中预先存在，需后续统一修复
-2. pyproject.toml 未注册 `gui` marker，导致 PytestUnknownMarkWarning（预先存在）
-3. 覆盖率 95% 门槛未达到（90.61%），预先存在的问题，与本次重构无关
+### 1. UP006/UP045 类型注解修复 ✅
+
+使用 `ruff check --fix --unsafe-fixes` 全代码库统一修复：`List[X]` → `list[X]`、`Optional[X]` → `X | None`。
+项目所有模块均使用 `from __future__ import annotations`，现代类型语法在 Python 3.8 下安全。
+
+### 2. gui marker 注册 ✅
+
+pyproject.toml 的 `[tool.pytest.ini_options].markers` 已注册 `gui` marker，消除 PytestUnknownMarkWarning。
+
+### 3. 覆盖率提升至 95% ✅
+
+从 90.61% 提升至 95.61%，新增测试覆盖：
+- `tests/test_watcher.py`：IncrementalScanner 异常路径（6 个测试）、FileMonitor 边界条件（6 个测试）
+- `tests/test_matchers.py`：匹配器边界条件（8 个测试）
+- `tests/test_extractors.py`：WPS 提取器异常路径（5 个测试）
+- `tests/test_archive.py`：压缩包读取器异常路径（26 个测试）
+- `tests/test_cli.py`：CLI 异常路径（5 个测试）
+- `tests/test_gui.py`：ScanWorker 异常路径（5 个测试）
+- `tests/test_scanner.py`：Scanner 异常路径（6 个测试）
+- `src/uniscan/extractors/text.py`：删除不可达死代码（latin-1 fallback 永不失败）
+- `src/uniscan/cli.py`：删除不可达死代码（required=True 时 parser.print_help 不可达）
+
+### 4. 图标美化 ✅
+
+为扫描控制按钮添加 SVG 图标（`src/uniscan/assets/icons/` 下的 scan.svg、stop.svg、pause.svg、rescan.svg），
+采用磁盘路径加载方式（QIcon(str(path))），扫描状态切换时图标随之变化。
+
+### 5. ruff per-file-ignores 优化
+
+- `**/*_ui.py`：忽略 F401/F403/F405（pyside2-uic 生成文件使用 star import）
+- `**/tests/**`：增加 ARG005（测试 lambda 回调常用未使用参数）、PLR0913（参数化测试参数多）
+- `cli.py`/`matchers.py`：忽略 PLR0911（命令分发/模式匹配自然多返回语句）
+- `scanner.py`/`worker.py`：忽略 PLR0913（构造函数参数多）

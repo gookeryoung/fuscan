@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List, Optional
 
 from uniscan.archive.base import ArchiveEntry, ArchiveError, ArchiveReader
 
@@ -23,7 +22,7 @@ class RarReader(ArchiveReader):
     加密条目需要密码；未提供密码或密码错误时跳过并记录。
     """
 
-    def __init__(self, path: Path, password: Optional[str] = None) -> None:
+    def __init__(self, path: Path, password: str | None = None) -> None:
         try:
             import rarfile  # 惰性导入，避免无 unrar 环境下的导入失败
         except ImportError as exc:
@@ -46,9 +45,9 @@ class RarReader(ArchiveReader):
     def supported_extensions(self) -> tuple[str, ...]:
         return ("rar",)
 
-    def list_entries(self) -> List[ArchiveEntry]:
+    def list_entries(self) -> list[ArchiveEntry]:
         """列出压缩包内所有条目。"""
-        entries: List[ArchiveEntry] = []
+        entries: list[ArchiveEntry] = []
         for info in self._rar.infolist():
             entries.append(
                 ArchiveEntry(

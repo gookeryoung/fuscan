@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, Optional, Tuple
 
 __all__ = [
     "Extractor",
@@ -36,7 +35,7 @@ class Extractor(ABC):
 
     @property
     @abstractmethod
-    def supported_extensions(self) -> Tuple[str, ...]:
+    def supported_extensions(self) -> tuple[str, ...]:
         """该提取器支持的文件扩展名列表（不含点，小写）。"""
 
     @abstractmethod
@@ -53,7 +52,7 @@ class ExtractorRegistry:
     """提取器注册表：按扩展名分发到对应提取器实例。"""
 
     def __init__(self) -> None:
-        self._extractors: Dict[str, Extractor] = {}
+        self._extractors: dict[str, Extractor] = {}
 
     def register(self, extractor: Extractor) -> None:
         """注册提取器，按其 supported_extensions 建立映射。"""
@@ -68,17 +67,17 @@ class ExtractorRegistry:
                 )
             self._extractors[normalized] = extractor
 
-    def get(self, extension: str) -> Optional[Extractor]:
+    def get(self, extension: str) -> Extractor | None:
         """按扩展名查找提取器，未注册返回 None。"""
         normalized = extension.lower().lstrip(".")
         return self._extractors.get(normalized)
 
     @property
-    def registered_extensions(self) -> Tuple[str, ...]:
+    def registered_extensions(self) -> tuple[str, ...]:
         """已注册的所有扩展名。"""
         return tuple(sorted(self._extractors.keys()))
 
-    def extract(self, path: Path, extension: Optional[str] = None) -> str:
+    def extract(self, path: Path, extension: str | None = None) -> str:
         """按扩展名提取文件内容。
 
         :param path: 文件路径
@@ -97,11 +96,11 @@ class ExtractorRegistry:
 default_registry = ExtractorRegistry()
 
 
-def get_extractor(extension: str) -> Optional[Extractor]:
+def get_extractor(extension: str) -> Extractor | None:
     """从默认注册表查找提取器。"""
     return default_registry.get(extension)
 
 
-def extract_content(path: Path, extension: Optional[str] = None) -> str:
+def extract_content(path: Path, extension: str | None = None) -> str:
     """使用默认注册表提取文件内容。"""
     return default_registry.extract(path, extension=extension)

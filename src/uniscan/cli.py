@@ -26,7 +26,7 @@ import logging
 import sys
 from dataclasses import asdict
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Sequence
 
 from uniscan import __version__
 from uniscan.builtin import load_with_builtin
@@ -101,7 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """CLI 主入口。
 
     :param argv: 命令行参数（默认从 sys.argv 读取）
@@ -135,17 +135,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"错误: {exc}", file=sys.stderr)
         return 1
 
-    parser.print_help()
-    return 0
+    return 0  # pragma: no cover
 
 
-def _load_ruleset_from_args(args: argparse.Namespace) -> Optional[RuleSet]:
+def _load_ruleset_from_args(args: argparse.Namespace) -> RuleSet | None:
     """根据 CLI 参数加载规则集，返回 None 表示出错（错误信息已打印）。
 
     - ``--no-builtin``：仅加载用户规则（需至少一个 -r），多个文件按顺序合并
     - 默认：内置规则 + 用户规则（按顺序合并，后者覆盖前者）
     """
-    rules_paths: Optional[List[Path]] = args.rules
+    rules_paths: list[Path] | None = args.rules
 
     if args.no_builtin:
         if not rules_paths:
@@ -215,7 +214,7 @@ def _cmd_rules(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_gui(args: argparse.Namespace) -> int:
+def _cmd_gui(_args: argparse.Namespace) -> int:
     """执行 gui 子命令：启动图形界面。"""
     try:
         from uniscan.gui import launch
@@ -240,7 +239,7 @@ def _cmd_tray(args: argparse.Namespace) -> int:
         return 1
 
     watch_paths = [Path(w) for w in args.watch]
-    state_file: Optional[Path] = args.state
+    state_file: Path | None = args.state
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
@@ -249,7 +248,7 @@ def _cmd_tray(args: argparse.Namespace) -> int:
     return tray.start(show_window=False)
 
 
-def _merge_ignore_dirs(ruleset: RuleSet, extra_dirs: List[str]) -> RuleSet:
+def _merge_ignore_dirs(ruleset: RuleSet, extra_dirs: list[str]) -> RuleSet:
     """合并额外忽略目录到规则集。"""
     from dataclasses import replace
 
@@ -268,7 +267,7 @@ def _format_report(report: ScanReport, fmt: str) -> str:
 
 def _format_text(report: ScanReport) -> str:
     """渲染文本格式报告。"""
-    lines: List[str] = []
+    lines: list[str] = []
     lines.append(f"扫描路径: {report.root}")
     lines.append(
         f"统计: 总计 {report.stats.total_files} | 已扫描 {report.stats.scanned_files} | "
@@ -322,7 +321,7 @@ def _format_csv(report: ScanReport) -> str:
     return buf.getvalue()
 
 
-def _write_output(content: str, output_file: Optional[Path]) -> None:
+def _write_output(content: str, output_file: Path | None) -> None:
     """输出报告到文件或 stdout。"""
     if output_file is None:
         sys.stdout.write(content)

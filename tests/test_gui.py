@@ -1681,6 +1681,128 @@ class TestScanWorkerDirect:
         assert result.total == 3
         assert result.matched == 1
 
+    def test_pause_delegates_to_scanner(self, qapp: QApplication) -> None:
+        """pause() 在 _scanner 非空时应调用 scanner.pause()。"""
+        rs = _build_ruleset()
+        worker = ScanWorker(ruleset=rs, roots=[Path("/tmp")])
+
+        called = {"pause": False}
+
+        class FakeScanner:
+            is_cancelled = False
+
+            def pause(self) -> None:
+                called["pause"] = True
+
+            def resume(self) -> None:
+                pass
+
+            def cancel(self) -> None:
+                pass
+
+        worker._scanner = FakeScanner()  # type: ignore[assignment]
+        worker.pause()
+        assert called["pause"] is True
+
+    def test_resume_delegates_to_scanner(self, qapp: QApplication) -> None:
+        """resume() 在 _scanner 非空时应调用 scanner.resume()。"""
+        rs = _build_ruleset()
+        worker = ScanWorker(ruleset=rs, roots=[Path("/tmp")])
+
+        called = {"resume": False}
+
+        class FakeScanner:
+            is_cancelled = False
+
+            def pause(self) -> None:
+                pass
+
+            def resume(self) -> None:
+                called["resume"] = True
+
+            def cancel(self) -> None:
+                pass
+
+        worker._scanner = FakeScanner()  # type: ignore[assignment]
+        worker.resume()
+        assert called["resume"] is True
+
+    def test_cancel_delegates_to_scanner(self, qapp: QApplication) -> None:
+        """cancel() 在 _scanner 非空时应调用 scanner.cancel()。"""
+        rs = _build_ruleset()
+        worker = ScanWorker(ruleset=rs, roots=[Path("/tmp")])
+
+        called = {"cancel": False}
+
+        class FakeScanner:
+            is_cancelled = False
+
+            def pause(self) -> None:
+                pass
+
+            def resume(self) -> None:
+                pass
+
+            def cancel(self) -> None:
+                called["cancel"] = True
+
+        worker._scanner = FakeScanner()  # type: ignore[assignment]
+        worker.cancel()
+        assert called["cancel"] is True
+        assert worker._cancel_requested is True
+
+    def test_run_cancel_requested_cancels_scanner(
+        self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_cancel_requested 为 True 时 run() 应在创建 Scanner 后立即 cancel。"""
+        from uniscan.scanner.scanner import Scanner
+
+        (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
+        rs = _build_ruleset()
+        worker = ScanWorker(ruleset=rs, roots=[tmp_path])
+        worker._cancel_requested = True
+
+        cancel_called = {"n": 0}
+        original_cancel = Scanner.cancel
+
+        def fake_cancel(self: Scanner) -> None:
+            cancel_called["n"] += 1
+            original_cancel(self)
+
+        monkeypatch.setattr(Scanner, "cancel", fake_cancel)
+
+        cancelled_reports: list = []
+        worker.cancelled.connect(cancelled_reports.append)
+        worker.run()
+
+        assert cancel_called["n"] >= 1
+        assert len(cancelled_reports) == 1
+
+    def test_run_emits_cancelled_when_scanner_cancelled(
+        self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Scanner 被取消后 run() 应 emit cancelled 信号。"""
+        from uniscan.scanner.scanner import Scanner
+
+        (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
+        rs = _build_ruleset()
+        worker = ScanWorker(ruleset=rs, roots=[tmp_path])
+
+        original_scan = Scanner.scan
+
+        def fake_scan(self: Scanner, root: Path):  # type: ignore[no-untyped-def]
+            self.cancel()
+            return original_scan(self, root)
+
+        monkeypatch.setattr(Scanner, "scan", fake_scan)
+
+        cancelled_reports: list = []
+        worker.cancelled.connect(cancelled_reports.append)
+        worker.run()
+
+        assert len(cancelled_reports) == 1
+        assert cancelled_reports[0].cancelled is True
+
 
 class TestScanMode:
     """扫描模式 UI 测试。"""
@@ -2420,7 +2542,7 @@ class TestRuleEditor:
             lambda *args, **kwargs: None,
         )
         saved_paths: list[str] = []
-        dialog.rules_saved.connect(lambda p: saved_paths.append(p))
+        dialog.rules_saved.connect(saved_paths.append)
         dialog._on_save()
 
         content = rules_path.read_text(encoding="utf-8")
@@ -2538,7 +2660,7 @@ class TestRuleEditor:
         rules_path = self._make_rules_file(tmp_path)
         dialog = RuleEditorDialog([rules_path])
         saved_paths: list[str] = []
-        dialog.rules_saved.connect(lambda p: saved_paths.append(p))
+        dialog.rules_saved.connect(saved_paths.append)
 
         # 模拟无效索引
         dialog._file_combo.setCurrentIndex(-1)
@@ -2573,7 +2695,7 @@ class TestRuleEditor:
 
         monkeypatch.setattr(Path, "write_text", _raise_on_write)
         saved_paths: list[str] = []
-        dialog.rules_saved.connect(lambda p: saved_paths.append(p))
+        dialog.rules_saved.connect(saved_paths.append)
         dialog._on_save()
 
         try:
@@ -2605,7 +2727,7 @@ class TestRuleEditor:
         )
 
         saved_paths: list[str] = []
-        dialog.rules_saved.connect(lambda p: saved_paths.append(p))
+        dialog.rules_saved.connect(saved_paths.append)
         dialog._on_save()
 
         assert warned["called"]

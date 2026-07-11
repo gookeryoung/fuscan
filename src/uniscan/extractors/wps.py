@@ -17,7 +17,6 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Tuple
 
 from uniscan.extractors.base import Extractor, ExtractorError
 
@@ -32,7 +31,7 @@ class WpsExtractor(Extractor):
     """WPS Office 文档提取器，按扩展名分发到对应的 OOXML 提取逻辑。"""
 
     @property
-    def supported_extensions(self) -> Tuple[str, ...]:
+    def supported_extensions(self) -> tuple[str, ...]:
         return ("wps", "et", "dps")
 
     def extract(self, path: Path) -> str:

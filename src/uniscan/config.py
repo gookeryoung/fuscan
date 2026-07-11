@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
@@ -35,24 +35,24 @@ class Config:
     """应用配置。"""
 
     # 窗口几何：[x, y, width, height]
-    window_geometry: Optional[List[int]] = field(default_factory=lambda: [300, 300, 1200, 900])
+    window_geometry: list[int] | None = field(default_factory=lambda: [300, 300, 1200, 900])
     # 窗口状态："maximized" 或 "normal"
-    window_state: Optional[str] = field(default_factory=lambda: "maximized")
+    window_state: str | None = field(default_factory=lambda: "maximized")
     # 主分割器大小：[left_width, right_width]
-    splitter_sizes: Optional[List[int]] = field(default_factory=list)
+    splitter_sizes: list[int] | None = field(default_factory=list)
     # 扫描模式："full"（全盘）、"drive"（盘符）、"folder"（文件夹）
     scan_mode: str = "folder"
     # 历史扫描路径（最近优先）
-    scan_paths: List[str] = field(default_factory=list)
+    scan_paths: list[str] = field(default_factory=list)
     # 上次选择的盘符（如 "C:\\"）
-    last_drive: Optional[str] = None
+    last_drive: str | None = None
     # 规则文件路径列表（按优先级从低到高）
-    rules_paths: List[str] = field(default_factory=list)
+    rules_paths: list[str] = field(default_factory=list)
     # 是否使用通用规则
     use_builtin: bool = True
 
 
-def load_config(path: Optional[Path] = None) -> Config:
+def load_config(path: Path | None = None) -> Config:
     """从 YAML 文件加载配置。
 
     文件不存在或解析失败时返回默认配置，不抛异常。
@@ -75,11 +75,11 @@ def load_config(path: Optional[Path] = None) -> Config:
         return Config()
 
     known = {f.name for f in fields(Config)}
-    filtered: Dict[str, Any] = {k: v for k, v in data.items() if k in known and v is not None}
+    filtered: dict[str, Any] = {k: v for k, v in data.items() if k in known and v is not None}
     return Config(**filtered)
 
 
-def save_config(config: Config, path: Optional[Path] = None) -> None:
+def save_config(config: Config, path: Path | None = None) -> None:
     """保存配置到 YAML 文件。
 
     :param config: :class:`Config` 实例

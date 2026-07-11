@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Tuple, Union
+from typing import Union
 
 __all__ = [
     "AndMatch",
@@ -78,14 +78,14 @@ class LeafMatch:
 class AndMatch:
     """逻辑与：所有子条件均命中才算命中。"""
 
-    children: Tuple[MatchSpec, ...] = field(default_factory=tuple)
+    children: tuple[MatchSpec, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
 class OrMatch:
     """逻辑或：任一子条件命中即算命中。"""
 
-    children: Tuple[MatchSpec, ...] = field(default_factory=tuple)
+    children: tuple[MatchSpec, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -106,7 +106,7 @@ class Rule:
     match: MatchSpec
     description: str = ""
     severity: Severity = Severity.INFO
-    file_extensions: Tuple[str, ...] = field(default_factory=tuple)
+    file_extensions: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -122,7 +122,7 @@ class RuleSet:
     """
 
     version: str
-    rules: Tuple[Rule, ...] = field(default_factory=tuple)
-    ignore_dirs: Tuple[str, ...] = field(default_factory=tuple)
-    ignore_extensions: Tuple[str, ...] = field(default_factory=tuple)
-    ignore_paths: Tuple[str, ...] = field(default_factory=tuple)
+    rules: tuple[Rule, ...] = field(default_factory=tuple)
+    ignore_dirs: tuple[str, ...] = field(default_factory=tuple)
+    ignore_extensions: tuple[str, ...] = field(default_factory=tuple)
+    ignore_paths: tuple[str, ...] = field(default_factory=tuple)

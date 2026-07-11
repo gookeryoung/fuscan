@@ -158,6 +158,45 @@ class TestTextExtractor:
         assert "密码" in content
         assert "password123" in content
 
+    def test_read_bytes_os_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """read_bytes 失败时抛出 ExtractorError。"""
+        path = tmp_path / "test.txt"
+        path.write_text("hello", encoding="utf-8")
+
+        original_read_bytes = Path.read_bytes
+
+        def mock_read_bytes(self: Path) -> bytes:
+            if self == path:
+                raise OSError("模拟读取失败")
+            return original_read_bytes(self)
+
+        monkeypatch.setattr(Path, "read_bytes", mock_read_bytes)
+        with pytest.raises(ExtractorError, match="文件读取失败"):
+            TextExtractor().extract(path)
+
+    def test_charset_normalizer_exception_fallback(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """charset-normalizer 抛异常时回退到 UTF-8 解码。"""
+        path = tmp_path / "test.txt"
+        path.write_text("异常回退 password", encoding="utf-8")
+
+        def fake_from_bytes(data: bytes):
+            raise RuntimeError("模拟检测异常")
+
+        monkeypatch.setattr("charset_normalizer.from_bytes", fake_from_bytes)
+        content = TextExtractor().extract(path)
+        assert "异常回退 password" in content
+
+    def test_charset_normalizer_none_fallback_to_latin1(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """charset-normalizer 返回 None 时回退到 latin-1 解码任意字节。"""
+        path = tmp_path / "test.txt"
+        path.write_bytes(b"\xff\xfe\xfd")
+
+        monkeypatch.setattr("charset_normalizer.from_bytes", lambda data: type("R", (), {"best": lambda self: None})())
+        content = TextExtractor().extract(path)
+        assert isinstance(content, str)
+        # latin-1 能解码任意字节，不应为空
+        assert len(content) == 3
+
 
 # ---------------------------------------------------------------------------
 # DocxExtractor
@@ -203,6 +242,103 @@ class TestPptxExtractor:
         path.write_text("not a pptx", encoding="utf-8")
         with pytest.raises(ExtractorError, match="PPTX 解析失败"):
             PptxExtractor().extract(path)
+
+    def test_pptx_import_error_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """python-pptx 未安装时应抛出 ExtractorError。"""
+        path = tmp_path / "test.pptx"
+        path.write_bytes(b"fake")
+        import builtins
+
+        original_import = builtins.__import__
+
+        def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if name == "pptx":
+                raise ImportError("No module named 'pptx'")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        with pytest.raises(ExtractorError, match="python-pptx 未安装"):
+            PptxExtractor().extract(path)
+
+    def test_pptx_with_table_and_notes(self, tmp_path: Path) -> None:
+        """PPTX 含表格和备注时应提取这些内容。"""
+        from pptx import Presentation
+        from pptx.util import Inches
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[1])
+        slide.shapes.title.text = "表格测试"
+        # 添加表格
+        table_shape = slide.shapes.add_table(
+            rows=2, cols=2, left=Inches(1), top=Inches(2), width=Inches(4), height=Inches(1)
+        )
+        table = table_shape.table
+        table.cell(0, 0).text = "键"
+        table.cell(0, 1).text = "密码"
+        table.cell(1, 0).text = "user"
+        table.cell(1, 1).text = "pwd123"
+        # 添加备注
+        slide.notes_slide.notes_text_frame.text = "备注内容 secret"
+        path = tmp_path / "table_notes.pptx"
+        prs.save(str(path))
+
+        content = PptxExtractor().extract(path)
+        assert "表格测试" in content
+        assert "pwd123" in content
+        assert "[备注]" in content
+        assert "备注内容 secret" in content
+
+    def test_pptx_empty_slide_skipped(self, tmp_path: Path) -> None:
+        """空幻灯片应被跳过（不添加 --- 幻灯片 --- 分隔符）。"""
+        from pptx import Presentation
+
+        prs = Presentation()
+        # 添加一个空布局的幻灯片（无文本）
+        prs.slides.add_slide(prs.slide_layouts[6])  # 空白布局
+        path = tmp_path / "empty.pptx"
+        prs.save(str(path))
+
+        content = PptxExtractor().extract(path)
+        assert "幻灯片" not in content
+
+
+class TestDocxExtractorExtra:
+    """DocxExtractor 额外覆盖。"""
+
+    def test_docx_import_error_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """python-docx 未安装时应抛出 ExtractorError。"""
+        path = tmp_path / "test.docx"
+        path.write_bytes(b"fake")
+        import builtins
+
+        original_import = builtins.__import__
+
+        def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if name == "docx":
+                raise ImportError("No module named 'docx'")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        with pytest.raises(ExtractorError, match="python-docx 未安装"):
+            DocxExtractor().extract(path)
+
+    def test_docx_with_header_footer(self, tmp_path: Path) -> None:
+        """DOCX 含页眉页脚时应提取这些内容。"""
+        from docx import Document
+
+        doc = Document()
+        doc.add_paragraph("正文 password")
+        # 添加页眉页脚
+        section = doc.sections[0]
+        section.header.paragraphs[0].text = "页眉内容 secret"
+        section.footer.paragraphs[0].text = "页脚信息"
+        path = tmp_path / "header_footer.docx"
+        doc.save(str(path))
+
+        content = DocxExtractor().extract(path)
+        assert "正文 password" in content
+        assert "页眉内容 secret" in content
+        assert "页脚信息" in content
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +496,86 @@ class TestWpsExtractor:
         """文件不存在时 _is_ooxml 返回 False。"""
         path = tmp_path / "nonexistent.wps"
         assert WpsExtractor()._is_ooxml(path) is False
+
+
+class TestWpsExtractorErrorPaths:
+    """WPS 提取器异常路径覆盖。"""
+
+    def test_extract_unknown_extension_returns_empty(self, tmp_path: Path) -> None:
+        """未知扩展名（但以 ZIP 头开头）应返回空字符串。"""
+        path = tmp_path / "file.unknown"
+        path.write_bytes(b"PK\x03\x04 fake content")
+        # supported_extensions 不含 unknown，但 extract 内部按 ext 分发
+        # 由于 ext 不匹配 wps/et/dps，走到 return ""
+        extractor = WpsExtractor()
+        # _is_ooxml 返回 True，但 ext 不匹配任何分支
+        result = extractor.extract(path)
+        assert result == ""
+
+    def test_temp_with_ext_os_error_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """_temp_with_ext 在 copyfile 失败时应抛出 OSError 并清理临时文件。"""
+        path = tmp_path / "test.wps"
+        path.write_bytes(b"PK\x03\x04 fake")
+
+        extractor = WpsExtractor()
+
+        def fake_copyfile(src: Path, dst: Path) -> None:
+            raise OSError("模拟复制失败")
+
+        monkeypatch.setattr("uniscan.extractors.wps.shutil.copyfile", fake_copyfile)
+        with pytest.raises(OSError, match="模拟复制失败"):
+            extractor._temp_with_ext(path, "docx")
+
+    def test_extract_as_docx_import_error_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """python-docx 未安装时 _extract_as_docx 应抛出 ExtractorError。"""
+        path = tmp_path / "test.wps"
+        path.write_bytes(b"PK\x03\x04 fake")
+        import builtins
+
+        original_import = builtins.__import__
+
+        def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if name == "docx":
+                raise ImportError("No module named 'docx'")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        with pytest.raises(ExtractorError, match="python-docx 未安装"):
+            WpsExtractor().extract(path)
+
+    def test_extract_as_xlsx_import_error_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """openpyxl 未安装时 _extract_as_xlsx 应抛出 ExtractorError。"""
+        path = tmp_path / "test.et"
+        path.write_bytes(b"PK\x03\x04 fake")
+        import builtins
+
+        original_import = builtins.__import__
+
+        def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if name == "openpyxl":
+                raise ImportError("No module named 'openpyxl'")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        with pytest.raises(ExtractorError, match="openpyxl 未安装"):
+            WpsExtractor().extract(path)
+
+    def test_extract_as_pptx_import_error_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """python-pptx 未安装时 _extract_as_pptx 应抛出 ExtractorError。"""
+        path = tmp_path / "test.dps"
+        path.write_bytes(b"PK\x03\x04 fake")
+        import builtins
+
+        original_import = builtins.__import__
+
+        def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if name == "pptx":
+                raise ImportError("No module named 'pptx'")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        with pytest.raises(ExtractorError, match="python-pptx 未安装"):
+            WpsExtractor().extract(path)
 
 
 # ---------------------------------------------------------------------------

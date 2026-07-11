@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List, Tuple
 
 from uniscan.extractors.base import Extractor, ExtractorError
 
@@ -28,7 +27,7 @@ class XlsxExtractor(Extractor):
         self._max_cols = max_cols
 
     @property
-    def supported_extensions(self) -> Tuple[str, ...]:
+    def supported_extensions(self) -> tuple[str, ...]:
         return ("xlsx", "xlsm")
 
     def extract(self, path: Path) -> str:
@@ -42,7 +41,7 @@ class XlsxExtractor(Extractor):
         except Exception as exc:
             raise ExtractorError(f"XLSX 解析失败: {path}: {exc}") from exc
 
-        parts: List[str] = []
+        parts: list[str] = []
         try:
             for sheet in wb:
                 sheet_texts = self._extract_sheet(sheet)
@@ -54,9 +53,9 @@ class XlsxExtractor(Extractor):
 
         return "\n".join(parts)
 
-    def _extract_sheet(self, sheet: object) -> List[str]:
+    def _extract_sheet(self, sheet: object) -> list[str]:
         """提取单个工作表的文本。"""
-        texts: List[str] = []
+        texts: list[str] = []
         for row_count, row in enumerate(sheet.iter_rows(values_only=True), 1):
             if row_count > self._max_rows:
                 logger.debug("工作表行数超过上限 %d，截断", self._max_rows)
@@ -78,7 +77,7 @@ class OdsExtractor(Extractor):
     """ODS 电子表格文本提取器（OpenDocument Spreadsheet）。"""
 
     @property
-    def supported_extensions(self) -> Tuple[str, ...]:
+    def supported_extensions(self) -> tuple[str, ...]:
         return ("ods",)
 
     def extract(self, path: Path) -> str:
@@ -93,7 +92,7 @@ class OdsExtractor(Extractor):
         except Exception as exc:
             raise ExtractorError(f"ODS 解析失败: {path}: {exc}") from exc
 
-        parts: List[str] = []
+        parts: list[str] = []
         for row in doc.getElementsByType(TableRow):
             row_texts = []
             for cell in row.getElementsByType(TableCell):

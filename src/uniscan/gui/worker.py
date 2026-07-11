@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import List, Optional
 
 from PySide2.QtCore import QThread, Signal
 
@@ -43,10 +42,10 @@ class ScanWorker(QThread):
     def __init__(
         self,
         ruleset: RuleSet,
-        roots: List[Path],
-        max_depth: Optional[int] = None,
+        roots: list[Path],
+        max_depth: int | None = None,
         scan_archives: bool = False,
-        max_workers: Optional[int] = None,
+        max_workers: int | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -55,7 +54,7 @@ class ScanWorker(QThread):
         self._max_depth = max_depth
         self._scan_archives = scan_archives
         self._max_workers = max_workers
-        self._scanner: Optional[Scanner] = None
+        self._scanner: Scanner | None = None
         self._cancel_requested: bool = False
         # 多根路径累计统计
         self._cum_scanned = 0
@@ -109,7 +108,7 @@ class ScanWorker(QThread):
             )
             if self._cancel_requested:
                 self._scanner.cancel()
-            all_results: List[ScanResult] = []
+            all_results: list[ScanResult] = []
             total_scanned = 0
             total_files = 0
             total_matched = 0

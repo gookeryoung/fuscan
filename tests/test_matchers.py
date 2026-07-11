@@ -262,3 +262,79 @@ def test_matcher_abstract() -> None:
     """Matcher 是抽象基类，不能直接实例化。"""
     with pytest.raises(TypeError):
         Matcher()  # type: ignore[abstract]
+
+
+class TestMatcherEdgeCases:
+    """匹配器边界条件与异常路径覆盖。"""
+
+    def test_and_match_all_collects_children(self, tmp_path: Path) -> None:
+        """AndMatcher.match_all 应收集所有子匹配器的结果。"""
+        path = tmp_path / "doc.conf"
+        path.write_text("", encoding="utf-8")
+        children = (
+            FileNameMatcher(LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.CONTAINS, pattern="doc")),
+            ContentMatcher(LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="pwd")),
+        )
+        matcher = AndMatcher(children)
+        ctx = _make_context(path, content="db_pwd=x")
+        results = matcher.match_all(ctx)
+        assert len(results) == 2
+
+    def test_or_match_all_collects_children(self, tmp_path: Path) -> None:
+        """OrMatcher.match_all 应收集所有子匹配器的结果。"""
+        path = tmp_path / "x.txt"
+        children = (
+            ContentMatcher(LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="token")),
+            ContentMatcher(LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="key")),
+        )
+        matcher = OrMatcher(children)
+        ctx = _make_context(path, content="has token here")
+        results = matcher.match_all(ctx)
+        assert len(results) == 2
+
+    def test_and_matches_with_no_detail(self, tmp_path: Path) -> None:
+        """AndMatcher 全部命中但无 detail 时返回默认"全部命中"。"""
+        path = tmp_path / "x.txt"
+        # EQUALS 模式命中时 detail 为"完全相等"，但如果都命中应合并 detail
+        children = (FileNameMatcher(LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.EQUALS, pattern="x.txt")),)
+        matcher = AndMatcher(children)
+        ctx = _make_context(path)
+        result = matcher.matches(ctx)
+        assert result.matched is True
+
+    def test_apply_leaf_endswith_not_matched(self, tmp_path: Path) -> None:
+        """ENDSWITH 模式不匹配时返回 matched=False。"""
+        path = tmp_path / "config.txt"
+        spec = LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.ENDSWITH, pattern=".conf")
+        matcher = FileNameMatcher(spec)
+        ctx = _make_context(path)
+        assert matcher.matches(ctx).matched is False
+
+    def test_build_matcher_unknown_target_raises(self) -> None:
+        """build_matcher 对未知 target 应抛出 TypeError。"""
+        spec = LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.CONTAINS, pattern="x")
+        # frozen dataclass 需用 object.__setattr__ 绕过冻结限制
+        object.__setattr__(spec, "target", "UNKNOWN")
+        with pytest.raises(TypeError, match="未知匹配目标"):
+            build_matcher(spec)
+
+    def test_build_matcher_unknown_spec_type_raises(self) -> None:
+        """build_matcher 对未知规格类型应抛出 TypeError。"""
+        with pytest.raises(TypeError, match="未知匹配规格类型"):
+            build_matcher("not_a_spec")  # type: ignore[arg-type]
+
+    def test_or_matcher_match_all_empty(self, tmp_path: Path) -> None:
+        """OrMatcher.match_all 无子匹配器时返回空列表。"""
+        matcher = OrMatcher(())
+        path = tmp_path / "x.txt"
+        ctx = _make_context(path)
+        results = matcher.match_all(ctx)
+        assert results == []
+
+    def test_and_matcher_match_all_empty(self, tmp_path: Path) -> None:
+        """AndMatcher.match_all 无子匹配器时返回空列表。"""
+        matcher = AndMatcher(())
+        path = tmp_path / "x.txt"
+        ctx = _make_context(path)
+        results = matcher.match_all(ctx)
+        assert results == []

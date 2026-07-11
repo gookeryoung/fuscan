@@ -9,7 +9,7 @@ import datetime
 import html
 import logging
 import re
-from typing import List, Optional, Sequence, Set
+from typing import Sequence
 
 from PySide2.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide2.QtWidgets import (
@@ -55,14 +55,14 @@ def _format_size(size: int) -> str:
     return f"{size / (1024 * 1024 * 1024):.2f} GB"
 
 
-def _extract_keywords(hits: Sequence[RuleHit]) -> List[str]:
+def _extract_keywords(hits: Sequence[RuleHit]) -> list[str]:
     """从命中规则的 detail 字段中提取关键词。
 
     detail 形如 "包含 'password'" / "正则命中: 'AKIA...'"，
     提取单引号内的模式用于内容高亮。
     """
-    keywords: List[str] = []
-    seen: Set[str] = set()
+    keywords: list[str] = []
+    seen: set[str] = set()
     for hit in hits:
         for match in _KEYWORD_RE.finditer(hit.detail):
             kw = match.group(1)
@@ -106,7 +106,7 @@ class HitDetailDialog(QDialog):
     内容预览限制在 _PREVIEW_MAX_CHARS 以内，避免大文件阻塞 UI。
     """
 
-    def __init__(self, result: ScanResult, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, result: ScanResult, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._result = result
         self._ui = Ui_HitDetailDialog()

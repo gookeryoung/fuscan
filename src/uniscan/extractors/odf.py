@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List, Tuple
 
 from uniscan.extractors.base import Extractor, ExtractorError
 
@@ -20,7 +19,7 @@ class OdtExtractor(Extractor):
     """ODT 文字文档文本提取器。"""
 
     @property
-    def supported_extensions(self) -> Tuple[str, ...]:
+    def supported_extensions(self) -> tuple[str, ...]:
         return ("odt",)
 
     def extract(self, path: Path) -> str:
@@ -35,7 +34,7 @@ class OdtExtractor(Extractor):
         except Exception as exc:
             raise ExtractorError(f"ODT 解析失败: {path}: {exc}") from exc
 
-        parts: List[str] = []
+        parts: list[str] = []
         # 提取段落 (P) 和标题 (H)
         for paragraph in doc.getElementsByType(P):
             text = str(paragraph).strip()

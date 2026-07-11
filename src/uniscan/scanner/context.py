@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 __all__ = ["FileEntry", "MatchContext", "default_content_provider"]
 
@@ -72,7 +72,7 @@ class MatchContext:
     def __init__(
         self,
         entry: FileEntry,
-        content_provider: Optional[ContentProvider] = None,
+        content_provider: ContentProvider | None = None,
     ) -> None:
         self.entry = entry
         self._content: str = ""

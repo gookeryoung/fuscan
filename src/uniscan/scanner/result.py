@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Tuple
 
 from uniscan.rules.model import Severity
 
@@ -47,7 +46,7 @@ class ScanResult:
 
     path: Path
     size: int
-    hits: Tuple[RuleHit, ...] = field(default_factory=tuple)
+    hits: tuple[RuleHit, ...] = field(default_factory=tuple)
     errors: int = 0
 
     @property
@@ -84,11 +83,11 @@ class ScanReport:
     """完整扫描报告。"""
 
     root: Path
-    results: Tuple[ScanResult, ...] = field(default_factory=tuple)
+    results: tuple[ScanResult, ...] = field(default_factory=tuple)
     stats: ScanStats = field(default_factory=ScanStats)
     cancelled: bool = False
 
     @property
-    def hits(self) -> Tuple[ScanResult, ...]:
+    def hits(self) -> tuple[ScanResult, ...]:
         """仅返回有命中的结果。"""
         return tuple(r for r in self.results if r.has_hit)

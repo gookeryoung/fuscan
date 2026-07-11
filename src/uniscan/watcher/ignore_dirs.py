@@ -9,12 +9,11 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import List, Tuple
 
 __all__ = ["common_ignore_dirs", "default_ignore_dirs", "windows_system_dirs"]
 
 
-common_ignore_dirs: Tuple[str, ...] = (
+common_ignore_dirs: tuple[str, ...] = (
     # 版本控制
     ".git",
     ".hg",
@@ -54,7 +53,7 @@ common_ignore_dirs: Tuple[str, ...] = (
 )
 
 
-windows_system_dirs: Tuple[str, ...] = (
+windows_system_dirs: tuple[str, ...] = (
     "Windows",
     "Program Files",
     "Program Files (x86)",
@@ -66,12 +65,12 @@ windows_system_dirs: Tuple[str, ...] = (
 )
 
 
-def default_ignore_dirs() -> List[str]:
+def default_ignore_dirs() -> list[str]:
     """返回当前平台的默认忽略目录列表。
 
     Windows 上追加系统目录，其他平台只返回通用忽略目录。
     """
-    dirs: List[str] = list(common_ignore_dirs)
+    dirs: list[str] = list(common_ignore_dirs)
     if sys.platform == "win32":
         dirs.extend(windows_system_dirs)
         # 用户临时目录

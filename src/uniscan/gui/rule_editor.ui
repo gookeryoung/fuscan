@@ -40,11 +40,11 @@
    </item>
    <item>
     <widget class="QTextEdit" name="editor">
-     <property name="fontFamily">
-      <string>Consolas</string>
-     </property>
      <property name="styleSheet">
       <string notr="true">font-family: Consolas, 'Courier New', monospace; font-size: 13px;</string>
+     </property>
+     <property name="fontFamily" stdset="0">
+      <string>Consolas</string>
      </property>
     </widget>
    </item>

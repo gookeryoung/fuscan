@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Sequence
 
 from uniscan.rules import RuleSet, load_ruleset
 from uniscan.rules.merge import merge_multiple_rulesets
@@ -37,7 +37,7 @@ def load_builtin_ruleset() -> RuleSet:
     return load_ruleset(BUILTIN_RULES_PATH)
 
 
-def load_with_builtin(user_paths: Optional[Sequence[Path]] = None) -> RuleSet:
+def load_with_builtin(user_paths: Sequence[Path] | None = None) -> RuleSet:
     """加载内置规则并与一个或多个用户规则按顺序合并。
 
     内置规则作为基础，用户规则按列表顺序依次合并覆盖（后面的覆盖前面的同名规则）。

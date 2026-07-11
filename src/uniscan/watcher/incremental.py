@@ -10,7 +10,6 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 from uniscan.rules.model import Rule, RuleSet
 from uniscan.scanner import ScanReport, ScanResult, ScanStats
@@ -47,19 +46,19 @@ class IncrementalScanner:
     def __init__(
         self,
         ruleset: RuleSet,
-        max_depth: Optional[int] = None,
+        max_depth: int | None = None,
         scan_archives: bool = False,
     ) -> None:
         self._ruleset = ruleset
         self._max_depth = max_depth
         self._scan_archives = scan_archives
-        self._compiled: List[Tuple[Rule, Matcher]] = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
+        self._compiled: list[tuple[Rule, Matcher]] = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
         self._walker = FileWalker(
             ignore_dirs=ruleset.ignore_dirs,
             ignore_extensions=ruleset.ignore_extensions,
             max_depth=max_depth,
         )
-        self._file_states: Dict[str, float] = {}  # path_str -> mtime
+        self._file_states: dict[str, float] = {}  # path_str -> mtime
 
     @property
     def tracked_count(self) -> int:
@@ -71,7 +70,7 @@ class IncrementalScanner:
         import time
 
         start = time.perf_counter()
-        results: List[ScanResult] = []
+        results: list[ScanResult] = []
         total = 0
         scanned = 0
         matched = 0
@@ -116,12 +115,12 @@ class IncrementalScanner:
         )
         return ScanReport(root=root, results=tuple(results), stats=stats)
 
-    def scan_paths(self, paths: List[Path]) -> ScanReport:
+    def scan_paths(self, paths: list[Path]) -> ScanReport:
         """扫描指定路径列表（由文件监控触发）。"""
         import time
 
         start = time.perf_counter()
-        results: List[ScanResult] = []
+        results: list[ScanResult] = []
         scanned = 0
         matched = 0
         errors = 0
@@ -193,7 +192,7 @@ class IncrementalScanner:
         from uniscan.scanner.context import MatchContext
 
         context = MatchContext(entry, content_provider=default_extract_content)
-        hits: List[RuleHit] = []
+        hits: list[RuleHit] = []
         rule_errors = 0
 
         for rule, matcher in self._compiled:

@@ -10,7 +10,6 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 from uniscan.archive.base import (
     ArchiveEntry,
@@ -41,15 +40,15 @@ class ArchiveScanner:
     def __init__(
         self,
         ruleset: RuleSet,
-        password: Optional[str] = None,
+        password: str | None = None,
         max_entry_size: int = 50 * 1024 * 1024,
     ) -> None:
         self._ruleset = ruleset
         self._password = password
         self._max_entry_size = max_entry_size
-        self._compiled: List[Tuple[Rule, Matcher]] = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
+        self._compiled: list[tuple[Rule, Matcher]] = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
 
-    def scan_archive(self, archive_path: Path) -> Tuple[ScanResult, ...]:
+    def scan_archive(self, archive_path: Path) -> tuple[ScanResult, ...]:
         """扫描压缩包内所有条目，返回结果元组。
 
         压缩包无法打开时返回单条错误结果。
@@ -84,7 +83,7 @@ class ArchiveScanner:
                 ),
             )
 
-        results: List[ScanResult] = []
+        results: list[ScanResult] = []
         for entry in entries:
             if entry.is_dir:
                 continue
@@ -110,11 +109,11 @@ class ArchiveScanner:
             is_dir=False,
         )
 
-        def content_provider(fe: FileEntry) -> str:
+        def content_provider(_fe: FileEntry) -> str:
             return self._read_entry_content(archive_path, entry, reader)
 
         context = MatchContext(file_entry, content_provider=content_provider)
-        hits: List[RuleHit] = []
+        hits: list[RuleHit] = []
         rule_errors = 0
 
         for rule, matcher in self._compiled:
@@ -143,7 +142,7 @@ class ArchiveScanner:
 
     def _read_entry_content(
         self,
-        archive_path: Path,
+        _archive_path: Path,
         entry: ArchiveEntry,
         reader: ArchiveReader,
     ) -> str:

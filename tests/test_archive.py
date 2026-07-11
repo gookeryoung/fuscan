@@ -262,6 +262,298 @@ class TestRarReader:
         assert hasattr(RarReader, "supported_extensions")
 
 
+class TestRarReaderMocked:
+    """通过 mock rarfile 模块覆盖 RarReader 各分支。"""
+
+    def test_init_bad_rar_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """rarfile.BadRarFile 应转为 ArchiveError。"""
+        import rarfile
+
+        def raise_bad_rar(path: str):
+            raise rarfile.BadRarFile("损坏")
+
+        monkeypatch.setattr(rarfile, "RarFile", raise_bad_rar)
+        with pytest.raises(ArchiveError, match="损坏的 RAR"):
+            RarReader(tmp_path / "a.rar")
+
+    def test_init_os_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """OSError 应转为 ArchiveError。"""
+        import rarfile
+
+        def raise_os_error(path: str):
+            raise OSError("权限拒绝")
+
+        monkeypatch.setattr(rarfile, "RarFile", raise_os_error)
+        with pytest.raises(ArchiveError, match="无法打开 RAR"):
+            RarReader(tmp_path / "a.rar")
+
+    def test_init_generic_exception(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """其他异常（如 unrar 缺失）应转为 ArchiveError。"""
+        import rarfile
+
+        def raise_generic(path: str):
+            raise RuntimeError("unrar not found")
+
+        monkeypatch.setattr(rarfile, "RarFile", raise_generic)
+        with pytest.raises(ArchiveError, match="可能缺少 unrar"):
+            RarReader(tmp_path / "a.rar")
+
+    def test_init_import_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """rarfile 导入失败应抛 ArchiveError。"""
+        import builtins
+
+        original_import = builtins.__import__
+
+        def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if name == "rarfile":
+                raise ImportError("No module named 'rarfile'")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        with pytest.raises(ArchiveError, match="rarfile 库未安装"):
+            RarReader(tmp_path / "a.rar")
+
+    def _make_mocked_reader(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rar_mock: object) -> RarReader:
+        """构造带 mock _rar 的 RarReader 实例，绕过 __init__。"""
+        import rarfile
+
+        monkeypatch.setattr(rarfile, "RarFile", lambda path: rar_mock)
+        reader = RarReader.__new__(RarReader)
+        reader._path = tmp_path / "a.rar"  # type: ignore[attr-defined]
+        reader._password = None  # type: ignore[attr-defined]
+        reader._rar = rar_mock  # type: ignore[attr-defined]
+        return reader
+
+    def test_list_entries(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """list_entries 应返回所有条目。"""
+
+        class FakeInfo:
+            def __init__(self, name: str, size: int, isdir: bool = False) -> None:
+                self.filename = name
+                self.file_size = size
+                self.compress_size = size // 2
+                self.isdir = isdir
+
+        class FakeRar:
+            def infolist(self):
+                return [FakeInfo("a.txt", 100), FakeInfo("dir/", 0, isdir=True)]
+
+            def close(self) -> None:
+                pass
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeRar())
+        entries = reader.list_entries()
+        assert len(entries) == 2
+        assert entries[0].entry_name == "a.txt"
+        assert entries[0].size == 100
+        assert entries[1].is_dir
+
+    def test_read_entry_dir_returns_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """目录条目返回空字节。"""
+
+        class FakeInfo:
+            isdir = True
+            needs_password = False
+
+        class FakeRar:
+            def getinfo(self, name: str):
+                return FakeInfo()
+
+            def close(self) -> None:
+                pass
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeRar())
+        assert reader.read_entry("dir/") == b""
+
+    def test_read_entry_not_found(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """条目不存在时抛 ArchiveError。"""
+
+        class FakeRar:
+            def getinfo(self, name: str):
+                raise KeyError(name)
+
+            def close(self) -> None:
+                pass
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeRar())
+        with pytest.raises(ArchiveError, match="条目不存在"):
+            reader.read_entry("missing.txt")
+
+    def test_read_entry_getinfo_exception(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """getinfo 抛异常时转为 ArchiveError。"""
+
+        class FakeRar:
+            def getinfo(self, name: str):
+                raise RuntimeError("模拟失败")
+
+            def close(self) -> None:
+                pass
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeRar())
+        with pytest.raises(ArchiveError, match="获取 RAR 条目信息失败"):
+            reader.read_entry("a.txt")
+
+    def test_read_entry_encrypted_no_password(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """加密条目未提供密码时抛 ArchiveError。"""
+
+        class FakeInfo:
+            isdir = False
+            needs_password = True
+
+        class FakeRar:
+            def getinfo(self, name: str):
+                return FakeInfo()
+
+            def close(self) -> None:
+                pass
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeRar())
+        with pytest.raises(ArchiveError, match="未提供密码"):
+            reader.read_entry("secret.txt")
+
+    def test_read_entry_with_password(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """有密码的加密条目应通过 pwd 参数读取。"""
+
+        class FakeInfo:
+            isdir = False
+            needs_password = True
+
+        class FakeRar:
+            def getinfo(self, name: str):
+                return FakeInfo()
+
+            def read(self, name: str, pwd: str | None = None):
+                assert pwd is not None
+                return b"decrypted content"
+
+            def close(self) -> None:
+                pass
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeRar())
+        reader._password = "secret"  # type: ignore[attr-defined]
+        assert reader.read_entry("a.txt") == b"decrypted content"
+
+    def test_read_entry_normal(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """非加密条目直接读取。"""
+
+        class FakeInfo:
+            isdir = False
+            needs_password = False
+
+        class FakeRar:
+            def getinfo(self, name: str):
+                return FakeInfo()
+
+            def read(self, name: str, pwd: str | None = None):
+                return b"content"
+
+            def close(self) -> None:
+                pass
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeRar())
+        assert reader.read_entry("a.txt") == b"content"
+
+    def test_read_entry_password_required(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """read 抛 PasswordRequired 时转为 ArchiveError。"""
+        import rarfile
+
+        class FakeInfo:
+            isdir = False
+            needs_password = False
+
+        class FakeRar:
+            def getinfo(self, name: str):
+                return FakeInfo()
+
+            def read(self, name: str, pwd: str | None = None):
+                raise rarfile.PasswordRequired("需要密码")
+
+            def close(self) -> None:
+                pass
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeRar())
+        with pytest.raises(ArchiveError, match="需要密码"):
+            reader.read_entry("a.txt")
+
+    def test_read_entry_bad_rar(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """read 抛 BadRarFile 时转为 ArchiveError。"""
+        import rarfile
+
+        class FakeInfo:
+            isdir = False
+            needs_password = False
+
+        class FakeRar:
+            def getinfo(self, name: str):
+                return FakeInfo()
+
+            def read(self, name: str, pwd: str | None = None):
+                raise rarfile.BadRarFile("损坏")
+
+            def close(self) -> None:
+                pass
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeRar())
+        with pytest.raises(ArchiveError, match="条目损坏"):
+            reader.read_entry("a.txt")
+
+    def test_read_entry_generic_exception(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """read 抛其他异常时转为 ArchiveError。"""
+
+        class FakeInfo:
+            isdir = False
+            needs_password = False
+
+        class FakeRar:
+            def getinfo(self, name: str):
+                return FakeInfo()
+
+            def read(self, name: str, pwd: str | None = None):
+                raise OSError("模拟 IO 错误")
+
+            def close(self) -> None:
+                pass
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeRar())
+        with pytest.raises(ArchiveError, match="条目读取失败"):
+            reader.read_entry("a.txt")
+
+    def test_close(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """close 应调用 _rar.close()。"""
+        called = {"close": False}
+
+        class FakeRar:
+            def close(self) -> None:
+                called["close"] = True
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeRar())
+        reader.close()
+        assert called["close"] is True
+
+    def test_context_manager(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """上下文管理器应正常工作。"""
+        called = {"close": False}
+
+        class FakeRar:
+            def close(self) -> None:
+                called["close"] = True
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeRar())
+        with reader as r:
+            assert r is reader
+        assert called["close"] is True
+
+    def test_supported_extensions_via_instance(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """通过实例访问 supported_extensions。"""
+
+        class FakeRar:
+            def close(self) -> None:
+                pass
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeRar())
+        assert reader.supported_extensions == ("rar",)
+
+
 # ----------------------------- ArchiveScanner -----------------------------
 
 
@@ -575,3 +867,237 @@ class TestArchiveContentExtraction:
             assert all(not r.has_hit for r in results)
         finally:
             scanner_module.get_reader = original_get_reader  # type: ignore[assignment]
+
+
+# ----------------------------- ZipReader 异常路径 -----------------------------
+
+
+class TestZipReaderErrorPaths:
+    """ZipReader 异常路径覆盖。"""
+
+    def test_open_os_error_raises_archive_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ZipFile 打开时抛 OSError 应转为 ArchiveError。"""
+        import zipfile
+
+        path = tmp_path / "a.zip"
+        path.write_bytes(b"fake")
+
+        original_zipfile = zipfile.ZipFile
+
+        def fake_zipfile(file: str, mode: str = "r"):
+            if file == str(path):
+                raise OSError("模拟权限拒绝")
+            return original_zipfile(file, mode)
+
+        monkeypatch.setattr(zipfile, "ZipFile", fake_zipfile)
+        with pytest.raises(ArchiveError, match="无法打开 ZIP 文件"):
+            ZipReader(path)
+
+    def test_read_entry_encrypted_wrong_password(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """加密条目密码错误时抛 ArchiveError。"""
+        zip_path = _make_zip(tmp_path / "a.zip", {"a.txt": "x"})
+        reader = ZipReader(zip_path, password="wrong")
+        try:
+            original_getinfo = reader._zip.getinfo  # type: ignore[attr-defined]
+
+            def fake_getinfo(name: str):  # type: ignore[no-untyped-def]
+                info = original_getinfo(name)
+                info.flag_bits = info.flag_bits | 0x1  # 设置加密位
+                return info
+
+            def fake_read(name: str, pwd: bytes | None = None):  # type: ignore[no-untyped-def]
+                raise RuntimeError("Bad password for file")
+
+            reader._zip.getinfo = fake_getinfo  # type: ignore[attr-defined]
+            reader._zip.read = fake_read  # type: ignore[attr-defined]
+            with pytest.raises(ArchiveError, match="密码错误或解密失败"):
+                reader.read_entry("a.txt")
+        finally:
+            reader.close()
+
+    def test_read_entry_runtime_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """非加密条目读取 RuntimeError 时抛 ArchiveError。"""
+        zip_path = _make_zip(tmp_path / "a.zip", {"a.txt": "x"})
+        reader = ZipReader(zip_path)
+        try:
+
+            def fake_read(name: str, pwd: bytes | None = None):  # type: ignore[no-untyped-def]
+                raise RuntimeError("模拟读取失败")
+
+            reader._zip.read = fake_read  # type: ignore[attr-defined]
+            with pytest.raises(ArchiveError, match="ZIP 条目读取失败"):
+                reader.read_entry("a.txt")
+        finally:
+            reader.close()
+
+    def test_read_entry_bad_zip_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """非加密条目读取 BadZipFile 时抛 ArchiveError。"""
+        import zipfile
+
+        zip_path = _make_zip(tmp_path / "a.zip", {"a.txt": "x"})
+        reader = ZipReader(zip_path)
+        try:
+
+            def fake_read(name: str, pwd: bytes | None = None):  # type: ignore[no-untyped-def]
+                raise zipfile.BadZipFile("模拟损坏")
+
+            reader._zip.read = fake_read  # type: ignore[attr-defined]
+            with pytest.raises(ArchiveError, match="ZIP 条目损坏"):
+                reader.read_entry("a.txt")
+        finally:
+            reader.close()
+
+
+# ----------------------------- ArchiveScanner 异常路径 -----------------------------
+
+
+class TestArchiveScannerErrorPaths:
+    """ArchiveScanner 异常路径覆盖。"""
+
+    def test_list_entries_failure_returns_error_result(self, tmp_path: Path) -> None:
+        """list_entries 抛 ArchiveError 时返回单条错误结果。"""
+        zip_path = tmp_path / "a.zip"
+        zip_path.write_bytes(b"fake")
+
+        class FailingListReader:
+            def list_entries(self) -> list[ArchiveEntry]:
+                raise ArchiveError("列出条目失败")
+
+            def close(self) -> None:
+                pass
+
+        from uniscan.archive import scanner as scanner_module
+
+        original_get_reader = scanner_module.get_reader
+        scanner_module.get_reader = lambda path, password=None: FailingListReader()  # type: ignore[assignment]
+        try:
+            rs = _build_ruleset(_filename_rule("r", "x"))
+            scanner = ArchiveScanner(rs)
+            results = scanner.scan_archive(zip_path)
+            assert len(results) == 1
+            assert results[0].errors == 1
+        finally:
+            scanner_module.get_reader = original_get_reader  # type: ignore[assignment]
+
+    def test_matcher_exception_increments_errors(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """matcher.matches 抛异常时 rule_errors 递增。"""
+        zip_path = _make_zip(tmp_path / "a.zip", {"a.txt": "hello"})
+        rs = _build_ruleset(_content_rule("r", "hello"))
+
+        from uniscan.scanner.matchers import Matcher
+
+        # 包装 build_matcher 返回会抛异常的 matcher
+        class FailingMatcher(Matcher):
+            def matches(self, context):  # type: ignore[no-untyped-def]
+                raise RuntimeError("模拟匹配失败")
+
+        import uniscan.archive.scanner as scanner_mod
+
+        monkeypatch.setattr(scanner_mod, "build_matcher", lambda match: FailingMatcher())
+
+        scanner = ArchiveScanner(rs)
+        results = scanner.scan_archive(zip_path)
+        assert len(results) == 1
+        assert results[0].errors == 1
+        assert not results[0].has_hit
+
+    def test_extract_via_temp_with_docx(self, tmp_path: Path) -> None:
+        """有注册提取器的格式（.docx）走临时文件提取路径。"""
+        from docx import Document
+
+        doc = Document()
+        doc.add_paragraph("docx 内的 password")
+        docx_bytes = b""
+        import io
+
+        buf = io.BytesIO()
+        doc.save(buf)
+        docx_bytes = buf.getvalue()
+
+        zip_path = tmp_path / "a.zip"
+        with zipfile.ZipFile(str(zip_path), "w") as zf:
+            zf.writestr("inner.docx", docx_bytes)
+
+        rs = _build_ruleset(_content_rule("r", "password"))
+        scanner = ArchiveScanner(rs)
+        results = scanner.scan_archive(zip_path)
+        hits = [r for r in results if r.has_hit]
+        assert len(hits) == 1
+        assert "inner.docx" in str(hits[0].path)
+
+    def test_extract_via_temp_failure_falls_back_to_decode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """临时文件提取失败时回退到字节解码。"""
+        # 创建一个 .docx 条目但让 extract_content 抛异常
+        zip_path = tmp_path / "a.zip"
+        with zipfile.ZipFile(str(zip_path), "w") as zf:
+            zf.writestr("inner.docx", b"PK\x03\x04 corrupted docx with password")
+
+        rs = _build_ruleset(_content_rule("r", "password"))
+
+        import uniscan.archive.scanner as scanner_mod
+
+        def fake_extract(path: Path) -> str:
+            raise RuntimeError("模拟提取失败")
+
+        monkeypatch.setattr(scanner_mod, "extract_content", fake_extract)
+        scanner = ArchiveScanner(rs)
+        results = scanner.scan_archive(zip_path)
+        # 提取失败回退到解码，password 明文在字节中应被命中
+        hits = [r for r in results if r.has_hit]
+        assert len(hits) == 1
+
+    def test_safe_unlink_permission_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """临时文件删除遇 PermissionError 时安全跳过。"""
+        zip_path = tmp_path / "a.zip"
+        with zipfile.ZipFile(str(zip_path), "w") as zf:
+            zf.writestr("inner.docx", b"PK\x03\x04 password")
+
+        rs = _build_ruleset(_content_rule("r", "password"))
+
+        original_unlink = Path.unlink
+        call_count = {"n": 0}
+
+        def mock_unlink(self: Path, missing_ok: bool = False) -> None:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise PermissionError("模拟文件锁定")
+            original_unlink(self, missing_ok=missing_ok)
+
+        monkeypatch.setattr(Path, "unlink", mock_unlink)
+        scanner = ArchiveScanner(rs)
+        # 不应抛异常
+        results = scanner.scan_archive(zip_path)
+        assert isinstance(results, tuple)
+
+    def test_decode_bytes_charset_normalizer_import_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_decode_bytes 中 charset_normalizer 导入失败时回退到 errors='ignore'。"""
+        import builtins
+
+        original_import = builtins.__import__
+
+        def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if name == "charset_normalizer":
+                raise ImportError("No module named 'charset_normalizer'")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        # 构造非 UTF-8 字节触发 _decode_bytes 的 except UnicodeDecodeError 分支
+        gbk_data = "密码 password".encode("gbk")
+        zip_path = tmp_path / "a.zip"
+        with zipfile.ZipFile(str(zip_path), "w") as zf:
+            # 使用 .unknown 扩展名，既不在 _TEXT_EXTENSIONS 也无提取器，走 _decode_bytes
+            zf.writestr("a.unknownext", gbk_data)
+
+        rs = _build_ruleset(_content_rule("r", "password"))
+        scanner = ArchiveScanner(rs)
+        results = scanner.scan_archive(zip_path)
+        # charset_normalizer 导入失败，UTF-8 解码也会失败（GBK 字节），
+        # 回退到 errors='ignore'，部分明文 password 可能被截断
+        # 但 GBK 的 ASCII 字符 password 仍能保留
+        hits = [r for r in results if r.has_hit]
+        assert len(hits) == 1

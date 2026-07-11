@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
-from uniscan.scanner.walker import FileWalker
+import pytest
+
+from uniscan.scanner.walker import FileWalker, list_drives
 
 
 def _create_tree(root: Path) -> None:
@@ -202,3 +205,97 @@ class TestIgnorePaths:
         assert "config" not in names
         assert "lib.js" not in names
         assert "main.py" in names
+
+
+class TestListDrives:
+    """list_drives 函数测试。"""
+
+    def test_list_drives_returns_list(self) -> None:
+        """list_drives 应返回列表。"""
+        drives = list_drives()
+        assert isinstance(drives, list)
+        assert len(drives) > 0
+
+    def test_list_drives_windows_returns_existing(self) -> None:
+        """Windows 下返回存在的盘符路径。"""
+        import sys
+
+        if sys.platform == "win32":
+            drives = list_drives()
+            # 至少有一个盘符存在（通常是 C:）
+            assert all(isinstance(d, Path) for d in drives)
+
+
+class TestWalkerErrorHandling:
+    """异常路径测试。"""
+
+    def test_walk_scandir_os_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """os.scandir 失败时跳过该目录。"""
+        (tmp_path / "subdir").mkdir()
+        (tmp_path / "subdir" / "file.txt").write_text("", encoding="utf-8")
+        (tmp_path / "main.py").write_text("", encoding="utf-8")
+
+        original_scandir = os.scandir
+
+        def mock_scandir(path: object) -> object:
+            if Path(str(path)).name == "subdir":
+                raise OSError("模拟权限拒绝")
+            return original_scandir(path)
+
+        monkeypatch.setattr(os, "scandir", mock_scandir)
+        walker = FileWalker()
+        entries = list(walker.walk(tmp_path))
+        names = {e.name for e in entries}
+        # subdir 被跳过，main.py 仍在
+        assert "file.txt" not in names
+        assert "main.py" in names
+
+    def test_walk_is_dir_os_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """entry.is_dir() 失败时跳过该条目。"""
+        (tmp_path / "subdir").mkdir()
+        (tmp_path / "subdir" / "inner.txt").write_text("", encoding="utf-8")
+        (tmp_path / "main.py").write_text("", encoding="utf-8")
+
+        original_scandir = os.scandir
+
+        class FakeEntry:
+            def __init__(self, entry: os.DirEntry) -> None:
+                self._entry = entry
+                self.name = entry.name
+                self.path = entry.path
+
+            def is_dir(self, follow_symlinks: bool = False) -> bool:
+                if self._entry.name == "subdir":
+                    raise OSError("模拟访问失败")
+                return self._entry.is_dir(follow_symlinks=follow_symlinks)
+
+        def mock_scandir(path: object) -> object:
+            for entry in original_scandir(Path(str(path))):
+                yield FakeEntry(entry)  # type: ignore[misc]
+
+        monkeypatch.setattr(os, "scandir", mock_scandir)
+        walker = FileWalker()
+        entries = list(walker.walk(tmp_path))
+        names = {e.name for e in entries}
+        # subdir 的 is_dir 失败被跳过，main.py 仍在
+        assert "inner.txt" not in names
+        assert "main.py" in names
+
+    def test_matches_ignore_path_value_error(self, tmp_path: Path) -> None:
+        """_matches_ignore_path 传入非子路径时返回 False。"""
+        (tmp_path / "main.py").write_text("", encoding="utf-8")
+        walker = FileWalker(ignore_paths=("vendor/*",))
+        list(walker.walk(tmp_path))  # 消耗生成器以设置 _root
+        # 传入一个不在 root 下的路径
+        result = walker._matches_ignore_path(Path("/other/path"))
+        assert result is False
+
+    def test_matches_ignore_path_direct_match(self, tmp_path: Path) -> None:
+        """_matches_ignore_path 直接匹配目录路径。"""
+        (tmp_path / "vendor").mkdir()
+        (tmp_path / "main.py").write_text("", encoding="utf-8")
+        walker = FileWalker(ignore_paths=("vendor",))
+        list(walker.walk(tmp_path))  # 消耗生成器以设置 _root
+        # walk() 会 resolve 根路径，传入的路径也需 resolve 才能匹配
+        result = walker._matches_ignore_path((tmp_path / "vendor").resolve())
+        assert result is True

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Tuple
 
 from uniscan.extractors.base import Extractor, ExtractorError
 
@@ -17,7 +16,7 @@ __all__ = ["TEXT_EXTENSIONS", "TextExtractor"]
 logger = logging.getLogger(__name__)
 
 # 支持的纯文本扩展名（不含点，小写）
-TEXT_EXTENSIONS: Tuple[str, ...] = (
+TEXT_EXTENSIONS: tuple[str, ...] = (
     "txt",
     "log",
     "md",
@@ -87,7 +86,7 @@ class TextExtractor(Extractor):
         self._max_size = max_size
 
     @property
-    def supported_extensions(self) -> Tuple[str, ...]:
+    def supported_extensions(self) -> tuple[str, ...]:
         return TEXT_EXTENSIONS
 
     def extract(self, path: Path) -> str:
@@ -123,10 +122,10 @@ class TextExtractor(Extractor):
         except Exception:
             logger.warning("编码检测失败，回退到 UTF-8 解码", exc_info=True)
 
-        # 回退：尝试 UTF-8，再尝试 GBK
-        for encoding in ("utf-8", "gbk", "latin-1"):
+        # 回退：尝试 UTF-8 和 GBK，最终用 latin-1（能解码任意字节序列，永不失败）
+        for encoding in ("utf-8", "gbk"):
             try:
                 return data.decode(encoding)
             except UnicodeDecodeError:
                 continue
-        return data.decode("utf-8", errors="ignore")
+        return data.decode("latin-1")

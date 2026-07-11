@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Sequence
 
 from PySide2.QtWidgets import QApplication
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 _QSS_PATH = Path(__file__).parent / "styles.qss"
 
 
-def launch(argv: Optional[Sequence[str]] = None) -> int:
+def launch(argv: Sequence[str] | None = None) -> int:
     """启动 GUI 应用。
 
     :param argv: 命令行参数（默认从 sys.argv 读取）

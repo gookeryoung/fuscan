@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import List
 
 import pytest
 
@@ -89,7 +88,7 @@ class TestFileMonitor:
     def test_monitor_starts_and_stops(self, tmp_path: Path) -> None:
         config = MonitorConfig(watch_paths=[tmp_path])
         monitor = FileMonitor(config)
-        events: List[FileEvent] = []
+        events: list[FileEvent] = []
         monitor.start(events.append)
         assert monitor.is_running
 
@@ -108,7 +107,7 @@ class TestFileMonitor:
             ignore_dirs=["ignored"],
         )
         monitor = FileMonitor(config)
-        events: List[FileEvent] = []
+        events: list[FileEvent] = []
         monitor.start(events.append)
 
         # 创建忽略目录内的文件
@@ -132,7 +131,7 @@ class TestFileMonitor:
             ignore_extensions=["pyc", "log"],
         )
         monitor = FileMonitor(config)
-        events: List[FileEvent] = []
+        events: list[FileEvent] = []
         monitor.start(events.append)
 
         (tmp_path / "a.pyc").write_text("x", encoding="utf-8")
@@ -163,7 +162,7 @@ class TestFileMonitor:
     def test_monitor_add_watch(self, tmp_path: Path) -> None:
         config = MonitorConfig(watch_paths=[tmp_path])
         monitor = FileMonitor(config)
-        events: List[FileEvent] = []
+        events: list[FileEvent] = []
         monitor.start(events.append)
 
         new_dir = tmp_path / "newdir"
@@ -186,7 +185,7 @@ class TestFileMonitor:
         """删除事件路径不触发扫描回调（由上层处理）。"""
         config = MonitorConfig(watch_paths=[tmp_path], dedup_interval_seconds=0.0)
         monitor = FileMonitor(config)
-        events: List[FileEvent] = []
+        events: list[FileEvent] = []
         monitor.start(events.append)
 
         f = tmp_path / "temp.txt"
@@ -199,6 +198,89 @@ class TestFileMonitor:
         types = [e.event_type for e in events]
         assert FileEventType.CREATED in types
         assert FileEventType.DELETED in types
+
+
+class TestFileMonitorEdgeCases:
+    """FileMonitor 边界条件覆盖。"""
+
+    def test_monitor_watch_paths_property(self, tmp_path: Path) -> None:
+        """watch_paths 属性应返回配置的路径列表副本。"""
+        config = MonitorConfig(watch_paths=[tmp_path])
+        monitor = FileMonitor(config)
+        paths = monitor.watch_paths
+        assert paths == [tmp_path]
+        # 修改返回值不影响内部状态
+        paths.append(Path("/other"))
+        assert monitor.watch_paths == [tmp_path]
+
+    def test_monitor_stop_when_not_running(self) -> None:
+        """未启动时调用 stop 不应出错。"""
+        config = MonitorConfig(watch_paths=[])
+        monitor = FileMonitor(config)
+        monitor.stop()  # 不应抛异常
+        assert not monitor.is_running
+
+    def test_monitor_start_with_nonexistent_path(self, tmp_path: Path) -> None:
+        """start 时路径不存在应跳过该路径但不报错。"""
+        nonexistent = tmp_path / "nonexistent"
+        config = MonitorConfig(watch_paths=[nonexistent])
+        monitor = FileMonitor(config)
+        events: list[FileEvent] = []
+        monitor.start(events.append)
+        # 无有效路径，监控器仍标记为运行（observer 已 start）
+        assert monitor.is_running
+        monitor.stop()
+
+    def test_monitor_add_watch_nonexistent(self, tmp_path: Path) -> None:
+        """add_watch 传入不存在路径应跳过。"""
+        config = MonitorConfig(watch_paths=[tmp_path])
+        monitor = FileMonitor(config)
+        monitor.start(lambda e: None)
+        nonexistent = tmp_path / "nonexistent"
+        monitor.add_watch(nonexistent)
+        # 不应崩溃
+        monitor.stop()
+
+    def test_event_handler_unknown_event_type(self, tmp_path: Path) -> None:
+        """未知事件类型应被跳过（返回 None 映射）。"""
+        from watchdog.events import FileSystemEvent
+
+        from uniscan.watcher.monitor import _EventHandler
+
+        events: list[FileEvent] = []
+        handler = _EventHandler(
+            callback=events.append,
+            ignore_dirs=set(),
+            ignore_extensions=set(),
+            dedup_interval=0.0,
+        )
+        # 构造一个未知事件类型
+        event = FileSystemEvent("unknown_event_type")
+        event.src_path = str(tmp_path / "test.txt")
+        event.is_directory = False
+        handler.on_any_event(event)
+        assert len(events) == 0
+
+    def test_event_handler_callback_exception_does_not_propagate(self, tmp_path: Path) -> None:
+        """回调抛异常时不应传播，仅记录日志。"""
+        from watchdog.events import FileSystemEvent
+
+        from uniscan.watcher.monitor import _EventHandler
+
+        def faulty_callback(event: FileEvent) -> None:
+            raise RuntimeError("回调异常")
+
+        handler = _EventHandler(
+            callback=faulty_callback,
+            ignore_dirs=set(),
+            ignore_extensions=set(),
+            dedup_interval=0.0,
+        )
+        event = FileSystemEvent("created")
+        event.src_path = str(tmp_path / "test.txt")
+        event.is_directory = False
+        # 不应抛异常
+        handler.on_any_event(event)
 
 
 # ----------------------------- IncrementalScanner -----------------------------
@@ -351,3 +433,108 @@ class TestIncrementalScanner:
         report = scanner.scan(tmp_path)
         assert report.stats.scanned_files == 1
         assert report.stats.matched_files == 1
+
+
+class TestIncrementalScannerErrorPaths:
+    """增量扫描器异常路径与边界条件覆盖。"""
+
+    def test_scan_entry_exception_counts_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """scan() 中 _scan_entry 抛异常时应计 error 并继续。"""
+        (tmp_path / "a.txt").write_text("password", encoding="utf-8")
+        (tmp_path / "b.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("r", "password"))
+        scanner = IncrementalScanner(rs)
+
+        original = scanner._scan_entry
+
+        def faulty(entry):
+            if entry.path.name == "a.txt":
+                raise RuntimeError("模拟扫描失败")
+            return original(entry)
+
+        monkeypatch.setattr(scanner, "_scan_entry", faulty)
+        report = scanner.scan(tmp_path)
+        assert report.stats.errors >= 1
+        assert report.stats.scanned_files >= 1
+
+    def test_scan_paths_skips_directory(self, tmp_path: Path) -> None:
+        """scan_paths 传入目录应跳过。"""
+        d = tmp_path / "subdir"
+        d.mkdir()
+        rs = _build_ruleset(_content_rule("r", "password"))
+        scanner = IncrementalScanner(rs)
+        report = scanner.scan_paths([d])
+        assert report.stats.scanned_files == 0
+
+    def test_scan_paths_skips_non_matching_extension(self, tmp_path: Path) -> None:
+        """scan_paths 传入不匹配扩展名的文件应跳过。"""
+        f = tmp_path / "a.txt"
+        f.write_text("password", encoding="utf-8")
+        rule = Rule(
+            name="conf-only",
+            severity=Severity.WARNING,
+            match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="password"),
+            file_extensions=("conf",),
+        )
+        rs = _build_ruleset(rule)
+        scanner = IncrementalScanner(rs)
+        report = scanner.scan_paths([f])
+        assert report.stats.scanned_files == 0
+
+    def test_scan_paths_entry_exception_counts_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """scan_paths 中 _scan_entry 抛异常时应计 error。"""
+        f = tmp_path / "a.txt"
+        f.write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("r", "password"))
+        scanner = IncrementalScanner(rs)
+
+        def faulty(entry):
+            raise RuntimeError("模拟扫描失败")
+
+        monkeypatch.setattr(scanner, "_scan_entry", faulty)
+        report = scanner.scan_paths([f])
+        assert report.stats.errors >= 1
+        assert report.stats.scanned_files >= 1
+
+    def test_should_scan_dir_returns_false(self, tmp_path: Path) -> None:
+        """_should_scan 对目录返回 False。"""
+        from uniscan.scanner.context import FileEntry
+
+        rs = _build_ruleset(_content_rule("r", "password"))
+        scanner = IncrementalScanner(rs)
+        d = tmp_path / "subdir"
+        d.mkdir()
+        entry = FileEntry(
+            path=d,
+            name=d.name,
+            size=0,
+            mtime=d.stat().st_mtime,
+            extension="",
+            is_dir=True,
+        )
+        assert scanner._should_scan(entry) is False
+
+    def test_scan_entry_rule_exception_counts_rule_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """_scan_entry 中 matcher 抛异常时应计 rule_errors 并继续。"""
+        from uniscan.scanner.context import FileEntry
+        from uniscan.scanner.matchers import FileNameMatcher
+
+        f = tmp_path / "a.txt"
+        f.write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_filename_rule("r", "password"))
+        scanner = IncrementalScanner(rs)
+
+        # 替换 compiled 中的 matcher 为抛异常的 mock
+        rule = scanner._compiled[0][0]
+
+        class FailingMatcher(FileNameMatcher):
+            def matches(self, context):
+                raise RuntimeError("匹配器异常")
+
+        spec = LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.CONTAINS, pattern="password")
+        scanner._compiled = [(rule, FailingMatcher(spec))]
+
+        entry = FileEntry.from_path(f)
+        result = scanner._scan_entry(entry)
+        assert result.errors >= 1
+        assert not result.has_hit

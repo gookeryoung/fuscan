@@ -7,14 +7,14 @@ import os
 import string
 import sys
 from pathlib import Path
-from typing import Iterator, List, Optional, Set, Tuple
+from typing import Iterator
 
 from uniscan.scanner.context import FileEntry
 
 __all__ = ["FileWalker", "list_drives"]
 
 
-def list_drives() -> List[Path]:
+def list_drives() -> list[Path]:
     """枚举系统可用盘符/根路径。
 
     Windows 下返回所有存在的盘符路径（如 ``C:\\``、``D:\\``）；
@@ -39,18 +39,18 @@ class FileWalker:
 
     def __init__(
         self,
-        ignore_dirs: Tuple[str, ...] = (),
-        ignore_extensions: Tuple[str, ...] = (),
-        ignore_paths: Tuple[str, ...] = (),
-        max_depth: Optional[int] = None,
+        ignore_dirs: tuple[str, ...] = (),
+        ignore_extensions: tuple[str, ...] = (),
+        ignore_paths: tuple[str, ...] = (),
+        max_depth: int | None = None,
         follow_symlinks: bool = False,
     ) -> None:
-        self._ignore_dirs: Set[str] = {d.lower() for d in ignore_dirs}
-        self._ignore_extensions: Set[str] = {e.lower().lstrip(".") for e in ignore_extensions}
-        self._ignore_paths: List[str] = [p.lower() for p in ignore_paths]
+        self._ignore_dirs: set[str] = {d.lower() for d in ignore_dirs}
+        self._ignore_extensions: set[str] = {e.lower().lstrip(".") for e in ignore_extensions}
+        self._ignore_paths: list[str] = [p.lower() for p in ignore_paths]
         self._max_depth = max_depth
         self._follow_symlinks = follow_symlinks
-        self._root: Optional[Path] = None
+        self._root: Path | None = None
 
     def walk(self, root: Path) -> Iterator[FileEntry]:
         """遍历根目录，产出 FileEntry（不包含目录本身）。"""

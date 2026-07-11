@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 import zipfile
 from pathlib import Path
-from typing import List, Optional
 
 from uniscan.archive.base import ArchiveEntry, ArchiveError, ArchiveReader
 
@@ -24,7 +23,7 @@ class ZipReader(ArchiveReader):
     加密条目需要密码；未提供密码或密码错误时跳过并记录。
     """
 
-    def __init__(self, path: Path, password: Optional[str] = None) -> None:
+    def __init__(self, path: Path, password: str | None = None) -> None:
         self._path = path
         self._password = password.encode("utf-8") if password else None
         try:
@@ -38,9 +37,9 @@ class ZipReader(ArchiveReader):
     def supported_extensions(self) -> tuple[str, ...]:
         return ("zip",)
 
-    def list_entries(self) -> List[ArchiveEntry]:
+    def list_entries(self) -> list[ArchiveEntry]:
         """列出压缩包内所有条目（目录与文件均列出）。"""
-        entries: List[ArchiveEntry] = []
+        entries: list[ArchiveEntry] = []
         for info in self._zip.infolist():
             entries.append(
                 ArchiveEntry(

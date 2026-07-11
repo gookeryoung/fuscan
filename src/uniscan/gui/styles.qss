@@ -66,12 +66,6 @@ QMenu::separator {
 
 /* ========== 卡片容器 ========== */
 
-QFrame#control_area {
-    background: #ffffff;
-    border: 2px solid #d0d7de;
-    border-radius: 8px;
-}
-
 QFrame#detail_empty_action, QFrame#detail_nonempty_action {
     background: #ffffff;
     border: 1px solid #e1e4e8;
@@ -84,16 +78,50 @@ QFrame#detail_empty_main, QFrame#detail_nonempty_main {
     border-radius: 8px;
 }
 
+/* ========== 分组框 ========== */
+
+QGroupBox {
+    background: #ffffff;
+    border: 1px solid #d0d7de;
+    border-radius: 8px;
+    margin-top: 10px;
+    padding-top: 8px;
+    font-size: 13px;
+    font-weight: bold;
+    color: #24292e;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 10px;
+    padding: 0 4px;
+    color: #0366d6;
+}
+
+/* ========== 状态栏 ========== */
+
+QStatusBar {
+    background: #ffffff;
+    border-top: 1px solid #e1e4e8;
+    font-size: 12px;
+    color: #586069;
+}
+
+QStatusBar::item {
+    border: none;
+}
+
+QStatusBar QLabel {
+    color: #586069;
+    padding: 0 4px;
+}
+
 /* ========== 扫描模式下拉 ========== */
 
 QComboBox#scan_mode_combo {
     min-width: 120px;
     font-weight: bold;
-}
-
-QLabel#scan_mode_label {
-    font-size: 13px;
-    color: #586069;
 }
 
 /* ========== 主操作按钮 ========== */
@@ -326,11 +354,6 @@ QLabel#filter_label, QLabel#rule_filter_label, QLabel#group_mode_label {
     font-size: 12px;
     color: #586069;
     padding: 0 2px;
-}
-
-QLabel#path_label, QLabel#drive_label {
-    font-size: 13px;
-    color: #586069;
 }
 
 QLabel#rules_label {

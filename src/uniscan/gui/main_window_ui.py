@@ -43,38 +43,28 @@ class Ui_MainWindow(object):
         self.about_action.setObjectName(u"about_action")
         self.central = QWidget(MainWindow)
         self.central.setObjectName(u"central")
-        self.central_layout = QVBoxLayout(self.central)
-        self.central_layout.setSpacing(6)
-        self.central_layout.setObjectName(u"central_layout")
-        self.central_layout.setContentsMargins(8, 8, 8, 8)
-        self.control_area = QFrame(self.central)
-        self.control_area.setObjectName(u"control_area")
-        self.control_layout = QVBoxLayout(self.control_area)
-        self.control_layout.setSpacing(6)
-        self.control_layout.setObjectName(u"control_layout")
-        self.control_layout.setContentsMargins(8, 8, 8, 8)
-        self.workflow_main_row = QHBoxLayout()
-        self.workflow_main_row.setSpacing(8)
-        self.workflow_main_row.setObjectName(u"workflow_main_row")
-        self.scan_mode_label = QLabel(self.control_area)
-        self.scan_mode_label.setObjectName(u"scan_mode_label")
-
-        self.workflow_main_row.addWidget(self.scan_mode_label)
-
-        self.scan_mode_combo = QComboBox(self.control_area)
+        self.verticalLayout_2 = QVBoxLayout(self.central)
+        self.verticalLayout_2.setObjectName(u"verticalLayout_2")
+        self.horizontalLayout_3 = QHBoxLayout()
+        self.horizontalLayout_3.setObjectName(u"horizontalLayout_3")
+        self.groupBox = QGroupBox(self.central)
+        self.groupBox.setObjectName(u"groupBox")
+        self.horizontalLayout = QHBoxLayout(self.groupBox)
+        self.horizontalLayout.setObjectName(u"horizontalLayout")
+        self.scan_mode_combo = QComboBox(self.groupBox)
         self.scan_mode_combo.addItem("")
         self.scan_mode_combo.addItem("")
         self.scan_mode_combo.addItem("")
         self.scan_mode_combo.setObjectName(u"scan_mode_combo")
 
-        self.workflow_main_row.addWidget(self.scan_mode_combo)
+        self.horizontalLayout.addWidget(self.scan_mode_combo)
 
-        self.path_label = QLabel(self.control_area)
-        self.path_label.setObjectName(u"path_label")
+        self.drive_combo = QComboBox(self.groupBox)
+        self.drive_combo.setObjectName(u"drive_combo")
 
-        self.workflow_main_row.addWidget(self.path_label)
+        self.horizontalLayout.addWidget(self.drive_combo)
 
-        self.path_combo = QComboBox(self.control_area)
+        self.path_combo = QComboBox(self.groupBox)
         self.path_combo.setObjectName(u"path_combo")
         sizePolicy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         sizePolicy.setHorizontalStretch(1)
@@ -82,93 +72,53 @@ class Ui_MainWindow(object):
         sizePolicy.setHeightForWidth(self.path_combo.sizePolicy().hasHeightForWidth())
         self.path_combo.setSizePolicy(sizePolicy)
 
-        self.workflow_main_row.addWidget(self.path_combo)
+        self.horizontalLayout.addWidget(self.path_combo)
 
-        self.select_path_btn = QPushButton(self.control_area)
+        self.select_path_btn = QPushButton(self.groupBox)
         self.select_path_btn.setObjectName(u"select_path_btn")
 
-        self.workflow_main_row.addWidget(self.select_path_btn)
-
-        self.drive_label = QLabel(self.control_area)
-        self.drive_label.setObjectName(u"drive_label")
-
-        self.workflow_main_row.addWidget(self.drive_label)
-
-        self.drive_combo = QComboBox(self.control_area)
-        self.drive_combo.setObjectName(u"drive_combo")
-
-        self.workflow_main_row.addWidget(self.drive_combo)
-
-        self.workflow_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-
-        self.workflow_main_row.addItem(self.workflow_spacer)
+        self.horizontalLayout.addWidget(self.select_path_btn)
 
 
-        self.control_layout.addLayout(self.workflow_main_row)
+        self.horizontalLayout_3.addWidget(self.groupBox)
 
-        self.workflow_rules_row = QHBoxLayout()
-        self.workflow_rules_row.setSpacing(8)
-        self.workflow_rules_row.setObjectName(u"workflow_rules_row")
-        self.load_rules_btn = QPushButton(self.control_area)
+        self.groupBox_2 = QGroupBox(self.central)
+        self.groupBox_2.setObjectName(u"groupBox_2")
+        self.verticalLayout = QVBoxLayout(self.groupBox_2)
+        self.verticalLayout.setObjectName(u"verticalLayout")
+        self.load_rules_btn = QPushButton(self.groupBox_2)
         self.load_rules_btn.setObjectName(u"load_rules_btn")
 
-        self.workflow_rules_row.addWidget(self.load_rules_btn)
+        self.verticalLayout.addWidget(self.load_rules_btn)
 
-        self.rules_label = QLabel(self.control_area)
-        self.rules_label.setObjectName(u"rules_label")
-
-        self.workflow_rules_row.addWidget(self.rules_label)
-
-        self.use_builtin_checkbox = QCheckBox(self.control_area)
+        self.horizontalLayout_2 = QHBoxLayout()
+        self.horizontalLayout_2.setObjectName(u"horizontalLayout_2")
+        self.use_builtin_checkbox = QCheckBox(self.groupBox_2)
         self.use_builtin_checkbox.setObjectName(u"use_builtin_checkbox")
         self.use_builtin_checkbox.setChecked(True)
 
-        self.workflow_rules_row.addWidget(self.use_builtin_checkbox)
+        self.horizontalLayout_2.addWidget(self.use_builtin_checkbox)
 
-        self.rules_row_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.rules_label = QLabel(self.groupBox_2)
+        self.rules_label.setObjectName(u"rules_label")
 
-        self.workflow_rules_row.addItem(self.rules_row_spacer)
+        self.horizontalLayout_2.addWidget(self.rules_label)
 
 
-        self.control_layout.addLayout(self.workflow_rules_row)
+        self.verticalLayout.addLayout(self.horizontalLayout_2)
 
-        self.workflow_action_row = QHBoxLayout()
-        self.workflow_action_row.setSpacing(8)
-        self.workflow_action_row.setObjectName(u"workflow_action_row")
-        self.stats_label = QLabel(self.control_area)
-        self.stats_label.setObjectName(u"stats_label")
 
-        self.workflow_action_row.addWidget(self.stats_label)
+        self.horizontalLayout_3.addWidget(self.groupBox_2)
 
-        self.progress = QProgressBar(self.control_area)
-        self.progress.setObjectName(u"progress")
-        self.progress.setVisible(False)
-        self.progress.setTextVisible(True)
-
-        self.workflow_action_row.addWidget(self.progress)
-
-        self.action_row_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-
-        self.workflow_action_row.addItem(self.action_row_spacer)
-
-        self.scan_btn = QPushButton(self.control_area)
+        self.scan_btn = QPushButton(self.central)
         self.scan_btn.setObjectName(u"scan_btn")
         self.scan_btn.setEnabled(False)
         self.scan_btn.setCursor(QCursor(Qt.PointingHandCursor))
 
-        self.workflow_action_row.addWidget(self.scan_btn)
+        self.horizontalLayout_3.addWidget(self.scan_btn)
 
 
-        self.control_layout.addLayout(self.workflow_action_row)
-
-        self.current_file_label = QLabel(self.control_area)
-        self.current_file_label.setObjectName(u"current_file_label")
-        self.current_file_label.setVisible(False)
-
-        self.control_layout.addWidget(self.current_file_label)
-
-
-        self.central_layout.addWidget(self.control_area)
+        self.verticalLayout_2.addLayout(self.horizontalLayout_3)
 
         self.splitter = QSplitter(self.central)
         self.splitter.setObjectName(u"splitter")
@@ -477,12 +427,18 @@ class Ui_MainWindow(object):
 
         self.splitter.addWidget(self.detail_area)
 
-        self.central_layout.addWidget(self.splitter)
+        self.verticalLayout_2.addWidget(self.splitter)
+
+        self.progress = QProgressBar(self.central)
+        self.progress.setObjectName(u"progress")
+        self.progress.setValue(24)
+
+        self.verticalLayout_2.addWidget(self.progress)
 
         MainWindow.setCentralWidget(self.central)
         self.menubar = QMenuBar(MainWindow)
         self.menubar.setObjectName(u"menubar")
-        self.menubar.setGeometry(QRect(0, 0, 1007, 22))
+        self.menubar.setGeometry(QRect(0, 0, 960, 22))
         self.file_menu = QMenu(self.menubar)
         self.file_menu.setObjectName(u"file_menu")
         self.scan_menu = QMenu(self.menubar)
@@ -561,7 +517,7 @@ class Ui_MainWindow(object):
         self.view_history_action.setShortcut(QCoreApplication.translate("MainWindow", u"Ctrl+3", None))
 #endif // QT_CONFIG(shortcut)
         self.about_action.setText(QCoreApplication.translate("MainWindow", u"\u5173\u4e8e", None))
-        self.scan_mode_label.setText(QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u6a21\u5f0f:", None))
+        self.groupBox.setTitle(QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u6a21\u5f0f", None))
         self.scan_mode_combo.setItemText(0, QCoreApplication.translate("MainWindow", u"\u5168\u76d8\u626b\u63cf", None))
         self.scan_mode_combo.setItemText(1, QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u76d8\u7b26", None))
         self.scan_mode_combo.setItemText(2, QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u6587\u4ef6\u5939", None))
@@ -569,24 +525,21 @@ class Ui_MainWindow(object):
 #if QT_CONFIG(tooltip)
         self.scan_mode_combo.setToolTip(QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u626b\u63cf\u6a21\u5f0f", None))
 #endif // QT_CONFIG(tooltip)
-        self.path_label.setText(QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u8def\u5f84:", None))
+#if QT_CONFIG(tooltip)
+        self.drive_combo.setToolTip(QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u8981\u626b\u63cf\u7684\u76d8\u7b26", None))
+#endif // QT_CONFIG(tooltip)
 #if QT_CONFIG(tooltip)
         self.path_combo.setToolTip(QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u8def\u5f84\uff08\u53ef\u4ece\u5386\u53f2\u8bb0\u5f55\u4e2d\u9009\u62e9\uff09", None))
 #endif // QT_CONFIG(tooltip)
         self.select_path_btn.setText(QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u8def\u5f84...", None))
-        self.drive_label.setText(QCoreApplication.translate("MainWindow", u"\u76d8\u7b26:", None))
-#if QT_CONFIG(tooltip)
-        self.drive_combo.setToolTip(QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u8981\u626b\u63cf\u7684\u76d8\u7b26", None))
-#endif // QT_CONFIG(tooltip)
+        self.groupBox_2.setTitle(QCoreApplication.translate("MainWindow", u"\u89c4\u5219", None))
         self.load_rules_btn.setText(QCoreApplication.translate("MainWindow", u"\u52a0\u8f7d\u89c4\u5219...", None))
-        self.rules_label.setText(QCoreApplication.translate("MainWindow", u"\u89c4\u5219: \u672a\u52a0\u8f7d", None))
 #if QT_CONFIG(tooltip)
         self.use_builtin_checkbox.setToolTip(QCoreApplication.translate("MainWindow", u"\u52fe\u9009\u540e\u52a0\u8f7d\u8f6f\u4ef6\u5185\u7f6e\u901a\u7528\u89c4\u5219\uff0c\u7528\u6237\u89c4\u5219\u4e2d\u540c\u540d\u89c4\u5219\u4f1a\u8986\u76d6\u901a\u7528\u89c4\u5219", None))
 #endif // QT_CONFIG(tooltip)
         self.use_builtin_checkbox.setText(QCoreApplication.translate("MainWindow", u"\u4f7f\u7528\u901a\u7528\u89c4\u5219", None))
-        self.stats_label.setText(QCoreApplication.translate("MainWindow", u"\u5c31\u7eea", None))
+        self.rules_label.setText(QCoreApplication.translate("MainWindow", u"\u89c4\u5219: \u672a\u52a0\u8f7d", None))
         self.scan_btn.setText(QCoreApplication.translate("MainWindow", u"\u5f00\u59cb\u626b\u63cf", None))
-        self.current_file_label.setText("")
         self.filter_label.setText(QCoreApplication.translate("MainWindow", u"\u7b5b\u9009:", None))
         self.path_filter_input.setPlaceholderText(QCoreApplication.translate("MainWindow", u"\u6309\u8def\u5f84\u7b5b\u9009...", None))
         self.rule_filter_label.setText(QCoreApplication.translate("MainWindow", u"\u89c4\u5219:", None))

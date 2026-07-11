@@ -1823,7 +1823,6 @@ class TestScanMode:
         qapp.processEvents()
         assert window._path_combo.isVisible()
         assert not window._drive_combo.isVisible()
-        assert not window._drive_label.isVisible()
         window.close()
 
     def test_full_mode_hides_target_selectors(self, qapp: QApplication) -> None:
@@ -1845,7 +1844,6 @@ class TestScanMode:
         window._scan_mode_combo.setCurrentIndex(1)
         assert window._scan_mode == "drive"
         assert window._drive_combo.isVisible()
-        assert window._drive_label.isVisible()
         assert not window._path_combo.isVisible()
         window.close()
 

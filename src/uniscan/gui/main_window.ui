@@ -20,52 +20,15 @@
    <string>uniscan 通用文件扫描器</string>
   </property>
   <widget class="QWidget" name="central">
-   <layout class="QVBoxLayout" name="central_layout">
-    <property name="spacing">
-     <number>6</number>
-    </property>
-    <property name="leftMargin">
-     <number>8</number>
-    </property>
-    <property name="topMargin">
-     <number>8</number>
-    </property>
-    <property name="rightMargin">
-     <number>8</number>
-    </property>
-    <property name="bottomMargin">
-     <number>8</number>
-    </property>
+   <layout class="QVBoxLayout" name="verticalLayout_2">
     <item>
-     <widget class="QFrame" name="control_area">
-      <layout class="QVBoxLayout" name="control_layout">
-       <property name="spacing">
-        <number>6</number>
-       </property>
-       <property name="leftMargin">
-        <number>8</number>
-       </property>
-       <property name="topMargin">
-        <number>8</number>
-       </property>
-       <property name="rightMargin">
-        <number>8</number>
-       </property>
-       <property name="bottomMargin">
-        <number>8</number>
-       </property>
-       <item>
-        <layout class="QHBoxLayout" name="workflow_main_row">
-         <property name="spacing">
-          <number>8</number>
-         </property>
-         <item>
-          <widget class="QLabel" name="scan_mode_label">
-           <property name="text">
-            <string>扫描模式:</string>
-           </property>
-          </widget>
-         </item>
+     <layout class="QHBoxLayout" name="horizontalLayout_3">
+      <item>
+       <widget class="QGroupBox" name="groupBox">
+        <property name="title">
+         <string>扫描模式</string>
+        </property>
+        <layout class="QHBoxLayout" name="horizontalLayout">
          <item>
           <widget class="QComboBox" name="scan_mode_combo">
            <property name="toolTip">
@@ -89,9 +52,9 @@
           </widget>
          </item>
          <item>
-          <widget class="QLabel" name="path_label">
-           <property name="text">
-            <string>扫描路径:</string>
+          <widget class="QComboBox" name="drive_combo">
+           <property name="toolTip">
+            <string>选择要扫描的盘符</string>
            </property>
           </widget>
          </item>
@@ -115,40 +78,15 @@
            </property>
           </widget>
          </item>
-         <item>
-          <widget class="QLabel" name="drive_label">
-           <property name="text">
-            <string>盘符:</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QComboBox" name="drive_combo">
-           <property name="toolTip">
-            <string>选择要扫描的盘符</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <spacer name="workflow_spacer">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>40</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
         </layout>
-       </item>
-       <item>
-        <layout class="QHBoxLayout" name="workflow_rules_row">
-         <property name="spacing">
-          <number>8</number>
-         </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QGroupBox" name="groupBox_2">
+        <property name="title">
+         <string>规则</string>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout">
          <item>
           <widget class="QPushButton" name="load_rules_btn">
            <property name="text">
@@ -157,102 +95,46 @@
           </widget>
          </item>
          <item>
-          <widget class="QLabel" name="rules_label">
-           <property name="text">
-            <string>规则: 未加载</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QCheckBox" name="use_builtin_checkbox">
-           <property name="toolTip">
-            <string>勾选后加载软件内置通用规则，用户规则中同名规则会覆盖通用规则</string>
-           </property>
-           <property name="text">
-            <string>使用通用规则</string>
-           </property>
-           <property name="checked">
-            <bool>true</bool>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <spacer name="rules_row_spacer">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>40</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
+          <layout class="QHBoxLayout" name="horizontalLayout_2">
+           <item>
+            <widget class="QCheckBox" name="use_builtin_checkbox">
+             <property name="toolTip">
+              <string>勾选后加载软件内置通用规则，用户规则中同名规则会覆盖通用规则</string>
+             </property>
+             <property name="text">
+              <string>使用通用规则</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="rules_label">
+             <property name="text">
+              <string>规则: 未加载</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
          </item>
         </layout>
-       </item>
-       <item>
-        <layout class="QHBoxLayout" name="workflow_action_row">
-         <property name="spacing">
-          <number>8</number>
-         </property>
-         <item>
-          <widget class="QLabel" name="stats_label">
-           <property name="text">
-            <string>就绪</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QProgressBar" name="progress">
-           <property name="visible">
-            <bool>false</bool>
-           </property>
-           <property name="textVisible">
-            <bool>true</bool>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <spacer name="action_row_spacer">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>40</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-         <item>
-          <widget class="QPushButton" name="scan_btn">
-           <property name="enabled">
-            <bool>false</bool>
-           </property>
-           <property name="cursor">
-            <cursorShape>PointingHandCursor</cursorShape>
-           </property>
-           <property name="text">
-            <string>开始扫描</string>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </item>
-       <item>
-        <widget class="QLabel" name="current_file_label">
-         <property name="visible">
-          <bool>false</bool>
-         </property>
-         <property name="text">
-          <string/>
-         </property>
-        </widget>
-       </item>
-      </layout>
-     </widget>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="scan_btn">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="cursor">
+         <cursorShape>PointingHandCursor</cursorShape>
+        </property>
+        <property name="text">
+         <string>开始扫描</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
     </item>
     <item>
      <widget class="QSplitter" name="splitter">
@@ -867,6 +749,13 @@
       </widget>
      </widget>
     </item>
+    <item>
+     <widget class="QProgressBar" name="progress">
+      <property name="value">
+       <number>24</number>
+      </property>
+     </widget>
+    </item>
    </layout>
   </widget>
   <widget class="QMenuBar" name="menubar">
@@ -874,7 +763,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1007</width>
+     <width>960</width>
      <height>22</height>
     </rect>
    </property>

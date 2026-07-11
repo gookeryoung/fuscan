@@ -1,15 +1,16 @@
 """GUI 主窗口。
 
-提供 GitHub Desktop 风格的 5 区布局：
+提供 GitHub Desktop 风格的布局：
 
 1. 菜单栏（文件/扫描/视图/帮助）
-2. 主操作区（工作流三行：扫描模式+目标 / 加载规则 / 进度+统计+扫描按钮）
+2. 顶部操作区（QGroupBox 分组：扫描模式 / 规则 + 扫描按钮）
 3. 列表区（QTabWidget 切换扫描结果/规则文件/扫描历史）
 4. 详情区（操作栏 QStackedWidget 两态 + 主体 QStackedWidget 两态，非空态含备注与导出）
+5. 底部进度条 + 状态栏（统计/当前文件）
 
 设计要点：
 
-- GitHub Desktop 风格：主操作区突出（卡片样式），三行工作流分区清晰
+- GitHub Desktop 风格：QGroupBox 分组操作区，状态栏承载扫描统计
 - 扫描在 ScanWorker（QThread）中执行，避免阻塞 UI
 - 结果以 QTreeWidget 展示（QAbstractItemView 迁移见后续迭代）
 - 详情区嵌入命中预览（文件信息+命中表+内容预览+命中导航+备注+导出）
@@ -36,6 +37,7 @@ from PySide2.QtWidgets import (
     QFileDialog,
     QHeaderView,
     QInputDialog,
+    QLabel,
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
@@ -183,18 +185,21 @@ class MainWindow(QMainWindow):
         # 主操作区
         self._scan_btn = ui.scan_btn
         self._progress = ui.progress
-        self._current_file_label = ui.current_file_label
-        self._stats_label = ui.stats_label
         self._scan_mode_combo = ui.scan_mode_combo
-        self._scan_mode_label = ui.scan_mode_label
-        self._drive_label = ui.drive_label
         self._drive_combo = ui.drive_combo
-        self._path_label = ui.path_label
         self._path_combo = ui.path_combo
         self._select_path_btn = ui.select_path_btn
         self._load_rules_btn = ui.load_rules_btn
         self._rules_label = ui.rules_label
         self._use_builtin_checkbox = ui.use_builtin_checkbox
+        # 状态栏（替代原顶部 stats_label/current_file_label）
+        self._stats_label = QLabel("就绪")
+        self._stats_label.setObjectName("stats_label")
+        self._current_file_label = QLabel("")
+        self._current_file_label.setObjectName("current_file_label")
+        self._current_file_label.setVisible(False)
+        self.statusBar().addWidget(self._stats_label, 1)
+        self.statusBar().addPermanentWidget(self._current_file_label)
         # 列表区
         self._splitter = ui.splitter
         self._tab_widget = ui.tab_widget
@@ -260,26 +265,14 @@ class MainWindow(QMainWindow):
 
         # layout 伸缩因子（.ui 不支持 stretch vector）
         ui = self._ui
-        ui.central_layout.setStretch(0, 0)
-        ui.central_layout.setStretch(1, 1)
-        # workflow_main_row: 模式标签/下拉/路径标签/路径下拉/选择按钮/盘符标签/盘符下拉/弹簧
-        ui.workflow_main_row.setStretch(0, 0)
-        ui.workflow_main_row.setStretch(1, 0)
-        ui.workflow_main_row.setStretch(2, 0)
-        ui.workflow_main_row.setStretch(3, 1)
-        ui.workflow_main_row.setStretch(4, 0)
-        ui.workflow_main_row.setStretch(5, 0)
-        ui.workflow_main_row.setStretch(6, 0)
-        ui.workflow_main_row.setStretch(7, 1)
-        ui.workflow_rules_row.setStretch(0, 0)
-        ui.workflow_rules_row.setStretch(1, 1)
-        ui.workflow_rules_row.setStretch(2, 0)
-        ui.workflow_rules_row.setStretch(3, 1)
-        # workflow_action_row: 统计标签/进度条/弹簧/扫描按钮
-        ui.workflow_action_row.setStretch(0, 0)
-        ui.workflow_action_row.setStretch(1, 1)
-        ui.workflow_action_row.setStretch(2, 1)
-        ui.workflow_action_row.setStretch(3, 0)
+        # verticalLayout_2: 顶部操作行 / 分割器 / 进度条
+        ui.verticalLayout_2.setStretch(0, 0)
+        ui.verticalLayout_2.setStretch(1, 1)
+        ui.verticalLayout_2.setStretch(2, 0)
+        # horizontalLayout_3: 扫描模式组 / 规则组 / 扫描按钮
+        ui.horizontalLayout_3.setStretch(0, 1)
+        ui.horizontalLayout_3.setStretch(1, 1)
+        ui.horizontalLayout_3.setStretch(2, 0)
         ui.list_layout.setStretch(0, 1)
         ui.results_layout.setStretch(0, 0)
         ui.results_layout.setStretch(1, 1)
@@ -304,6 +297,9 @@ class MainWindow(QMainWindow):
         ui.detail_nonempty_main_layout.setStretch(4, 2)
         ui.detail_nonempty_main_layout.setStretch(5, 0)
         ui.detail_nonempty_main_layout.setStretch(6, 0)
+
+        # 进度条初始隐藏（.ui 中未设 visible 属性）
+        self._progress.setVisible(False)
 
         # 空白详情面板居中（.ui 中 QVBoxLayout 不支持 alignment 属性）
         ui.detail_empty_main_layout.insertStretch(0)
@@ -547,9 +543,7 @@ class MainWindow(QMainWindow):
         """根据扫描模式更新目标选择器可见性。"""
         is_drive = self._scan_mode == "drive"
         is_folder = self._scan_mode == "folder"
-        self._drive_label.setVisible(is_drive)
         self._drive_combo.setVisible(is_drive)
-        self._path_label.setVisible(is_folder)
         self._path_combo.setVisible(is_folder)
         self._select_path_btn.setVisible(is_folder)
 

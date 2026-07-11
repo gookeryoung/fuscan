@@ -846,9 +846,6 @@
           </property>
           <widget class="QFrame" name="detail_empty_main">
            <layout class="QVBoxLayout" name="detail_empty_main_layout">
-            <property name="alignment">
-             <set>Qt::AlignCenter</set>
-            </property>
             <item>
              <widget class="QLabel" name="detail_empty_hint">
               <property name="text">

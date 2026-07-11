@@ -306,6 +306,10 @@ class MainWindow(QMainWindow):
         ui.detail_nonempty_main_layout.setStretch(3, 0)
         ui.detail_nonempty_main_layout.setStretch(4, 2)
 
+        # 空白详情面板居中（.ui 中 QVBoxLayout 不支持 alignment 属性）
+        ui.detail_empty_main_layout.insertStretch(0)
+        ui.detail_empty_main_layout.addStretch()
+
         # 加载图标并为扫描控制按钮设置
         self._icon_scan = QIcon(_ICON_SCAN)
         self._icon_pause = QIcon(_ICON_PAUSE)

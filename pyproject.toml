@@ -98,6 +98,7 @@ testpaths                          = ["tests"]
 [tool.ruff]
 line-length    = 120
 target-version = "py38"
+extend-exclude = ["**/*_ui.py"]
 
 [tool.ruff.lint]
 ignore = [
@@ -128,7 +129,7 @@ select = [
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["ARG001", "ARG002", "ARG005", "PLR0913"]
-"**/*_ui.py" = ["F401", "F403", "F405"]
+"**/*_ui.py" = ["F401", "F403", "F405", "UP004", "UP009", "UP025"]
 "src/uniscan/cli.py" = ["PLR0911"]
 "src/uniscan/scanner/matchers.py" = ["PLR0911"]
 "src/uniscan/scanner/scanner.py" = ["PLR0913"]

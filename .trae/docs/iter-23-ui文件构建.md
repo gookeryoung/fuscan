@@ -99,7 +99,45 @@ pyproject.toml 的 `[tool.pytest.ini_options].markers` 已注册 `gui` marker，
 
 ### 5. ruff per-file-ignores 优化
 
-- `**/*_ui.py`：忽略 F401/F403/F405（pyside2-uic 生成文件使用 star import）
+- `**/*_ui.py`：忽略 F401/F403/F405（pyside2-uic 生成文件使用 star import）、UP004/UP009/UP025（生成的 `object` 继承、utf-8 声明、unicode 前缀）
+- `[tool.ruff] extend-exclude = ["**/*_ui.py"]`：生成文件完全排除 ruff format（避免重新编译后格式差异）
 - `**/tests/**`：增加 ARG005（测试 lambda 回调常用未使用参数）、PLR0913（参数化测试参数多）
 - `cli.py`/`matchers.py`：忽略 PLR0911（命令分发/模式匹配自然多返回语句）
 - `scanner.py`/`worker.py`：忽略 PLR0913（构造函数参数多）
+
+## 后续修复（.ui alignment 与 QSS 完善）
+
+### 1. main_window.ui alignment 属性错误修复 ✅
+
+**问题**：Qt Designer 打开 main_window.ui 时报错"无法读取属性 alignment"，原因是 QVBoxLayout 不支持 `alignment` 属性（仅 QLabel 等部件支持）。
+
+**修复**：
+
+- 从 `detail_empty_main_layout` 移除 `<property name="alignment">`，保留 QLabel 上的 alignment
+- 在 `_configure_ui()` 中用 `insertStretch(0)` + `addStretch()` 实现空白详情面板的垂直居中
+- 重新编译 `main_window_ui.py`
+
+### 2. QSS 样式对照 GitHub Desktop 完善 ✅
+
+**改动**（`styles.qss` 完整重写，716 行）：
+
+- **全局字体**：`"Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif`，基准 13px
+- **菜单栏**：白底圆角菜单项、蓝色悬停（`#f1f8ff` 背景 + `#0366d6` 文字）
+- **工具栏**：扁平白底无边框、透明按钮带悬停色
+- **卡片容器**：`border-radius: 8px`（从 6px 增大），统一白底 + `#e1e4e8` 边框
+- **扫描按钮**：改为 GitHub 绿色 `#2ea44f`（原为蓝色 #0366d6），hover/pressed/disabled 完整状态
+- **停止按钮**：红色 `#d73a49`，完整状态
+- **输入控件**：QLineEdit/QComboBox/QSpinBox 统一圆角边框 + 聚焦蓝色边框
+- **QCheckBox**：自定义 16px 方形指示器，`#0366d6` 选中态
+- **QTabBar**：底部 3px 边框指示器（替代顶部圆角标签式），selected/hover 状态
+- **QHeaderView**：浅灰底 `#f6f8fa`、粗体 12px 小字
+- **QScrollBar**：10px 宽、圆角、灰色滑块、hover/pressed 加深
+- **树/列表/表格项**：hover `#f6f8fa`、selected `#f1f8ff` + `#0366d6` 文字
+- **QLabel 按角色分级**：filter_label（12px 灰）、stats_label（13px 黑）、detail_empty_hint（14px 浅灰）等
+
+### 验证结果
+
+- **ruff check**：全部通过（`*_ui.py` 已 extend-exclude + per-file-ignores 排除）
+- **ruff format**：全部通过
+- **pytest**：649 passed, 2 skipped
+- **覆盖率**：95.61%（达到 95% 门槛）

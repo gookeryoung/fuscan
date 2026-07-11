@@ -12,17 +12,12 @@ from pathlib import Path
 import yaml
 from PySide2.QtCore import Signal
 from PySide2.QtWidgets import (
-    QComboBox,
     QDialog,
-    QHBoxLayout,
-    QLabel,
     QMessageBox,
-    QPushButton,
-    QTextEdit,
-    QVBoxLayout,
     QWidget,
 )
 
+from uniscan.gui.rule_editor_ui import Ui_RuleEditorDialog
 from uniscan.rules import RuleError, load_ruleset
 
 __all__ = ["RuleEditorDialog"]
@@ -47,63 +42,42 @@ class RuleEditorDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self._rules_paths = rules_paths
-        self.setWindowTitle("规则编辑器")
-        self.resize(700, 500)
-        self._init_ui()
-        if rules_paths:
-            self._file_combo.setCurrentIndex(0)
+        self._ui = Ui_RuleEditorDialog()
+        self._ui.setupUi(self)
+        self._bind_widgets()
+        self._configure_ui()
 
-    def _init_ui(self) -> None:
-        """初始化对话框布局。"""
-        layout = QVBoxLayout(self)
+    def _bind_widgets(self) -> None:
+        """将 Ui_RuleEditorDialog 的部件绑定到本类私有属性，保持业务逻辑兼容。"""
+        ui = self._ui
+        self._file_combo = ui.file_combo
+        self._editor = ui.editor
 
-        # 文件选择栏
-        file_layout = QHBoxLayout()
-        file_layout.addWidget(QLabel("规则文件:"))
-        self._file_combo = QComboBox()
+    def _configure_ui(self) -> None:
+        """配置 .ui 无法静态表达的动态属性、初始内容与信号槽连接。"""
+        ui = self._ui
+        # 填充文件下拉框
         for path in self._rules_paths:
             self._file_combo.addItem(path.name, str(path))
-        self._file_combo.currentIndexChanged.connect(self._on_file_changed)
-        file_layout.addWidget(self._file_combo, stretch=1)
-        layout.addLayout(file_layout)
 
+        # 信号槽连接
+        self._file_combo.currentIndexChanged.connect(self._on_file_changed)
+        ui.reload_btn.clicked.connect(self._on_reload)
+        ui.save_btn.clicked.connect(self._on_save)
+
+        # 无规则文件时的空态处理
         if not self._rules_paths:
-            layout.addWidget(QLabel("（未加载任何规则文件）"))
-            self._editor = QTextEdit()
+            ui.empty_label.setVisible(True)
             self._editor.setEnabled(False)
-            layout.addWidget(self._editor, stretch=1)
-            btn_layout = QHBoxLayout()
-            btn_layout.addStretch()
-            close_btn = QPushButton("关闭")
-            close_btn.clicked.connect(self.accept)
-            btn_layout.addWidget(close_btn)
-            layout.addLayout(btn_layout)
+            ui.reload_btn.setEnabled(False)
+            ui.save_btn.setEnabled(False)
             return
 
-        # 编辑区
-        self._editor = QTextEdit()
-        self._editor.setFontFamily("Consolas")
-        self._editor.setStyleSheet("font-family: Consolas, 'Courier New', monospace; font-size: 13px;")
-        layout.addWidget(self._editor, stretch=1)
-
-        # 按钮栏
-        btn_layout = QHBoxLayout()
-        reload_btn = QPushButton("重新加载")
-        reload_btn.setToolTip("放弃修改，从文件重新加载内容")
-        reload_btn.clicked.connect(self._on_reload)
-        btn_layout.addWidget(reload_btn)
-
-        btn_layout.addStretch()
-
-        save_btn = QPushButton("保存并应用")
-        save_btn.setToolTip("保存文件并重新加载规则集")
-        save_btn.clicked.connect(self._on_save)
-        btn_layout.addWidget(save_btn)
-
-        close_btn = QPushButton("关闭")
-        close_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(close_btn)
-        layout.addLayout(btn_layout)
+        # layout 伸缩比例（编辑区占主要空间）
+        ui.main_layout.setStretch(0, 0)
+        ui.main_layout.setStretch(1, 0)
+        ui.main_layout.setStretch(2, 1)
+        ui.main_layout.setStretch(3, 0)
 
         self._load_file_content(0)
 

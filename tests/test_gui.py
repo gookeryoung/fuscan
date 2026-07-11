@@ -1212,6 +1212,9 @@ class TestLaunchApp:
             def setApplicationName(self, name: str) -> None:
                 self._app_name = name
 
+            def setStyleSheet(self, sheet: str) -> None:
+                pass
+
             def exec_(self) -> int:
                 return 0
 
@@ -1243,7 +1246,15 @@ class TestLaunchApp:
         """已有 QApplication 实例时复用，不创建新实例。"""
         from uniscan.gui import app as app_module
 
-        existing_app = type("ExistingApp", (), {"exec_": lambda self: 0, "setApplicationName": lambda self, n: None})()
+        existing_app = type(
+            "ExistingApp",
+            (),
+            {
+                "exec_": lambda self: 0,
+                "setApplicationName": lambda self, n: None,
+                "setStyleSheet": lambda self, s: None,
+            },
+        )()
         created: list = []
 
         class FakeApp:
@@ -1251,6 +1262,9 @@ class TestLaunchApp:
                 created.append(self)
 
             def setApplicationName(self, name: str) -> None:
+                pass
+
+            def setStyleSheet(self, sheet: str) -> None:
                 pass
 
             def exec_(self) -> int:

@@ -4,13 +4,18 @@
 PACKAGE := uniscan
 COV_THRESHOLD := 95
 
-.PHONY: help sync build b clean c test cov lint typecheck check doc tox bump patch minor major push
+.PHONY: help sync build b clean c test cov lint typecheck check doc tox bump patch minor major push ui
 
 help: ## 显示帮助信息
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z].*:.*##/ {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 sync: ## 安装开发依赖
 	uv sync --extra dev
+
+ui: ## 编译 .ui 文件到 _ui.py (pyside2-uic)
+	pyside2-uic src/uniscan/gui/main_window.ui -o src/uniscan/gui/main_window_ui.py
+	pyside2-uic src/uniscan/gui/detail_dialog.ui -o src/uniscan/gui/detail_dialog_ui.py
+	pyside2-uic src/uniscan/gui/rule_editor.ui -o src/uniscan/gui/rule_editor_ui.py
 
 build b: ## 构建分发包 (wheel + sdist)
 	uv build

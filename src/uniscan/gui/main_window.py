@@ -33,35 +33,18 @@ from typing import List, Optional, Sequence, Set, Tuple
 from PySide2.QtCore import Qt
 from PySide2.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide2.QtWidgets import (
-    QAction,
     QApplication,
     QButtonGroup,
-    QCheckBox,
-    QComboBox,
     QFileDialog,
-    QFrame,
-    QHBoxLayout,
     QHeaderView,
     QInputDialog,
-    QLabel,
-    QLineEdit,
-    QListWidget,
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
-    QPlainTextEdit,
-    QProgressBar,
-    QPushButton,
-    QSizePolicy,
-    QSplitter,
-    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QTextEdit,
-    QTreeWidget,
     QTreeWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -69,6 +52,7 @@ from uniscan.builtin import load_with_builtin
 from uniscan.config import MAX_HISTORY, Config, load_config, save_config
 from uniscan.extractors import extract_content
 from uniscan.gui.detail_dialog import HitDetailDialog
+from uniscan.gui.main_window_ui import Ui_MainWindow
 from uniscan.gui.worker import ScanWorker
 from uniscan.rules import RuleError, load_ruleset, merge_multiple_rulesets
 from uniscan.rules.model import RuleSet
@@ -157,7 +141,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("uniscan 通用文件扫描器")
+        self._ui = Ui_MainWindow()
+        self._ui.setupUi(self)
 
         self._config: Config = load_config()
         self._ruleset: Optional[RuleSet] = None
@@ -176,569 +161,188 @@ class MainWindow(QMainWindow):
         # 扫描历史记录
         self._scan_history: List[str] = []
 
-        self._init_ui()
-        self._init_menu()
-        self._init_toolbar()
-        self._apply_qss()
+        self._bind_widgets()
+        self._configure_ui()
         self._apply_config()
         self._init_rules()
 
-    # ----------------------------- UI 初始化 -----------------------------
+    # ----------------------------- UI 绑定与配置 -----------------------------
 
-    def _init_ui(self) -> None:
-        """初始化中央 widget：主操作区 + 主体分割器（列表区 | 详情区）。"""
-        central = QWidget()
-        central.setObjectName("central")
-        self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setSpacing(6)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.addWidget(self._build_main_operation_area())
-        layout.addWidget(self._build_body_splitter(), stretch=1)
+    def _bind_widgets(self) -> None:
+        """将 Ui_MainWindow 的部件绑定到本类私有属性，保持业务逻辑兼容。"""
+        ui = self._ui
+        # 主操作区
+        self._scan_btn = ui.scan_btn
+        self._stop_btn = ui.stop_btn
+        self._progress = ui.progress
+        self._current_file_label = ui.current_file_label
+        self._stats_label = ui.stats_label
+        self._full_btn = ui.full_btn
+        self._drive_btn = ui.drive_btn
+        self._folder_btn = ui.folder_btn
+        self._drive_label = ui.drive_label
+        self._drive_combo = ui.drive_combo
+        self._target_row = ui.target_row
+        self._path_label = ui.path_label
+        self._path_combo = ui.path_combo
+        self._select_path_btn = ui.select_path_btn
+        self._load_rules_btn = ui.load_rules_btn
+        self._rules_label = ui.rules_label
+        self._use_builtin_checkbox = ui.use_builtin_checkbox
+        # 列表区
+        self._splitter = ui.splitter
+        self._tab_widget = ui.tab_widget
+        self._result_tree = ui.result_tree
+        self._path_filter_input = ui.path_filter_input
+        self._rule_filter_combo = ui.rule_filter_combo
+        self._group_mode_combo = ui.group_mode_combo
+        self._rules_file_list = ui.rules_file_list
+        self._move_up_btn = ui.move_up_btn
+        self._move_down_btn = ui.move_down_btn
+        self._remove_rule_btn = ui.remove_rule_btn
+        self._edit_rule_btn = ui.edit_rule_btn
+        self._rules_tree = ui.rules_tree
+        self._history_list = ui.history_list
+        self._note_edit = ui.note_edit
+        self._batch_btn = ui.batch_btn
+        self._export_btn = ui.export_btn
+        # 详情区
+        self._detail_action_stack = ui.detail_action_stack
+        self._detail_main_stack = ui.detail_main_stack
+        self._detail_start_btn = ui.detail_start_btn
+        self._detail_load_rules_btn = ui.detail_load_rules_btn
+        self._detail_view_history_btn = ui.detail_view_history_btn
+        self._detail_locate_btn = ui.detail_locate_btn
+        self._detail_prev_btn = ui.detail_prev_btn
+        self._detail_next_btn = ui.detail_next_btn
+        self._detail_nav_label = ui.detail_nav_label
+        self._detail_open_location_btn = ui.detail_open_location_btn
+        self._detail_copy_path_btn = ui.detail_copy_path_btn
+        self._detail_open_window_btn = ui.detail_open_window_btn
+        self._detail_info_label = ui.detail_info_label
+        self._detail_hits_table = ui.detail_hits_table
+        self._detail_preview = ui.detail_preview
+        # actions
+        self._scan_action = ui.scan_action
+        self._load_rules_action = ui.load_rules_action
+        self._edit_rules_action = ui.edit_rules_action
+        self._export_csv_action = ui.export_csv_action
+        self._export_json_action = ui.export_json_action
+        self._stop_action = ui.stop_action
+        self._view_results_action = ui.view_results_action
+        self._view_rules_action = ui.view_rules_action
+        self._view_history_action = ui.view_history_action
 
-    def _build_main_operation_area(self) -> QWidget:
-        """构造 ② 主操作区：扫描模式 + 目标 + 规则 + 扫描按钮 + 进度 + 统计。"""
-        container = QFrame()
-        container.setObjectName("controlArea")
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(6)
-
-        # 扫描模式行：三张卡片按钮 + 盘符下拉
-        layout.addLayout(self._build_scan_mode_row())
-
-        # 目标路径行（仅 folder 模式可见）
-        layout.addWidget(self._build_target_row())
-
-        # 规则加载行
-        layout.addLayout(self._build_rules_row())
-
-        # 扫描控制按钮行：扫描按钮（开始/暂停/继续）+ 停止按钮
-        btn_row = QHBoxLayout()
-        self._scan_btn = QPushButton("开始扫描")
-        self._scan_btn.setObjectName("scanBtn")
-        self._scan_btn.setCursor(Qt.PointingHandCursor)
-        self._scan_btn.setMinimumHeight(40)
-        self._scan_btn.clicked.connect(self._on_scan)
-        self._scan_btn.setEnabled(False)
-        btn_row.addWidget(self._scan_btn, stretch=3)
-
-        self._stop_btn = QPushButton("停止")
-        self._stop_btn.setObjectName("stopBtn")
-        self._stop_btn.setCursor(Qt.PointingHandCursor)
-        self._stop_btn.setMinimumHeight(40)
-        self._stop_btn.clicked.connect(self._on_stop)
-        self._stop_btn.setVisible(False)
-        btn_row.addWidget(self._stop_btn, stretch=1)
-        layout.addLayout(btn_row)
-
-        # 进度条
-        self._progress = QProgressBar()
-        self._progress.setVisible(False)
-        self._progress.setTextVisible(True)
-        self._progress.setMinimumHeight(20)
-        layout.addWidget(self._progress)
-
-        # 当前文件标签
-        self._current_file_label = QLabel("")
-        self._current_file_label.setObjectName("currentFileLabel")
-        self._current_file_label.setVisible(False)
-        layout.addWidget(self._current_file_label)
-
-        # 统计标签
-        self._stats_label = QLabel("就绪")
-        self._stats_label.setObjectName("statsLabel")
-        layout.addWidget(self._stats_label)
-
-        return container
-
-    def _build_scan_mode_row(self) -> QHBoxLayout:
-        """构造扫描模式选择行：三张卡片按钮 + 盘符下拉。"""
-        mode_row = QHBoxLayout()
-        mode_row.setSpacing(8)
-
-        self._mode_btn_group = QButtonGroup(self)
-        self._mode_btn_group.setExclusive(True)
-
-        self._full_btn = QPushButton("全盘扫描\n扫描所有盘符")
-        self._full_btn.setCheckable(True)
-        self._full_btn.setObjectName("modeCard")
-        self._full_btn.setCursor(Qt.PointingHandCursor)
-
-        self._drive_btn = QPushButton("选择盘符\n扫描指定盘符")
-        self._drive_btn.setCheckable(True)
-        self._drive_btn.setObjectName("modeCard")
-        self._drive_btn.setCursor(Qt.PointingHandCursor)
-
-        self._folder_btn = QPushButton("选择文件夹\n扫描指定目录")
-        self._folder_btn.setCheckable(True)
-        self._folder_btn.setObjectName("modeCard")
-        self._folder_btn.setCursor(Qt.PointingHandCursor)
-        self._folder_btn.setChecked(True)
-
-        self._mode_btn_group.addButton(self._full_btn, 0)
-        self._mode_btn_group.addButton(self._drive_btn, 1)
-        self._mode_btn_group.addButton(self._folder_btn, 2)
-        self._mode_btn_group.buttonClicked.connect(self._on_scan_mode_changed)
-
-        mode_row.addWidget(self._full_btn)
-        mode_row.addWidget(self._drive_btn)
-        mode_row.addWidget(self._folder_btn)
-        mode_row.addStretch()
-
-        self._drive_label = QLabel("盘符:")
-        self._drive_combo = QComboBox()
-        self._drive_combo.setToolTip("选择要扫描的盘符")
-        self._drive_combo.setMinimumWidth(80)
-        self._drive_combo.currentIndexChanged.connect(self._on_drive_selected)
-        self._refresh_drive_combo()
-        mode_row.addWidget(self._drive_label)
-        mode_row.addWidget(self._drive_combo)
-
-        return mode_row
-
-    def _build_target_row(self) -> QWidget:
-        """构造目标路径行（仅 folder 模式可见）。"""
-        self._target_row = QWidget()
-        target_layout = QHBoxLayout(self._target_row)
-        target_layout.setContentsMargins(0, 0, 0, 0)
-        self._path_label = QLabel("扫描路径:")
-        self._path_combo = QComboBox()
-        self._path_combo.setToolTip("扫描路径（可从历史记录中选择）")
-        self._path_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._path_combo.currentIndexChanged.connect(self._on_path_selected)
-        self._select_path_btn = QPushButton("选择路径...")
-        self._select_path_btn.clicked.connect(self._on_select_path)
-        target_layout.addWidget(self._path_label)
-        target_layout.addWidget(self._path_combo, stretch=1)
-        target_layout.addWidget(self._select_path_btn)
-        return self._target_row
-
-    def _build_rules_row(self) -> QHBoxLayout:
-        """构造规则加载行。"""
-        self._load_rules_btn = QPushButton("加载规则...")
-        self._load_rules_btn.clicked.connect(self._on_load_rules)
-        self._rules_label = QLabel("规则: 未加载")
-        self._rules_label.setStyleSheet("padding: 4px;")
-        self._use_builtin_checkbox = QCheckBox("使用通用规则")
-        self._use_builtin_checkbox.setChecked(True)
-        self._use_builtin_checkbox.setToolTip("勾选后加载软件内置通用规则，用户规则中同名规则会覆盖通用规则")
-        self._use_builtin_checkbox.stateChanged.connect(self._on_toggle_builtin)
-
-        rules_row = QHBoxLayout()
-        rules_row.addWidget(self._load_rules_btn)
-        rules_row.addWidget(self._rules_label, stretch=1)
-        rules_row.addWidget(self._use_builtin_checkbox)
-        return rules_row
-
-    def _build_body_splitter(self) -> QSplitter:
-        """构造主体分割器：左侧列表区 + 右侧详情区。"""
-        self._splitter = QSplitter(Qt.Horizontal)
-        list_area = self._build_list_area()
-        detail_area = self._build_detail_area()
-        # 水平 sizePolicy 设为 Ignored，让 QSplitter 按 stretchFactor/setSizes 分配，
-        # 而非按子部件 sizeHint 比例（两者 sizeHint 接近会导致 1:1 平分）
-        list_area.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        detail_area.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        self._splitter.addWidget(list_area)
-        self._splitter.addWidget(detail_area)
-        self._splitter.setStretchFactor(0, 2)
-        self._splitter.setStretchFactor(1, 3)
-        return self._splitter
-
-    def _build_list_area(self) -> QWidget:
-        """构造 ③ 列表区：QTabWidget + ⑤ 底部操作区。"""
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-
-        self._tab_widget = QTabWidget()
-        self._tab_widget.setObjectName("listTabs")
-        self._tab_widget.addTab(self._build_results_tab(), "扫描结果")
-        self._tab_widget.addTab(self._build_rules_tab(), "规则文件")
-        self._tab_widget.addTab(self._build_history_tab(), "扫描历史")
-        layout.addWidget(self._tab_widget, stretch=1)
-
-        layout.addWidget(self._build_list_action_bar())
-        return container
-
-    def _build_results_tab(self) -> QWidget:
-        """构造扫描结果 Tab：筛选栏 + 结果树。"""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-
-        layout.addWidget(self._build_result_filter_bar())
-
-        self._result_tree = QTreeWidget()
-        self._result_tree.setObjectName("resultTree")
-        self._result_tree.setHeaderLabels(["路径", "规则", "严重等级", "命中数", "详情"])
+    def _configure_ui(self) -> None:
+        """配置 .ui 无法静态表达的动态属性、QButtonGroup、layout stretch 与信号槽连接。"""
+        # 结果树列宽
         self._result_tree.setColumnWidth(0, 400)
         self._result_tree.setColumnWidth(1, 150)
         self._result_tree.setColumnWidth(2, 80)
         self._result_tree.setColumnWidth(3, 60)
-        self._result_tree.setAlternatingRowColors(True)
-        self._result_tree.setRootIsDecorated(True)
-        self._result_tree.setSortingEnabled(True)
-        self._result_tree.itemDoubleClicked.connect(self._on_result_double_clicked)
-        self._result_tree.itemSelectionChanged.connect(self._on_result_selection_changed)
-        layout.addWidget(self._result_tree, stretch=1)
-        return tab
 
-    def _build_result_filter_bar(self) -> QWidget:
-        """构造结果筛选栏：路径筛选 + 规则筛选 + 分组模式。"""
-        bar = QFrame()
-        bar.setObjectName("filterBar")
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(6)
-
-        layout.addWidget(QLabel("筛选:"))
-
-        self._path_filter_input = QLineEdit()
-        self._path_filter_input.setPlaceholderText("按路径筛选...")
-        self._path_filter_input.setClearButtonEnabled(True)
-        self._path_filter_input.textChanged.connect(self._refresh_result_tree)
-        layout.addWidget(self._path_filter_input, stretch=2)
-
-        layout.addWidget(QLabel("规则:"))
-        self._rule_filter_combo = QComboBox()
-        self._rule_filter_combo.addItem("全部规则", "")
-        self._rule_filter_combo.currentIndexChanged.connect(self._refresh_result_tree)
-        layout.addWidget(self._rule_filter_combo, stretch=1)
-
-        layout.addWidget(QLabel("分组:"))
-        self._group_mode_combo = QComboBox()
-        self._group_mode_combo.addItem("不分组", "flat")
-        self._group_mode_combo.addItem("按规则", "rule")
-        self._group_mode_combo.addItem("按严重等级", "severity")
-        self._group_mode_combo.currentIndexChanged.connect(self._refresh_result_tree)
-        layout.addWidget(self._group_mode_combo, stretch=1)
-
-        return bar
-
-    def _build_rules_tab(self) -> QWidget:
-        """构造规则文件 Tab：规则文件列表 + 排序按钮 + 规则树。"""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-
-        layout.addWidget(QLabel("规则文件（顺序从上到下，后者覆盖前者）"))
-
-        self._rules_file_list = QListWidget()
-        self._rules_file_list.setToolTip("已加载的规则文件，列表顺序代表优先级（从低到高）")
-        layout.addWidget(self._rules_file_list)
-
-        btn_layout = QHBoxLayout()
-        self._move_up_btn = QPushButton("上移")
-        self._move_up_btn.setToolTip("将选中的规则文件上移（优先级降低）")
-        self._move_up_btn.clicked.connect(self._on_move_rule_up)
-        self._move_down_btn = QPushButton("下移")
-        self._move_down_btn.setToolTip("将选中的规则文件下移（优先级升高）")
-        self._move_down_btn.clicked.connect(self._on_move_rule_down)
-        self._remove_rule_btn = QPushButton("移除")
-        self._remove_rule_btn.setToolTip("移除选中的规则文件")
-        self._remove_rule_btn.clicked.connect(self._on_remove_rule)
-        self._edit_rule_btn = QPushButton("编辑")
-        self._edit_rule_btn.setToolTip("编辑选中的规则文件")
-        self._edit_rule_btn.clicked.connect(self._on_edit_rules)
-        btn_layout.addWidget(self._move_up_btn)
-        btn_layout.addWidget(self._move_down_btn)
-        btn_layout.addWidget(self._remove_rule_btn)
-        btn_layout.addWidget(self._edit_rule_btn)
-        layout.addLayout(btn_layout)
-
-        self._rules_tree = QTreeWidget()
-        self._rules_tree.setHeaderLabels(["规则名", "严重等级", "扩展名"])
-        self._rules_tree.setRootIsDecorated(False)
-        layout.addWidget(self._rules_tree, stretch=1)
-        return tab
-
-    def _build_history_tab(self) -> QWidget:
-        """构造扫描历史 Tab：历史路径列表。"""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-
-        layout.addWidget(QLabel("扫描历史（最近优先）"))
-        self._history_list = QListWidget()
-        self._history_list.setToolTip("最近扫描过的路径，双击可快速选择")
-        self._history_list.itemDoubleClicked.connect(self._on_history_item_double_clicked)
-        layout.addWidget(self._history_list, stretch=1)
-        return tab
-
-    def _build_list_action_bar(self) -> QWidget:
-        """构造 ⑤ 底部操作区：备注输入框 + 按钮组。"""
-        bar = QFrame()
-        bar.setObjectName("listActionBar")
-        layout = QVBoxLayout(bar)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(4)
-
-        # 备注输入框
-        self._note_edit = QPlainTextEdit()
-        self._note_edit.setObjectName("noteEdit")
-        self._note_edit.setPlaceholderText("备注/批注/导出说明...")
-        self._note_edit.setMaximumHeight(80)
-        layout.addWidget(self._note_edit)
-
-        # 按钮组：辅助操作靠左，主操作靠右
-        btn_row = QHBoxLayout()
-        self._batch_btn = QPushButton("批量处理")
-        self._batch_btn.setObjectName("batchBtn")
-        self._batch_btn.setToolTip("对选中项批量处理（预留）")
-        self._batch_btn.clicked.connect(self._on_batch_process)
-        self._batch_btn.setEnabled(False)
-        btn_row.addWidget(self._batch_btn)
-        btn_row.addStretch()
-
-        self._export_btn = QPushButton("导出结果")
-        self._export_btn.setObjectName("exportBtn")
-        self._export_btn.setToolTip("导出扫描结果到文件")
-        self._export_btn.clicked.connect(self._on_export_menu)
-        self._export_btn.setEnabled(False)
-        btn_row.addWidget(self._export_btn)
-        layout.addLayout(btn_row)
-        return bar
-
-    def _build_detail_area(self) -> QWidget:
-        """构造 ④ 详情区：操作栏（QStackedWidget 两态）+ 主体（QStackedWidget 两态）。"""
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-
-        # 操作栏：QStackedWidget 持久化空态/非空态两页面
-        self._detail_action_stack = QStackedWidget()
-        self._detail_action_stack.setObjectName("detailActionBar")
-        self._detail_action_stack.addWidget(self._build_detail_empty_action())
-        self._detail_action_stack.addWidget(self._build_detail_nonempty_action())
-        layout.addWidget(self._detail_action_stack)
-
-        # 主体：QStackedWidget 持久化空态/非空态两页面
-        self._detail_main_stack = QStackedWidget()
-        self._detail_main_stack.setObjectName("detailMain")
-        self._detail_main_stack.addWidget(self._build_detail_empty_main())
-        self._detail_main_stack.addWidget(self._build_detail_nonempty_main())
-        layout.addWidget(self._detail_main_stack, stretch=1)
-        return container
-
-    def _build_detail_empty_action(self) -> QWidget:
-        """详情区操作栏空态页：全局操作引导。"""
-        bar = QFrame()
-        bar.setObjectName("detailEmptyAction")
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(6)
-
-        layout.addWidget(QLabel("详情操作:"))
-        hint = QLabel("未选中任何项")
-        hint.setStyleSheet("color: #586069;")
-        layout.addWidget(hint)
-        layout.addStretch()
-
-        self._detail_start_btn = QPushButton("开始扫描")
-        self._detail_start_btn.setObjectName("detailStartBtn")
-        self._detail_start_btn.setToolTip("开始扫描（需先选择目标与规则）")
-        self._detail_start_btn.clicked.connect(self._on_scan)
-        layout.addWidget(self._detail_start_btn)
-
-        self._detail_load_rules_btn = QPushButton("加载规则")
-        self._detail_load_rules_btn.setObjectName("detailLoadRulesBtn")
-        self._detail_load_rules_btn.setToolTip("加载规则文件")
-        self._detail_load_rules_btn.clicked.connect(self._on_load_rules)
-        layout.addWidget(self._detail_load_rules_btn)
-
-        self._detail_view_history_btn = QPushButton("查看历史")
-        self._detail_view_history_btn.setObjectName("detailViewHistoryBtn")
-        self._detail_view_history_btn.setToolTip("切换到扫描历史视图")
-        self._detail_view_history_btn.clicked.connect(self._on_view_history)
-        layout.addWidget(self._detail_view_history_btn)
-        return bar
-
-    def _build_detail_nonempty_action(self) -> QWidget:
-        """详情区操作栏非空态页：针对具体详情的操作。"""
-        bar = QFrame()
-        bar.setObjectName("detailNonemptyAction")
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(6)
-
-        self._detail_locate_btn = QPushButton("定位命中")
-        self._detail_locate_btn.setObjectName("detailLocateBtn")
-        self._detail_locate_btn.setToolTip("滚动到当前命中位置")
-        self._detail_locate_btn.clicked.connect(self._on_locate_hit)
-        layout.addWidget(self._detail_locate_btn)
-
-        self._detail_prev_btn = QPushButton("上一条")
-        self._detail_prev_btn.setObjectName("detailPrevBtn")
-        self._detail_prev_btn.setToolTip("跳转到上一个命中位置")
-        self._detail_prev_btn.clicked.connect(self._on_prev_detail_hit)
-        layout.addWidget(self._detail_prev_btn)
-
-        self._detail_next_btn = QPushButton("下一条")
-        self._detail_next_btn.setObjectName("detailNextBtn")
-        self._detail_next_btn.setToolTip("跳转到下一个命中位置")
-        self._detail_next_btn.clicked.connect(self._on_next_detail_hit)
-        layout.addWidget(self._detail_next_btn)
-
-        self._detail_nav_label = QLabel("0 / 0")
-        self._detail_nav_label.setObjectName("detailNavLabel")
-        layout.addWidget(self._detail_nav_label)
-
-        layout.addStretch()
-
-        self._detail_open_location_btn = QPushButton("打开文件位置")
-        self._detail_open_location_btn.setObjectName("detailOpenLocationBtn")
-        self._detail_open_location_btn.setToolTip("在文件管理器中打开所在目录")
-        self._detail_open_location_btn.clicked.connect(self._on_open_file_location)
-        layout.addWidget(self._detail_open_location_btn)
-
-        self._detail_copy_path_btn = QPushButton("复制路径")
-        self._detail_copy_path_btn.setObjectName("detailCopyPathBtn")
-        self._detail_copy_path_btn.setToolTip("复制文件路径到剪贴板")
-        self._detail_copy_path_btn.clicked.connect(self._on_copy_path)
-        layout.addWidget(self._detail_copy_path_btn)
-
-        self._detail_open_window_btn = QPushButton("在新窗口打开")
-        self._detail_open_window_btn.setObjectName("detailOpenWindowBtn")
-        self._detail_open_window_btn.setToolTip("弹出独立对话框查看完整详情")
-        self._detail_open_window_btn.clicked.connect(self._on_open_in_window)
-        layout.addWidget(self._detail_open_window_btn)
-        return bar
-
-    def _build_detail_empty_main(self) -> QWidget:
-        """详情区主体空态页：引导文案。"""
-        container = QFrame()
-        container.setObjectName("detailEmptyMain")
-        layout = QVBoxLayout(container)
-        layout.setAlignment(Qt.AlignCenter)
-        hint = QLabel("未选中任何项\n请先开始扫描或在左侧列表选择一项")
-        hint.setAlignment(Qt.AlignCenter)
-        hint.setStyleSheet("color: #586069; font-size: 13px;")
-        layout.addWidget(hint)
-        return container
-
-    def _build_detail_nonempty_main(self) -> QWidget:
-        """详情区主体非空态页：文件信息 + 命中表 + 内容预览 + 命中导航。"""
-        container = QFrame()
-        container.setObjectName("detailNonemptyMain")
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(6)
-
-        # 文件信息区
-        self._detail_info_label = QLabel()
-        self._detail_info_label.setTextFormat(Qt.RichText)
-        self._detail_info_label.setWordWrap(True)
-        self._detail_info_label.setStyleSheet(
-            "padding: 8px; background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 4px;"
-        )
-        layout.addWidget(self._detail_info_label)
-
-        # 命中规则表
-        layout.addWidget(QLabel("命中规则:"))
-        self._detail_hits_table = QTableWidget()
-        self._detail_hits_table.setObjectName("detailHitsTable")
-        self._detail_hits_table.setColumnCount(3)
-        self._detail_hits_table.setHorizontalHeaderLabels(["规则名", "严重等级", "详情"])
+        # 详情区命中表
         self._detail_hits_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self._detail_hits_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._detail_hits_table.setSelectionBehavior(QTableWidget.SelectRows)
-        layout.addWidget(self._detail_hits_table, stretch=1)
 
-        # 内容预览
-        layout.addWidget(QLabel("内容预览 (关键词高亮):"))
-        self._detail_preview = QTextEdit()
-        self._detail_preview.setObjectName("detailPreview")
-        self._detail_preview.setReadOnly(True)
-        layout.addWidget(self._detail_preview, stretch=2)
-        return container
+        # QButtonGroup：扫描模式按钮组（.ui 不支持）
+        self._mode_btn_group = QButtonGroup(self)
+        self._mode_btn_group.setExclusive(True)
+        self._mode_btn_group.addButton(self._full_btn, 0)
+        self._mode_btn_group.addButton(self._drive_btn, 1)
+        self._mode_btn_group.addButton(self._folder_btn, 2)
 
-    def _init_menu(self) -> None:
-        """初始化菜单栏：文件/扫描/视图/帮助。"""
-        menubar = self.menuBar()
+        # QComboBox 初始项
+        self._rule_filter_combo.addItem("全部规则", "")
+        self._group_mode_combo.addItem("不分组", "flat")
+        self._group_mode_combo.addItem("按规则", "rule")
+        self._group_mode_combo.addItem("按严重等级", "severity")
 
-        # 文件菜单
-        file_menu = menubar.addMenu(self.tr("文件(&F)"))
-        self._load_rules_action = QAction(self.tr("加载规则..."), self)
-        self._load_rules_action.setShortcut("Ctrl+O")
+        # QSplitter 伸缩比例（左:右 = 2:3）
+        self._splitter.setStretchFactor(0, 2)
+        self._splitter.setStretchFactor(1, 3)
+
+        # layout 伸缩因子（.ui 不支持 stretch vector）
+        ui = self._ui
+        ui.central_layout.setStretch(0, 0)
+        ui.central_layout.setStretch(1, 1)
+        ui.target_layout.setStretch(0, 0)
+        ui.target_layout.setStretch(1, 1)
+        ui.target_layout.setStretch(2, 0)
+        ui.rules_row.setStretch(0, 0)
+        ui.rules_row.setStretch(1, 1)
+        ui.rules_row.setStretch(2, 0)
+        ui.scan_btn_row.setStretch(0, 3)
+        ui.scan_btn_row.setStretch(1, 1)
+        ui.list_layout.setStretch(0, 1)
+        ui.list_layout.setStretch(1, 0)
+        ui.results_layout.setStretch(0, 0)
+        ui.results_layout.setStretch(1, 1)
+        ui.filter_layout.setStretch(0, 0)
+        ui.filter_layout.setStretch(1, 2)
+        ui.filter_layout.setStretch(2, 0)
+        ui.filter_layout.setStretch(3, 1)
+        ui.filter_layout.setStretch(4, 0)
+        ui.filter_layout.setStretch(5, 1)
+        ui.rules_tab_layout.setStretch(0, 0)
+        ui.rules_tab_layout.setStretch(1, 0)
+        ui.rules_tab_layout.setStretch(2, 0)
+        ui.rules_tab_layout.setStretch(3, 1)
+        ui.history_layout.setStretch(0, 0)
+        ui.history_layout.setStretch(1, 1)
+        ui.detail_layout.setStretch(0, 0)
+        ui.detail_layout.setStretch(1, 1)
+        ui.detail_nonempty_main_layout.setStretch(0, 0)
+        ui.detail_nonempty_main_layout.setStretch(1, 0)
+        ui.detail_nonempty_main_layout.setStretch(2, 1)
+        ui.detail_nonempty_main_layout.setStretch(3, 0)
+        ui.detail_nonempty_main_layout.setStretch(4, 2)
+
+        # 信号槽连接
+        self._scan_btn.clicked.connect(self._on_scan)
+        self._stop_btn.clicked.connect(self._on_stop)
+        self._mode_btn_group.buttonClicked.connect(self._on_scan_mode_changed)
+        self._drive_combo.currentIndexChanged.connect(self._on_drive_selected)
+        self._path_combo.currentIndexChanged.connect(self._on_path_selected)
+        self._select_path_btn.clicked.connect(self._on_select_path)
+        self._load_rules_btn.clicked.connect(self._on_load_rules)
+        self._use_builtin_checkbox.stateChanged.connect(self._on_toggle_builtin)
+        self._result_tree.itemDoubleClicked.connect(self._on_result_double_clicked)
+        self._result_tree.itemSelectionChanged.connect(self._on_result_selection_changed)
+        self._path_filter_input.textChanged.connect(self._refresh_result_tree)
+        self._rule_filter_combo.currentIndexChanged.connect(self._refresh_result_tree)
+        self._group_mode_combo.currentIndexChanged.connect(self._refresh_result_tree)
+        self._move_up_btn.clicked.connect(self._on_move_rule_up)
+        self._move_down_btn.clicked.connect(self._on_move_rule_down)
+        self._remove_rule_btn.clicked.connect(self._on_remove_rule)
+        self._edit_rule_btn.clicked.connect(self._on_edit_rules)
+        self._history_list.itemDoubleClicked.connect(self._on_history_item_double_clicked)
+        self._batch_btn.clicked.connect(self._on_batch_process)
+        self._export_btn.clicked.connect(self._on_export_menu)
+        self._detail_start_btn.clicked.connect(self._on_scan)
+        self._detail_load_rules_btn.clicked.connect(self._on_load_rules)
+        self._detail_view_history_btn.clicked.connect(self._on_view_history)
+        self._detail_locate_btn.clicked.connect(self._on_locate_hit)
+        self._detail_prev_btn.clicked.connect(self._on_prev_detail_hit)
+        self._detail_next_btn.clicked.connect(self._on_next_detail_hit)
+        self._detail_open_location_btn.clicked.connect(self._on_open_file_location)
+        self._detail_copy_path_btn.clicked.connect(self._on_copy_path)
+        self._detail_open_window_btn.clicked.connect(self._on_open_in_window)
+
+        # actions 信号槽
         self._load_rules_action.triggered.connect(self._on_load_rules)
-        file_menu.addAction(self._load_rules_action)
-
-        self._edit_rules_action = QAction(self.tr("编辑规则..."), self)
-        self._edit_rules_action.setShortcut("Ctrl+E")
         self._edit_rules_action.triggered.connect(self._on_edit_rules)
-        file_menu.addAction(self._edit_rules_action)
-
-        file_menu.addSeparator()
-
-        self._export_csv_action = QAction(self.tr("导出 CSV..."), self)
-        self._export_csv_action.setShortcut("Ctrl+S")
         self._export_csv_action.triggered.connect(lambda: self._on_export("csv"))
-        file_menu.addAction(self._export_csv_action)
-
-        self._export_json_action = QAction(self.tr("导出 JSON..."), self)
-        self._export_json_action.setShortcut("Ctrl+Shift+S")
         self._export_json_action.triggered.connect(lambda: self._on_export("json"))
-        file_menu.addAction(self._export_json_action)
-
-        file_menu.addSeparator()
-
-        quit_action = QAction(self.tr("退出(&Q)"), self)
-        quit_action.setShortcut("Ctrl+Q")
-        quit_action.triggered.connect(self.close)
-        file_menu.addAction(quit_action)
-
-        # 扫描菜单
-        scan_menu = menubar.addMenu(self.tr("扫描(&S)"))
-        select_path_action = QAction(self.tr("选择扫描路径..."), self)
-        select_path_action.triggered.connect(self._on_select_path)
-        scan_menu.addAction(select_path_action)
-
-        self._scan_action = QAction(self.tr("开始扫描"), self)
-        self._scan_action.setShortcut("F5")
+        self._ui.quit_action.triggered.connect(self.close)
+        self._ui.select_path_action.triggered.connect(self._on_select_path)
         self._scan_action.triggered.connect(self._on_scan)
-        scan_menu.addAction(self._scan_action)
-
-        self._stop_action = QAction(self.tr("停止扫描"), self)
-        self._stop_action.setShortcut("Esc")
         self._stop_action.triggered.connect(self._on_stop)
-        scan_menu.addAction(self._stop_action)
-
-        # 视图菜单
-        view_menu = menubar.addMenu(self.tr("视图(&V)"))
-        self._view_results_action = QAction(self.tr("切换到扫描结果"), self)
-        self._view_results_action.setShortcut("Ctrl+1")
         self._view_results_action.triggered.connect(lambda: self._switch_tab(0))
-        view_menu.addAction(self._view_results_action)
-
-        self._view_rules_action = QAction(self.tr("切换到规则文件"), self)
-        self._view_rules_action.setShortcut("Ctrl+2")
         self._view_rules_action.triggered.connect(lambda: self._switch_tab(1))
-        view_menu.addAction(self._view_rules_action)
-
-        self._view_history_action = QAction(self.tr("切换到扫描历史"), self)
-        self._view_history_action.setShortcut("Ctrl+3")
         self._view_history_action.triggered.connect(lambda: self._switch_tab(2))
-        view_menu.addAction(self._view_history_action)
-
-        # 帮助菜单
-        help_menu = menubar.addMenu(self.tr("帮助(&H)"))
-        about_action = QAction(self.tr("关于"), self)
-        about_action.triggered.connect(self._on_about)
-        help_menu.addAction(about_action)
-
-    def _init_toolbar(self) -> None:
-        """工具栏与菜单复用 action。"""
-        toolbar = self.addToolBar(self.tr("主工具栏"))
-        toolbar.addAction(self._scan_action)
-        toolbar.addAction(self._load_rules_action)
-        toolbar.addAction(self._export_csv_action)
+        self._ui.about_action.triggered.connect(self._on_about)
 
     def _switch_tab(self, index: int) -> None:
         """切换列表区 Tab 视图。"""
@@ -748,231 +352,6 @@ class MainWindow(QMainWindow):
     def _on_view_history(self) -> None:
         """切换到扫描历史视图。"""
         self._switch_tab(2)
-
-    def _apply_qss(self) -> None:
-        """应用 GitHub Desktop 风格样式表。
-
-        配色：背景 #f6f8fa、主色 #0366d6、危险色 #d73a49、边框 #e1e4e8。
-        字体层级：主操作按钮 14px > 列表项 13px > 详情正文 13px > 辅助说明 12px。
-        """
-        self.setStyleSheet(
-            """
-            QMainWindow, QWidget#central {
-                background: #f6f8fa;
-            }
-            QFrame#controlArea {
-                background: #ffffff;
-                border: 1px solid #e1e4e8;
-                border-radius: 6px;
-            }
-            QFrame#listActionBar, QFrame#detailEmptyAction, QFrame#detailNonemptyAction {
-                background: #ffffff;
-                border: 1px solid #e1e4e8;
-                border-radius: 6px;
-            }
-            QFrame#detailEmptyMain, QFrame#detailNonemptyMain {
-                background: #ffffff;
-                border: 1px solid #e1e4e8;
-                border-radius: 6px;
-            }
-            QPushButton#modeCard {
-                text-align: left;
-                padding: 12px 16px;
-                border: 2px solid #e1e4e8;
-                border-radius: 6px;
-                background: #ffffff;
-                font-size: 13px;
-                min-width: 110px;
-            }
-            QPushButton#modeCard:hover {
-                border-color: #0366d6;
-                background: #f1f8ff;
-            }
-            QPushButton#modeCard:checked {
-                border-color: #0366d6;
-                background: #0366d6;
-                color: white;
-                font-weight: bold;
-            }
-            QPushButton#scanBtn {
-                background: #0366d6;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-size: 14px;
-                font-weight: bold;
-                padding: 10px 24px;
-            }
-            QPushButton#scanBtn:hover {
-                background: #0256c1;
-            }
-            QPushButton#scanBtn:pressed {
-                background: #024a9c;
-            }
-            QPushButton#scanBtn:disabled {
-                background: #e1e4e8;
-                color: #ffffff;
-            }
-            QPushButton#stopBtn {
-                background: #d73a49;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-size: 13px;
-                font-weight: bold;
-                padding: 10px 20px;
-            }
-            QPushButton#stopBtn:hover {
-                background: #c12736;
-            }
-            QPushButton#stopBtn:pressed {
-                background: #a51e2b;
-            }
-            QPushButton#stopBtn:disabled {
-                background: #e1e4e8;
-                color: #ffffff;
-            }
-            QPushButton#exportBtn {
-                background: #0366d6;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-size: 13px;
-                font-weight: bold;
-                padding: 6px 16px;
-            }
-            QPushButton#exportBtn:hover {
-                background: #0256c1;
-            }
-            QPushButton#exportBtn:disabled {
-                background: #e1e4e8;
-                color: #ffffff;
-            }
-            QPushButton#detailStartBtn, QPushButton#detailLoadRulesBtn, QPushButton#detailViewHistoryBtn {
-                background: #ffffff;
-                color: #0366d6;
-                border: 1px solid #0366d6;
-                border-radius: 4px;
-                font-size: 13px;
-                padding: 6px 12px;
-            }
-            QPushButton#detailStartBtn:hover, QPushButton#detailLoadRulesBtn:hover, QPushButton#detailViewHistoryBtn:hover {
-                background: #f1f8ff;
-            }
-            QPushButton#detailPrevBtn, QPushButton#detailNextBtn,
-            QPushButton#detailLocateBtn, QPushButton#detailOpenLocationBtn,
-            QPushButton#detailCopyPathBtn, QPushButton#detailOpenWindowBtn,
-            QPushButton#batchBtn {
-                background: #ffffff;
-                color: #24292e;
-                border: 1px solid #e1e4e8;
-                border-radius: 4px;
-                font-size: 13px;
-                padding: 6px 12px;
-            }
-            QPushButton#detailPrevBtn:hover, QPushButton#detailNextBtn:hover,
-            QPushButton#detailLocateBtn:hover, QPushButton#detailOpenLocationBtn:hover,
-            QPushButton#detailCopyPathBtn:hover, QPushButton#detailOpenWindowBtn:hover,
-            QPushButton#batchBtn:hover {
-                background: #f6f8fa;
-                border-color: #0366d6;
-            }
-            QProgressBar {
-                border: 1px solid #e1e4e8;
-                border-radius: 4px;
-                text-align: center;
-                background: #f6f8fa;
-            }
-            QProgressBar::chunk {
-                background: #0366d6;
-                border-radius: 3px;
-            }
-            QLabel#currentFileLabel {
-                font-size: 12px;
-                color: #586069;
-                padding: 1px 4px;
-            }
-            QLabel#statsLabel {
-                font-size: 13px;
-                color: #24292e;
-                padding: 2px 4px;
-            }
-            QTreeWidget#resultTree {
-                font-size: 13px;
-                alternate-background-color: #f6f8fa;
-                background: #ffffff;
-                border: 1px solid #e1e4e8;
-                border-radius: 4px;
-            }
-            QTreeWidget#resultTree::item {
-                min-height: 22px;
-            }
-            QTreeWidget {
-                font-size: 13px;
-                background: #ffffff;
-                border: 1px solid #e1e4e8;
-                border-radius: 4px;
-            }
-            QListWidget {
-                font-size: 13px;
-                background: #ffffff;
-                border: 1px solid #e1e4e8;
-                border-radius: 4px;
-            }
-            QTabWidget::pane {
-                border: 1px solid #e1e4e8;
-                border-radius: 4px;
-                background: #ffffff;
-            }
-            QTabBar::tab {
-                background: #f6f8fa;
-                color: #24292e;
-                padding: 6px 12px;
-                border: 1px solid #e1e4e8;
-                border-bottom: none;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                font-size: 13px;
-            }
-            QTabBar::tab:selected {
-                background: #ffffff;
-                color: #0366d6;
-                font-weight: bold;
-            }
-            QTabBar::tab:hover:!selected {
-                background: #e1e4e8;
-            }
-            QPlainTextEdit#noteEdit {
-                background: #ffffff;
-                border: 1px solid #e1e4e8;
-                border-radius: 4px;
-                font-size: 13px;
-            }
-            QTextEdit#detailPreview {
-                background: #ffffff;
-                border: 1px solid #e1e4e8;
-                border-radius: 4px;
-                font-size: 13px;
-            }
-            QTableWidget#detailHitsTable {
-                background: #ffffff;
-                border: 1px solid #e1e4e8;
-                border-radius: 4px;
-                font-size: 13px;
-            }
-            QLabel#detailNavLabel {
-                font-size: 12px;
-                color: #586069;
-                padding: 0 8px;
-            }
-            QSplitter::handle {
-                background: #e1e4e8;
-            }
-            QSplitter::handle:horizontal {
-                width: 2px;
-            }
-            """
-        )
 
     # ----------------------------- 配置持久化 -----------------------------
 

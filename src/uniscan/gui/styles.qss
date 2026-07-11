@@ -1,0 +1,287 @@
+/* uniscan GUI 样式表（GitHub Desktop 风格）。
+ *
+ * 配色：背景 #f6f8fa、主色 #0366d6、危险色 #d73a49、边框 #e1e4e8。
+ * 字体层级：主操作按钮 14px > 列表项 13px > 详情正文 13px > 辅助说明 12px。
+ * 由 app.py 的 launch() 加载并应用到 QApplication。
+ */
+
+QMainWindow, QWidget#central {
+    background: #f6f8fa;
+}
+
+QFrame#control_area {
+    background: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+}
+
+QFrame#list_action_bar, QFrame#detail_empty_action, QFrame#detail_nonempty_action {
+    background: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+}
+
+QFrame#detail_empty_main, QFrame#detail_nonempty_main {
+    background: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+}
+
+QPushButton#full_btn, QPushButton#drive_btn, QPushButton#folder_btn {
+    text-align: left;
+    padding: 12px 16px;
+    border: 2px solid #e1e4e8;
+    border-radius: 6px;
+    background: #ffffff;
+    font-size: 13px;
+    min-width: 110px;
+}
+
+QPushButton#full_btn:hover, QPushButton#drive_btn:hover, QPushButton#folder_btn:hover {
+    border-color: #0366d6;
+    background: #f1f8ff;
+}
+
+QPushButton#full_btn:checked, QPushButton#drive_btn:checked, QPushButton#folder_btn:checked {
+    border-color: #0366d6;
+    background: #0366d6;
+    color: white;
+    font-weight: bold;
+}
+
+QPushButton#scan_btn {
+    background: #0366d6;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 10px 24px;
+}
+
+QPushButton#scan_btn:hover {
+    background: #0256c1;
+}
+
+QPushButton#scan_btn:pressed {
+    background: #024a9c;
+}
+
+QPushButton#scan_btn:disabled {
+    background: #e1e4e8;
+    color: #ffffff;
+}
+
+QPushButton#stop_btn {
+    background: #d73a49;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: bold;
+    padding: 10px 20px;
+}
+
+QPushButton#stop_btn:hover {
+    background: #c12736;
+}
+
+QPushButton#stop_btn:pressed {
+    background: #a51e2b;
+}
+
+QPushButton#stop_btn:disabled {
+    background: #e1e4e8;
+    color: #ffffff;
+}
+
+QPushButton#export_btn {
+    background: #0366d6;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: bold;
+    padding: 6px 16px;
+}
+
+QPushButton#export_btn:hover {
+    background: #0256c1;
+}
+
+QPushButton#export_btn:disabled {
+    background: #e1e4e8;
+    color: #ffffff;
+}
+
+QPushButton#detail_start_btn, QPushButton#detail_load_rules_btn, QPushButton#detail_view_history_btn {
+    background: #ffffff;
+    color: #0366d6;
+    border: 1px solid #0366d6;
+    border-radius: 4px;
+    font-size: 13px;
+    padding: 6px 12px;
+}
+
+QPushButton#detail_start_btn:hover, QPushButton#detail_load_rules_btn:hover, QPushButton#detail_view_history_btn:hover {
+    background: #f1f8ff;
+}
+
+QPushButton#detail_prev_btn, QPushButton#detail_next_btn,
+QPushButton#detail_locate_btn, QPushButton#detail_open_location_btn,
+QPushButton#detail_copy_path_btn, QPushButton#detail_open_window_btn,
+QPushButton#batch_btn {
+    background: #ffffff;
+    color: #24292e;
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+    font-size: 13px;
+    padding: 6px 12px;
+}
+
+QPushButton#detail_prev_btn:hover, QPushButton#detail_next_btn:hover,
+QPushButton#detail_locate_btn:hover, QPushButton#detail_open_location_btn:hover,
+QPushButton#detail_copy_path_btn:hover, QPushButton#detail_open_window_btn:hover,
+QPushButton#batch_btn:hover {
+    background: #f6f8fa;
+    border-color: #0366d6;
+}
+
+QProgressBar {
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+    text-align: center;
+    background: #f6f8fa;
+}
+
+QProgressBar::chunk {
+    background: #0366d6;
+    border-radius: 3px;
+}
+
+QLabel#current_file_label {
+    font-size: 12px;
+    color: #586069;
+    padding: 1px 4px;
+}
+
+QLabel#stats_label {
+    font-size: 13px;
+    color: #24292e;
+    padding: 2px 4px;
+}
+
+QTreeWidget#result_tree {
+    font-size: 13px;
+    alternate-background-color: #f6f8fa;
+    background: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+}
+
+QTreeWidget#result_tree::item {
+    min-height: 22px;
+}
+
+QTreeWidget {
+    font-size: 13px;
+    background: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+}
+
+QListWidget {
+    font-size: 13px;
+    background: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+}
+
+QTabWidget::pane {
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+    background: #ffffff;
+}
+
+QTabBar::tab {
+    background: #f6f8fa;
+    color: #24292e;
+    padding: 6px 12px;
+    border: 1px solid #e1e4e8;
+    border-bottom: none;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    font-size: 13px;
+}
+
+QTabBar::tab:selected {
+    background: #ffffff;
+    color: #0366d6;
+    font-weight: bold;
+}
+
+QTabBar::tab:hover:!selected {
+    background: #e1e4e8;
+}
+
+QPlainTextEdit#note_edit {
+    background: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+QTextEdit#detail_preview {
+    background: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+QTableWidget#detail_hits_table {
+    background: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+QLabel#detail_nav_label {
+    font-size: 12px;
+    color: #586069;
+    padding: 0 8px;
+}
+
+QSplitter::handle {
+    background: #e1e4e8;
+}
+
+QSplitter::handle:horizontal {
+    width: 2px;
+}
+
+/* HitDetailDialog 样式 */
+QLabel#hit_info_label {
+    padding: 8px;
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+}
+
+QTextEdit#hit_preview {
+    background: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+QTableWidget#hit_hits_table {
+    background: #ffffff;
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+/* RuleEditorDialog 样式 */
+QTextEdit#rule_editor {
+    font-family: Consolas, 'Courier New', monospace;
+    font-size: 13px;
+}

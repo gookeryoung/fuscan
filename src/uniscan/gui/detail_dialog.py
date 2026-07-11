@@ -11,22 +11,18 @@ import logging
 import re
 from typing import List, Optional, Sequence, Set
 
-from PySide2.QtCore import Qt
 from PySide2.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide2.QtWidgets import (
     QDialog,
-    QHBoxLayout,
     QHeaderView,
-    QLabel,
-    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
-    QVBoxLayout,
     QWidget,
 )
 
 from uniscan.extractors import extract_content
+from uniscan.gui.detail_dialog_ui import Ui_HitDetailDialog
 from uniscan.scanner.result import RuleHit, ScanResult
 
 __all__ = ["HitDetailDialog"]
@@ -113,65 +109,45 @@ class HitDetailDialog(QDialog):
     def __init__(self, result: ScanResult, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._result = result
-        self.setWindowTitle("命中详情")
-        self.resize(800, 600)
+        self._ui = Ui_HitDetailDialog()
+        self._ui.setupUi(self)
         self._hit_positions: list[tuple[int, int]] = []
         self._current_hit_index: int = -1
-        self._init_ui()
+        self._bind_widgets()
+        self._configure_ui()
         self._populate_file_info()
         self._populate_hits_table()
         self._populate_preview()
 
-    def _init_ui(self) -> None:
-        """初始化对话框布局。"""
-        layout = QVBoxLayout(self)
+    def _bind_widgets(self) -> None:
+        """将 Ui_HitDetailDialog 的部件绑定到本类私有属性，保持业务逻辑兼容。"""
+        ui = self._ui
+        self._info_label = ui.info_label
+        self._hits_table = ui.hits_table
+        self._preview = ui.preview
+        self._prev_btn = ui.prev_btn
+        self._next_btn = ui.next_btn
+        self._nav_label = ui.nav_label
 
-        # 文件信息区
-        self._info_label = QLabel()
-        self._info_label.setTextFormat(Qt.RichText)
-        self._info_label.setWordWrap(True)
-        self._info_label.setStyleSheet("padding: 8px; background: #f5f5f5; border: 1px solid #ddd;")
-        layout.addWidget(self._info_label)
-
-        # 命中规则表
-        layout.addWidget(QLabel("命中规则:"))
-        self._hits_table = QTableWidget()
-        self._hits_table.setColumnCount(3)
-        self._hits_table.setHorizontalHeaderLabels(["规则名", "严重等级", "详情"])
+    def _configure_ui(self) -> None:
+        """配置 .ui 无法静态表达的动态属性与信号槽连接。"""
+        # 命中规则表：列头拉伸模式、只读、整行选择
         self._hits_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self._hits_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._hits_table.setSelectionBehavior(QTableWidget.SelectRows)
-        layout.addWidget(self._hits_table, stretch=1)
 
-        # 内容预览
-        layout.addWidget(QLabel("内容预览 (关键词高亮):"))
-        self._preview = QTextEdit()
-        self._preview.setReadOnly(True)
-        layout.addWidget(self._preview, stretch=2)
-
-        # 命中位置导航栏
-        nav_layout = QHBoxLayout()
-        nav_layout.addWidget(QLabel("命中定位:"))
-        self._prev_btn = QPushButton("上一个")
-        self._prev_btn.setToolTip("跳转到上一个命中位置")
+        # 命中导航按钮信号槽
         self._prev_btn.clicked.connect(self._on_prev_hit)
-        self._next_btn = QPushButton("下一个")
-        self._next_btn.setToolTip("跳转到下一个命中位置")
         self._next_btn.clicked.connect(self._on_next_hit)
-        self._nav_label = QLabel("0 / 0")
-        nav_layout.addWidget(self._prev_btn)
-        nav_layout.addWidget(self._next_btn)
-        nav_layout.addWidget(self._nav_label)
-        nav_layout.addStretch()
-        layout.addLayout(nav_layout)
 
-        # 底部按钮
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        close_btn = QPushButton("关闭")
-        close_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(close_btn)
-        layout.addLayout(btn_layout)
+        # 内容预览伸缩比例（预览区占更大空间）
+        self._ui.main_layout.setStretch(0, 0)
+        self._ui.main_layout.setStretch(1, 0)
+        self._ui.main_layout.setStretch(2, 1)
+        self._ui.main_layout.setStretch(3, 0)
+        self._ui.main_layout.setStretch(4, 2)
+        self._ui.main_layout.setStretch(5, 0)
+        self._ui.main_layout.setStretch(6, 0)
 
     def _populate_file_info(self) -> None:
         """填充文件元信息。"""

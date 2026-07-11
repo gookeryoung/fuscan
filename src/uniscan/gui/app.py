@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 from typing import Optional, Sequence
 
 from PySide2.QtWidgets import QApplication
@@ -16,6 +17,9 @@ from uniscan.gui.main_window import MainWindow
 __all__ = ["launch"]
 
 logger = logging.getLogger(__name__)
+
+# QSS 样式表路径（与本模块同目录）
+_QSS_PATH = Path(__file__).parent / "styles.qss"
 
 
 def launch(argv: Optional[Sequence[str]] = None) -> int:
@@ -28,10 +32,18 @@ def launch(argv: Optional[Sequence[str]] = None) -> int:
     app = QApplication.instance() or QApplication(args)
     app.setApplicationName("uniscan")
 
+    # 加载 GitHub Desktop 风格样式表
+    try:
+        app.setStyleSheet(_QSS_PATH.read_text(encoding="utf-8"))
+    except OSError:
+        logger.warning("加载样式表失败: %s", _QSS_PATH, exc_info=True)
+
     window = MainWindow()
     window.show()
 
-    return app.exec_()
+    # PySide2 用 exec_，PySide6 推荐 exec
+    run = app.exec if hasattr(app, "exec") else app.exec_
+    return run()
 
 
 if __name__ == "__main__":

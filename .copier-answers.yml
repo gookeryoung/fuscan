@@ -1,5 +1,5 @@
 # Changes here will be overwritten by Copier
-_commit: v0.2.4
+_commit: v0.4.2
 _src_path: https://github.com/gookeryoung/coopie
 author_email: gooker_young@qq.com
 author_name: gooker_young
@@ -11,6 +11,7 @@ max_python_version: '3.14'
 min_python_version: '3.8'
 package_name: uniscan
 project_name: uniscan
+project_type: gui
 use_cicd: true
 use_cli: true
 use_docker: false

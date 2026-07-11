@@ -13,7 +13,8 @@ classifiers = [
 ]
 
 dependencies = [
-    "PySide2>=5.14",
+    "PySide2>=5.15.2.1; python_version <= '3.10'",
+    "PySide6>=6.5.0; python_version >= '3.11'",
     "PyYAML>=6.0",
     "watchdog>=3.0.0",
     "python-docx>=1.1.0",

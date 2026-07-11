@@ -1819,7 +1819,7 @@ class TestScanMode:
     def test_folder_mode_shows_path_row(self, qapp: QApplication) -> None:
         """folder 模式下路径行可见，盘符下拉隐藏。"""
         window = MainWindow()
-        assert window._target_row.isVisible()
+        assert window._path_combo.isVisible()
         assert not window._drive_combo.isVisible()
         assert not window._drive_label.isVisible()
         window.close()
@@ -1830,7 +1830,7 @@ class TestScanMode:
         window._full_btn.setChecked(True)
         window._on_scan_mode_changed(window._full_btn)
         assert window._scan_mode == "full"
-        assert not window._target_row.isVisible()
+        assert not window._path_combo.isVisible()
         assert not window._drive_combo.isVisible()
         window.close()
 
@@ -1842,7 +1842,7 @@ class TestScanMode:
         assert window._scan_mode == "drive"
         assert window._drive_combo.isVisible()
         assert window._drive_label.isVisible()
-        assert not window._target_row.isVisible()
+        assert not window._path_combo.isVisible()
         window.close()
 
     def test_full_mode_enables_scan_without_path(self, qapp: QApplication) -> None:

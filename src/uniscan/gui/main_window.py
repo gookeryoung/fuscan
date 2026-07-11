@@ -30,7 +30,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Sequence
 
-from PySide2.QtCore import Qt
+from PySide2.QtCore import QSize, Qt
 from PySide2.QtGui import QColor, QIcon, QTextCharFormat, QTextCursor
 from PySide2.QtWidgets import (
     QApplication,
@@ -83,6 +83,11 @@ _ICON_SCAN = str(_ICONS_DIR / "scan.svg")
 _ICON_PAUSE = str(_ICONS_DIR / "pause.svg")
 _ICON_RESCAN = str(_ICONS_DIR / "rescan.svg")
 _ICON_STOP = str(_ICONS_DIR / "stop.svg")
+_ICON_ALL_DISK = str(_ICONS_DIR / "all_disk.svg")
+_ICON_DISK = str(_ICONS_DIR / "disk.svg")
+_ICON_FOLDER = str(_ICONS_DIR / "folder.svg")
+_ICON_HISTORY = str(_ICONS_DIR / "history.svg")
+_ICON_LOAD_LIST = str(_ICONS_DIR / "load_list.svg")
 
 
 def _format_size(size: int) -> str:
@@ -189,7 +194,6 @@ class MainWindow(QMainWindow):
         self._folder_btn = ui.folder_btn
         self._drive_label = ui.drive_label
         self._drive_combo = ui.drive_combo
-        self._target_row = ui.target_row
         self._path_label = ui.path_label
         self._path_combo = ui.path_combo
         self._select_path_btn = ui.select_path_btn
@@ -315,9 +319,35 @@ class MainWindow(QMainWindow):
         self._icon_pause = QIcon(_ICON_PAUSE)
         self._icon_rescan = QIcon(_ICON_RESCAN)
         self._icon_stop = QIcon(_ICON_STOP)
+        self._icon_all_disk = QIcon(_ICON_ALL_DISK)
+        self._icon_disk = QIcon(_ICON_DISK)
+        self._icon_folder = QIcon(_ICON_FOLDER)
+        self._icon_history = QIcon(_ICON_HISTORY)
+        self._icon_load_list = QIcon(_ICON_LOAD_LIST)
         self._scan_btn.setIcon(self._icon_scan)
         self._stop_btn.setIcon(self._icon_stop)
         self._detail_start_btn.setIcon(self._icon_scan)
+        # 扫描模式按钮图标
+        self._full_btn.setIcon(self._icon_all_disk)
+        self._drive_btn.setIcon(self._icon_disk)
+        self._folder_btn.setIcon(self._icon_folder)
+        self._full_btn.setIconSize(QSize(24, 24))
+        self._drive_btn.setIconSize(QSize(24, 24))
+        self._folder_btn.setIconSize(QSize(24, 24))
+        # 加载规则按钮图标
+        self._load_rules_btn.setIcon(self._icon_load_list)
+        self._detail_load_rules_btn.setIcon(self._icon_load_list)
+        self._load_rules_action.setIcon(self._icon_load_list)
+        # 历史记录按钮图标
+        self._detail_view_history_btn.setIcon(self._icon_history)
+        self._view_history_action.setIcon(self._icon_history)
+        # Tab 图标
+        self._tab_widget.setTabIcon(0, self._icon_scan)
+        self._tab_widget.setTabIcon(2, self._icon_history)
+        # 工具栏/菜单 actions 图标
+        self._scan_action.setIcon(self._icon_scan)
+        self._stop_action.setIcon(self._icon_stop)
+        self._ui.toolbar.setIconSize(QSize(20, 20))
 
         # 信号槽连接
         self._scan_btn.clicked.connect(self._on_scan)
@@ -535,7 +565,9 @@ class MainWindow(QMainWindow):
         is_folder = self._scan_mode == "folder"
         self._drive_label.setVisible(is_drive)
         self._drive_combo.setVisible(is_drive)
-        self._target_row.setVisible(is_folder)
+        self._path_label.setVisible(is_folder)
+        self._path_combo.setVisible(is_folder)
+        self._select_path_btn.setVisible(is_folder)
 
     def _refresh_drive_combo(self) -> None:
         """刷新盘符下拉列表。"""
@@ -637,6 +669,7 @@ class MainWindow(QMainWindow):
             icon = self._icon_scan
         self._scan_btn.setIcon(icon)
         self._detail_start_btn.setIcon(icon)
+        self._scan_action.setIcon(icon)
 
     def _on_scan(self) -> None:
         """扫描按钮：根据当前状态执行开始/暂停/继续。"""
@@ -1054,11 +1087,13 @@ class MainWindow(QMainWindow):
         if self._ruleset is None:
             return
         for rule in self._ruleset.rules:
-            item = QTreeWidgetItem([
-                rule.name,
-                rule.severity.value,
-                ", ".join(rule.file_extensions) if rule.file_extensions else "(全部)",
-            ])
+            item = QTreeWidgetItem(
+                [
+                    rule.name,
+                    rule.severity.value,
+                    ", ".join(rule.file_extensions) if rule.file_extensions else "(全部)",
+                ]
+            )
             self._rules_tree.addTopLevelItem(item)
 
     def _refresh_rules_file_list(self) -> None:
@@ -1218,23 +1253,27 @@ class MainWindow(QMainWindow):
     def _populate_flat(self, results: list[ScanResult]) -> None:
         """不分组：文件为顶层项，规则命中为子项。"""
         for sr in results:
-            file_item = QTreeWidgetItem([
-                str(sr.path),
-                "",
-                sr.max_severity.value,
-                str(len(sr.hits)),
-                f"{len(sr.hits)} 条命中",
-            ])
+            file_item = QTreeWidgetItem(
+                [
+                    str(sr.path),
+                    "",
+                    sr.max_severity.value,
+                    str(len(sr.hits)),
+                    f"{len(sr.hits)} 条命中",
+                ]
+            )
             file_item.setData(0, Qt.UserRole, sr)
             file_item.setTextAlignment(3, Qt.AlignCenter)
             for hit in sr.hits:
-                child = QTreeWidgetItem([
-                    "",
-                    hit.rule_name,
-                    hit.severity.value,
-                    "",
-                    hit.detail,
-                ])
+                child = QTreeWidgetItem(
+                    [
+                        "",
+                        hit.rule_name,
+                        hit.severity.value,
+                        "",
+                        hit.detail,
+                    ]
+                )
                 file_item.addChild(child)
             self._result_tree.addTopLevelItem(file_item)
 
@@ -1248,22 +1287,26 @@ class MainWindow(QMainWindow):
         for rule_name in sorted(rule_map.keys()):
             entries = rule_map[rule_name]
             hit_count = len(entries)
-            top = QTreeWidgetItem([
-                "",
-                rule_name,
-                "",
-                str(hit_count),
-                f"{hit_count} 个文件",
-            ])
+            top = QTreeWidgetItem(
+                [
+                    "",
+                    rule_name,
+                    "",
+                    str(hit_count),
+                    f"{hit_count} 个文件",
+                ]
+            )
             top.setTextAlignment(3, Qt.AlignCenter)
             for sr, hit in entries:
-                child = QTreeWidgetItem([
-                    str(sr.path),
-                    "",
-                    hit.severity.value,
-                    "",
-                    hit.detail,
-                ])
+                child = QTreeWidgetItem(
+                    [
+                        str(sr.path),
+                        "",
+                        hit.severity.value,
+                        "",
+                        hit.detail,
+                    ]
+                )
                 child.setData(0, Qt.UserRole, sr)
                 top.addChild(child)
             self._result_tree.addTopLevelItem(top)
@@ -1278,22 +1321,26 @@ class MainWindow(QMainWindow):
         for severity in sorted(severity_map.keys(), reverse=True):
             entries = severity_map[severity]
             file_count = len(entries)
-            top = QTreeWidgetItem([
-                "",
-                "",
-                severity,
-                str(file_count),
-                f"{file_count} 个文件",
-            ])
-            top.setTextAlignment(3, Qt.AlignCenter)
-            for sr in entries:
-                child = QTreeWidgetItem([
-                    str(sr.path),
+            top = QTreeWidgetItem(
+                [
+                    "",
                     "",
                     severity,
-                    str(len(sr.hits)),
-                    f"{len(sr.hits)} 条命中",
-                ])
+                    str(file_count),
+                    f"{file_count} 个文件",
+                ]
+            )
+            top.setTextAlignment(3, Qt.AlignCenter)
+            for sr in entries:
+                child = QTreeWidgetItem(
+                    [
+                        str(sr.path),
+                        "",
+                        severity,
+                        str(len(sr.hits)),
+                        f"{len(sr.hits)} 条命中",
+                    ]
+                )
                 child.setData(0, Qt.UserRole, sr)
                 child.setTextAlignment(3, Qt.AlignCenter)
                 top.addChild(child)

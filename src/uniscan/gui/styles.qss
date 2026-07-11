@@ -128,12 +128,12 @@ QFrame#detail_empty_main, QFrame#detail_nonempty_main {
 
 QPushButton#full_btn, QPushButton#drive_btn, QPushButton#folder_btn {
     text-align: left;
-    padding: 10px 16px;
+    padding: 10px 16px 10px 12px;
     border: 2px solid #e1e4e8;
     border-radius: 8px;
     background: #ffffff;
     font-size: 13px;
-    min-width: 110px;
+    min-width: 130px;
     color: #24292e;
 }
 

@@ -1817,33 +1817,33 @@ class TestScanMode:
         window.close()
 
     def test_folder_mode_shows_path_row(self, qapp: QApplication) -> None:
-        """folder 模式下路径行可见，盘符下拉隐藏。"""
+        """folder 模式下路径行可见，盘符按钮隐藏。"""
         window = MainWindow()
         window.show()
         qapp.processEvents()
         assert window._path_combo.isVisible()
-        assert not window._drive_combo.isVisible()
+        assert not window._drive_buttons_container.isVisible()
         window.close()
 
     def test_full_mode_hides_target_selectors(self, qapp: QApplication) -> None:
-        """full 模式下隐藏路径行与盘符下拉。"""
+        """full 模式下隐藏路径行与盘符按钮。"""
         window = MainWindow()
         window.show()
         qapp.processEvents()
         window._scan_mode_combo.setCurrentIndex(0)
         assert window._scan_mode == "full"
         assert not window._path_combo.isVisible()
-        assert not window._drive_combo.isVisible()
+        assert not window._drive_buttons_container.isVisible()
         window.close()
 
-    def test_drive_mode_shows_drive_combo(self, qapp: QApplication) -> None:
-        """drive 模式下盘符下拉可见，路径行隐藏。"""
+    def test_drive_mode_shows_drive_buttons(self, qapp: QApplication) -> None:
+        """drive 模式下盘符按钮可见，路径行隐藏。"""
         window = MainWindow()
         window.show()
         qapp.processEvents()
         window._scan_mode_combo.setCurrentIndex(1)
         assert window._scan_mode == "drive"
-        assert window._drive_combo.isVisible()
+        assert window._drive_buttons_container.isVisible()
         assert not window._path_combo.isVisible()
         window.close()
 
@@ -1859,11 +1859,13 @@ class TestScanMode:
         window.close()
 
     def test_drive_mode_enables_scan_with_drive(self, qapp: QApplication) -> None:
-        """drive 模式下有盘符即可扫描。"""
+        """drive 模式下选中盘符即可扫描。"""
         window = MainWindow()
         window._scan_mode_combo.setCurrentIndex(1)
-        # 盘符下拉在测试环境（Windows）通常有盘符
-        if window._drive_combo.count() > 0:
+        # 盘符按钮在测试环境（Windows）通常有盘符
+        if len(window._drive_buttons) > 0:
+            window._drive_buttons[0].setChecked(True)
+            window._on_drive_selected(window._drive_buttons[0])
             assert window._scan_btn.isEnabled()
         window.close()
 
@@ -1884,7 +1886,9 @@ class TestScanMode:
         """drive 模式应返回选中的单个盘符。"""
         window = MainWindow()
         window._scan_mode_combo.setCurrentIndex(1)
-        if window._drive_combo.count() > 0:
+        if len(window._drive_buttons) > 0:
+            window._drive_buttons[0].setChecked(True)
+            window._on_drive_selected(window._drive_buttons[0])
             roots = window._build_scan_roots()
             assert len(roots) == 1
         window.close()
@@ -1953,10 +1957,10 @@ class TestScanModePersistence:
 
         # 使用存在的盘符
         window = MainWindow()
-        if window._drive_combo.count() == 0:
+        if len(window._drive_buttons) == 0:
             window.close()
             pytest.skip("无可用盘符")
-        first_drive = window._drive_combo.itemData(0)
+        first_drive = window._drive_buttons[0].property("drive")
         window.close()
 
         config = Config(scan_mode="drive", last_drive=first_drive)
@@ -1964,7 +1968,7 @@ class TestScanModePersistence:
 
         window = MainWindow()
         assert window._scan_mode == "drive"
-        assert window._drive_combo.currentData() == first_drive
+        assert window._selected_drive == first_drive
         window.close()
 
 

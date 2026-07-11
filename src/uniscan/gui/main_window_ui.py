@@ -59,10 +59,14 @@ class Ui_MainWindow(object):
 
         self.horizontalLayout.addWidget(self.scan_mode_combo)
 
-        self.drive_combo = QComboBox(self.groupBox)
-        self.drive_combo.setObjectName(u"drive_combo")
+        self.drive_buttons_container = QWidget(self.groupBox)
+        self.drive_buttons_container.setObjectName(u"drive_buttons_container")
+        self.drive_buttons_layout = QHBoxLayout(self.drive_buttons_container)
+        self.drive_buttons_layout.setSpacing(4)
+        self.drive_buttons_layout.setObjectName(u"drive_buttons_layout")
+        self.drive_buttons_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.horizontalLayout.addWidget(self.drive_combo)
+        self.horizontalLayout.addWidget(self.drive_buttons_container)
 
         self.path_combo = QComboBox(self.groupBox)
         self.path_combo.setObjectName(u"path_combo")
@@ -81,6 +85,12 @@ class Ui_MainWindow(object):
 
 
         self.horizontalLayout_3.addWidget(self.groupBox)
+
+        self.arrow_label_1 = QLabel(self.central)
+        self.arrow_label_1.setObjectName(u"arrow_label_1")
+        self.arrow_label_1.setAlignment(Qt.AlignCenter)
+
+        self.horizontalLayout_3.addWidget(self.arrow_label_1)
 
         self.groupBox_2 = QGroupBox(self.central)
         self.groupBox_2.setObjectName(u"groupBox_2")
@@ -109,6 +119,12 @@ class Ui_MainWindow(object):
 
 
         self.horizontalLayout_3.addWidget(self.groupBox_2)
+
+        self.arrow_label_2 = QLabel(self.central)
+        self.arrow_label_2.setObjectName(u"arrow_label_2")
+        self.arrow_label_2.setAlignment(Qt.AlignCenter)
+
+        self.horizontalLayout_3.addWidget(self.arrow_label_2)
 
         self.scan_btn = QPushButton(self.central)
         self.scan_btn.setObjectName(u"scan_btn")
@@ -526,12 +542,13 @@ class Ui_MainWindow(object):
         self.scan_mode_combo.setToolTip(QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u626b\u63cf\u6a21\u5f0f", None))
 #endif // QT_CONFIG(tooltip)
 #if QT_CONFIG(tooltip)
-        self.drive_combo.setToolTip(QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u8981\u626b\u63cf\u7684\u76d8\u7b26", None))
+        self.drive_buttons_container.setToolTip(QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u8981\u626b\u63cf\u7684\u76d8\u7b26", None))
 #endif // QT_CONFIG(tooltip)
 #if QT_CONFIG(tooltip)
         self.path_combo.setToolTip(QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u8def\u5f84\uff08\u53ef\u4ece\u5386\u53f2\u8bb0\u5f55\u4e2d\u9009\u62e9\uff09", None))
 #endif // QT_CONFIG(tooltip)
         self.select_path_btn.setText(QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u8def\u5f84...", None))
+        self.arrow_label_1.setText("")
         self.groupBox_2.setTitle(QCoreApplication.translate("MainWindow", u"\u89c4\u5219", None))
         self.load_rules_btn.setText(QCoreApplication.translate("MainWindow", u"\u52a0\u8f7d\u89c4\u5219...", None))
 #if QT_CONFIG(tooltip)
@@ -539,6 +556,7 @@ class Ui_MainWindow(object):
 #endif // QT_CONFIG(tooltip)
         self.use_builtin_checkbox.setText(QCoreApplication.translate("MainWindow", u"\u4f7f\u7528\u901a\u7528\u89c4\u5219", None))
         self.rules_label.setText(QCoreApplication.translate("MainWindow", u"\u89c4\u5219: \u672a\u52a0\u8f7d", None))
+        self.arrow_label_2.setText("")
         self.scan_btn.setText(QCoreApplication.translate("MainWindow", u"\u5f00\u59cb\u626b\u63cf", None))
         self.filter_label.setText(QCoreApplication.translate("MainWindow", u"\u7b5b\u9009:", None))
         self.path_filter_input.setPlaceholderText(QCoreApplication.translate("MainWindow", u"\u6309\u8def\u5f84\u7b5b\u9009...", None))

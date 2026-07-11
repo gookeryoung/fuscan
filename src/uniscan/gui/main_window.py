@@ -33,7 +33,9 @@ from typing import Sequence
 from PySide2.QtCore import Qt
 from PySide2.QtGui import QColor, QIcon, QTextCharFormat, QTextCursor
 from PySide2.QtWidgets import (
+    QAbstractButton,
     QApplication,
+    QButtonGroup,
     QFileDialog,
     QHeaderView,
     QInputDialog,
@@ -41,6 +43,8 @@ from PySide2.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -87,6 +91,7 @@ _ICON_DISK = str(_ICONS_DIR / "disk.svg")
 _ICON_FOLDER = str(_ICONS_DIR / "folder.svg")
 _ICON_HISTORY = str(_ICONS_DIR / "history.svg")
 _ICON_LOAD_LIST = str(_ICONS_DIR / "load_list.svg")
+_ICON_RIGHT = str(_ICONS_DIR / "right.svg")
 
 
 def _format_size(size: int) -> str:
@@ -171,6 +176,10 @@ class MainWindow(QMainWindow):
         self._detail_current_result: ScanResult | None = None
         # 扫描历史记录
         self._scan_history: list[str] = []
+        # 盘符按钮组（平铺选择，替代下拉）
+        self._drive_button_group: QButtonGroup | None = None
+        self._drive_buttons: list[QPushButton] = []
+        self._selected_drive: str | None = None
 
         self._bind_widgets()
         self._configure_ui()
@@ -186,7 +195,10 @@ class MainWindow(QMainWindow):
         self._scan_btn = ui.scan_btn
         self._progress = ui.progress
         self._scan_mode_combo = ui.scan_mode_combo
-        self._drive_combo = ui.drive_combo
+        self._drive_buttons_container = ui.drive_buttons_container
+        self._drive_buttons_layout = ui.drive_buttons_layout
+        self._arrow_label_1 = ui.arrow_label_1
+        self._arrow_label_2 = ui.arrow_label_2
         self._path_combo = ui.path_combo
         self._select_path_btn = ui.select_path_btn
         self._load_rules_btn = ui.load_rules_btn
@@ -269,10 +281,12 @@ class MainWindow(QMainWindow):
         ui.verticalLayout_2.setStretch(0, 0)
         ui.verticalLayout_2.setStretch(1, 1)
         ui.verticalLayout_2.setStretch(2, 0)
-        # horizontalLayout_3: 扫描模式组 / 规则组 / 扫描按钮
+        # horizontalLayout_3: 扫描模式组 / 箭头 / 规则组 / 箭头 / 扫描按钮
         ui.horizontalLayout_3.setStretch(0, 1)
-        ui.horizontalLayout_3.setStretch(1, 1)
-        ui.horizontalLayout_3.setStretch(2, 0)
+        ui.horizontalLayout_3.setStretch(1, 0)
+        ui.horizontalLayout_3.setStretch(2, 1)
+        ui.horizontalLayout_3.setStretch(3, 0)
+        ui.horizontalLayout_3.setStretch(4, 0)
         ui.list_layout.setStretch(0, 1)
         ui.results_layout.setStretch(0, 0)
         ui.results_layout.setStretch(1, 1)
@@ -314,11 +328,17 @@ class MainWindow(QMainWindow):
         self._icon_folder = QIcon(_ICON_FOLDER)
         self._icon_history = QIcon(_ICON_HISTORY)
         self._icon_load_list = QIcon(_ICON_LOAD_LIST)
+        self._icon_right = QIcon(_ICON_RIGHT)
         self._scan_btn.setIcon(self._icon_scan)
+        # 扫描按钮垂直填满，与旁边的 QGroupBox 高度一致
+        self._scan_btn.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.MinimumExpanding)
         # 扫描模式下拉项图标
         self._scan_mode_combo.setItemIcon(0, self._icon_all_disk)
         self._scan_mode_combo.setItemIcon(1, self._icon_disk)
         self._scan_mode_combo.setItemIcon(2, self._icon_folder)
+        # 递进关系箭头（扫描模式 → 规则 → 扫描按钮）
+        self._arrow_label_1.setPixmap(self._icon_right.pixmap(20, 20))
+        self._arrow_label_2.setPixmap(self._icon_right.pixmap(20, 20))
         # 加载规则按钮图标
         self._load_rules_btn.setIcon(self._icon_load_list)
         self._load_rules_action.setIcon(self._icon_load_list)
@@ -330,10 +350,15 @@ class MainWindow(QMainWindow):
         # 菜单 actions 图标
         self._scan_action.setIcon(self._icon_scan)
 
+        # 初始化盘符按钮组（平铺选择，替代下拉）
+        self._drive_button_group = QButtonGroup(self)
+        self._drive_button_group.setExclusive(True)
+        self._drive_button_group.buttonClicked.connect(self._on_drive_selected)
+        self._refresh_drive_buttons()
+
         # 信号槽连接
         self._scan_btn.clicked.connect(self._on_scan)
         self._scan_mode_combo.currentIndexChanged.connect(self._on_scan_mode_changed)
-        self._drive_combo.currentIndexChanged.connect(self._on_drive_selected)
         self._path_combo.currentIndexChanged.connect(self._on_path_selected)
         self._select_path_btn.clicked.connect(self._on_select_path)
         self._load_rules_btn.clicked.connect(self._on_load_rules)
@@ -406,11 +431,12 @@ class MainWindow(QMainWindow):
 
         # 恢复上次选择的盘符
         if self._config.last_drive:
-            idx = self._drive_combo.findData(self._config.last_drive)
-            if idx >= 0:
-                self._drive_combo.blockSignals(True)
-                self._drive_combo.setCurrentIndex(idx)
-                self._drive_combo.blockSignals(False)
+            target = self._config.last_drive
+            for btn in self._drive_buttons:
+                if btn.property("drive") == target:
+                    btn.setChecked(True)
+                    self._selected_drive = target
+                    break
 
         self._use_builtin = self._config.use_builtin
         self._use_builtin_checkbox.blockSignals(True)
@@ -441,7 +467,7 @@ class MainWindow(QMainWindow):
         self._config.window_state = "maximized" if self.isMaximized() else "normal"
         self._config.splitter_sizes = list(self._splitter.sizes())
         self._config.scan_mode = self._scan_mode
-        self._config.last_drive = self._drive_combo.currentData() if self._drive_combo.count() > 0 else None
+        self._config.last_drive = self._selected_drive
         self._config.rules_paths = [str(p) for p in self._rules_paths]
         self._config.use_builtin = self._use_builtin
         self._config.scan_paths = [self._path_combo.itemText(i) for i in range(self._path_combo.count())]
@@ -543,20 +569,32 @@ class MainWindow(QMainWindow):
         """根据扫描模式更新目标选择器可见性。"""
         is_drive = self._scan_mode == "drive"
         is_folder = self._scan_mode == "folder"
-        self._drive_combo.setVisible(is_drive)
+        self._drive_buttons_container.setVisible(is_drive)
         self._path_combo.setVisible(is_folder)
         self._select_path_btn.setVisible(is_folder)
 
-    def _refresh_drive_combo(self) -> None:
-        """刷新盘符下拉列表。"""
-        self._drive_combo.blockSignals(True)
-        self._drive_combo.clear()
-        for drive in list_drives():
-            self._drive_combo.addItem(str(drive), str(drive))
-        self._drive_combo.blockSignals(False)
+    def _refresh_drive_buttons(self) -> None:
+        """刷新盘符按钮列表（平铺展示所有可用盘符）。"""
+        # 清除旧按钮
+        for btn in self._drive_buttons:
+            self._drive_button_group.removeButton(btn)
+            self._drive_buttons_layout.removeWidget(btn)
+            btn.deleteLater()
+        self._drive_buttons.clear()
 
-    def _on_drive_selected(self, _index: int) -> None:
-        """盘符选择变更。"""
+        for drive in list_drives():
+            btn = QPushButton(str(drive), self._drive_buttons_container)
+            btn.setObjectName(f"drive_btn_{drive}")
+            btn.setCheckable(True)
+            btn.setProperty("drive", str(drive))
+            self._drive_buttons_layout.addWidget(btn)
+            self._drive_button_group.addButton(btn)
+            self._drive_buttons.append(btn)
+
+    def _on_drive_selected(self, _button: QAbstractButton) -> None:
+        """盘符按钮选择变更。"""
+        checked = self._drive_button_group.checkedButton() if self._drive_button_group else None
+        self._selected_drive = checked.property("drive") if checked is not None else None
         self._update_scan_button()
 
     def _build_scan_roots(self) -> list[Path]:
@@ -564,8 +602,7 @@ class MainWindow(QMainWindow):
         if self._scan_mode == "full":
             return list_drives()
         if self._scan_mode == "drive":
-            data = self._drive_combo.currentData()
-            return [Path(data)] if data else []
+            return [Path(self._selected_drive)] if self._selected_drive else []
         # folder 模式
         return [self._scan_root] if self._scan_root else []
 
@@ -1344,7 +1381,7 @@ class MainWindow(QMainWindow):
         elif self._scan_mode == "full":
             ready = True
         elif self._scan_mode == "drive":
-            ready = self._drive_combo.count() > 0 and self._drive_combo.currentData() is not None
+            ready = self._selected_drive is not None
         else:  # folder
             ready = self._scan_root is not None
         self._scan_btn.setEnabled(ready)

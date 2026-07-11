@@ -124,6 +124,37 @@ QComboBox#scan_mode_combo {
     font-weight: bold;
 }
 
+/* ========== 盘符按钮（平铺，checkable） ========== */
+
+QPushButton[drive!=""] {
+    background: #ffffff;
+    color: #24292e;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: bold;
+    min-width: 40px;
+}
+
+QPushButton[drive!=""]:hover {
+    background: #f6f8fa;
+    border-color: #0366d6;
+    color: #0366d6;
+}
+
+QPushButton[drive!=""]:checked {
+    background: #0366d6;
+    border-color: #0366d6;
+    color: #ffffff;
+}
+
+QPushButton[drive!=""]:checked:hover {
+    background: #0256c1;
+    border-color: #0256c1;
+    color: #ffffff;
+}
+
 /* ========== 主操作按钮 ========== */
 
 QPushButton#scan_btn {
@@ -133,7 +164,8 @@ QPushButton#scan_btn {
     border-radius: 6px;
     font-size: 14px;
     font-weight: bold;
-    padding: 10px 24px;
+    padding: 10px 28px;
+    min-width: 140px;
 }
 
 QPushButton#scan_btn:hover {

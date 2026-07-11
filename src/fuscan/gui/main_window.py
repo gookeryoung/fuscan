@@ -249,6 +249,7 @@ class MainWindow(QMainWindow):
         self._view_results_action = ui.view_results_action
         self._view_rules_action = ui.view_rules_action
         self._view_history_action = ui.view_history_action
+        self._settings_action = ui.settings_action
 
     def _configure_ui(self) -> None:
         """配置 .ui 无法静态表达的动态属性、layout stretch 与信号槽连接。"""
@@ -384,6 +385,7 @@ class MainWindow(QMainWindow):
         self._view_rules_action.triggered.connect(lambda: self._switch_tab(1))
         self._view_history_action.triggered.connect(lambda: self._switch_tab(2))
         self._ui.about_action.triggered.connect(self._on_about)
+        self._settings_action.triggered.connect(self._on_settings)
 
     def _switch_tab(self, index: int) -> None:
         """切换列表区 Tab 视图。"""
@@ -584,7 +586,7 @@ class MainWindow(QMainWindow):
             btn.deleteLater()
         self._drive_buttons.clear()
 
-        for drive in list_drives():
+        for drive in list_drives(include_network=self._config.include_network_drives):
             letter = str(drive)[:1]
             btn = QPushButton(letter, self._target_stack.widget(1))
             btn.setObjectName(f"drive_btn_{letter}")
@@ -605,7 +607,7 @@ class MainWindow(QMainWindow):
     def _build_scan_roots(self) -> list[Path]:
         """根据扫描模式构造根路径列表。"""
         if self._scan_mode == "full":
-            return list_drives()
+            return list_drives(include_network=self._config.include_network_drives)
         if self._scan_mode == "drive":
             return [Path(self._selected_drive)] if self._selected_drive else []
         # folder 模式
@@ -720,8 +722,9 @@ class MainWindow(QMainWindow):
         self._worker = ScanWorker(
             ruleset=self._ruleset,
             roots=roots,
-            scan_archives=True,
-            max_workers=8,
+            scan_archives=self._config.scan_archives,
+            max_workers=self._config.max_workers,
+            max_depth=self._config.max_depth,
         )
         self._worker.progress_info.connect(self._on_scan_progress)
         self._worker.finished_report.connect(self._on_scan_finished)
@@ -865,6 +868,26 @@ class MainWindow(QMainWindow):
             "关于 fuscan",
             f"fuscan {__version__}\n\n通用文件扫描器\n支持多格式与压缩文件扫描\n\n技术栈: Python + PySide2",
         )
+
+    def _on_settings(self) -> None:
+        """打开设置对话框，修改后保存配置并应用。"""
+        from fuscan.gui.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog(self._config, self)
+        if dialog.exec_() == QDialog.Accepted:
+            self._save_config()
+            self._use_builtin = self._config.use_builtin
+            self._use_builtin_checkbox.blockSignals(True)
+            self._use_builtin_checkbox.setChecked(self._config.use_builtin)
+            self._use_builtin_checkbox.blockSignals(False)
+            self._reload_ruleset()
+            self._refresh_rules_tree()
+            self._refresh_rules_file_list()
+            self._refresh_drive_buttons()
+            self._update_scan_button()
+            if self._ruleset is not None:
+                self._rules_label.setText(f"规则: {self._build_rules_label()}")
+                self._stats_label.setText(f"已加载 {len(self._ruleset.rules)} 条规则")
 
     def _on_batch_process(self) -> None:
         """批量处理按钮（预留）：提示功能未实现。"""

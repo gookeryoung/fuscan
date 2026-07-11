@@ -50,6 +50,14 @@ class Config:
     rules_paths: list[str] = field(default_factory=list)
     # 是否使用通用规则
     use_builtin: bool = True
+    # 是否包含网络映射盘（默认不包含）
+    include_network_drives: bool = False
+    # 是否扫描压缩包
+    scan_archives: bool = True
+    # 最大工作线程数
+    max_workers: int = 8
+    # 最大扫描深度（None 表示无限制）
+    max_depth: int | None = None
 
 
 def load_config(path: Path | None = None) -> Config:

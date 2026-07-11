@@ -14,17 +14,42 @@ from fuscan.scanner.context import FileEntry
 __all__ = ["FileWalker", "list_drives"]
 
 
-def list_drives() -> list[Path]:
+def list_drives(include_network: bool = False) -> list[Path]:
     """枚举系统可用盘符/根路径。
 
-    Windows 下返回所有存在的盘符路径（如 ``C:\\``、``D:\\``）；
+    Windows 下返回所有存在的盘符路径（如 ``C:\\``、``D:\\``），
+    默认排除网络映射盘（DRIVE_REMOTE=4），可通过参数控制。
     Unix-like 系统返回 ``["/"]``。
 
+    :param include_network: 是否包含网络映射盘，默认 False
     :return: 盘符路径列表
     """
     if sys.platform == "win32":
-        return [Path(f"{letter}:\\") for letter in string.ascii_uppercase if Path(f"{letter}:\\").exists()]
+        if include_network:
+            return [Path(f"{letter}:\\") for letter in string.ascii_uppercase if Path(f"{letter}:\\").exists()]
+        return [drive for drive in _list_windows_drives() if not _is_network_drive(drive)]
     return [Path("/")]  # pragma: no cover - Unix 平台分支，Windows 测试环境无法覆盖
+
+
+def _list_windows_drives() -> list[Path]:
+    """枚举 Windows 所有存在的盘符。"""
+    return [Path(f"{letter}:\\") for letter in string.ascii_uppercase if Path(f"{letter}:\\").exists()]
+
+
+def _is_network_drive(drive: Path) -> bool:
+    """判断盘符是否为网络映射盘。
+
+    使用 Windows API GetDriveTypeW 检测驱动器类型，DRIVE_REMOTE=4 表示网络驱动器。
+
+    :param drive: 盘符路径（如 ``C:\\``）
+    :return: True 表示网络映射盘
+    """
+    import ctypes
+
+    DRIVE_REMOTE = 4
+    drive_str = str(drive)
+    drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive_str)
+    return drive_type == DRIVE_REMOTE
 
 
 class FileWalker:

@@ -103,13 +103,6 @@ class Ui_MainWindow(object):
 
         self.workflow_main_row.addItem(self.workflow_spacer)
 
-        self.scan_btn = QPushButton(self.control_area)
-        self.scan_btn.setObjectName(u"scan_btn")
-        self.scan_btn.setEnabled(False)
-        self.scan_btn.setCursor(QCursor(Qt.PointingHandCursor))
-
-        self.workflow_main_row.addWidget(self.scan_btn)
-
 
         self.control_layout.addLayout(self.workflow_main_row)
 
@@ -139,23 +132,40 @@ class Ui_MainWindow(object):
 
         self.control_layout.addLayout(self.workflow_rules_row)
 
+        self.workflow_action_row = QHBoxLayout()
+        self.workflow_action_row.setSpacing(8)
+        self.workflow_action_row.setObjectName(u"workflow_action_row")
+        self.stats_label = QLabel(self.control_area)
+        self.stats_label.setObjectName(u"stats_label")
+
+        self.workflow_action_row.addWidget(self.stats_label)
+
         self.progress = QProgressBar(self.control_area)
         self.progress.setObjectName(u"progress")
         self.progress.setVisible(False)
         self.progress.setTextVisible(True)
 
-        self.control_layout.addWidget(self.progress)
+        self.workflow_action_row.addWidget(self.progress)
+
+        self.action_row_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self.workflow_action_row.addItem(self.action_row_spacer)
+
+        self.scan_btn = QPushButton(self.control_area)
+        self.scan_btn.setObjectName(u"scan_btn")
+        self.scan_btn.setEnabled(False)
+        self.scan_btn.setCursor(QCursor(Qt.PointingHandCursor))
+
+        self.workflow_action_row.addWidget(self.scan_btn)
+
+
+        self.control_layout.addLayout(self.workflow_action_row)
 
         self.current_file_label = QLabel(self.control_area)
         self.current_file_label.setObjectName(u"current_file_label")
         self.current_file_label.setVisible(False)
 
         self.control_layout.addWidget(self.current_file_label)
-
-        self.stats_label = QLabel(self.control_area)
-        self.stats_label.setObjectName(u"stats_label")
-
-        self.control_layout.addWidget(self.stats_label)
 
 
         self.central_layout.addWidget(self.control_area)
@@ -299,41 +309,6 @@ class Ui_MainWindow(object):
 
         self.list_layout.addWidget(self.tab_widget)
 
-        self.list_action_bar = QFrame(self.list_area)
-        self.list_action_bar.setObjectName(u"list_action_bar")
-        self.list_action_layout = QVBoxLayout(self.list_action_bar)
-        self.list_action_layout.setSpacing(4)
-        self.list_action_layout.setObjectName(u"list_action_layout")
-        self.list_action_layout.setContentsMargins(8, 4, 8, 4)
-        self.note_edit = QPlainTextEdit(self.list_action_bar)
-        self.note_edit.setObjectName(u"note_edit")
-
-        self.list_action_layout.addWidget(self.note_edit)
-
-        self.action_btn_row = QHBoxLayout()
-        self.action_btn_row.setObjectName(u"action_btn_row")
-        self.batch_btn = QPushButton(self.list_action_bar)
-        self.batch_btn.setObjectName(u"batch_btn")
-        self.batch_btn.setEnabled(False)
-
-        self.action_btn_row.addWidget(self.batch_btn)
-
-        self.action_row_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-
-        self.action_btn_row.addItem(self.action_row_spacer)
-
-        self.export_btn = QPushButton(self.list_action_bar)
-        self.export_btn.setObjectName(u"export_btn")
-        self.export_btn.setEnabled(False)
-
-        self.action_btn_row.addWidget(self.export_btn)
-
-
-        self.list_action_layout.addLayout(self.action_btn_row)
-
-
-        self.list_layout.addWidget(self.list_action_bar)
-
         self.splitter.addWidget(self.list_area)
         self.detail_area = QWidget(self.splitter)
         self.detail_area.setObjectName(u"detail_area")
@@ -364,21 +339,6 @@ class Ui_MainWindow(object):
         self.detail_empty_action_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         self.detail_empty_action_layout.addItem(self.detail_empty_action_spacer)
-
-        self.detail_start_btn = QPushButton(self.detail_empty_action)
-        self.detail_start_btn.setObjectName(u"detail_start_btn")
-
-        self.detail_empty_action_layout.addWidget(self.detail_start_btn)
-
-        self.detail_load_rules_btn = QPushButton(self.detail_empty_action)
-        self.detail_load_rules_btn.setObjectName(u"detail_load_rules_btn")
-
-        self.detail_empty_action_layout.addWidget(self.detail_load_rules_btn)
-
-        self.detail_view_history_btn = QPushButton(self.detail_empty_action)
-        self.detail_view_history_btn.setObjectName(u"detail_view_history_btn")
-
-        self.detail_empty_action_layout.addWidget(self.detail_view_history_btn)
 
         self.detail_action_stack.addWidget(self.detail_empty_action)
         self.detail_nonempty_action = QFrame()
@@ -484,6 +444,32 @@ class Ui_MainWindow(object):
         self.detail_preview.setReadOnly(True)
 
         self.detail_nonempty_main_layout.addWidget(self.detail_preview)
+
+        self.note_edit = QPlainTextEdit(self.detail_nonempty_main)
+        self.note_edit.setObjectName(u"note_edit")
+
+        self.detail_nonempty_main_layout.addWidget(self.note_edit)
+
+        self.detail_export_row = QHBoxLayout()
+        self.detail_export_row.setObjectName(u"detail_export_row")
+        self.batch_btn = QPushButton(self.detail_nonempty_main)
+        self.batch_btn.setObjectName(u"batch_btn")
+        self.batch_btn.setEnabled(False)
+
+        self.detail_export_row.addWidget(self.batch_btn)
+
+        self.detail_export_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self.detail_export_row.addItem(self.detail_export_spacer)
+
+        self.export_btn = QPushButton(self.detail_nonempty_main)
+        self.export_btn.setObjectName(u"export_btn")
+        self.export_btn.setEnabled(False)
+
+        self.detail_export_row.addWidget(self.export_btn)
+
+
+        self.detail_nonempty_main_layout.addLayout(self.detail_export_row)
 
         self.detail_main_stack.addWidget(self.detail_nonempty_main)
 
@@ -592,15 +578,15 @@ class Ui_MainWindow(object):
 #if QT_CONFIG(tooltip)
         self.drive_combo.setToolTip(QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u8981\u626b\u63cf\u7684\u76d8\u7b26", None))
 #endif // QT_CONFIG(tooltip)
-        self.scan_btn.setText(QCoreApplication.translate("MainWindow", u"\u5f00\u59cb\u626b\u63cf", None))
         self.load_rules_btn.setText(QCoreApplication.translate("MainWindow", u"\u52a0\u8f7d\u89c4\u5219...", None))
         self.rules_label.setText(QCoreApplication.translate("MainWindow", u"\u89c4\u5219: \u672a\u52a0\u8f7d", None))
 #if QT_CONFIG(tooltip)
         self.use_builtin_checkbox.setToolTip(QCoreApplication.translate("MainWindow", u"\u52fe\u9009\u540e\u52a0\u8f7d\u8f6f\u4ef6\u5185\u7f6e\u901a\u7528\u89c4\u5219\uff0c\u7528\u6237\u89c4\u5219\u4e2d\u540c\u540d\u89c4\u5219\u4f1a\u8986\u76d6\u901a\u7528\u89c4\u5219", None))
 #endif // QT_CONFIG(tooltip)
         self.use_builtin_checkbox.setText(QCoreApplication.translate("MainWindow", u"\u4f7f\u7528\u901a\u7528\u89c4\u5219", None))
-        self.current_file_label.setText("")
         self.stats_label.setText(QCoreApplication.translate("MainWindow", u"\u5c31\u7eea", None))
+        self.scan_btn.setText(QCoreApplication.translate("MainWindow", u"\u5f00\u59cb\u626b\u63cf", None))
+        self.current_file_label.setText("")
         self.filter_label.setText(QCoreApplication.translate("MainWindow", u"\u7b5b\u9009:", None))
         self.path_filter_input.setPlaceholderText(QCoreApplication.translate("MainWindow", u"\u6309\u8def\u5f84\u7b5b\u9009...", None))
         self.rule_filter_label.setText(QCoreApplication.translate("MainWindow", u"\u89c4\u5219:", None))
@@ -642,29 +628,8 @@ class Ui_MainWindow(object):
         self.history_list.setToolTip(QCoreApplication.translate("MainWindow", u"\u6700\u8fd1\u626b\u63cf\u8fc7\u7684\u8def\u5f84\uff0c\u53cc\u51fb\u53ef\u5feb\u901f\u9009\u62e9", None))
 #endif // QT_CONFIG(tooltip)
         self.tab_widget.setTabText(self.tab_widget.indexOf(self.history_tab), QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u5386\u53f2", None))
-        self.note_edit.setPlaceholderText(QCoreApplication.translate("MainWindow", u"\u5907\u6ce8/\u6279\u6ce8/\u5bfc\u51fa\u8bf4\u660e...", None))
-#if QT_CONFIG(tooltip)
-        self.batch_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u5bf9\u9009\u4e2d\u9879\u6279\u91cf\u5904\u7406\uff08\u9884\u7559\uff09", None))
-#endif // QT_CONFIG(tooltip)
-        self.batch_btn.setText(QCoreApplication.translate("MainWindow", u"\u6279\u91cf\u5904\u7406", None))
-#if QT_CONFIG(tooltip)
-        self.export_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u5bfc\u51fa\u626b\u63cf\u7ed3\u679c\u5230\u6587\u4ef6", None))
-#endif // QT_CONFIG(tooltip)
-        self.export_btn.setText(QCoreApplication.translate("MainWindow", u"\u5bfc\u51fa\u7ed3\u679c", None))
         self.detail_action_title_label.setText(QCoreApplication.translate("MainWindow", u"\u8be6\u60c5\u64cd\u4f5c:", None))
         self.detail_action_hint.setText(QCoreApplication.translate("MainWindow", u"\u672a\u9009\u4e2d\u4efb\u4f55\u9879", None))
-#if QT_CONFIG(tooltip)
-        self.detail_start_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u5f00\u59cb\u626b\u63cf\uff08\u9700\u5148\u9009\u62e9\u76ee\u6807\u4e0e\u89c4\u5219\uff09", None))
-#endif // QT_CONFIG(tooltip)
-        self.detail_start_btn.setText(QCoreApplication.translate("MainWindow", u"\u5f00\u59cb\u626b\u63cf", None))
-#if QT_CONFIG(tooltip)
-        self.detail_load_rules_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u52a0\u8f7d\u89c4\u5219\u6587\u4ef6", None))
-#endif // QT_CONFIG(tooltip)
-        self.detail_load_rules_btn.setText(QCoreApplication.translate("MainWindow", u"\u52a0\u8f7d\u89c4\u5219", None))
-#if QT_CONFIG(tooltip)
-        self.detail_view_history_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u5207\u6362\u5230\u626b\u63cf\u5386\u53f2\u89c6\u56fe", None))
-#endif // QT_CONFIG(tooltip)
-        self.detail_view_history_btn.setText(QCoreApplication.translate("MainWindow", u"\u67e5\u770b\u5386\u53f2", None))
 #if QT_CONFIG(tooltip)
         self.detail_locate_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u6eda\u52a8\u5230\u5f53\u524d\u547d\u4e2d\u4f4d\u7f6e", None))
 #endif // QT_CONFIG(tooltip)
@@ -700,6 +665,15 @@ class Ui_MainWindow(object):
         ___qtablewidgetitem2 = self.detail_hits_table.horizontalHeaderItem(2)
         ___qtablewidgetitem2.setText(QCoreApplication.translate("MainWindow", u"\u8be6\u60c5", None));
         self.detail_preview_title_label.setText(QCoreApplication.translate("MainWindow", u"\u5185\u5bb9\u9884\u89c8 (\u5173\u952e\u8bcd\u9ad8\u4eae):", None))
+        self.note_edit.setPlaceholderText(QCoreApplication.translate("MainWindow", u"\u5907\u6ce8/\u6279\u6ce8/\u5bfc\u51fa\u8bf4\u660e...", None))
+#if QT_CONFIG(tooltip)
+        self.batch_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u5bf9\u9009\u4e2d\u9879\u6279\u91cf\u5904\u7406\uff08\u9884\u7559\uff09", None))
+#endif // QT_CONFIG(tooltip)
+        self.batch_btn.setText(QCoreApplication.translate("MainWindow", u"\u6279\u91cf\u5904\u7406", None))
+#if QT_CONFIG(tooltip)
+        self.export_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u5bfc\u51fa\u626b\u63cf\u7ed3\u679c\u5230\u6587\u4ef6", None))
+#endif // QT_CONFIG(tooltip)
+        self.export_btn.setText(QCoreApplication.translate("MainWindow", u"\u5bfc\u51fa\u7ed3\u679c", None))
         self.file_menu.setTitle(QCoreApplication.translate("MainWindow", u"\u6587\u4ef6(&F)", None))
         self.scan_menu.setTitle(QCoreApplication.translate("MainWindow", u"\u626b\u63cf(&S)", None))
         self.view_menu.setTitle(QCoreApplication.translate("MainWindow", u"\u89c6\u56fe(&V)", None))

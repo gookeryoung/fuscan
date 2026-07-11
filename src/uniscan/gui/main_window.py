@@ -3,17 +3,16 @@
 提供 GitHub Desktop 风格的 5 区布局：
 
 1. 菜单栏（文件/扫描/视图/帮助）
-2. 主操作区（扫描模式/目标/规则/扫描按钮/进度/统计）
-3. 列表区（QTabWidget 切换扫描结果/规则文件/扫描历史 + 底部操作区）
-4. 详情区（操作栏 QStackedWidget 两态 + 主体 QStackedWidget 两态）
-5. 底部操作区（备注输入框 + 按钮组）
+2. 主操作区（工作流三行：扫描模式+目标 / 加载规则 / 进度+统计+扫描按钮）
+3. 列表区（QTabWidget 切换扫描结果/规则文件/扫描历史）
+4. 详情区（操作栏 QStackedWidget 两态 + 主体 QStackedWidget 两态，非空态含备注与导出）
 
 设计要点：
 
-- GitHub Desktop 风格：5 区布局，详情区两态切换（QStackedWidget 持久化）
+- GitHub Desktop 风格：主操作区突出（卡片样式），三行工作流分区清晰
 - 扫描在 ScanWorker（QThread）中执行，避免阻塞 UI
 - 结果以 QTreeWidget 展示（QAbstractItemView 迁移见后续迭代）
-- 详情区嵌入命中预览（文件信息+命中表+内容预览+命中导航）
+- 详情区嵌入命中预览（文件信息+命中表+内容预览+命中导航+备注+导出）
 """
 
 from __future__ import annotations
@@ -216,9 +215,6 @@ class MainWindow(QMainWindow):
         # 详情区
         self._detail_action_stack = ui.detail_action_stack
         self._detail_main_stack = ui.detail_main_stack
-        self._detail_start_btn = ui.detail_start_btn
-        self._detail_load_rules_btn = ui.detail_load_rules_btn
-        self._detail_view_history_btn = ui.detail_view_history_btn
         self._detail_locate_btn = ui.detail_locate_btn
         self._detail_prev_btn = ui.detail_prev_btn
         self._detail_next_btn = ui.detail_next_btn
@@ -266,6 +262,7 @@ class MainWindow(QMainWindow):
         ui = self._ui
         ui.central_layout.setStretch(0, 0)
         ui.central_layout.setStretch(1, 1)
+        # workflow_main_row: 模式标签/下拉/路径标签/路径下拉/选择按钮/盘符标签/盘符下拉/弹簧
         ui.workflow_main_row.setStretch(0, 0)
         ui.workflow_main_row.setStretch(1, 0)
         ui.workflow_main_row.setStretch(2, 0)
@@ -273,15 +270,17 @@ class MainWindow(QMainWindow):
         ui.workflow_main_row.setStretch(4, 0)
         ui.workflow_main_row.setStretch(5, 0)
         ui.workflow_main_row.setStretch(6, 0)
-        ui.workflow_main_row.setStretch(7, 0)
-        ui.workflow_main_row.setStretch(8, 1)
-        ui.workflow_main_row.setStretch(9, 0)
+        ui.workflow_main_row.setStretch(7, 1)
         ui.workflow_rules_row.setStretch(0, 0)
         ui.workflow_rules_row.setStretch(1, 1)
         ui.workflow_rules_row.setStretch(2, 0)
         ui.workflow_rules_row.setStretch(3, 1)
+        # workflow_action_row: 统计标签/进度条/弹簧/扫描按钮
+        ui.workflow_action_row.setStretch(0, 0)
+        ui.workflow_action_row.setStretch(1, 1)
+        ui.workflow_action_row.setStretch(2, 1)
+        ui.workflow_action_row.setStretch(3, 0)
         ui.list_layout.setStretch(0, 1)
-        ui.list_layout.setStretch(1, 0)
         ui.results_layout.setStretch(0, 0)
         ui.results_layout.setStretch(1, 1)
         ui.filter_layout.setStretch(0, 0)
@@ -303,6 +302,8 @@ class MainWindow(QMainWindow):
         ui.detail_nonempty_main_layout.setStretch(2, 1)
         ui.detail_nonempty_main_layout.setStretch(3, 0)
         ui.detail_nonempty_main_layout.setStretch(4, 2)
+        ui.detail_nonempty_main_layout.setStretch(5, 0)
+        ui.detail_nonempty_main_layout.setStretch(6, 0)
 
         # 空白详情面板居中（.ui 中 QVBoxLayout 不支持 alignment 属性）
         ui.detail_empty_main_layout.insertStretch(0)
@@ -318,17 +319,14 @@ class MainWindow(QMainWindow):
         self._icon_history = QIcon(_ICON_HISTORY)
         self._icon_load_list = QIcon(_ICON_LOAD_LIST)
         self._scan_btn.setIcon(self._icon_scan)
-        self._detail_start_btn.setIcon(self._icon_scan)
         # 扫描模式下拉项图标
         self._scan_mode_combo.setItemIcon(0, self._icon_all_disk)
         self._scan_mode_combo.setItemIcon(1, self._icon_disk)
         self._scan_mode_combo.setItemIcon(2, self._icon_folder)
         # 加载规则按钮图标
         self._load_rules_btn.setIcon(self._icon_load_list)
-        self._detail_load_rules_btn.setIcon(self._icon_load_list)
         self._load_rules_action.setIcon(self._icon_load_list)
         # 历史记录按钮图标
-        self._detail_view_history_btn.setIcon(self._icon_history)
         self._view_history_action.setIcon(self._icon_history)
         # Tab 图标
         self._tab_widget.setTabIcon(0, self._icon_scan)
@@ -356,9 +354,6 @@ class MainWindow(QMainWindow):
         self._history_list.itemDoubleClicked.connect(self._on_history_item_double_clicked)
         self._batch_btn.clicked.connect(self._on_batch_process)
         self._export_btn.clicked.connect(self._on_export_menu)
-        self._detail_start_btn.clicked.connect(self._on_scan)
-        self._detail_load_rules_btn.clicked.connect(self._on_load_rules)
-        self._detail_view_history_btn.clicked.connect(self._on_view_history)
         self._detail_locate_btn.clicked.connect(self._on_locate_hit)
         self._detail_prev_btn.clicked.connect(self._on_prev_detail_hit)
         self._detail_next_btn.clicked.connect(self._on_next_detail_hit)
@@ -646,7 +641,6 @@ class MainWindow(QMainWindow):
         """同步设置扫描按钮与菜单 action 的文本。"""
         self._scan_btn.setText(text)
         self._scan_action.setText(text)
-        self._detail_start_btn.setText(text)
 
     def _update_scan_button_icon(self) -> None:
         """根据扫描状态切换扫描按钮图标。"""
@@ -657,7 +651,6 @@ class MainWindow(QMainWindow):
         else:
             icon = self._icon_scan
         self._scan_btn.setIcon(icon)
-        self._detail_start_btn.setIcon(icon)
         self._scan_action.setIcon(icon)
 
     def _on_scan(self) -> None:
@@ -1351,7 +1344,6 @@ class MainWindow(QMainWindow):
         if self._scan_state in (ScanState.RUNNING, ScanState.PAUSED):
             self._scan_btn.setEnabled(True)
             self._scan_action.setEnabled(True)
-            self._detail_start_btn.setEnabled(True)
             return
         if self._ruleset is None:
             ready = False
@@ -1363,7 +1355,6 @@ class MainWindow(QMainWindow):
             ready = self._scan_root is not None
         self._scan_btn.setEnabled(ready)
         self._scan_action.setEnabled(ready)
-        self._detail_start_btn.setEnabled(ready)
 
     @staticmethod
     def _format_report(report: ScanReport, fmt: str) -> str:

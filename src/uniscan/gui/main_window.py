@@ -278,6 +278,7 @@ class MainWindow(QMainWindow):
         # layout 伸缩因子（.ui 不支持 stretch vector）
         ui = self._ui
         # verticalLayout_2: 顶部操作行 / 分割器 / 进度条
+        ui.verticalLayout_2.setSpacing(4)
         ui.verticalLayout_2.setStretch(0, 0)
         ui.verticalLayout_2.setStretch(1, 1)
         ui.verticalLayout_2.setStretch(2, 0)
@@ -339,6 +340,8 @@ class MainWindow(QMainWindow):
         # 递进关系箭头（扫描模式 → 规则 → 扫描按钮）
         self._arrow_label_1.setPixmap(self._icon_right.pixmap(20, 20))
         self._arrow_label_2.setPixmap(self._icon_right.pixmap(20, 20))
+        self._arrow_label_1.setFixedSize(24, 24)
+        self._arrow_label_2.setFixedSize(24, 24)
         # 加载规则按钮图标
         self._load_rules_btn.setIcon(self._icon_load_list)
         self._load_rules_action.setIcon(self._icon_load_list)

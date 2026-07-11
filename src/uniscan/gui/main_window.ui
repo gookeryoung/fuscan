@@ -23,6 +23,21 @@
    <layout class="QVBoxLayout" name="verticalLayout_2">
     <item>
      <layout class="QHBoxLayout" name="horizontalLayout_3">
+      <property name="spacing">
+       <number>8</number>
+      </property>
+      <property name="leftMargin">
+       <number>8</number>
+      </property>
+      <property name="topMargin">
+       <number>8</number>
+      </property>
+      <property name="rightMargin">
+       <number>8</number>
+      </property>
+      <property name="bottomMargin">
+       <number>8</number>
+      </property>
       <item>
        <widget class="QGroupBox" name="groupBox">
         <property name="title">
@@ -100,6 +115,12 @@
       </item>
       <item>
        <widget class="QLabel" name="arrow_label_1">
+        <property name="maximumSize">
+         <size>
+          <width>24</width>
+          <height>24</height>
+         </size>
+        </property>
         <property name="text">
          <string/>
         </property>
@@ -113,7 +134,10 @@
         <property name="title">
          <string>规则</string>
         </property>
-        <layout class="QVBoxLayout" name="verticalLayout">
+        <layout class="QHBoxLayout" name="horizontalLayout_4">
+         <property name="spacing">
+          <number>6</number>
+         </property>
          <item>
           <widget class="QPushButton" name="load_rules_btn">
            <property name="text">
@@ -122,34 +146,36 @@
           </widget>
          </item>
          <item>
-          <layout class="QHBoxLayout" name="horizontalLayout_2">
-           <item>
-            <widget class="QCheckBox" name="use_builtin_checkbox">
-             <property name="toolTip">
-              <string>勾选后加载软件内置通用规则，用户规则中同名规则会覆盖通用规则</string>
-             </property>
-             <property name="text">
-              <string>使用通用规则</string>
-             </property>
-             <property name="checked">
-              <bool>true</bool>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QLabel" name="rules_label">
-             <property name="text">
-              <string>规则: 未加载</string>
-             </property>
-            </widget>
-           </item>
-          </layout>
+          <widget class="QCheckBox" name="use_builtin_checkbox">
+           <property name="toolTip">
+            <string>勾选后加载软件内置通用规则，用户规则中同名规则会覆盖通用规则</string>
+           </property>
+           <property name="text">
+            <string>使用通用规则</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="rules_label">
+           <property name="text">
+            <string>规则: 未加载</string>
+           </property>
+          </widget>
          </item>
         </layout>
        </widget>
       </item>
       <item>
        <widget class="QLabel" name="arrow_label_2">
+        <property name="maximumSize">
+         <size>
+          <width>24</width>
+          <height>24</height>
+         </size>
+        </property>
         <property name="text">
          <string/>
         </property>

@@ -46,7 +46,9 @@ class Ui_MainWindow(object):
         self.verticalLayout_2 = QVBoxLayout(self.central)
         self.verticalLayout_2.setObjectName(u"verticalLayout_2")
         self.horizontalLayout_3 = QHBoxLayout()
+        self.horizontalLayout_3.setSpacing(8)
         self.horizontalLayout_3.setObjectName(u"horizontalLayout_3")
+        self.horizontalLayout_3.setContentsMargins(8, 8, 8, 8)
         self.groupBox = QGroupBox(self.central)
         self.groupBox.setObjectName(u"groupBox")
         self.horizontalLayout = QHBoxLayout(self.groupBox)
@@ -88,40 +90,38 @@ class Ui_MainWindow(object):
 
         self.arrow_label_1 = QLabel(self.central)
         self.arrow_label_1.setObjectName(u"arrow_label_1")
+        self.arrow_label_1.setMaximumSize(QSize(24, 24))
         self.arrow_label_1.setAlignment(Qt.AlignCenter)
 
         self.horizontalLayout_3.addWidget(self.arrow_label_1)
 
         self.groupBox_2 = QGroupBox(self.central)
         self.groupBox_2.setObjectName(u"groupBox_2")
-        self.verticalLayout = QVBoxLayout(self.groupBox_2)
-        self.verticalLayout.setObjectName(u"verticalLayout")
+        self.horizontalLayout_4 = QHBoxLayout(self.groupBox_2)
+        self.horizontalLayout_4.setSpacing(6)
+        self.horizontalLayout_4.setObjectName(u"horizontalLayout_4")
         self.load_rules_btn = QPushButton(self.groupBox_2)
         self.load_rules_btn.setObjectName(u"load_rules_btn")
 
-        self.verticalLayout.addWidget(self.load_rules_btn)
+        self.horizontalLayout_4.addWidget(self.load_rules_btn)
 
-        self.horizontalLayout_2 = QHBoxLayout()
-        self.horizontalLayout_2.setObjectName(u"horizontalLayout_2")
         self.use_builtin_checkbox = QCheckBox(self.groupBox_2)
         self.use_builtin_checkbox.setObjectName(u"use_builtin_checkbox")
         self.use_builtin_checkbox.setChecked(True)
 
-        self.horizontalLayout_2.addWidget(self.use_builtin_checkbox)
+        self.horizontalLayout_4.addWidget(self.use_builtin_checkbox)
 
         self.rules_label = QLabel(self.groupBox_2)
         self.rules_label.setObjectName(u"rules_label")
 
-        self.horizontalLayout_2.addWidget(self.rules_label)
-
-
-        self.verticalLayout.addLayout(self.horizontalLayout_2)
+        self.horizontalLayout_4.addWidget(self.rules_label)
 
 
         self.horizontalLayout_3.addWidget(self.groupBox_2)
 
         self.arrow_label_2 = QLabel(self.central)
         self.arrow_label_2.setObjectName(u"arrow_label_2")
+        self.arrow_label_2.setMaximumSize(QSize(24, 24))
         self.arrow_label_2.setAlignment(Qt.AlignCenter)
 
         self.horizontalLayout_3.addWidget(self.arrow_label_2)

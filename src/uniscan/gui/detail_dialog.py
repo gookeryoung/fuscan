@@ -12,6 +12,7 @@ import re
 from typing import List, Optional, Sequence, Set
 
 from PySide2.QtCore import Qt
+from PySide2.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide2.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -114,6 +115,8 @@ class HitDetailDialog(QDialog):
         self._result = result
         self.setWindowTitle("命中详情")
         self.resize(800, 600)
+        self._hit_positions: list[tuple[int, int]] = []
+        self._current_hit_index: int = -1
         self._init_ui()
         self._populate_file_info()
         self._populate_hits_table()
@@ -145,6 +148,22 @@ class HitDetailDialog(QDialog):
         self._preview = QTextEdit()
         self._preview.setReadOnly(True)
         layout.addWidget(self._preview, stretch=2)
+
+        # 命中位置导航栏
+        nav_layout = QHBoxLayout()
+        nav_layout.addWidget(QLabel("命中定位:"))
+        self._prev_btn = QPushButton("上一个")
+        self._prev_btn.setToolTip("跳转到上一个命中位置")
+        self._prev_btn.clicked.connect(self._on_prev_hit)
+        self._next_btn = QPushButton("下一个")
+        self._next_btn.setToolTip("跳转到下一个命中位置")
+        self._next_btn.clicked.connect(self._on_next_hit)
+        self._nav_label = QLabel("0 / 0")
+        nav_layout.addWidget(self._prev_btn)
+        nav_layout.addWidget(self._next_btn)
+        nav_layout.addWidget(self._nav_label)
+        nav_layout.addStretch()
+        layout.addLayout(nav_layout)
 
         # 底部按钮
         btn_layout = QHBoxLayout()
@@ -182,7 +201,7 @@ class HitDetailDialog(QDialog):
             self._hits_table.setItem(row, 2, QTableWidgetItem(hit.detail))
 
     def _populate_preview(self) -> None:
-        """填充内容预览，命中关键词高亮。"""
+        """填充内容预览，命中关键词高亮并定位到首个命中。"""
         path = self._result.path
         truncated = False
 
@@ -196,10 +215,12 @@ class HitDetailDialog(QDialog):
             except OSError as exc:
                 logger.warning("读取内容预览失败 %s", path, exc_info=True)
                 self._preview.setPlainText(f"无法读取文件内容: {exc}")
+                self._update_nav_label()
                 return
 
         if not content:
             self._preview.setPlainText("(文件内容为空或为二进制)")
+            self._update_nav_label()
             return
 
         # 截断过长内容
@@ -212,3 +233,84 @@ class HitDetailDialog(QDialog):
         if truncated:
             html_content += "<p style='color: #888; font-size: 11px;'>(内容已截断，仅显示前 100KB)</p>"
         self._preview.setHtml(html_content)
+
+        # 查找所有关键词位置并定位到首个命中
+        self._find_hit_positions(keywords)
+        if self._hit_positions:
+            self._current_hit_index = 0
+            self._highlight_current_hit()
+            self._scroll_to_current_hit()
+        self._update_nav_label()
+
+    def _find_hit_positions(self, keywords: Sequence[str]) -> None:
+        """在文档中查找所有关键词出现位置，按位置排序后存储。"""
+        self._hit_positions = []
+        if not keywords:
+            return
+        doc = self._preview.document()
+        seen: set[tuple[int, int]] = set()
+        for kw in sorted(set(keywords), key=len, reverse=True):
+            cursor = doc.find(kw)
+            while not cursor.isNull():
+                pos = (cursor.selectionStart(), cursor.selectionEnd())
+                if pos not in seen:
+                    seen.add(pos)
+                    self._hit_positions.append(pos)
+                cursor = doc.find(kw, cursor)
+        self._hit_positions.sort()
+
+    def _highlight_current_hit(self) -> None:
+        """用橙色背景高亮当前命中位置，区别于其他命中的黄色高亮。"""
+        if self._current_hit_index < 0 or self._current_hit_index >= len(self._hit_positions):
+            self._preview.setExtraSelections([])
+            return
+        start, end = self._hit_positions[self._current_hit_index]
+        sel = QTextEdit.ExtraSelection()
+        cursor = self._preview.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.KeepAnchor)
+        sel.cursor = cursor
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor(255, 165, 0))
+        sel.format = fmt
+        self._preview.setExtraSelections([sel])
+
+    def _scroll_to_current_hit(self) -> None:
+        """滚动预览区域使当前命中位置可见。"""
+        if self._current_hit_index < 0 or self._current_hit_index >= len(self._hit_positions):
+            return
+        start, _ = self._hit_positions[self._current_hit_index]
+        cursor = self._preview.textCursor()
+        cursor.setPosition(start)
+        self._preview.setTextCursor(cursor)
+        self._preview.ensureCursorVisible()
+
+    def _on_prev_hit(self) -> None:
+        """跳转到上一个命中位置。"""
+        if not self._hit_positions:
+            return
+        self._current_hit_index = (self._current_hit_index - 1) % len(self._hit_positions)
+        self._highlight_current_hit()
+        self._scroll_to_current_hit()
+        self._update_nav_label()
+
+    def _on_next_hit(self) -> None:
+        """跳转到下一个命中位置。"""
+        if not self._hit_positions:
+            return
+        self._current_hit_index = (self._current_hit_index + 1) % len(self._hit_positions)
+        self._highlight_current_hit()
+        self._scroll_to_current_hit()
+        self._update_nav_label()
+
+    def _update_nav_label(self) -> None:
+        """更新导航标签与按钮状态。"""
+        total = len(self._hit_positions)
+        if total == 0:
+            self._nav_label.setText("无命中")
+            self._prev_btn.setEnabled(False)
+            self._next_btn.setEnabled(False)
+        else:
+            self._nav_label.setText(f"{self._current_hit_index + 1} / {total}")
+            self._prev_btn.setEnabled(True)
+            self._next_btn.setEnabled(True)

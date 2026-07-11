@@ -1978,6 +1978,133 @@ class TestHitDetailDialog:
         window.close()
 
 
+class TestHitDetailDialogNavigation:
+    """详情对话框命中位置导航测试。"""
+
+    def _make_dialog_with_content(
+        self, qapp: QApplication, tmp_path: Path, content: str, keyword: str
+    ) -> "HitDetailDialog":
+        """构造带内容的详情对话框。"""
+        from uniscan.gui.detail_dialog import HitDetailDialog
+        from uniscan.scanner.result import RuleHit, ScanResult
+
+        path = tmp_path / "test.txt"
+        path.write_text(content, encoding="utf-8")
+        result = ScanResult(
+            path=path,
+            size=len(content),
+            hits=(RuleHit("r1", Severity.WARNING, f"包含 '{keyword}'"),),
+        )
+        return HitDetailDialog(result)
+
+    def test_nav_buttons_exist(self, qapp: QApplication, tmp_path: Path) -> None:
+        """对话框应包含导航按钮和标签。"""
+        dialog = self._make_dialog_with_content(qapp, tmp_path, "hello", "hello")
+        assert dialog._prev_btn is not None
+        assert dialog._next_btn is not None
+        assert dialog._nav_label is not None
+        dialog.close()
+
+    def test_hit_positions_found(self, qapp: QApplication, tmp_path: Path) -> None:
+        """应在内容中找到关键词位置。"""
+        dialog = self._make_dialog_with_content(
+            qapp, tmp_path, "password and password again", "password"
+        )
+        assert len(dialog._hit_positions) == 2
+        dialog.close()
+
+    def test_first_hit_selected_on_open(self, qapp: QApplication, tmp_path: Path) -> None:
+        """对话框打开时应定位到首个命中。"""
+        dialog = self._make_dialog_with_content(
+            qapp, tmp_path, "first password and second password", "password"
+        )
+        assert dialog._current_hit_index == 0
+        assert "1 / 2" in dialog._nav_label.text()
+        dialog.close()
+
+    def test_next_hit_advances(self, qapp: QApplication, tmp_path: Path) -> None:
+        """下一个按钮应前进到下一个命中。"""
+        dialog = self._make_dialog_with_content(
+            qapp, tmp_path, "password and password again", "password"
+        )
+        assert dialog._current_hit_index == 0
+        dialog._on_next_hit()
+        assert dialog._current_hit_index == 1
+        assert "2 / 2" in dialog._nav_label.text()
+        dialog.close()
+
+    def test_next_wraps_around(self, qapp: QApplication, tmp_path: Path) -> None:
+        """到达最后一个命中后再下一个应回到首个。"""
+        dialog = self._make_dialog_with_content(
+            qapp, tmp_path, "password and password again", "password"
+        )
+        dialog._on_next_hit()
+        assert dialog._current_hit_index == 1
+        dialog._on_next_hit()
+        assert dialog._current_hit_index == 0
+        dialog.close()
+
+    def test_prev_wraps_around(self, qapp: QApplication, tmp_path: Path) -> None:
+        """在首个命中时上一个应跳转到最后一个。"""
+        dialog = self._make_dialog_with_content(
+            qapp, tmp_path, "password and password again", "password"
+        )
+        assert dialog._current_hit_index == 0
+        dialog._on_prev_hit()
+        assert dialog._current_hit_index == 1
+        dialog.close()
+
+    def test_no_hits_disables_buttons(self, qapp: QApplication, tmp_path: Path) -> None:
+        """无关键词命中时按钮应禁用。"""
+        dialog = self._make_dialog_with_content(qapp, tmp_path, "nothing here", "missing")
+        assert len(dialog._hit_positions) == 0
+        assert not dialog._prev_btn.isEnabled()
+        assert not dialog._next_btn.isEnabled()
+        assert "无命中" in dialog._nav_label.text()
+        dialog.close()
+
+    def test_empty_file_no_crash(self, qapp: QApplication, tmp_path: Path) -> None:
+        """空文件不应导致导航异常。"""
+        dialog = self._make_dialog_with_content(qapp, tmp_path, "", "keyword")
+        assert len(dialog._hit_positions) == 0
+        dialog.close()
+
+    def test_nonexistent_file_no_crash(self, qapp: QApplication, tmp_path: Path) -> None:
+        """文件不存在时不应导致导航异常。"""
+        from uniscan.gui.detail_dialog import HitDetailDialog
+        from uniscan.scanner.result import RuleHit, ScanResult
+
+        result = ScanResult(
+            path=tmp_path / "nonexistent.txt",
+            size=0,
+            hits=(RuleHit("r", Severity.WARNING, "包含 'keyword'"),),
+        )
+        dialog = HitDetailDialog(result)
+        assert len(dialog._hit_positions) == 0
+        dialog.close()
+
+    def test_multiple_keywords(self, qapp: QApplication, tmp_path: Path) -> None:
+        """多个不同关键词的命中都应被找到。"""
+        from uniscan.gui.detail_dialog import HitDetailDialog
+        from uniscan.scanner.result import RuleHit, ScanResult
+
+        content = "password here and api_key there"
+        path = tmp_path / "multi.txt"
+        path.write_text(content, encoding="utf-8")
+        result = ScanResult(
+            path=path,
+            size=len(content),
+            hits=(
+                RuleHit("r1", Severity.WARNING, "包含 'password'"),
+                RuleHit("r2", Severity.CRITICAL, "包含 'api_key'"),
+            ),
+        )
+        dialog = HitDetailDialog(result)
+        assert len(dialog._hit_positions) == 2
+        assert "1 / 2" in dialog._nav_label.text()
+        dialog.close()
+
+
 def _build_multi_hit_report(tmp_path: Path) -> ScanReport:
     """构造多规则、多文件命中的测试报告。"""
     from uniscan.rules.model import (

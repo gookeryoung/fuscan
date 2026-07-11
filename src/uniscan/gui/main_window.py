@@ -36,6 +36,7 @@ from PySide2.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -57,6 +58,7 @@ from uniscan.gui.worker import ScanWorker
 from uniscan.rules import RuleError, load_ruleset, merge_multiple_rulesets
 from uniscan.rules.model import RuleSet
 from uniscan.scanner import ScanReport, list_drives
+from uniscan.scanner.result import RuleHit, ScanResult
 
 __all__ = ["MainWindow", "ScanState"]
 
@@ -248,19 +250,62 @@ class MainWindow(QMainWindow):
         self._splitter = QSplitter(Qt.Horizontal)
         self._splitter.addWidget(self._build_left_panel())
 
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(4)
+        right_layout.addWidget(self._build_result_filter_bar())
+
         self._result_tree = QTreeWidget()
         self._result_tree.setObjectName("resultTree")
-        self._result_tree.setHeaderLabels(["路径", "规则", "严重等级", "详情"])
-        self._result_tree.setColumnWidth(0, 450)
-        self._result_tree.setColumnWidth(1, 180)
+        self._result_tree.setHeaderLabels(["路径", "规则", "严重等级", "命中数", "详情"])
+        self._result_tree.setColumnWidth(0, 400)
+        self._result_tree.setColumnWidth(1, 150)
+        self._result_tree.setColumnWidth(2, 80)
+        self._result_tree.setColumnWidth(3, 60)
         self._result_tree.setAlternatingRowColors(True)
         self._result_tree.setRootIsDecorated(True)
+        self._result_tree.setSortingEnabled(True)
         self._result_tree.itemDoubleClicked.connect(self._on_result_double_clicked)
-        self._splitter.addWidget(self._result_tree)
+        right_layout.addWidget(self._result_tree, stretch=1)
+
+        self._splitter.addWidget(right_panel)
 
         self._splitter.setStretchFactor(0, 1)
         self._splitter.setStretchFactor(1, 4)
         return self._splitter
+
+    def _build_result_filter_bar(self) -> QWidget:
+        """构造结果筛选栏：路径筛选 + 规则筛选 + 分组模式。"""
+        bar = QFrame()
+        bar.setObjectName("filterBar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(6)
+
+        layout.addWidget(QLabel("筛选:"))
+
+        self._path_filter_input = QLineEdit()
+        self._path_filter_input.setPlaceholderText("按路径筛选...")
+        self._path_filter_input.setClearButtonEnabled(True)
+        self._path_filter_input.textChanged.connect(self._refresh_result_tree)
+        layout.addWidget(self._path_filter_input, stretch=2)
+
+        layout.addWidget(QLabel("规则:"))
+        self._rule_filter_combo = QComboBox()
+        self._rule_filter_combo.addItem("全部规则", "")
+        self._rule_filter_combo.currentIndexChanged.connect(self._refresh_result_tree)
+        layout.addWidget(self._rule_filter_combo, stretch=1)
+
+        layout.addWidget(QLabel("分组:"))
+        self._group_mode_combo = QComboBox()
+        self._group_mode_combo.addItem("不分组", "flat")
+        self._group_mode_combo.addItem("按规则", "rule")
+        self._group_mode_combo.addItem("按严重等级", "severity")
+        self._group_mode_combo.currentIndexChanged.connect(self._refresh_result_tree)
+        layout.addWidget(self._group_mode_combo, stretch=1)
+
+        return bar
 
     def _build_left_panel(self) -> QWidget:
         """构造左侧面板：规则文件列表 + 排序按钮 + 规则树。"""
@@ -902,32 +947,170 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "规则错误", f"重新加载规则失败:\n{exc}")
 
     def _populate_results(self, report: ScanReport) -> None:
-        """填充结果树。"""
-        self._result_tree.clear()
+        """填充结果树：存储报告、更新规则筛选下拉、刷新结果树。"""
+        self._last_report = report
+        self._update_rule_filter_options(report)
+        self._refresh_result_tree()
+
+    def _update_rule_filter_options(self, report: ScanReport) -> None:
+        """根据扫描结果更新规则筛选下拉项。"""
+        current_rule = self._rule_filter_combo.currentData()
+        self._rule_filter_combo.blockSignals(True)
+        self._rule_filter_combo.clear()
+        self._rule_filter_combo.addItem("全部规则", "")
+        rule_names: list[str] = []
+        seen = set()
         for result in report.hits:
-            file_item = QTreeWidgetItem([
-                str(result.path),
-                "",
-                result.max_severity.value,
-                f"{len(result.hits)} 条命中",
-            ])
-            # 将 ScanResult 存入 UserRole，供双击详情对话框使用
-            file_item.setData(0, Qt.UserRole, result)
             for hit in result.hits:
+                if hit.rule_name not in seen:
+                    seen.add(hit.rule_name)
+                    rule_names.append(hit.rule_name)
+        for name in sorted(rule_names):
+            self._rule_filter_combo.addItem(name, name)
+        # 恢复之前选中的规则
+        if current_rule:
+            idx = self._rule_filter_combo.findData(current_rule)
+            if idx >= 0:
+                self._rule_filter_combo.setCurrentIndex(idx)
+        self._rule_filter_combo.blockSignals(False)
+
+    def _refresh_result_tree(self) -> None:
+        """根据当前筛选条件与分组模式刷新结果树。"""
+        self._result_tree.clear()
+        if self._last_report is None:
+            return
+
+        path_filter = self._path_filter_input.text().strip().lower()
+        rule_filter = self._rule_filter_combo.currentData() or ""
+        group_mode = self._group_mode_combo.currentData() or "flat"
+
+        # 筛选 + 收集命中
+        filtered = self._filter_results(self._last_report, path_filter, rule_filter)
+
+        if group_mode == "rule":
+            self._populate_grouped_by_rule(filtered)
+        elif group_mode == "severity":
+            self._populate_grouped_by_severity(filtered)
+        else:
+            self._populate_flat(filtered)
+
+    def _filter_results(
+        self,
+        report: ScanReport,
+        path_filter: str,
+        rule_filter: str,
+    ) -> list[ScanResult]:
+        """按路径与规则筛选结果，返回符合条件的 ScanResult 列表。
+
+        路径筛选为大小写不敏感子串匹配；规则筛选时仅保留包含该规则命中的文件，
+        且每个 ScanResult 的 hits 被过滤为仅匹配规则的命中。
+        """
+        result: list[ScanResult] = []
+        for sr in report.hits:
+            if path_filter and path_filter not in str(sr.path).lower():
+                continue
+            if rule_filter:
+                matching_hits = tuple(h for h in sr.hits if h.rule_name == rule_filter)
+                if not matching_hits:
+                    continue
+                result.append(ScanResult(path=sr.path, size=sr.size, hits=matching_hits, errors=sr.errors))
+            else:
+                result.append(sr)
+        return result
+
+    def _populate_flat(self, results: list[ScanResult]) -> None:
+        """不分组：文件为顶层项，规则命中为子项。"""
+        for sr in results:
+            file_item = QTreeWidgetItem([
+                str(sr.path),
+                "",
+                sr.max_severity.value,
+                str(len(sr.hits)),
+                f"{len(sr.hits)} 条命中",
+            ])
+            file_item.setData(0, Qt.UserRole, sr)
+            file_item.setTextAlignment(3, Qt.AlignCenter)
+            for hit in sr.hits:
                 child = QTreeWidgetItem([
                     "",
                     hit.rule_name,
                     hit.severity.value,
+                    "",
                     hit.detail,
                 ])
                 file_item.addChild(child)
             self._result_tree.addTopLevelItem(file_item)
 
+    def _populate_grouped_by_rule(self, results: list[ScanResult]) -> None:
+        """按规则分组：规则名为顶层项，文件为子项。"""
+        rule_map: dict[str, list[tuple[ScanResult, RuleHit]]] = {}
+        for sr in results:
+            for hit in sr.hits:
+                rule_map.setdefault(hit.rule_name, []).append((sr, hit))
+
+        for rule_name in sorted(rule_map.keys()):
+            entries = rule_map[rule_name]
+            hit_count = len(entries)
+            top = QTreeWidgetItem([
+                "",
+                rule_name,
+                "",
+                str(hit_count),
+                f"{hit_count} 个文件",
+            ])
+            top.setTextAlignment(3, Qt.AlignCenter)
+            for sr, hit in entries:
+                child = QTreeWidgetItem([
+                    str(sr.path),
+                    "",
+                    hit.severity.value,
+                    "",
+                    hit.detail,
+                ])
+                child.setData(0, Qt.UserRole, sr)
+                top.addChild(child)
+            self._result_tree.addTopLevelItem(top)
+
+    def _populate_grouped_by_severity(self, results: list[ScanResult]) -> None:
+        """按严重等级分组：等级为顶层项，文件为子项。"""
+        severity_map: dict[str, list[ScanResult]] = {}
+        for sr in results:
+            sev = sr.max_severity.value
+            severity_map.setdefault(sev, []).append(sr)
+
+        for severity in sorted(severity_map.keys(), reverse=True):
+            entries = severity_map[severity]
+            file_count = len(entries)
+            top = QTreeWidgetItem([
+                "",
+                "",
+                severity,
+                str(file_count),
+                f"{file_count} 个文件",
+            ])
+            top.setTextAlignment(3, Qt.AlignCenter)
+            for sr in entries:
+                child = QTreeWidgetItem([
+                    str(sr.path),
+                    "",
+                    severity,
+                    str(len(sr.hits)),
+                    f"{len(sr.hits)} 条命中",
+                ])
+                child.setData(0, Qt.UserRole, sr)
+                child.setTextAlignment(3, Qt.AlignCenter)
+                top.addChild(child)
+            self._result_tree.addTopLevelItem(top)
+
     def _on_result_double_clicked(self, item: QTreeWidgetItem, column: int) -> None:
-        """双击结果项弹出详情对话框。"""
-        # 子项双击时取其父项（文件项）的 UserRole 数据
-        top_item = item.parent() if item.parent() is not None else item
-        result = top_item.data(0, Qt.UserRole)
+        """双击结果项弹出详情对话框。
+
+        ScanResult 存储在文件项的 UserRole 中。不分组模式下文件为顶层项，
+        分组模式下文件为子项——因此优先取当前项，取不到再取父项。
+        """
+        result = item.data(0, Qt.UserRole)
+        if result is None and item.parent() is not None:
+            result = item.parent().data(0, Qt.UserRole)
         if result is None:
             return
         dialog = HitDetailDialog(result, self)

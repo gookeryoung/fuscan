@@ -18,6 +18,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytestmark = pytest.mark.gui
 
 try:
+    from PySide2.QtCore import Qt
     from PySide2.QtWidgets import QApplication
 
     from uniscan.gui.main_window import MainWindow, ScanState
@@ -31,6 +32,7 @@ try:
         RuleSet,
         Severity,
     )
+    from uniscan.scanner import ScanReport
 
     PYSIDE2_AVAILABLE = True
 except ImportError:
@@ -1973,4 +1975,237 @@ class TestHitDetailDialog:
         window._result_tree.addTopLevelItem(item)
         # 不应抛异常
         window._on_result_double_clicked(item, 0)
+        window.close()
+
+
+def _build_multi_hit_report(tmp_path: Path) -> ScanReport:
+    """构造多规则、多文件命中的测试报告。"""
+    from uniscan.rules.model import (
+        LeafMatch,
+        MatchMode,
+        MatchTarget,
+        Rule,
+        RuleSet,
+        Severity,
+    )
+    from uniscan.scanner import Scanner
+
+    (tmp_path / "secret.txt").write_text("password = 123", encoding="utf-8")
+    (tmp_path / "safe.txt").write_text("normal content", encoding="utf-8")
+    (tmp_path / "key.txt").write_text("api_key = abc", encoding="utf-8")
+
+    rs = RuleSet(
+        version="1.0",
+        rules=(
+            Rule(
+                name="敏感文件名",
+                severity=Severity.WARNING,
+                match=LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.CONTAINS, pattern="secret"),
+            ),
+            Rule(
+                name="密钥内容",
+                severity=Severity.CRITICAL,
+                match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="key"),
+            ),
+        ),
+    )
+    scanner = Scanner(rs)
+    return scanner.scan(tmp_path)
+
+
+class TestResultFilterAndGroup:
+    """结果筛选与分组测试。"""
+
+    def test_filter_bar_exists(self, qapp: QApplication) -> None:
+        """筛选栏控件应存在。"""
+        window = MainWindow()
+        assert window._path_filter_input is not None
+        assert window._rule_filter_combo is not None
+        assert window._group_mode_combo is not None
+        window.close()
+
+    def test_header_sorting_enabled(self, qapp: QApplication) -> None:
+        """结果树应启用表头排序。"""
+        window = MainWindow()
+        assert window._result_tree.isSortingEnabled()
+        window.close()
+
+    def test_column_count_includes_hit_count(self, qapp: QApplication) -> None:
+        """结果树应包含命中数列。"""
+        window = MainWindow()
+        assert window._result_tree.columnCount() == 5
+        window.close()
+
+    def test_rule_filter_populated_after_scan(self, qapp: QApplication, tmp_path: Path) -> None:
+        """扫描后规则筛选下拉应填充规则名。"""
+        window = MainWindow()
+        report = _build_multi_hit_report(tmp_path)
+        window._populate_results(report)
+        combo = window._rule_filter_combo
+        assert combo.count() == 3  # "全部规则" + 2 个命中规则
+        assert combo.itemText(0) == "全部规则"
+        rule_texts = {combo.itemText(i) for i in range(1, combo.count())}
+        assert "敏感文件名" in rule_texts
+        assert "密钥内容" in rule_texts
+        window.close()
+
+    def test_path_filter(self, qapp: QApplication, tmp_path: Path) -> None:
+        """路径筛选应只显示匹配路径的文件。"""
+        window = MainWindow()
+        report = _build_multi_hit_report(tmp_path)
+        window._populate_results(report)
+        assert window._result_tree.topLevelItemCount() == 2  # secret.txt + key.txt
+
+        window._path_filter_input.setText("secret")
+        assert window._result_tree.topLevelItemCount() == 1
+        assert "secret.txt" in window._result_tree.topLevelItem(0).text(0)
+        window.close()
+
+    def test_path_filter_case_insensitive(self, qapp: QApplication, tmp_path: Path) -> None:
+        """路径筛选应大小写不敏感。"""
+        window = MainWindow()
+        report = _build_multi_hit_report(tmp_path)
+        window._populate_results(report)
+        window._path_filter_input.setText("SECRET")
+        assert window._result_tree.topLevelItemCount() == 1
+        window.close()
+
+    def test_rule_filter(self, qapp: QApplication, tmp_path: Path) -> None:
+        """规则筛选应只显示包含该规则命中的文件。"""
+        window = MainWindow()
+        report = _build_multi_hit_report(tmp_path)
+        window._populate_results(report)
+
+        idx = window._rule_filter_combo.findData("密钥内容")
+        assert idx >= 0
+        window._rule_filter_combo.setCurrentIndex(idx)
+        # secret.txt 同时命中"密钥内容"（内容含 key），key.txt 也命中"密钥内容"
+        count = window._result_tree.topLevelItemCount()
+        assert count >= 1
+        window.close()
+
+    def test_combined_path_and_rule_filter(self, qapp: QApplication, tmp_path: Path) -> None:
+        """路径+规则组合筛选。"""
+        window = MainWindow()
+        report = _build_multi_hit_report(tmp_path)
+        window._populate_results(report)
+
+        window._path_filter_input.setText("key.txt")
+        idx = window._rule_filter_combo.findData("密钥内容")
+        window._rule_filter_combo.setCurrentIndex(idx)
+        assert window._result_tree.topLevelItemCount() == 1
+        assert "key.txt" in window._result_tree.topLevelItem(0).text(0)
+        window.close()
+
+    def test_no_results_after_filter(self, qapp: QApplication, tmp_path: Path) -> None:
+        """筛选无匹配时结果树为空。"""
+        window = MainWindow()
+        report = _build_multi_hit_report(tmp_path)
+        window._populate_results(report)
+        window._path_filter_input.setText("nonexistent_path")
+        assert window._result_tree.topLevelItemCount() == 0
+        window.close()
+
+    def test_clear_path_filter_restores_results(self, qapp: QApplication, tmp_path: Path) -> None:
+        """清空路径筛选应恢复全部结果。"""
+        window = MainWindow()
+        report = _build_multi_hit_report(tmp_path)
+        window._populate_results(report)
+        window._path_filter_input.setText("secret")
+        assert window._result_tree.topLevelItemCount() == 1
+        window._path_filter_input.setText("")
+        assert window._result_tree.topLevelItemCount() == 2
+        window.close()
+
+    def test_group_by_rule(self, qapp: QApplication, tmp_path: Path) -> None:
+        """按规则分组：顶层项为规则名。"""
+        window = MainWindow()
+        report = _build_multi_hit_report(tmp_path)
+        window._populate_results(report)
+
+        idx = window._group_mode_combo.findData("rule")
+        window._group_mode_combo.setCurrentIndex(idx)
+        top_count = window._result_tree.topLevelItemCount()
+        assert top_count == 2  # 两个规则
+        rule_names = {window._result_tree.topLevelItem(i).text(1) for i in range(top_count)}
+        assert "敏感文件名" in rule_names
+        assert "密钥内容" in rule_names
+        window.close()
+
+    def test_group_by_severity(self, qapp: QApplication, tmp_path: Path) -> None:
+        """按严重等级分组：顶层项为严重等级。"""
+        window = MainWindow()
+        report = _build_multi_hit_report(tmp_path)
+        window._populate_results(report)
+
+        idx = window._group_mode_combo.findData("severity")
+        window._group_mode_combo.setCurrentIndex(idx)
+        top_count = window._result_tree.topLevelItemCount()
+        assert top_count == 2  # warning + critical
+        severities = {window._result_tree.topLevelItem(i).text(2) for i in range(top_count)}
+        assert "warning" in severities
+        assert "critical" in severities
+        window.close()
+
+    def test_group_by_rule_children_have_user_data(self, qapp: QApplication, tmp_path: Path) -> None:
+        """按规则分组时子项应携带 ScanResult 供双击使用。"""
+        window = MainWindow()
+        report = _build_multi_hit_report(tmp_path)
+        window._populate_results(report)
+
+        idx = window._group_mode_combo.findData("rule")
+        window._group_mode_combo.setCurrentIndex(idx)
+        top = window._result_tree.topLevelItem(0)
+        assert top.childCount() > 0
+        child = top.child(0)
+        assert child.data(0, Qt.UserRole) is not None
+        window.close()
+
+    def test_double_click_grouped_child_opens_dialog(self, qapp: QApplication, tmp_path: Path) -> None:
+        """分组模式下双击子项应打开详情对话框。"""
+        from uniscan.gui import detail_dialog as dd_module
+
+        window = MainWindow()
+        report = _build_multi_hit_report(tmp_path)
+        window._populate_results(report)
+
+        idx = window._group_mode_combo.findData("rule")
+        window._group_mode_combo.setCurrentIndex(idx)
+
+        called = {"count": 0}
+
+        def fake_exec(self) -> int:  # type: ignore[no-untyped-def]
+            called["count"] += 1
+            return 1
+
+        monkeypatch_obj = pytest.MonkeyPatch()
+        monkeypatch_obj.setattr(dd_module.HitDetailDialog, "exec_", fake_exec)
+        top = window._result_tree.topLevelItem(0)
+        child = top.child(0)
+        window._on_result_double_clicked(child, 0)
+        assert called["count"] == 1
+        monkeypatch_obj.undo()
+        window.close()
+
+    def test_refresh_with_no_report(self, qapp: QApplication) -> None:
+        """无报告时刷新结果树不应异常。"""
+        window = MainWindow()
+        window._last_report = None
+        window._refresh_result_tree()
+        assert window._result_tree.topLevelItemCount() == 0
+        window.close()
+
+    def test_rule_filter_restored_after_repopulate(self, qapp: QApplication, tmp_path: Path) -> None:
+        """重新填充结果时之前选中的规则筛选应恢复。"""
+        window = MainWindow()
+        report = _build_multi_hit_report(tmp_path)
+        window._populate_results(report)
+
+        idx = window._rule_filter_combo.findData("密钥内容")
+        window._rule_filter_combo.setCurrentIndex(idx)
+        assert window._rule_filter_combo.currentData() == "密钥内容"
+
+        # 重新填充应恢复选中的规则
+        window._populate_results(report)
+        assert window._rule_filter_combo.currentData() == "密钥内容"
         window.close()

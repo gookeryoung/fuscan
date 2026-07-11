@@ -33,8 +33,6 @@ class Ui_MainWindow(object):
         self.select_path_action.setObjectName(u"select_path_action")
         self.scan_action = QAction(MainWindow)
         self.scan_action.setObjectName(u"scan_action")
-        self.stop_action = QAction(MainWindow)
-        self.stop_action.setObjectName(u"stop_action")
         self.view_results_action = QAction(MainWindow)
         self.view_results_action.setObjectName(u"view_results_action")
         self.view_rules_action = QAction(MainWindow)
@@ -55,113 +53,91 @@ class Ui_MainWindow(object):
         self.control_layout.setSpacing(6)
         self.control_layout.setObjectName(u"control_layout")
         self.control_layout.setContentsMargins(8, 8, 8, 8)
-        self.scan_mode_row = QHBoxLayout()
-        self.scan_mode_row.setSpacing(8)
-        self.scan_mode_row.setObjectName(u"scan_mode_row")
-        self.full_btn = QPushButton(self.control_area)
-        self.full_btn.setObjectName(u"full_btn")
-        self.full_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self.full_btn.setCheckable(True)
+        self.workflow_main_row = QHBoxLayout()
+        self.workflow_main_row.setSpacing(8)
+        self.workflow_main_row.setObjectName(u"workflow_main_row")
+        self.scan_mode_label = QLabel(self.control_area)
+        self.scan_mode_label.setObjectName(u"scan_mode_label")
 
-        self.scan_mode_row.addWidget(self.full_btn)
+        self.workflow_main_row.addWidget(self.scan_mode_label)
 
-        self.drive_btn = QPushButton(self.control_area)
-        self.drive_btn.setObjectName(u"drive_btn")
-        self.drive_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self.drive_btn.setCheckable(True)
+        self.scan_mode_combo = QComboBox(self.control_area)
+        self.scan_mode_combo.addItem("")
+        self.scan_mode_combo.addItem("")
+        self.scan_mode_combo.addItem("")
+        self.scan_mode_combo.setObjectName(u"scan_mode_combo")
 
-        self.scan_mode_row.addWidget(self.drive_btn)
+        self.workflow_main_row.addWidget(self.scan_mode_combo)
 
-        self.folder_btn = QPushButton(self.control_area)
-        self.folder_btn.setObjectName(u"folder_btn")
-        self.folder_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self.folder_btn.setCheckable(True)
-        self.folder_btn.setChecked(True)
-
-        self.scan_mode_row.addWidget(self.folder_btn)
-
-        self.mode_row_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-
-        self.scan_mode_row.addItem(self.mode_row_spacer)
-
-        self.drive_label = QLabel(self.control_area)
-        self.drive_label.setObjectName(u"drive_label")
-
-        self.scan_mode_row.addWidget(self.drive_label)
-
-        self.drive_combo = QComboBox(self.control_area)
-        self.drive_combo.setObjectName(u"drive_combo")
-
-        self.scan_mode_row.addWidget(self.drive_combo)
-
-
-        self.control_layout.addLayout(self.scan_mode_row)
-
-        self.target_layout = QHBoxLayout()
-        self.target_layout.setObjectName(u"target_layout")
-        self.target_layout.setContentsMargins(0, 0, 0, 0)
         self.path_label = QLabel(self.control_area)
         self.path_label.setObjectName(u"path_label")
 
-        self.target_layout.addWidget(self.path_label)
+        self.workflow_main_row.addWidget(self.path_label)
 
         self.path_combo = QComboBox(self.control_area)
         self.path_combo.setObjectName(u"path_combo")
         sizePolicy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setHorizontalStretch(1)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.path_combo.sizePolicy().hasHeightForWidth())
         self.path_combo.setSizePolicy(sizePolicy)
 
-        self.target_layout.addWidget(self.path_combo)
+        self.workflow_main_row.addWidget(self.path_combo)
 
         self.select_path_btn = QPushButton(self.control_area)
         self.select_path_btn.setObjectName(u"select_path_btn")
 
-        self.target_layout.addWidget(self.select_path_btn)
+        self.workflow_main_row.addWidget(self.select_path_btn)
 
+        self.drive_label = QLabel(self.control_area)
+        self.drive_label.setObjectName(u"drive_label")
 
-        self.control_layout.addLayout(self.target_layout)
+        self.workflow_main_row.addWidget(self.drive_label)
 
-        self.rules_row = QHBoxLayout()
-        self.rules_row.setObjectName(u"rules_row")
-        self.load_rules_btn = QPushButton(self.control_area)
-        self.load_rules_btn.setObjectName(u"load_rules_btn")
+        self.drive_combo = QComboBox(self.control_area)
+        self.drive_combo.setObjectName(u"drive_combo")
 
-        self.rules_row.addWidget(self.load_rules_btn)
+        self.workflow_main_row.addWidget(self.drive_combo)
 
-        self.rules_label = QLabel(self.control_area)
-        self.rules_label.setObjectName(u"rules_label")
+        self.workflow_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
 
-        self.rules_row.addWidget(self.rules_label)
+        self.workflow_main_row.addItem(self.workflow_spacer)
 
-        self.use_builtin_checkbox = QCheckBox(self.control_area)
-        self.use_builtin_checkbox.setObjectName(u"use_builtin_checkbox")
-        self.use_builtin_checkbox.setChecked(True)
-
-        self.rules_row.addWidget(self.use_builtin_checkbox)
-
-
-        self.control_layout.addLayout(self.rules_row)
-
-        self.scan_btn_row = QHBoxLayout()
-        self.scan_btn_row.setObjectName(u"scan_btn_row")
         self.scan_btn = QPushButton(self.control_area)
         self.scan_btn.setObjectName(u"scan_btn")
         self.scan_btn.setEnabled(False)
         self.scan_btn.setCursor(QCursor(Qt.PointingHandCursor))
 
-        self.scan_btn_row.addWidget(self.scan_btn)
-
-        self.stop_btn = QPushButton(self.control_area)
-        self.stop_btn.setObjectName(u"stop_btn")
-        self.stop_btn.setCursor(QCursor(Qt.PointingHandCursor))
-        self.stop_btn.setVisible(False)
-
-        self.scan_btn_row.addWidget(self.stop_btn)
+        self.workflow_main_row.addWidget(self.scan_btn)
 
 
-        self.control_layout.addLayout(self.scan_btn_row)
+        self.control_layout.addLayout(self.workflow_main_row)
+
+        self.workflow_rules_row = QHBoxLayout()
+        self.workflow_rules_row.setSpacing(8)
+        self.workflow_rules_row.setObjectName(u"workflow_rules_row")
+        self.load_rules_btn = QPushButton(self.control_area)
+        self.load_rules_btn.setObjectName(u"load_rules_btn")
+
+        self.workflow_rules_row.addWidget(self.load_rules_btn)
+
+        self.rules_label = QLabel(self.control_area)
+        self.rules_label.setObjectName(u"rules_label")
+
+        self.workflow_rules_row.addWidget(self.rules_label)
+
+        self.use_builtin_checkbox = QCheckBox(self.control_area)
+        self.use_builtin_checkbox.setObjectName(u"use_builtin_checkbox")
+        self.use_builtin_checkbox.setChecked(True)
+
+        self.workflow_rules_row.addWidget(self.use_builtin_checkbox)
+
+        self.rules_row_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self.workflow_rules_row.addItem(self.rules_row_spacer)
+
+
+        self.control_layout.addLayout(self.workflow_rules_row)
 
         self.progress = QProgressBar(self.control_area)
         self.progress.setObjectName(u"progress")
@@ -530,9 +506,6 @@ class Ui_MainWindow(object):
         self.help_menu = QMenu(self.menubar)
         self.help_menu.setObjectName(u"help_menu")
         MainWindow.setMenuBar(self.menubar)
-        self.toolbar = QToolBar(MainWindow)
-        self.toolbar.setObjectName(u"toolbar")
-        MainWindow.addToolBar(Qt.TopToolBarArea, self.toolbar)
 
         self.menubar.addAction(self.file_menu.menuAction())
         self.menubar.addAction(self.scan_menu.menuAction())
@@ -547,14 +520,10 @@ class Ui_MainWindow(object):
         self.file_menu.addAction(self.quit_action)
         self.scan_menu.addAction(self.select_path_action)
         self.scan_menu.addAction(self.scan_action)
-        self.scan_menu.addAction(self.stop_action)
         self.view_menu.addAction(self.view_results_action)
         self.view_menu.addAction(self.view_rules_action)
         self.view_menu.addAction(self.view_history_action)
         self.help_menu.addAction(self.about_action)
-        self.toolbar.addAction(self.scan_action)
-        self.toolbar.addAction(self.load_rules_action)
-        self.toolbar.addAction(self.export_csv_action)
 
         self.retranslateUi(MainWindow)
 
@@ -593,10 +562,6 @@ class Ui_MainWindow(object):
 #if QT_CONFIG(shortcut)
         self.scan_action.setShortcut(QCoreApplication.translate("MainWindow", u"F5", None))
 #endif // QT_CONFIG(shortcut)
-        self.stop_action.setText(QCoreApplication.translate("MainWindow", u"\u505c\u6b62\u626b\u63cf", None))
-#if QT_CONFIG(shortcut)
-        self.stop_action.setShortcut(QCoreApplication.translate("MainWindow", u"Esc", None))
-#endif // QT_CONFIG(shortcut)
         self.view_results_action.setText(QCoreApplication.translate("MainWindow", u"\u5207\u6362\u5230\u626b\u63cf\u7ed3\u679c", None))
 #if QT_CONFIG(shortcut)
         self.view_results_action.setShortcut(QCoreApplication.translate("MainWindow", u"Ctrl+1", None))
@@ -610,29 +575,30 @@ class Ui_MainWindow(object):
         self.view_history_action.setShortcut(QCoreApplication.translate("MainWindow", u"Ctrl+3", None))
 #endif // QT_CONFIG(shortcut)
         self.about_action.setText(QCoreApplication.translate("MainWindow", u"\u5173\u4e8e", None))
-        self.full_btn.setText(QCoreApplication.translate("MainWindow", u"\u5168\u76d8\u626b\u63cf\n"
-"\u626b\u63cf\u6240\u6709\u76d8\u7b26", None))
-        self.drive_btn.setText(QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u76d8\u7b26\n"
-"\u626b\u63cf\u6307\u5b9a\u76d8\u7b26", None))
-        self.folder_btn.setText(QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u6587\u4ef6\u5939\n"
-"\u626b\u63cf\u6307\u5b9a\u76ee\u5f55", None))
-        self.drive_label.setText(QCoreApplication.translate("MainWindow", u"\u76d8\u7b26:", None))
+        self.scan_mode_label.setText(QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u6a21\u5f0f:", None))
+        self.scan_mode_combo.setItemText(0, QCoreApplication.translate("MainWindow", u"\u5168\u76d8\u626b\u63cf", None))
+        self.scan_mode_combo.setItemText(1, QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u76d8\u7b26", None))
+        self.scan_mode_combo.setItemText(2, QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u6587\u4ef6\u5939", None))
+
 #if QT_CONFIG(tooltip)
-        self.drive_combo.setToolTip(QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u8981\u626b\u63cf\u7684\u76d8\u7b26", None))
+        self.scan_mode_combo.setToolTip(QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u626b\u63cf\u6a21\u5f0f", None))
 #endif // QT_CONFIG(tooltip)
         self.path_label.setText(QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u8def\u5f84:", None))
 #if QT_CONFIG(tooltip)
         self.path_combo.setToolTip(QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u8def\u5f84\uff08\u53ef\u4ece\u5386\u53f2\u8bb0\u5f55\u4e2d\u9009\u62e9\uff09", None))
 #endif // QT_CONFIG(tooltip)
         self.select_path_btn.setText(QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u8def\u5f84...", None))
+        self.drive_label.setText(QCoreApplication.translate("MainWindow", u"\u76d8\u7b26:", None))
+#if QT_CONFIG(tooltip)
+        self.drive_combo.setToolTip(QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u8981\u626b\u63cf\u7684\u76d8\u7b26", None))
+#endif // QT_CONFIG(tooltip)
+        self.scan_btn.setText(QCoreApplication.translate("MainWindow", u"\u5f00\u59cb\u626b\u63cf", None))
         self.load_rules_btn.setText(QCoreApplication.translate("MainWindow", u"\u52a0\u8f7d\u89c4\u5219...", None))
         self.rules_label.setText(QCoreApplication.translate("MainWindow", u"\u89c4\u5219: \u672a\u52a0\u8f7d", None))
 #if QT_CONFIG(tooltip)
         self.use_builtin_checkbox.setToolTip(QCoreApplication.translate("MainWindow", u"\u52fe\u9009\u540e\u52a0\u8f7d\u8f6f\u4ef6\u5185\u7f6e\u901a\u7528\u89c4\u5219\uff0c\u7528\u6237\u89c4\u5219\u4e2d\u540c\u540d\u89c4\u5219\u4f1a\u8986\u76d6\u901a\u7528\u89c4\u5219", None))
 #endif // QT_CONFIG(tooltip)
         self.use_builtin_checkbox.setText(QCoreApplication.translate("MainWindow", u"\u4f7f\u7528\u901a\u7528\u89c4\u5219", None))
-        self.scan_btn.setText(QCoreApplication.translate("MainWindow", u"\u5f00\u59cb\u626b\u63cf", None))
-        self.stop_btn.setText(QCoreApplication.translate("MainWindow", u"\u505c\u6b62", None))
         self.current_file_label.setText("")
         self.stats_label.setText(QCoreApplication.translate("MainWindow", u"\u5c31\u7eea", None))
         self.filter_label.setText(QCoreApplication.translate("MainWindow", u"\u7b5b\u9009:", None))
@@ -738,6 +704,5 @@ class Ui_MainWindow(object):
         self.scan_menu.setTitle(QCoreApplication.translate("MainWindow", u"\u626b\u63cf(&S)", None))
         self.view_menu.setTitle(QCoreApplication.translate("MainWindow", u"\u89c6\u56fe(&V)", None))
         self.help_menu.setTitle(QCoreApplication.translate("MainWindow", u"\u5e2e\u52a9(&H)", None))
-        self.toolbar.setWindowTitle(QCoreApplication.translate("MainWindow", u"\u4e3b\u5de5\u5177\u680f", None))
     # retranslateUi
 

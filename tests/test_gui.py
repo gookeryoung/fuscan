@@ -932,12 +932,6 @@ class TestScanControlUI:
         assert window._scan_action.text() == "开始扫描"
         window.close()
 
-    def test_stop_button_hidden_initially(self, qapp: QApplication) -> None:
-        """启动时停止按钮应隐藏。"""
-        window = MainWindow()
-        assert not window._stop_btn.isVisible()
-        window.close()
-
     def test_set_scan_controls_text_updates_both(self, qapp: QApplication) -> None:
         """_set_scan_controls_text 应同步更新按钮和 action 文本。"""
         window = MainWindow()
@@ -995,12 +989,10 @@ class TestScanControlUI:
         window = MainWindow()
         window._scan_state = ScanState.RUNNING
         window._set_scan_controls_text("暂停扫描")
-        window._stop_btn.setVisible(True)
         window._reset_scan_ui()
         assert window._scan_state == ScanState.IDLE
         assert window._scan_btn.text() == "开始扫描"
         assert window._scan_action.text() == "开始扫描"
-        assert not window._stop_btn.isVisible()
         assert not window._progress.isVisible()
         assert not window._current_file_label.isVisible()
         window.close()
@@ -1055,7 +1047,6 @@ class TestScanControlIntegration:
 
         assert window._scan_state == ScanState.RUNNING
         assert window._scan_btn.text() == "暂停扫描"
-        assert window._stop_btn.isVisible()
 
         loop = QEventLoop()
         QTimer.singleShot(10000, loop.quit)
@@ -1084,7 +1075,6 @@ class TestScanControlIntegration:
         # 模拟扫描中状态
         window._scan_state = ScanState.RUNNING
         window._set_scan_controls_text("暂停扫描")
-        window._stop_btn.setVisible(True)
         window._progress.setVisible(True)
 
         # 直接调用 _on_scan_cancelled 模拟取消回调
@@ -1098,7 +1088,6 @@ class TestScanControlIntegration:
 
         assert window._scan_state == ScanState.IDLE
         assert window._scan_btn.text() == "开始扫描"
-        assert not window._stop_btn.isVisible()
         assert "已取消" in window._stats_label.text()
         window.close()
 
@@ -1824,9 +1813,7 @@ class TestScanMode:
         """启动时默认扫描模式为 folder。"""
         window = MainWindow()
         assert window._scan_mode == "folder"
-        assert window._folder_btn.isChecked()
-        assert not window._full_btn.isChecked()
-        assert not window._drive_btn.isChecked()
+        assert window._scan_mode_combo.currentIndex() == 2
         window.close()
 
     def test_folder_mode_shows_path_row(self, qapp: QApplication) -> None:
@@ -1844,8 +1831,7 @@ class TestScanMode:
         window = MainWindow()
         window.show()
         qapp.processEvents()
-        window._full_btn.setChecked(True)
-        window._on_scan_mode_changed(window._full_btn)
+        window._scan_mode_combo.setCurrentIndex(0)
         assert window._scan_mode == "full"
         assert not window._path_combo.isVisible()
         assert not window._drive_combo.isVisible()
@@ -1856,8 +1842,7 @@ class TestScanMode:
         window = MainWindow()
         window.show()
         qapp.processEvents()
-        window._drive_btn.setChecked(True)
-        window._on_scan_mode_changed(window._drive_btn)
+        window._scan_mode_combo.setCurrentIndex(1)
         assert window._scan_mode == "drive"
         assert window._drive_combo.isVisible()
         assert window._drive_label.isVisible()
@@ -1871,16 +1856,14 @@ class TestScanMode:
         # folder 模式下未选路径，按钮禁用
         assert not window._scan_btn.isEnabled()
         # 切换到 full 模式
-        window._full_btn.setChecked(True)
-        window._on_scan_mode_changed(window._full_btn)
+        window._scan_mode_combo.setCurrentIndex(0)
         assert window._scan_btn.isEnabled()
         window.close()
 
     def test_drive_mode_enables_scan_with_drive(self, qapp: QApplication) -> None:
         """drive 模式下有盘符即可扫描。"""
         window = MainWindow()
-        window._drive_btn.setChecked(True)
-        window._on_scan_mode_changed(window._drive_btn)
+        window._scan_mode_combo.setCurrentIndex(1)
         # 盘符下拉在测试环境（Windows）通常有盘符
         if window._drive_combo.count() > 0:
             assert window._scan_btn.isEnabled()
@@ -1894,8 +1877,7 @@ class TestScanMode:
         monkeypatch.setattr(mw_mod, "list_drives", lambda: fake_drives)
 
         window = MainWindow()
-        window._full_btn.setChecked(True)
-        window._on_scan_mode_changed(window._full_btn)
+        window._scan_mode_combo.setCurrentIndex(0)
         roots = window._build_scan_roots()
         assert roots == fake_drives
         window.close()
@@ -1903,8 +1885,7 @@ class TestScanMode:
     def test_build_scan_roots_drive_mode(self, qapp: QApplication) -> None:
         """drive 模式应返回选中的单个盘符。"""
         window = MainWindow()
-        window._drive_btn.setChecked(True)
-        window._on_scan_mode_changed(window._drive_btn)
+        window._scan_mode_combo.setCurrentIndex(1)
         if window._drive_combo.count() > 0:
             roots = window._build_scan_roots()
             assert len(roots) == 1
@@ -1940,7 +1921,7 @@ class TestScanModePersistence:
 
         window = MainWindow()
         assert window._scan_mode == "full"
-        assert window._full_btn.isChecked()
+        assert window._scan_mode_combo.currentIndex() == 0
         window.close()
 
     def test_drive_mode_restored_on_startup(self, qapp: QApplication, tmp_path: Path) -> None:
@@ -1953,14 +1934,13 @@ class TestScanModePersistence:
 
         window = MainWindow()
         assert window._scan_mode == "drive"
-        assert window._drive_btn.isChecked()
+        assert window._scan_mode_combo.currentIndex() == 1
         window.close()
 
     def test_close_saves_scan_mode(self, qapp: QApplication, tmp_path: Path) -> None:
         """关闭时扫描模式应被保存。"""
         window = MainWindow()
-        window._full_btn.setChecked(True)
-        window._on_scan_mode_changed(window._full_btn)
+        window._scan_mode_combo.setCurrentIndex(0)
         window.close()
 
         from uniscan.config import load_config as _load_impl
@@ -3121,12 +3101,6 @@ class TestScanCallbacks:
         assert "暂停" in window._scan_btn.text()
 
         window._worker = None
-        window.close()
-
-    def test_on_stop_no_worker(self, qapp: QApplication) -> None:
-        """无 worker 时停止不应崩溃。"""
-        window = MainWindow()
-        window._on_stop()
         window.close()
 
 

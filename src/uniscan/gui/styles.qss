@@ -64,46 +64,6 @@ QMenu::separator {
     margin: 4px 8px;
 }
 
-/* ========== 工具栏 ========== */
-
-QToolBar {
-    background: #ffffff;
-    border-bottom: 1px solid #e1e4e8;
-    border-top: none;
-    border-left: none;
-    border-right: none;
-    spacing: 4px;
-    padding: 4px 8px;
-}
-
-QToolBar::separator {
-    width: 1px;
-    background: #e1e4e8;
-    margin: 4px 6px;
-}
-
-QToolBar QToolButton {
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    padding: 6px 10px;
-    color: #24292e;
-    font-size: 13px;
-}
-
-QToolBar QToolButton:hover {
-    background: #f1f8ff;
-    color: #0366d6;
-}
-
-QToolBar QToolButton:pressed {
-    background: #e1e4e8;
-}
-
-QToolBar QToolButton:disabled {
-    color: #959da5;
-}
-
 /* ========== 卡片容器 ========== */
 
 QFrame#control_area {
@@ -124,30 +84,16 @@ QFrame#detail_empty_main, QFrame#detail_nonempty_main {
     border-radius: 8px;
 }
 
-/* ========== 扫描模式按钮 ========== */
+/* ========== 扫描模式下拉 ========== */
 
-QPushButton#full_btn, QPushButton#drive_btn, QPushButton#folder_btn {
-    text-align: left;
-    padding: 10px 16px 10px 12px;
-    border: 2px solid #e1e4e8;
-    border-radius: 8px;
-    background: #ffffff;
-    font-size: 13px;
-    min-width: 130px;
-    color: #24292e;
-}
-
-QPushButton#full_btn:hover, QPushButton#drive_btn:hover, QPushButton#folder_btn:hover {
-    border-color: #0366d6;
-    background: #f1f8ff;
-    color: #0366d6;
-}
-
-QPushButton#full_btn:checked, QPushButton#drive_btn:checked, QPushButton#folder_btn:checked {
-    border-color: #0366d6;
-    background: #0366d6;
-    color: #ffffff;
+QComboBox#scan_mode_combo {
+    min-width: 120px;
     font-weight: bold;
+}
+
+QLabel#scan_mode_label {
+    font-size: 13px;
+    color: #586069;
 }
 
 /* ========== 主操作按钮 ========== */
@@ -171,29 +117,6 @@ QPushButton#scan_btn:pressed {
 }
 
 QPushButton#scan_btn:disabled {
-    background: #e1e4e8;
-    color: #ffffff;
-}
-
-QPushButton#stop_btn {
-    background: #d73a49;
-    color: #ffffff;
-    border: none;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: bold;
-    padding: 10px 20px;
-}
-
-QPushButton#stop_btn:hover {
-    background: #c12736;
-}
-
-QPushButton#stop_btn:pressed {
-    background: #a51e2b;
-}
-
-QPushButton#stop_btn:disabled {
     background: #e1e4e8;
     color: #ffffff;
 }

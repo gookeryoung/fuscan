@@ -30,11 +30,10 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Sequence
 
-from PySide2.QtCore import QSize, Qt
+from PySide2.QtCore import Qt
 from PySide2.QtGui import QColor, QIcon, QTextCharFormat, QTextCursor
 from PySide2.QtWidgets import (
     QApplication,
-    QButtonGroup,
     QFileDialog,
     QHeaderView,
     QInputDialog,
@@ -82,7 +81,6 @@ _ICONS_DIR = Path(__file__).parent.parent / "assets" / "icons"
 _ICON_SCAN = str(_ICONS_DIR / "scan.svg")
 _ICON_PAUSE = str(_ICONS_DIR / "pause.svg")
 _ICON_RESCAN = str(_ICONS_DIR / "rescan.svg")
-_ICON_STOP = str(_ICONS_DIR / "stop.svg")
 _ICON_ALL_DISK = str(_ICONS_DIR / "all_disk.svg")
 _ICON_DISK = str(_ICONS_DIR / "disk.svg")
 _ICON_FOLDER = str(_ICONS_DIR / "folder.svg")
@@ -185,13 +183,11 @@ class MainWindow(QMainWindow):
         ui = self._ui
         # 主操作区
         self._scan_btn = ui.scan_btn
-        self._stop_btn = ui.stop_btn
         self._progress = ui.progress
         self._current_file_label = ui.current_file_label
         self._stats_label = ui.stats_label
-        self._full_btn = ui.full_btn
-        self._drive_btn = ui.drive_btn
-        self._folder_btn = ui.folder_btn
+        self._scan_mode_combo = ui.scan_mode_combo
+        self._scan_mode_label = ui.scan_mode_label
         self._drive_label = ui.drive_label
         self._drive_combo = ui.drive_combo
         self._path_label = ui.path_label
@@ -239,13 +235,12 @@ class MainWindow(QMainWindow):
         self._edit_rules_action = ui.edit_rules_action
         self._export_csv_action = ui.export_csv_action
         self._export_json_action = ui.export_json_action
-        self._stop_action = ui.stop_action
         self._view_results_action = ui.view_results_action
         self._view_rules_action = ui.view_rules_action
         self._view_history_action = ui.view_history_action
 
     def _configure_ui(self) -> None:
-        """配置 .ui 无法静态表达的动态属性、QButtonGroup、layout stretch 与信号槽连接。"""
+        """配置 .ui 无法静态表达的动态属性、layout stretch 与信号槽连接。"""
         # 结果树列宽
         self._result_tree.setColumnWidth(0, 400)
         self._result_tree.setColumnWidth(1, 150)
@@ -256,13 +251,6 @@ class MainWindow(QMainWindow):
         self._detail_hits_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self._detail_hits_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._detail_hits_table.setSelectionBehavior(QTableWidget.SelectRows)
-
-        # QButtonGroup：扫描模式按钮组（.ui 不支持）
-        self._mode_btn_group = QButtonGroup(self)
-        self._mode_btn_group.setExclusive(True)
-        self._mode_btn_group.addButton(self._full_btn, 0)
-        self._mode_btn_group.addButton(self._drive_btn, 1)
-        self._mode_btn_group.addButton(self._folder_btn, 2)
 
         # QComboBox 初始项
         self._rule_filter_combo.addItem("全部规则", "")
@@ -278,14 +266,20 @@ class MainWindow(QMainWindow):
         ui = self._ui
         ui.central_layout.setStretch(0, 0)
         ui.central_layout.setStretch(1, 1)
-        ui.target_layout.setStretch(0, 0)
-        ui.target_layout.setStretch(1, 1)
-        ui.target_layout.setStretch(2, 0)
-        ui.rules_row.setStretch(0, 0)
-        ui.rules_row.setStretch(1, 1)
-        ui.rules_row.setStretch(2, 0)
-        ui.scan_btn_row.setStretch(0, 3)
-        ui.scan_btn_row.setStretch(1, 1)
+        ui.workflow_main_row.setStretch(0, 0)
+        ui.workflow_main_row.setStretch(1, 0)
+        ui.workflow_main_row.setStretch(2, 0)
+        ui.workflow_main_row.setStretch(3, 1)
+        ui.workflow_main_row.setStretch(4, 0)
+        ui.workflow_main_row.setStretch(5, 0)
+        ui.workflow_main_row.setStretch(6, 0)
+        ui.workflow_main_row.setStretch(7, 0)
+        ui.workflow_main_row.setStretch(8, 1)
+        ui.workflow_main_row.setStretch(9, 0)
+        ui.workflow_rules_row.setStretch(0, 0)
+        ui.workflow_rules_row.setStretch(1, 1)
+        ui.workflow_rules_row.setStretch(2, 0)
+        ui.workflow_rules_row.setStretch(3, 1)
         ui.list_layout.setStretch(0, 1)
         ui.list_layout.setStretch(1, 0)
         ui.results_layout.setStretch(0, 0)
@@ -318,22 +312,17 @@ class MainWindow(QMainWindow):
         self._icon_scan = QIcon(_ICON_SCAN)
         self._icon_pause = QIcon(_ICON_PAUSE)
         self._icon_rescan = QIcon(_ICON_RESCAN)
-        self._icon_stop = QIcon(_ICON_STOP)
         self._icon_all_disk = QIcon(_ICON_ALL_DISK)
         self._icon_disk = QIcon(_ICON_DISK)
         self._icon_folder = QIcon(_ICON_FOLDER)
         self._icon_history = QIcon(_ICON_HISTORY)
         self._icon_load_list = QIcon(_ICON_LOAD_LIST)
         self._scan_btn.setIcon(self._icon_scan)
-        self._stop_btn.setIcon(self._icon_stop)
         self._detail_start_btn.setIcon(self._icon_scan)
-        # 扫描模式按钮图标
-        self._full_btn.setIcon(self._icon_all_disk)
-        self._drive_btn.setIcon(self._icon_disk)
-        self._folder_btn.setIcon(self._icon_folder)
-        self._full_btn.setIconSize(QSize(24, 24))
-        self._drive_btn.setIconSize(QSize(24, 24))
-        self._folder_btn.setIconSize(QSize(24, 24))
+        # 扫描模式下拉项图标
+        self._scan_mode_combo.setItemIcon(0, self._icon_all_disk)
+        self._scan_mode_combo.setItemIcon(1, self._icon_disk)
+        self._scan_mode_combo.setItemIcon(2, self._icon_folder)
         # 加载规则按钮图标
         self._load_rules_btn.setIcon(self._icon_load_list)
         self._detail_load_rules_btn.setIcon(self._icon_load_list)
@@ -344,15 +333,12 @@ class MainWindow(QMainWindow):
         # Tab 图标
         self._tab_widget.setTabIcon(0, self._icon_scan)
         self._tab_widget.setTabIcon(2, self._icon_history)
-        # 工具栏/菜单 actions 图标
+        # 菜单 actions 图标
         self._scan_action.setIcon(self._icon_scan)
-        self._stop_action.setIcon(self._icon_stop)
-        self._ui.toolbar.setIconSize(QSize(20, 20))
 
         # 信号槽连接
         self._scan_btn.clicked.connect(self._on_scan)
-        self._stop_btn.clicked.connect(self._on_stop)
-        self._mode_btn_group.buttonClicked.connect(self._on_scan_mode_changed)
+        self._scan_mode_combo.currentIndexChanged.connect(self._on_scan_mode_changed)
         self._drive_combo.currentIndexChanged.connect(self._on_drive_selected)
         self._path_combo.currentIndexChanged.connect(self._on_path_selected)
         self._select_path_btn.clicked.connect(self._on_select_path)
@@ -388,7 +374,6 @@ class MainWindow(QMainWindow):
         self._ui.quit_action.triggered.connect(self.close)
         self._ui.select_path_action.triggered.connect(self._on_select_path)
         self._scan_action.triggered.connect(self._on_scan)
-        self._stop_action.triggered.connect(self._on_stop)
         self._view_results_action.triggered.connect(lambda: self._switch_tab(0))
         self._view_rules_action.triggered.connect(lambda: self._switch_tab(1))
         self._view_history_action.triggered.connect(lambda: self._switch_tab(2))
@@ -422,8 +407,10 @@ class MainWindow(QMainWindow):
 
         # 恢复扫描模式
         self._scan_mode = self._config.scan_mode if self._config.scan_mode in ("full", "drive", "folder") else "folder"
-        mode_btn_map = {"full": self._full_btn, "drive": self._drive_btn, "folder": self._folder_btn}
-        mode_btn_map[self._scan_mode].setChecked(True)
+        mode_index_map = {"full": 0, "drive": 1, "folder": 2}
+        self._scan_mode_combo.blockSignals(True)
+        self._scan_mode_combo.setCurrentIndex(mode_index_map[self._scan_mode])
+        self._scan_mode_combo.blockSignals(False)
         self._update_target_visibility()
 
         # 恢复上次选择的盘符
@@ -504,8 +491,7 @@ class MainWindow(QMainWindow):
         if not path.exists():
             QMessageBox.information(self, "提示", f"路径不存在:\n{path_str}")
             return
-        self._folder_btn.setChecked(True)
-        self._on_scan_mode_changed(self._folder_btn)
+        self._scan_mode_combo.setCurrentIndex(2)
         self._scan_root = path
         self._add_scan_path_history(path_str)
         self._update_scan_button()
@@ -556,10 +542,9 @@ class MainWindow(QMainWindow):
 
     # ----------------------------- 扫描模式 -----------------------------
 
-    def _on_scan_mode_changed(self, button) -> None:  # type: ignore[no-untyped-def]
+    def _on_scan_mode_changed(self, index: int) -> None:
         """扫描模式切换：更新目标选择器可见性与扫描按钮状态。"""
-        btn_id = self._mode_btn_group.id(button)
-        self._scan_mode = {0: "full", 1: "drive", 2: "folder"}.get(btn_id, "folder")
+        self._scan_mode = {0: "full", 1: "drive", 2: "folder"}.get(index, "folder")
         self._update_target_visibility()
         self._update_scan_button()
 
@@ -658,7 +643,7 @@ class MainWindow(QMainWindow):
         self._update_scan_button()
 
     def _set_scan_controls_text(self, text: str) -> None:
-        """同步设置扫描按钮与菜单/工具栏 action 的文本。"""
+        """同步设置扫描按钮与菜单 action 的文本。"""
         self._scan_btn.setText(text)
         self._scan_action.setText(text)
         self._detail_start_btn.setText(text)
@@ -697,7 +682,6 @@ class MainWindow(QMainWindow):
         self._scan_state = ScanState.RUNNING
         self._set_scan_controls_text("暂停扫描")
         self._update_scan_button_icon()
-        self._stop_btn.setVisible(True)
         self._progress.setVisible(True)
         self._progress.setRange(0, 0)
         self._current_file_label.setVisible(True)
@@ -734,11 +718,6 @@ class MainWindow(QMainWindow):
         self._update_scan_button_icon()
         self._stats_label.setText("扫描中...")
 
-    def _on_stop(self) -> None:
-        """停止扫描。"""
-        if self._worker is not None:
-            self._worker.cancel()
-
     def _on_scan_cancelled(self, report: ScanReport) -> None:
         """扫描被取消后的回调。"""
         self._last_report = report
@@ -755,7 +734,6 @@ class MainWindow(QMainWindow):
         self._scan_state = ScanState.IDLE
         self._progress.setVisible(False)
         self._current_file_label.setVisible(False)
-        self._stop_btn.setVisible(False)
         self._set_scan_controls_text("开始扫描")
         self._update_scan_button_icon()
         self._cleanup_worker()

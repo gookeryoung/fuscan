@@ -1872,7 +1872,7 @@ class TestScanMode:
         from fuscan.gui import main_window as mw_mod
 
         fake_drives = [Path("C:\\"), Path("D:\\")]
-        monkeypatch.setattr(mw_mod, "list_drives", lambda: fake_drives)
+        monkeypatch.setattr(mw_mod, "list_drives", lambda include_network=False: fake_drives)
 
         window = MainWindow()
         window._scan_mode_combo.setCurrentIndex(0)
@@ -3321,4 +3321,57 @@ class TestRulesManagement:
         window._reload_and_refresh()
         # 应成功加载规则集
         assert window._ruleset is not None
+        window.close()
+
+
+class TestSettingsDialog:
+    """设置对话框测试。"""
+
+    def test_settings_action_in_file_menu(self, qapp: QApplication) -> None:
+        """设置 action 应存在于文件菜单（而非帮助菜单）。"""
+        from PySide2.QtWidgets import QDialog
+
+        window = MainWindow()
+        # settings_action 应存在并连接到 _on_settings
+        assert window._settings_action is not None
+        assert window._settings_action.text() == "设置..."
+        # 设置 action 应在文件菜单中
+        file_actions = window._ui.file_menu.actions()
+        settings_texts = [a.text() for a in file_actions]
+        assert "设置..." in settings_texts
+        # 帮助菜单不应包含设置
+        help_actions = window._ui.help_menu.actions()
+        help_texts = [a.text() for a in help_actions]
+        assert "设置..." not in help_texts
+        # 确认 QDialog 已导入可用
+        assert QDialog.Accepted == 1
+        window.close()
+
+    def test_on_settings_accept_applies_config(self, qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+        """点击确定应保存配置并应用。"""
+        from fuscan.gui import settings_dialog as sd_module
+
+        window = MainWindow()
+        monkeypatch.setattr(sd_module.SettingsDialog, "exec_", lambda self: 1)  # QDialog.Accepted
+
+        original_config = window._config.use_builtin
+        window._config.use_builtin = not original_config
+        window._on_settings()
+
+        # 配置应被应用（checkbox 同步）
+        assert window._use_builtin == window._config.use_builtin
+        assert window._use_builtin_checkbox.isChecked() == window._config.use_builtin
+        window.close()
+
+    def test_on_settings_reject_no_change(self, qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+        """点击取消不应改变配置。"""
+        from fuscan.gui import settings_dialog as sd_module
+
+        window = MainWindow()
+        monkeypatch.setattr(sd_module.SettingsDialog, "exec_", lambda self: 0)  # QDialog.Rejected
+
+        before = window._config.use_builtin
+        window._on_settings()
+        # 取消后配置不变
+        assert window._config.use_builtin == before
         window.close()

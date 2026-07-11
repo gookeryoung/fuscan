@@ -36,6 +36,7 @@ from PySide2.QtWidgets import (
     QAbstractButton,
     QApplication,
     QButtonGroup,
+    QDialog,
     QFileDialog,
     QHeaderView,
     QInputDialog,
@@ -593,7 +594,7 @@ class MainWindow(QMainWindow):
             btn.setCheckable(True)
             btn.setProperty("drive", str(drive))
             btn.setIcon(self._icon_hard_disk)
-            btn.setIconSize(QSize(14, 14))
+            btn.setIconSize(QSize(14, 50))
             self._drive_buttons_layout.addWidget(btn)
             self._drive_button_group.addButton(btn)
             self._drive_buttons.append(btn)

@@ -10,8 +10,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide2.QtCore import Qt
 from PySide2.QtWidgets import (
     QCheckBox,
@@ -19,10 +17,6 @@ from PySide2.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QGroupBox,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QPushButton,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,

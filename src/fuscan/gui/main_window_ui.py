@@ -17,7 +17,7 @@ class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         if not MainWindow.objectName():
             MainWindow.setObjectName(u"MainWindow")
-        MainWindow.resize(800, 560)
+        MainWindow.resize(1330, 927)
         MainWindow.setMinimumSize(QSize(720, 480))
         self.load_rules_action = QAction(MainWindow)
         self.load_rules_action.setObjectName(u"load_rules_action")
@@ -41,6 +41,8 @@ class Ui_MainWindow(object):
         self.view_history_action.setObjectName(u"view_history_action")
         self.about_action = QAction(MainWindow)
         self.about_action.setObjectName(u"about_action")
+        self.settings_action = QAction(MainWindow)
+        self.settings_action.setObjectName(u"settings_action")
         self.central = QWidget(MainWindow)
         self.central.setObjectName(u"central")
         self.verticalLayout_2 = QVBoxLayout(self.central)
@@ -69,6 +71,7 @@ class Ui_MainWindow(object):
         sizePolicy1.setVerticalStretch(0)
         sizePolicy1.setHeightForWidth(self.scan_mode_combo.sizePolicy().hasHeightForWidth())
         self.scan_mode_combo.setSizePolicy(sizePolicy1)
+        self.scan_mode_combo.setMinimumSize(QSize(0, 60))
 
         self.scan_mode_layout.addWidget(self.scan_mode_combo)
 
@@ -107,11 +110,13 @@ class Ui_MainWindow(object):
         self.path_combo.setObjectName(u"path_combo")
         sizePolicy2.setHeightForWidth(self.path_combo.sizePolicy().hasHeightForWidth())
         self.path_combo.setSizePolicy(sizePolicy2)
+        self.path_combo.setMinimumSize(QSize(0, 60))
 
         self.folder_select_layout.addWidget(self.path_combo)
 
         self.select_path_btn = QPushButton(self.folder_select_page)
         self.select_path_btn.setObjectName(u"select_path_btn")
+        self.select_path_btn.setMinimumSize(QSize(0, 60))
 
         self.folder_select_layout.addWidget(self.select_path_btn)
 
@@ -127,6 +132,7 @@ class Ui_MainWindow(object):
         self.rules_layout.setObjectName(u"rules_layout")
         self.load_rules_btn = QPushButton(self.control_card)
         self.load_rules_btn.setObjectName(u"load_rules_btn")
+        self.load_rules_btn.setMinimumSize(QSize(150, 60))
 
         self.rules_layout.addWidget(self.load_rules_btn)
 
@@ -147,6 +153,7 @@ class Ui_MainWindow(object):
         self.scan_btn = QPushButton(self.control_card)
         self.scan_btn.setObjectName(u"scan_btn")
         self.scan_btn.setEnabled(False)
+        self.scan_btn.setMinimumSize(QSize(0, 60))
         self.scan_btn.setCursor(QCursor(Qt.PointingHandCursor))
 
         self.control_layout.addWidget(self.scan_btn)
@@ -472,7 +479,7 @@ class Ui_MainWindow(object):
         MainWindow.setCentralWidget(self.central)
         self.menubar = QMenuBar(MainWindow)
         self.menubar.setObjectName(u"menubar")
-        self.menubar.setGeometry(QRect(0, 0, 800, 22))
+        self.menubar.setGeometry(QRect(0, 0, 1330, 26))
         self.file_menu = QMenu(self.menubar)
         self.file_menu.setObjectName(u"file_menu")
         self.scan_menu = QMenu(self.menubar)
@@ -493,6 +500,8 @@ class Ui_MainWindow(object):
         self.file_menu.addAction(self.export_csv_action)
         self.file_menu.addAction(self.export_json_action)
         self.file_menu.addSeparator()
+        self.file_menu.addAction(self.settings_action)
+        self.file_menu.addSeparator()
         self.file_menu.addAction(self.quit_action)
         self.scan_menu.addAction(self.select_path_action)
         self.scan_menu.addAction(self.scan_action)
@@ -503,7 +512,7 @@ class Ui_MainWindow(object):
 
         self.retranslateUi(MainWindow)
 
-        self.target_stack.setCurrentIndex(2)
+        self.target_stack.setCurrentIndex(1)
         self.tab_widget.setCurrentIndex(0)
         self.detail_action_stack.setCurrentIndex(0)
         self.detail_main_stack.setCurrentIndex(0)
@@ -552,6 +561,10 @@ class Ui_MainWindow(object):
         self.view_history_action.setShortcut(QCoreApplication.translate("MainWindow", u"Ctrl+3", None))
 #endif // QT_CONFIG(shortcut)
         self.about_action.setText(QCoreApplication.translate("MainWindow", u"\u5173\u4e8e", None))
+        self.settings_action.setText(QCoreApplication.translate("MainWindow", u"\u8bbe\u7f6e...", None))
+#if QT_CONFIG(shortcut)
+        self.settings_action.setShortcut(QCoreApplication.translate("MainWindow", u"Ctrl+,", None))
+#endif // QT_CONFIG(shortcut)
         self.scan_mode_combo.setItemText(0, QCoreApplication.translate("MainWindow", u"\u5168\u76d8\u626b\u63cf", None))
         self.scan_mode_combo.setItemText(1, QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u76d8\u7b26", None))
         self.scan_mode_combo.setItemText(2, QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u6587\u4ef6\u5939", None))

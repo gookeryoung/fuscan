@@ -286,24 +286,35 @@ class Ui_MainWindow(object):
         self.results_page_layout.setContentsMargins(0, 4, 0, 0)
         self.results_top_bar = QFrame(self.results_page)
         self.results_top_bar.setObjectName(u"results_top_bar")
+        sizePolicy2 = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        sizePolicy2.setHorizontalStretch(0)
+        sizePolicy2.setVerticalStretch(0)
+        sizePolicy2.setHeightForWidth(self.results_top_bar.sizePolicy().hasHeightForWidth())
+        self.results_top_bar.setSizePolicy(sizePolicy2)
         self.results_top_layout = QHBoxLayout(self.results_top_bar)
         self.results_top_layout.setSpacing(8)
         self.results_top_layout.setObjectName(u"results_top_layout")
         self.results_top_layout.setContentsMargins(8, 4, 8, 4)
+        self.horizontalSpacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self.results_top_layout.addItem(self.horizontalSpacer)
+
         self.rescan_btn = QPushButton(self.results_top_bar)
         self.rescan_btn.setObjectName(u"rescan_btn")
+        self.rescan_btn.setMinimumSize(QSize(160, 50))
 
         self.results_top_layout.addWidget(self.rescan_btn)
-
-        self.results_top_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-
-        self.results_top_layout.addItem(self.results_top_spacer)
 
         self.export_btn = QPushButton(self.results_top_bar)
         self.export_btn.setObjectName(u"export_btn")
         self.export_btn.setEnabled(False)
+        self.export_btn.setMinimumSize(QSize(160, 50))
 
         self.results_top_layout.addWidget(self.export_btn)
+
+        self.results_top_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self.results_top_layout.addItem(self.results_top_spacer)
 
 
         self.results_page_layout.addWidget(self.results_top_bar)
@@ -313,11 +324,11 @@ class Ui_MainWindow(object):
         self.results_splitter.setOrientation(Qt.Horizontal)
         self.results_list_area = QWidget(self.results_splitter)
         self.results_list_area.setObjectName(u"results_list_area")
-        sizePolicy2 = QSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        sizePolicy2.setHorizontalStretch(0)
-        sizePolicy2.setVerticalStretch(0)
-        sizePolicy2.setHeightForWidth(self.results_list_area.sizePolicy().hasHeightForWidth())
-        self.results_list_area.setSizePolicy(sizePolicy2)
+        sizePolicy3 = QSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        sizePolicy3.setHorizontalStretch(0)
+        sizePolicy3.setVerticalStretch(0)
+        sizePolicy3.setHeightForWidth(self.results_list_area.sizePolicy().hasHeightForWidth())
+        self.results_list_area.setSizePolicy(sizePolicy3)
         self.results_list_layout = QVBoxLayout(self.results_list_area)
         self.results_list_layout.setSpacing(4)
         self.results_list_layout.setObjectName(u"results_list_layout")
@@ -358,8 +369,8 @@ class Ui_MainWindow(object):
         self.results_splitter.addWidget(self.results_list_area)
         self.detail_area = QWidget(self.results_splitter)
         self.detail_area.setObjectName(u"detail_area")
-        sizePolicy2.setHeightForWidth(self.detail_area.sizePolicy().hasHeightForWidth())
-        self.detail_area.setSizePolicy(sizePolicy2)
+        sizePolicy3.setHeightForWidth(self.detail_area.sizePolicy().hasHeightForWidth())
+        self.detail_area.setSizePolicy(sizePolicy3)
         self.detail_layout = QVBoxLayout(self.detail_area)
         self.detail_layout.setSpacing(4)
         self.detail_layout.setObjectName(u"detail_layout")
@@ -523,7 +534,7 @@ class Ui_MainWindow(object):
 
         self.retranslateUi(MainWindow)
 
-        self.main_stack.setCurrentIndex(0)
+        self.main_stack.setCurrentIndex(2)
         self.target_stack.setCurrentIndex(1)
         self.detail_action_stack.setCurrentIndex(0)
         self.detail_main_stack.setCurrentIndex(0)

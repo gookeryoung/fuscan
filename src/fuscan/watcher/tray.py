@@ -38,6 +38,7 @@ from fuscan.watcher.incremental import IncrementalScanner
 from fuscan.watcher.monitor import FileEvent, FileEventType, FileMonitor, MonitorConfig
 
 if TYPE_CHECKING:
+    from fuscan.cache import CacheStore
     from fuscan.gui.main_window import MainWindow
     from fuscan.gui.worker import ScanWorker
 
@@ -65,12 +66,14 @@ class TrayApp(QObject):
         state_file: Path | None = None,
         ignore_dirs: list[str] | None = None,
         ignore_extensions: list[str] | None = None,
+        cache: CacheStore | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._ruleset = ruleset
         self._watch_paths = watch_paths or []
         self._state_file = state_file
+        self._cache: CacheStore | None = cache
 
         config_ignore_dirs = ignore_dirs or []
         config_ignore_exts = ignore_extensions or []
@@ -87,6 +90,7 @@ class TrayApp(QObject):
             ruleset=ruleset,
             ignore_dirs=tuple(config_ignore_dirs),
             ignore_extensions=tuple(config_ignore_exts),
+            cache=cache,
         )
 
         self._tray: QSystemTrayIcon | None = None
@@ -300,11 +304,11 @@ class TrayApp(QObject):
     def _quit(self) -> None:
         """退出应用。"""
         self.stop_monitoring()
-        if self._state_file is not None:
+        if self._cache is not None:
             try:
-                self._scanner.save_state(self._state_file)
-            except OSError:
-                logger.warning("扫描状态持久化失败", exc_info=True)
+                self._cache.close()
+            except Exception:
+                logger.warning("缓存关闭失败", exc_info=True)
         if self._main_window is not None:
             self._main_window.close()
         QApplication.quit()

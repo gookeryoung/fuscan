@@ -756,3 +756,208 @@ class TestScannerExtraCoverage:
         scanner.cancel()
         report = scanner.scan(tmp_path)
         assert report.cancelled
+
+
+class TestScannerCache:
+    """缓存模式扫描测试。"""
+
+    def test_cache_hit_reuses_result(self, tmp_path: Path) -> None:
+        """第二次扫描应复用缓存结果，命中信息一致。"""
+        from fuscan.cache import CacheStore
+
+        (tmp_path / "secret.txt").write_text("password=abc", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
+        try:
+            scanner1 = Scanner(rs, cache=cache)
+            report1 = scanner1.scan(tmp_path)
+            assert report1.stats.matched_files == 1
+            hit1 = report1.hits[0].hits[0]
+            assert hit1.rule_name == "pwd"
+            assert hit1.match_count == 1
+
+            # 第二次扫描应命中缓存
+            scanner2 = Scanner(rs, cache=cache)
+            report2 = scanner2.scan(tmp_path)
+            assert report2.stats.matched_files == 1
+            hit2 = report2.hits[0].hits[0]
+            assert hit2.rule_name == "pwd"
+            assert hit2.match_count == hit1.match_count
+            assert hit2.match_text == hit1.match_text
+        finally:
+            cache.close()
+
+    def test_cache_miss_writes_result(self, tmp_path: Path) -> None:
+        """扫描后缓存应包含结果记录。"""
+        from fuscan.cache import CacheStore, compute_file_hash
+
+        (tmp_path / "a.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
+        try:
+            scanner = Scanner(rs, cache=cache)
+            scanner.scan(tmp_path)
+
+            file_hash = compute_file_hash(tmp_path / "a.txt")
+            rule_hashes = cache.get_rule_hashes()
+            cached = cache.get_cached_hits(file_hash, list(rule_hashes.values()))
+            assert len(cached) == 1
+            cached_hit = next(iter(cached.values()))
+            assert cached_hit is not None
+            assert cached_hit.match_count == 1
+        finally:
+            cache.close()
+
+    def test_file_change_triggers_rescan(self, tmp_path: Path) -> None:
+        """文件内容变更后应重新扫描。"""
+        from fuscan.cache import CacheStore
+
+        path = tmp_path / "a.txt"
+        path.write_text("password=old", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
+        try:
+            scanner1 = Scanner(rs, cache=cache)
+            report1 = scanner1.scan(tmp_path)
+            assert report1.stats.matched_files == 1
+            assert report1.hits[0].hits[0].match_text == "password"
+
+            # 修改文件内容（仍命中但 match_text 不同）
+            path.write_text("password=new\npassword=again", encoding="utf-8")
+            scanner2 = Scanner(rs, cache=cache)
+            report2 = scanner2.scan(tmp_path)
+            assert report2.stats.matched_files == 1
+            # 新内容匹配 2 处
+            assert report2.hits[0].hits[0].match_count == 2
+        finally:
+            cache.close()
+
+    def test_path_change_still_hits(self, tmp_path: Path) -> None:
+        """文件移动到新路径后，缓存仍命中（哈希不变）。"""
+        from fuscan.cache import CacheStore
+
+        (tmp_path / "sub").mkdir()
+        path1 = tmp_path / "a.txt"
+        path1.write_text("password=abc", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
+        try:
+            scanner1 = Scanner(rs, cache=cache)
+            report1 = scanner1.scan(tmp_path)
+            assert report1.stats.matched_files == 1
+
+            # 移动文件到新路径
+            path2 = tmp_path / "sub" / "renamed.txt"
+            path1.rename(path2)
+            scanner2 = Scanner(rs, cache=cache)
+            report2 = scanner2.scan(tmp_path)
+            assert report2.stats.matched_files == 1
+            assert report2.hits[0].path.name == "renamed.txt"
+            assert report2.hits[0].hits[0].rule_name == "pwd"
+        finally:
+            cache.close()
+
+    def test_rule_change_triggers_rescan(self, tmp_path: Path) -> None:
+        """规则变更（pattern 不同）后应重新扫描。"""
+        from fuscan.cache import CacheStore
+
+        (tmp_path / "a.txt").write_text("secret_key=abc", encoding="utf-8")
+        rs1 = _build_ruleset(_content_rule("pwd", "secret"))
+        rs2 = _build_ruleset(_content_rule("pwd", "key"))
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
+        try:
+            scanner1 = Scanner(rs1, cache=cache)
+            report1 = scanner1.scan(tmp_path)
+            assert report1.stats.matched_files == 1
+
+            # 规则变更：pattern "secret" -> "key"
+            scanner2 = Scanner(rs2, cache=cache)
+            report2 = scanner2.scan(tmp_path)
+            assert report2.stats.matched_files == 1
+        finally:
+            cache.close()
+
+    def test_uncached_mode_unchanged(self, tmp_path: Path) -> None:
+        """cache=None 时走原 _scan_entry_uncached 路径。"""
+        (tmp_path / "a.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs)  # 不传 cache
+        assert scanner._cache is None
+        report = scanner.scan(tmp_path)
+        assert report.stats.matched_files == 1
+
+    def test_cache_concurrent_safe(self, tmp_path: Path) -> None:
+        """多线程缓存扫描结果应与单线程一致。"""
+        from fuscan.cache import CacheStore
+
+        for i in range(20):
+            (tmp_path / f"secret_{i}.txt").write_text(f"password_{i}", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
+        try:
+            scanner = Scanner(rs, cache=cache, max_workers=4)
+            report = scanner.scan(tmp_path)
+            assert report.stats.matched_files == 20
+            assert report.stats.errors == 0
+        finally:
+            cache.close()
+
+    def test_cache_none_hit_not_returned(self, tmp_path: Path) -> None:
+        """未命中规则的文件二次扫描不产生命中。"""
+        from fuscan.cache import CacheStore
+
+        (tmp_path / "clean.txt").write_text("nothing suspicious", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
+        try:
+            scanner1 = Scanner(rs, cache=cache)
+            report1 = scanner1.scan(tmp_path)
+            assert report1.stats.matched_files == 0
+
+            scanner2 = Scanner(rs, cache=cache)
+            report2 = scanner2.scan(tmp_path)
+            assert report2.stats.matched_files == 0
+        finally:
+            cache.close()
+
+    def test_default_extract_content_with_hash(self, tmp_path: Path) -> None:
+        """default_extract_content_with_hash 返回内容和哈希。"""
+        import hashlib
+
+        from fuscan.scanner.context import FileEntry
+        from fuscan.scanner.scanner import default_extract_content_with_hash
+
+        path = tmp_path / "a.txt"
+        path.write_bytes(b"password content")
+        entry = FileEntry.from_path(path)
+        content, file_hash = default_extract_content_with_hash(entry)
+        assert "password" in content
+        expected = hashlib.sha256(b"password content").hexdigest()
+        assert file_hash == expected
+
+    def test_default_extract_content_with_hash_empty_for_dir(self, tmp_path: Path) -> None:
+        """目录返回空内容和空哈希。"""
+        import hashlib
+
+        from fuscan.scanner.context import FileEntry
+        from fuscan.scanner.scanner import default_extract_content_with_hash
+
+        (tmp_path / "subdir").mkdir()
+        entry = FileEntry.from_path(tmp_path / "subdir")
+        content, file_hash = default_extract_content_with_hash(entry)
+        assert content == ""
+        assert file_hash == hashlib.sha256(b"").hexdigest()

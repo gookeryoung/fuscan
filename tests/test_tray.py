@@ -77,16 +77,30 @@ class TestTrayAppConstruction:
         assert not app.is_monitoring
         assert app.tracked_count == 0
 
-    def test_construct_loads_state_file(self, qapp: QApplication, tmp_path: Path) -> None:
+    def test_construct_with_state_file(self, qapp: QApplication, tmp_path: Path) -> None:
+        """传 state_file 时应调用 load_state（空操作）但不报错。"""
+        rs = _build_ruleset()
         state_file = tmp_path / "state.json"
-        scanner = IncrementalScanner(_build_ruleset())
-        f = tmp_path / "a.txt"
-        f.write_text("x", encoding="utf-8")
-        scanner.scan(tmp_path)
-        scanner.save_state(state_file)
+        app = TrayApp(ruleset=rs, state_file=state_file)
+        assert not app.is_monitoring
 
-        app = TrayApp(ruleset=_build_ruleset(), state_file=state_file)
-        assert app.tracked_count == 1
+    def test_construct_loads_state_file(self, qapp: QApplication, tmp_path: Path) -> None:
+        """传 cache 后 TrayApp 应反映缓存中的已跟踪文件数。"""
+        from fuscan.cache import CacheStore
+
+        scan_dir = tmp_path / "scan"
+        scan_dir.mkdir()
+        (scan_dir / "a.txt").write_text("x", encoding="utf-8")
+
+        cache = CacheStore(tmp_path / "cache.db")
+        try:
+            scanner = IncrementalScanner(_build_ruleset(), cache=cache)
+            scanner.scan(scan_dir)
+
+            app = TrayApp(ruleset=_build_ruleset(), cache=cache)
+            assert app.tracked_count == 1
+        finally:
+            cache.close()
 
 
 class TestTrayAppMonitoring:
@@ -283,11 +297,42 @@ class TestTrayAppScanHandling:
         app._handle_scan_result(report)
         assert hit_paths == []
 
-    def test_handle_scan_result_persists_state(self, qapp: QApplication, tmp_path: Path) -> None:
+    def test_handle_scan_result_with_cache_no_error(self, qapp: QApplication, tmp_path: Path) -> None:
+        """传 cache 后 _handle_scan_result 不应抛异常。"""
+        from fuscan.cache import CacheStore
         from fuscan.scanner import ScanReport, ScanResult, ScanStats
 
-        state_file = tmp_path.parent / f"state_{tmp_path.name}.json"
+        cache = CacheStore(tmp_path / "cache.db")
+        try:
+            rs = _build_ruleset()
+            app = TrayApp(ruleset=rs, cache=cache)
+            app._init_tray()
+            app._init_main_window(show=False)
+
+            result = ScanResult(path=tmp_path / "a.txt", size=10, hits=(), errors=0)
+            report = ScanReport(
+                root=tmp_path,
+                results=(result,),
+                stats=ScanStats(
+                    total_files=1,
+                    scanned_files=1,
+                    matched_files=0,
+                    skipped_files=0,
+                    errors=0,
+                    duration_seconds=0.01,
+                ),
+            )
+
+            app._handle_scan_result(report)
+        finally:
+            cache.close()
+
+    def test_handle_scan_result_with_state_file(self, qapp: QApplication, tmp_path: Path) -> None:
+        """传 state_file 后 _handle_scan_result 应调用 save_state（空操作）但不报错。"""
+        from fuscan.scanner import ScanReport, ScanResult, ScanStats
+
         rs = _build_ruleset()
+        state_file = tmp_path / "state.json"
         app = TrayApp(ruleset=rs, state_file=state_file)
         app._init_tray()
         app._init_main_window(show=False)
@@ -305,10 +350,8 @@ class TestTrayAppScanHandling:
                 duration_seconds=0.01,
             ),
         )
-
+        # save_state 为空操作，不应抛异常
         app._handle_scan_result(report)
-        assert state_file.exists()
-        state_file.unlink()
 
 
 class TestTrayAppFullScan:
@@ -363,16 +406,19 @@ class TestTrayAppQuit:
         app._quit()
         assert not app.is_monitoring
 
-    def test_quit_persists_state(self, qapp: QApplication, tmp_path: Path) -> None:
-        state_file = tmp_path.parent / f"quit_state_{tmp_path.name}.json"
+    def test_quit_closes_cache(self, qapp: QApplication, tmp_path: Path) -> None:
+        """_quit 应关闭 cache，cache.db 文件应存在。"""
+        from fuscan.cache import CacheStore
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
         rs = _build_ruleset()
-        app = TrayApp(ruleset=rs, state_file=state_file)
+        app = TrayApp(ruleset=rs, cache=cache)
         app._init_tray()
         app._init_main_window(show=False)
 
         app._quit()
-        assert state_file.exists()
-        state_file.unlink()
+        assert cache_path.exists()
 
 
 class TestTrayAppShowWindow:

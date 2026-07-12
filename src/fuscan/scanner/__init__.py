@@ -14,6 +14,7 @@ from __future__ import annotations
 from fuscan.scanner.context import (
     ContentProvider,
     FileEntry,
+    HashingContentProvider,
     MatchContext,
     default_content_provider,
 )
@@ -35,7 +36,7 @@ from fuscan.scanner.result import (
     ScanResult,
     ScanStats,
 )
-from fuscan.scanner.scanner import Scanner, default_extract_content
+from fuscan.scanner.scanner import Scanner, default_extract_content, default_extract_content_with_hash
 from fuscan.scanner.walker import FileWalker, list_drives
 
 __all__ = [
@@ -45,6 +46,7 @@ __all__ = [
     "FileEntry",
     "FileNameMatcher",
     "FileWalker",
+    "HashingContentProvider",
     "MatchContext",
     "MatchResult",
     "Matcher",
@@ -60,5 +62,6 @@ __all__ = [
     "build_matcher",
     "default_content_provider",
     "default_extract_content",
+    "default_extract_content_with_hash",
     "list_drives",
 ]

@@ -18,6 +18,7 @@ try:
         QDialogButtonBox,
         QFormLayout,
         QGroupBox,
+        QLineEdit,
         QPlainTextEdit,
         QSpinBox,
         QTabWidget,
@@ -32,6 +33,7 @@ except ImportError:  # pragma: no cover
         QDialogButtonBox,
         QFormLayout,
         QGroupBox,
+        QLineEdit,
         QPlainTextEdit,
         QSpinBox,
         QTabWidget,
@@ -162,8 +164,22 @@ class SettingsDialog(QDialog):
         self._use_builtin_check.setToolTip("启用随包分发的安全扫描规则")
         rules_layout.addWidget(self._use_builtin_check)
 
+        cache_group = QGroupBox("缓存设置")
+        cache_layout = QFormLayout(cache_group)
+        cache_layout.setSpacing(8)
+
+        self._cache_enabled_check = QCheckBox("启用扫描结果缓存", cache_group)
+        self._cache_enabled_check.setToolTip("基于内容哈希跳过未变化文件，提升二次扫描速度；禁用后每次全量扫描")
+        cache_layout.addRow(self._cache_enabled_check)
+
+        self._cache_path_edit = QLineEdit(cache_group)
+        self._cache_path_edit.setPlaceholderText("留空使用默认路径 ~/.fuscan/cache.db")
+        self._cache_path_edit.setToolTip("自定义缓存数据库路径")
+        cache_layout.addRow("缓存路径:", self._cache_path_edit)
+
         layout.addWidget(drive_group)
         layout.addWidget(rules_group)
+        layout.addWidget(cache_group)
         layout.addStretch()
 
         return page
@@ -177,6 +193,8 @@ class SettingsDialog(QDialog):
         self._use_builtin_check.setChecked(self._config.use_builtin)
         self._ignore_dirs_edit.setPlainText("\n".join(self._config.ignore_dirs))
         self._ignore_extensions_edit.setPlainText("\n".join(self._config.ignore_extensions))
+        self._cache_enabled_check.setChecked(self._config.cache_enabled)
+        self._cache_path_edit.setText(self._config.cache_path or "")
 
     def _save_config(self) -> None:
         """将控件值保存到配置。"""
@@ -192,6 +210,9 @@ class SettingsDialog(QDialog):
         self._config.ignore_extensions = [
             line.strip() for line in self._ignore_extensions_edit.toPlainText().splitlines() if line.strip()
         ]
+        self._config.cache_enabled = self._cache_enabled_check.isChecked()
+        path_text = self._cache_path_edit.text().strip()
+        self._config.cache_path = path_text or None
 
     def _on_accept(self) -> None:
         """确定按钮：保存配置并关闭对话框。"""

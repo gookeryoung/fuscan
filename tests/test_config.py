@@ -38,6 +38,12 @@ class TestConfig:
         assert "zip" in config.ignore_extensions
         assert len(config.ignore_extensions) >= 25
 
+    def test_default_cache_fields(self) -> None:
+        """默认启用缓存，路径为 None 表示使用默认路径。"""
+        config = Config()
+        assert config.cache_enabled is True
+        assert config.cache_path is None
+
 
 class TestLoadConfig:
     def test_load_nonexistent_returns_default(self, tmp_path: Path) -> None:
@@ -117,6 +123,17 @@ class TestLoadConfig:
         assert config.scan_paths == []
         assert config.rules_paths == []
 
+    def test_load_cache_fields(self, tmp_path: Path) -> None:
+        """从 YAML 加载缓存字段。"""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "cache_enabled: false\ncache_path: /tmp/custom_cache.db\n",
+            encoding="utf-8",
+        )
+        config = load_config(config_file)
+        assert config.cache_enabled is False
+        assert config.cache_path == "/tmp/custom_cache.db"
+
 
 class TestSaveConfig:
     def test_save_and_load_roundtrip(self, tmp_path: Path) -> None:
@@ -166,6 +183,18 @@ class TestSaveConfig:
         save_config(original, config_file)
         loaded = load_config(config_file)
         assert loaded.scan_paths == ["/用户/文档/扫描目录"]
+
+    def test_save_and_load_cache_fields(self, tmp_path: Path) -> None:
+        """缓存字段保存后重新加载应一致。"""
+        config_file = tmp_path / "config.yaml"
+        original = Config(
+            cache_enabled=False,
+            cache_path="/tmp/test_cache.db",
+        )
+        save_config(original, config_file)
+        loaded = load_config(config_file)
+        assert loaded.cache_enabled is False
+        assert loaded.cache_path == "/tmp/test_cache.db"
 
     def test_load_config_os_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """文件打开失败时返回默认配置。"""

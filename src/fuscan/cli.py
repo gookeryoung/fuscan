@@ -7,6 +7,7 @@
 - ``version``：显示版本信息
 - ``gui``：启动图形界面
 - ``tray``：启动托盘驻守（监控新增文件并增量扫描）
+- ``cache``：管理扫描结果缓存（stats/clear/prune）
 
 用法示例：
 
@@ -73,6 +74,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan_parser.add_argument("--no-builtin", action="store_true", help="禁用内置通用规则（需配合 -r 使用）")
     scan_parser.add_argument("--no-color", action="store_true", help="禁用彩色输出")
+    scan_parser.add_argument("--no-cache", action="store_true", help="禁用扫描结果缓存")
+    scan_parser.add_argument(
+        "--cache-path", type=Path, default=None, metavar="DB", help="自定义缓存数据库路径（默认 ~/.fuscan/cache.db）"
+    )
 
     # rules 子命令
     rules_parser = subparsers.add_parser("rules", help="校验规则文件")
@@ -99,6 +104,18 @@ def build_parser() -> argparse.ArgumentParser:
     # version 子命令
     subparsers.add_parser("version", help="显示版本信息")
 
+    # cache 子命令：--cache-path 通过 parents 共享给各子操作，支持 `cache <action> --cache-path X` 顺序
+    cache_parent = argparse.ArgumentParser(add_help=False)
+    cache_parent.add_argument(
+        "--cache-path", type=Path, default=None, metavar="DB", help="自定义缓存数据库路径（默认 ~/.fuscan/cache.db）"
+    )
+    cache_parser = subparsers.add_parser("cache", help="管理扫描结果缓存")
+    cache_sub = cache_parser.add_subparsers(dest="cache_action", metavar="<action>", required=True)
+    cache_sub.add_parser("stats", help="显示缓存统计信息", parents=[cache_parent])
+    cache_sub.add_parser("clear", help="清空缓存（删除数据库文件）", parents=[cache_parent])
+    cache_prune = cache_sub.add_parser("prune", help="清理过期文件缓存", parents=[cache_parent])
+    cache_prune.add_argument("--max-age-days", type=int, default=30, help="清理超过指定天数的文件缓存（默认 30）")
+
     return parser
 
 
@@ -122,6 +139,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_gui(args)
         if args.command == "tray":
             return _cmd_tray(args)
+        if args.command == "cache":
+            return _cmd_cache(args)
         if args.command == "version":
             print(f"fuscan {__version__}")
             return 0
@@ -179,21 +198,47 @@ def _cmd_scan(args: argparse.Namespace) -> int:
 
     config = load_config()
     ignore_dirs = _merge_ignore_dirs(config.ignore_dirs, args.ignore_dir)
-    scanner = Scanner(
-        ruleset,
-        max_depth=args.max_depth,
-        ignore_dirs=ignore_dirs,
-        ignore_extensions=tuple(config.ignore_extensions),
-    )
-    rules_desc = f"规则: {args.rules}" if args.rules else "内置通用规则"
-    logger.info("开始扫描 %s（%s，规则数: %d）", scan_path, rules_desc, len(ruleset.rules))
-    report = scanner.scan(scan_path)
+
+    use_cache = config.cache_enabled and not args.no_cache
+    cache_path = _resolve_cache_path(args.cache_path, config.cache_path)
+
+    if use_cache and cache_path is not None:
+        from fuscan.cache import CacheStore, compute_source_files
+
+        cache = CacheStore(cache_path)
+        try:
+            source_files = compute_source_files(args.rules or [], use_builtin=not args.no_builtin)
+            scanner = Scanner(
+                ruleset,
+                max_depth=args.max_depth,
+                ignore_dirs=ignore_dirs,
+                ignore_extensions=tuple(config.ignore_extensions),
+                cache=cache,
+                source_files=source_files,
+            )
+            report = _run_scan(scanner, scan_path, args)
+        finally:
+            cache.close()
+    else:
+        scanner = Scanner(
+            ruleset,
+            max_depth=args.max_depth,
+            ignore_dirs=ignore_dirs,
+            ignore_extensions=tuple(config.ignore_extensions),
+        )
+        report = _run_scan(scanner, scan_path, args)
 
     output = _format_report(report, args.output_format)
     _write_output(output, args.output_file)
-
     _print_summary(report)
     return 0
+
+
+def _run_scan(scanner: Scanner, scan_path: Path, args: argparse.Namespace) -> ScanReport:
+    """执行扫描并记录日志。"""
+    rules_desc = f"规则: {args.rules}" if args.rules else "内置通用规则"
+    logger.info("开始扫描 %s（%s，规则数: %d）", scan_path, rules_desc, len(scanner.ruleset.rules))
+    return scanner.scan(scan_path)
 
 
 def _cmd_rules(args: argparse.Namespace) -> int:
@@ -251,12 +296,21 @@ def _cmd_tray(args: argparse.Namespace) -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
 
+    cache = None
+    if config.cache_enabled:
+        from fuscan.cache import CacheStore
+
+        cache_path = _resolve_cache_path(None, config.cache_path)
+        if cache_path is not None:
+            cache = CacheStore(cache_path)
+
     tray = TrayApp(
         ruleset=ruleset,
         watch_paths=watch_paths,
         state_file=state_file,
         ignore_dirs=config.ignore_dirs,
         ignore_extensions=config.ignore_extensions,
+        cache=cache,
     )
     return tray.start(show_window=False)
 
@@ -264,6 +318,73 @@ def _cmd_tray(args: argparse.Namespace) -> int:
 def _merge_ignore_dirs(base_dirs: list[str], extra_dirs: list[str]) -> tuple[str, ...]:
     """合并全局忽略目录与命令行额外忽略目录（去重保序）。"""
     return tuple(dict.fromkeys((*base_dirs, *extra_dirs)))
+
+
+def _resolve_cache_path(arg_path: Path | None, config_path: str | None) -> Path | None:
+    """解析缓存数据库路径：命令行参数 > 配置文件 > 默认路径。"""
+    if arg_path is not None:
+        return arg_path
+    if config_path:
+        return Path(config_path)
+    from fuscan.cache import default_cache_path
+
+    return default_cache_path()
+
+
+def _cmd_cache(args: argparse.Namespace) -> int:
+    """执行 cache 子命令：管理扫描结果缓存。"""
+    from fuscan.cache import CacheStore, default_cache_path
+
+    action: str = args.cache_action
+
+    if action == "stats":
+        cache_path = _resolve_cache_path(getattr(args, "cache_path", None), None) or default_cache_path()
+        if not cache_path.exists():
+            print("缓存数据库不存在，尚未扫描或缓存已清空")
+            return 0
+        cache = CacheStore(cache_path)
+        try:
+            stats = cache.stats()
+        finally:
+            cache.close()
+        print(f"缓存数据库: {cache_path}")
+        print(f"  schema 版本: {stats.schema_version}")
+        print(f"  规则文件数: {stats.rule_files}")
+        print(f"  规则数:     {stats.rules}")
+        print(f"  已扫描文件: {stats.scanned_files}")
+        print(f"  文件路径数: {stats.file_paths}")
+        print(f"  缓存结果数: {stats.scan_results}")
+        print(f"  数据库大小: {stats.db_bytes} 字节")
+        return 0
+
+    if action == "clear":
+        cache_path = _resolve_cache_path(getattr(args, "cache_path", None), None) or default_cache_path()
+        if not cache_path.exists():
+            print("缓存数据库不存在，无需清理")
+            return 0
+        # 删除主数据库文件及 WAL/SHM 副文件
+        for suffix in ("", "-wal", "-shm"):
+            sidecar = cache_path.with_name(cache_path.name + suffix)
+            if sidecar.exists():
+                sidecar.unlink()
+        print(f"已清空缓存: {cache_path}")
+        return 0
+
+    if action == "prune":
+        cache_path = _resolve_cache_path(getattr(args, "cache_path", None), None) or default_cache_path()
+        if not cache_path.exists():
+            print("缓存数据库不存在，无需清理")
+            return 0
+        cache = CacheStore(cache_path)
+        try:
+            deleted = cache.prune_stale_files(args.max_age_days)
+        finally:
+            cache.close()
+        print(f"已清理 {deleted} 条过期文件缓存（>={args.max_age_days} 天）")
+        return 0
+
+    print(f"未知缓存操作: {action}", file=sys.stderr)
+    return 1  # pragma: no cover
 
 
 def _format_report(report: ScanReport, fmt: str) -> str:

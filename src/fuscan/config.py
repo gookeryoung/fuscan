@@ -60,6 +60,10 @@ class Config:
     max_workers: int = 8
     # 最大扫描深度（None 表示无限制）
     max_depth: int | None = None
+    # 是否启用扫描结果缓存（基于内容哈希跳过未变化文件，提升二次扫描速度）
+    cache_enabled: bool = True
+    # 缓存数据库路径（None 表示默认 ~/.fuscan/cache.db）
+    cache_path: str | None = None
     # 忽略目录名（按目录名匹配任意层级，大小写不敏感）
     ignore_dirs: list[str] = field(
         default_factory=lambda: [

@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any
 
 import pytest
-from typing_extensions import override
 
 from fuscan.rules.model import (
     LeafMatch,
@@ -29,14 +27,6 @@ from fuscan.watcher.monitor import (
 
 def _build_ruleset(*rules: Rule) -> RuleSet:
     return RuleSet(version="1.0", rules=tuple(rules))
-
-
-def _filename_rule(name: str, pattern: str) -> Rule:
-    return Rule(
-        name=name,
-        severity=Severity.WARNING,
-        match=LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.CONTAINS, pattern=pattern),
-    )
 
 
 def _content_rule(name: str, pattern: str) -> Rule:
@@ -289,6 +279,8 @@ class TestFileMonitorEdgeCases:
 
 
 class TestIncrementalScanner:
+    """无 cache 模式下 IncrementalScanner 委托 Scanner 全量扫描。"""
+
     def test_first_scan_scans_all(self, tmp_path: Path) -> None:
         (tmp_path / "a.txt").write_text("password", encoding="utf-8")
         (tmp_path / "b.txt").write_text("normal", encoding="utf-8")
@@ -298,40 +290,8 @@ class TestIncrementalScanner:
         assert report.stats.scanned_files == 2
         assert report.stats.matched_files == 1
 
-    def test_second_scan_skips_unchanged(self, tmp_path: Path) -> None:
-        (tmp_path / "a.txt").write_text("password", encoding="utf-8")
-        rs = _build_ruleset(_content_rule("r", "password"))
-        scanner = IncrementalScanner(rs)
-
-        # 首次扫描
-        scanner.scan(tmp_path)
-        assert scanner.tracked_count == 1
-
-        # 二次扫描，文件未变化
-        report = scanner.scan(tmp_path)
-        assert report.stats.scanned_files == 0
-        assert report.stats.skipped_files == 1
-
-    def test_modified_file_is_rescanned(self, tmp_path: Path) -> None:
-        f = tmp_path / "a.txt"
-        f.write_text("normal", encoding="utf-8")
-        rs = _build_ruleset(_content_rule("r", "password"))
-        scanner = IncrementalScanner(rs)
-
-        # 首次扫描，无命中
-        report1 = scanner.scan(tmp_path)
-        assert report1.stats.matched_files == 0
-
-        # 修改文件，加入 password
-        time.sleep(0.01)  # 确保 mtime 变化
-        f.write_text("password=123", encoding="utf-8")
-
-        # 二次扫描，应重新扫描
-        report2 = scanner.scan(tmp_path)
-        assert report2.stats.scanned_files == 1
-        assert report2.stats.matched_files == 1
-
     def test_new_file_is_scanned(self, tmp_path: Path) -> None:
+        """无 cache 时每次 scan 都全量扫描，新增文件也被扫描。"""
         (tmp_path / "a.txt").write_text("normal", encoding="utf-8")
         rs = _build_ruleset(_content_rule("r", "password"))
         scanner = IncrementalScanner(rs)
@@ -340,7 +300,8 @@ class TestIncrementalScanner:
         # 新增文件
         (tmp_path / "b.txt").write_text("password", encoding="utf-8")
         report = scanner.scan(tmp_path)
-        assert report.stats.scanned_files == 1
+        # 无 cache：两次都全量扫描
+        assert report.stats.scanned_files == 2
         assert report.stats.matched_files == 1
 
     def test_scan_paths_scans_specific_files(self, tmp_path: Path) -> None:
@@ -360,104 +321,6 @@ class TestIncrementalScanner:
         scanner = IncrementalScanner(rs)
         report = scanner.scan_paths([tmp_path / "nonexistent.txt"])
         assert report.stats.scanned_files == 0
-
-    def test_mark_scanned_skips_on_next_scan(self, tmp_path: Path) -> None:
-        f = tmp_path / "a.txt"
-        f.write_text("x", encoding="utf-8")
-        rs = _build_ruleset(_content_rule("r", "password"))
-        scanner = IncrementalScanner(rs)
-        scanner.mark_scanned(f, f.stat().st_mtime)
-
-        report = scanner.scan(tmp_path)
-        assert report.stats.scanned_files == 0
-        assert report.stats.skipped_files == 1
-
-    def test_remove_path_clears_state(self, tmp_path: Path) -> None:
-        f = tmp_path / "a.txt"
-        f.write_text("x", encoding="utf-8")
-        rs = _build_ruleset(_content_rule("r", "password"))
-        scanner = IncrementalScanner(rs)
-        scanner.scan(tmp_path)
-        assert scanner.tracked_count == 1
-
-        scanner.remove_path(f)
-        assert scanner.tracked_count == 0
-
-        report = scanner.scan(tmp_path)
-        assert report.stats.scanned_files == 1
-
-    def test_save_and_load_state(self, tmp_path: Path) -> None:
-        (tmp_path / "a.txt").write_text("x", encoding="utf-8")
-        rs = _build_ruleset(_content_rule("r", "password"))
-        scanner = IncrementalScanner(rs)
-        scanner.scan(tmp_path)
-
-        # 状态文件保存到扫描目录外，避免被当作新文件扫描
-        state_file = tmp_path.parent / f"state_{tmp_path.name}.json"
-        scanner.save_state(state_file)
-        assert state_file.exists()
-
-        # 新建扫描器，加载状态
-        scanner2 = IncrementalScanner(rs)
-        scanner2.load_state(state_file)
-        assert scanner2.tracked_count == 1
-
-        # 加载状态后，文件未变化应跳过
-        report = scanner2.scan(tmp_path)
-        assert report.stats.scanned_files == 0
-        state_file.unlink()
-
-    def test_load_state_nonexistent_file(self, tmp_path: Path) -> None:
-        rs = _build_ruleset(_content_rule("r", "password"))
-        scanner = IncrementalScanner(rs)
-        scanner.load_state(tmp_path / "nonexistent.json")
-        assert scanner.tracked_count == 0
-
-    def test_load_state_corrupted_file(self, tmp_path: Path) -> None:
-        state_file = tmp_path / "state.json"
-        state_file.write_text("not json {{{", encoding="utf-8")
-        rs = _build_ruleset(_content_rule("r", "password"))
-        scanner = IncrementalScanner(rs)
-        scanner.load_state(state_file)
-        assert scanner.tracked_count == 0
-
-    def test_file_extensions_filter(self, tmp_path: Path) -> None:
-        (tmp_path / "a.conf").write_text("password", encoding="utf-8")
-        (tmp_path / "a.txt").write_text("password", encoding="utf-8")
-        rule = Rule(
-            name="conf-only",
-            severity=Severity.WARNING,
-            match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="password"),
-            file_extensions=("conf",),
-        )
-        rs = _build_ruleset(rule)
-        scanner = IncrementalScanner(rs)
-        report = scanner.scan(tmp_path)
-        assert report.stats.scanned_files == 1
-        assert report.stats.matched_files == 1
-
-
-class TestIncrementalScannerErrorPaths:
-    """增量扫描器异常路径与边界条件覆盖。"""
-
-    def test_scan_entry_exception_counts_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """scan() 中 _scan_entry 抛异常时应计 error 并继续。"""
-        (tmp_path / "a.txt").write_text("password", encoding="utf-8")
-        (tmp_path / "b.txt").write_text("password", encoding="utf-8")
-        rs = _build_ruleset(_content_rule("r", "password"))
-        scanner = IncrementalScanner(rs)
-
-        original = scanner._scan_entry
-
-        def faulty(entry: Any) -> Any:
-            if entry.path.name == "a.txt":
-                raise RuntimeError("模拟扫描失败")
-            return original(entry)
-
-        monkeypatch.setattr(scanner, "_scan_entry", faulty)
-        report = scanner.scan(tmp_path)
-        assert report.stats.errors >= 1
-        assert report.stats.scanned_files >= 1
 
     def test_scan_paths_skips_directory(self, tmp_path: Path) -> None:
         """scan_paths 传入目录应跳过。"""
@@ -483,62 +346,206 @@ class TestIncrementalScannerErrorPaths:
         report = scanner.scan_paths([f])
         assert report.stats.scanned_files == 0
 
-    def test_scan_paths_entry_exception_counts_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """scan_paths 中 _scan_entry 抛异常时应计 error。"""
+    def test_scan_paths_handles_scan_exception(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """scan_paths 中 scan_file 抛异常时应记录错误而非崩溃。"""
         f = tmp_path / "a.txt"
         f.write_text("password", encoding="utf-8")
         rs = _build_ruleset(_content_rule("r", "password"))
         scanner = IncrementalScanner(rs)
 
-        def faulty(entry: Any) -> None:
-            raise RuntimeError("模拟扫描失败")
+        def raising_scan_file(path: Path) -> None:
+            raise RuntimeError("scan error")
 
-        monkeypatch.setattr(scanner, "_scan_entry", faulty)
+        monkeypatch.setattr(scanner._scanner, "scan_file", raising_scan_file)
         report = scanner.scan_paths([f])
-        assert report.stats.errors >= 1
-        assert report.stats.scanned_files >= 1
+        assert report.stats.scanned_files == 1
+        assert report.stats.errors == 1
 
-    def test_should_scan_dir_returns_false(self, tmp_path: Path) -> None:
-        """_should_scan 对目录返回 False。"""
-        from fuscan.scanner.context import FileEntry
+    def test_file_extensions_filter(self, tmp_path: Path) -> None:
+        (tmp_path / "a.conf").write_text("password", encoding="utf-8")
+        (tmp_path / "a.txt").write_text("password", encoding="utf-8")
+        rule = Rule(
+            name="conf-only",
+            severity=Severity.WARNING,
+            match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="password"),
+            file_extensions=("conf",),
+        )
+        rs = _build_ruleset(rule)
+        scanner = IncrementalScanner(rs)
+        report = scanner.scan(tmp_path)
+        assert report.stats.scanned_files == 1
+        assert report.stats.matched_files == 1
 
+    def test_tracked_count_zero_without_cache(self, tmp_path: Path) -> None:
+        """无 cache 时 tracked_count 始终为 0。"""
+        (tmp_path / "a.txt").write_text("password", encoding="utf-8")
         rs = _build_ruleset(_content_rule("r", "password"))
         scanner = IncrementalScanner(rs)
-        d = tmp_path / "subdir"
-        d.mkdir()
-        entry = FileEntry(
-            path=d,
-            name=d.name,
-            size=0,
-            mtime=d.stat().st_mtime,
-            extension="",
-            is_dir=True,
-        )
-        assert scanner._should_scan(entry) is False
+        scanner.scan(tmp_path)
+        assert scanner.tracked_count == 0
 
-    def test_scan_entry_rule_exception_counts_rule_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """_scan_entry 中 matcher 抛异常时应计 rule_errors 并继续。"""
-        from fuscan.scanner.context import FileEntry, MatchContext
-        from fuscan.scanner.matchers import FileNameMatcher
-        from fuscan.scanner.result import MatchResult
-
-        f = tmp_path / "a.txt"
-        f.write_text("password", encoding="utf-8")
-        rs = _build_ruleset(_filename_rule("r", "password"))
+    def test_noop_methods_dont_raise(self, tmp_path: Path) -> None:
+        """mark_scanned/remove_path/save_state/load_state 空操作不抛异常。"""
+        rs = _build_ruleset(_content_rule("r", "password"))
         scanner = IncrementalScanner(rs)
+        f = tmp_path / "a.txt"
+        f.write_text("x", encoding="utf-8")
+        # 空操作：不应抛异常
+        scanner.mark_scanned(f, f.stat().st_mtime)
+        scanner.remove_path(f)
+        scanner.save_state(tmp_path / "state.json")
+        scanner.load_state(tmp_path / "nonexistent.json")
 
-        # 替换 compiled 中的 matcher 为抛异常的 mock
-        rule = scanner._compiled[0][0]
 
-        class FailingMatcher(FileNameMatcher):
-            @override
-            def matches(self, context: MatchContext) -> MatchResult:
-                raise RuntimeError("匹配器异常")
+class TestIncrementalScannerCache:
+    """有 cache 模式下 IncrementalScanner 的哈希缓存增量行为。
 
-        spec = LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.CONTAINS, pattern="password")
-        scanner._compiled = [(rule, FailingMatcher(spec))]
+    cache.db 放在 tmp_path 根目录，扫描目标放在 scan 子目录，避免缓存文件被扫描。
+    """
 
-        entry = FileEntry.from_path(f)
-        result = scanner._scan_entry(entry)
-        assert result.errors >= 1
-        assert not result.has_hit
+    def test_cache_hit_skips_second_scan(self, tmp_path: Path) -> None:
+        """传 cache 后第二次扫描相同文件应复用缓存结果，命中信息一致。"""
+        from fuscan.cache import CacheStore
+
+        scan_dir = tmp_path / "scan"
+        scan_dir.mkdir()
+        (scan_dir / "a.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("r", "password"))
+        cache = CacheStore(tmp_path / "cache.db")
+        try:
+            scanner = IncrementalScanner(rs, cache=cache)
+
+            # 首次扫描
+            report1 = scanner.scan(scan_dir)
+            assert report1.stats.scanned_files == 1
+            assert report1.stats.matched_files == 1
+            assert scanner.tracked_count == 1
+
+            # 二次扫描，文件未变化 → 缓存命中，结果一致
+            report2 = scanner.scan(scan_dir)
+            assert report2.stats.matched_files == 1
+            assert report2.hits[0].hits[0].rule_name == "r"
+        finally:
+            cache.close()
+
+    def test_content_change_triggers_rescan(self, tmp_path: Path) -> None:
+        """传 cache 后修改文件内容应触发重新扫描。"""
+        from fuscan.cache import CacheStore
+
+        scan_dir = tmp_path / "scan"
+        scan_dir.mkdir()
+        f = scan_dir / "a.txt"
+        f.write_text("normal", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("r", "password"))
+        cache = CacheStore(tmp_path / "cache.db")
+        try:
+            scanner = IncrementalScanner(rs, cache=cache)
+
+            # 首次扫描，无命中
+            report1 = scanner.scan(scan_dir)
+            assert report1.stats.matched_files == 0
+
+            # 修改文件内容，加入 password
+            f.write_text("password=123", encoding="utf-8")
+
+            # 二次扫描，内容变化 → 重新扫描
+            report2 = scanner.scan(scan_dir)
+            assert report2.stats.scanned_files == 1
+            assert report2.stats.matched_files == 1
+        finally:
+            cache.close()
+
+    def test_rule_change_triggers_rescan(self, tmp_path: Path) -> None:
+        """传 cache 后规则 pattern 变化应触发重新扫描。"""
+        from fuscan.cache import CacheStore
+
+        scan_dir = tmp_path / "scan"
+        scan_dir.mkdir()
+        (scan_dir / "a.txt").write_text("secret123", encoding="utf-8")
+        cache = CacheStore(tmp_path / "cache.db")
+        try:
+            # 首次用 "password" 规则扫描，无命中
+            rs1 = _build_ruleset(_content_rule("r", "password"))
+            scanner1 = IncrementalScanner(rs1, cache=cache)
+            report1 = scanner1.scan(scan_dir)
+            assert report1.stats.scanned_files == 1
+            assert report1.stats.matched_files == 0
+
+            # 换用 "secret" 规则扫描，规则哈希变化 → 重新扫描
+            rs2 = _build_ruleset(_content_rule("r", "secret"))
+            scanner2 = IncrementalScanner(rs2, cache=cache)
+            report2 = scanner2.scan(scan_dir)
+            assert report2.stats.scanned_files == 1
+            assert report2.stats.matched_files == 1
+        finally:
+            cache.close()
+
+    def test_tracked_count_reflects_cache(self, tmp_path: Path) -> None:
+        """tracked_count 应反映 cache.stats().scanned_files。"""
+        from fuscan.cache import CacheStore
+
+        scan_dir = tmp_path / "scan"
+        scan_dir.mkdir()
+        (scan_dir / "a.txt").write_text("x", encoding="utf-8")
+        (scan_dir / "b.txt").write_text("y", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("r", "password"))
+        cache = CacheStore(tmp_path / "cache.db")
+        try:
+            scanner = IncrementalScanner(rs, cache=cache)
+            assert scanner.tracked_count == 0
+            scanner.scan(scan_dir)
+            assert scanner.tracked_count == 2
+        finally:
+            cache.close()
+
+    def test_scan_paths_uses_cache(self, tmp_path: Path) -> None:
+        """scan_paths 传 cache 后第二次调用相同文件应复用缓存结果。"""
+        from fuscan.cache import CacheStore
+
+        scan_dir = tmp_path / "scan"
+        scan_dir.mkdir()
+        f = scan_dir / "a.txt"
+        f.write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("r", "password"))
+        cache = CacheStore(tmp_path / "cache.db")
+        try:
+            scanner = IncrementalScanner(rs, cache=cache)
+
+            report1 = scanner.scan_paths([f])
+            assert report1.stats.scanned_files == 1
+            assert report1.stats.matched_files == 1
+
+            # 二次 scan_paths 同一文件，缓存命中，结果一致
+            report2 = scanner.scan_paths([f])
+            assert report2.stats.matched_files == 1
+            assert report2.hits[0].hits[0].rule_name == "r"
+        finally:
+            cache.close()
+
+    def test_path_independence(self, tmp_path: Path) -> None:
+        """同内容文件不同路径，缓存应命中（路径无关），结果一致。"""
+        from fuscan.cache import CacheStore
+
+        dir1 = tmp_path / "dir1"
+        dir2 = tmp_path / "dir2"
+        dir1.mkdir()
+        dir2.mkdir()
+        (dir1 / "a.txt").write_text("password", encoding="utf-8")
+        (dir2 / "b.txt").write_text("password", encoding="utf-8")  # 同内容不同路径
+
+        rs = _build_ruleset(_content_rule("r", "password"))
+        cache = CacheStore(tmp_path / "cache.db")
+        try:
+            scanner = IncrementalScanner(rs, cache=cache)
+
+            # 扫描 dir1
+            report1 = scanner.scan(dir1)
+            assert report1.stats.scanned_files == 1
+            assert report1.stats.matched_files == 1
+
+            # 扫描 dir2：文件哈希相同 → 缓存命中，结果一致
+            report2 = scanner.scan(dir2)
+            assert report2.stats.matched_files == 1
+            assert report2.hits[0].hits[0].rule_name == "r"
+        finally:
+            cache.close()

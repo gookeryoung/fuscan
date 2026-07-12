@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fuscan.archive.base import (
     ArchiveEntry,
@@ -22,6 +24,9 @@ from fuscan.rules.model import Rule, RuleSet
 from fuscan.scanner.context import FileEntry, MatchContext
 from fuscan.scanner.matchers import Matcher, build_matcher
 from fuscan.scanner.result import RuleHit, ScanResult
+
+if TYPE_CHECKING:
+    from fuscan.cache import CacheStore
 
 __all__ = ["ArchiveScanner"]
 
@@ -42,11 +47,20 @@ class ArchiveScanner:
         ruleset: RuleSet,
         password: str | None = None,
         max_entry_size: int = 50 * 1024 * 1024,
+        cache: CacheStore | None = None,
     ) -> None:
         self._ruleset = ruleset
         self._password = password
         self._max_entry_size = max_entry_size
         self._compiled: list[tuple[Rule, Matcher]] = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
+        # 缓存模式：由父 Scanner 调 register_ruleset 登记规则，此处仅读取规则哈希
+        self._cache: CacheStore | None = cache
+        self._compiled_with_hash: list[tuple[Rule, Matcher, str]] = []
+        if cache is not None:
+            rule_hashes = cache.get_rule_hashes()
+            self._compiled_with_hash = [
+                (rule, matcher, rule_hashes[rule.name]) for rule, matcher in self._compiled if rule.name in rule_hashes
+            ]
 
     def scan_archive(self, archive_path: Path) -> tuple[ScanResult, ...]:
         """扫描压缩包内所有条目，返回结果元组。
@@ -99,7 +113,21 @@ class ArchiveScanner:
         entry: ArchiveEntry,
         reader: ArchiveReader,
     ) -> ScanResult:
-        """对压缩包内单个条目应用规则。"""
+        """对压缩包内单个条目应用规则。
+
+        缓存模式下委托 :meth:`_scan_entry_cached`，否则走 :meth:`_scan_entry_uncached`。
+        """
+        if self._cache is None:
+            return self._scan_entry_uncached(archive_path, entry, reader)
+        return self._scan_entry_cached(archive_path, entry, reader)
+
+    def _scan_entry_uncached(
+        self,
+        archive_path: Path,
+        entry: ArchiveEntry,
+        reader: ArchiveReader,
+    ) -> ScanResult:
+        """对压缩包内单个条目应用规则（无缓存）。"""
         file_entry = FileEntry(
             path=Path(entry.display_path),
             name=entry.name,
@@ -149,6 +177,93 @@ class ArchiveScanner:
             errors=rule_errors,
         )
 
+    def _scan_entry_cached(
+        self,
+        archive_path: Path,
+        entry: ArchiveEntry,
+        reader: ArchiveReader,
+    ) -> ScanResult:
+        """缓存模式扫描压缩包条目：读字节算哈希，查缓存，未命中走匹配器。"""
+        assert self._cache is not None  # 仅类型收窄，调用方已保证非 None
+        file_entry = FileEntry(
+            path=Path(entry.display_path),
+            name=entry.name,
+            size=entry.size,
+            mtime=0.0,
+            extension=entry.extension,
+            is_dir=False,
+        )
+
+        # 读字节并算哈希
+        data = self._read_entry_bytes(archive_path, entry, reader)
+        file_hash = hashlib.sha256(data).hexdigest()
+        content = self._extract_content_from_bytes(data, entry)
+
+        def content_provider(_fe: FileEntry) -> str:
+            return content
+
+        context = MatchContext(file_entry, content_provider=content_provider)
+
+        applicable: list[tuple[Rule, Matcher, str]] = [
+            (rule, matcher, rule_hash)
+            for rule, matcher, rule_hash in self._compiled_with_hash
+            if not rule.file_extensions or entry.extension in rule.file_extensions
+        ]
+        rule_hashes = [rh for _, _, rh in applicable]
+        cached: dict[str, RuleHit | None] = self._cache.get_cached_hits(file_hash, rule_hashes) if rule_hashes else {}
+
+        hits: list[RuleHit] = []
+        rule_errors = 0
+        for rule, matcher, rule_hash in applicable:
+            if rule_hash in cached:
+                result = cached[rule_hash]
+                if result is not None:
+                    hits.append(
+                        RuleHit(
+                            rule_name=rule.name,
+                            severity=result.severity,
+                            detail=result.detail,
+                            match_text=result.match_text,
+                            match_count=result.match_count,
+                            target=result.target,
+                        )
+                    )
+                continue
+            try:
+                match_result = matcher.matches(context)
+            except Exception:
+                rule_errors += 1
+                logger.warning(
+                    "规则 %s 求值失败 %s",
+                    rule.name,
+                    entry.display_path,
+                    exc_info=True,
+                )
+                continue
+            if match_result.matched:
+                hit = RuleHit(
+                    rule_name=rule.name,
+                    severity=rule.severity,
+                    detail=match_result.detail,
+                    match_text=match_result.match_text,
+                    match_count=match_result.match_count,
+                    target=match_result.target,
+                )
+                hits.append(hit)
+                self._cache.put_result(file_hash, rule_hash, hit)
+            else:
+                self._cache.put_result(file_hash, rule_hash, None)
+
+        self._cache.register_file(file_hash, file_entry.size)
+        self._cache.register_path(file_hash, file_entry.path, file_entry.mtime)
+
+        return ScanResult(
+            path=file_entry.path,
+            size=file_entry.size,
+            hits=tuple(hits),
+            errors=rule_errors,
+        )
+
     def _read_entry_content(
         self,
         _archive_path: Path,
@@ -156,28 +271,33 @@ class ArchiveScanner:
         reader: ArchiveReader,
     ) -> str:
         """读取条目字节并通过临时文件复用提取器链。"""
+        data = self._read_entry_bytes(_archive_path, entry, reader)
+        return self._extract_content_from_bytes(data, entry)
+
+    def _read_entry_bytes(
+        self,
+        _archive_path: Path,
+        entry: ArchiveEntry,
+        reader: ArchiveReader,
+    ) -> bytes:
+        """读取压缩包条目字节，超大或读取失败时返回空字节。"""
         if entry.size > self._max_entry_size:
             logger.debug("条目过大，跳过内容提取: %s", entry.display_path)
-            return ""
-
+            return b""
         try:
-            data = reader.read_entry(entry.entry_name)
+            return reader.read_entry(entry.entry_name)
         except ArchiveError as exc:
             logger.info("读取压缩包条目失败: %s", exc)
-            return ""
+            return b""
 
+    def _extract_content_from_bytes(self, data: bytes, entry: ArchiveEntry) -> str:
+        """从字节提取文本内容，复用提取器链或直接解码。"""
         if not data:
             return ""
-
-        # 纯文本类条目直接解码
         if entry.extension in _TEXT_EXTENSIONS:
             return _decode_bytes(data)
-
-        # 有注册提取器的格式走临时文件提取
         if _has_extractor(entry.extension):
             return self._extract_via_temp(data, entry)
-
-        # 其他情况按文本解码
         return _decode_bytes(data)
 
     def _extract_via_temp(self, data: bytes, entry: ArchiveEntry) -> str:

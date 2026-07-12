@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Tuple
 
-__all__ = ["FileEntry", "MatchContext", "default_content_provider"]
+__all__ = ["FileEntry", "HashingContentProvider", "MatchContext", "default_content_provider"]
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,10 @@ class FileEntry:
 
 
 ContentProvider = Callable[["FileEntry"], str]
+
+# 带哈希的内容提供器：返回 (content, file_hash)。
+# 缓存模式下用此类型，使文件哈希计算与内容提取共享一次磁盘 I/O。
+HashingContentProvider = Callable[["FileEntry"], Tuple[str, str]]
 
 
 def default_content_provider(entry: FileEntry, *, max_size: int = 50 * 1024 * 1024) -> str:

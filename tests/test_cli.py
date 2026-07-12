@@ -606,3 +606,130 @@ class TestCliErrorPaths:
 
         _configure_logging(2)
         assert calls[-1]["level"] == logging.DEBUG
+
+
+class TestCacheCommand:
+    """缓存子命令测试。"""
+
+    def test_cache_stats_shows_statistics(
+        self,
+        scan_root: Path,
+        rules_file: Path,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """cache stats 应输出缓存统计信息。"""
+        cache_path = tmp_path / "cache.db"
+        # 先扫描以创建缓存
+        rc = main(["scan", str(scan_root), "-r", str(rules_file), "--cache-path", str(cache_path)])
+        assert rc == 0
+        assert cache_path.exists()
+        capsys.readouterr()
+
+        rc = main(["cache", "stats", "--cache-path", str(cache_path)])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "缓存数据库" in out
+        assert "已扫描文件" in out
+
+    def test_cache_stats_nonexistent_db(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """cache stats 在缓存不存在时应提示。"""
+        cache_path = tmp_path / "nonexistent.db"
+        rc = main(["cache", "stats", "--cache-path", str(cache_path)])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "不存在" in out
+
+    def test_cache_clear_deletes_db(
+        self,
+        scan_root: Path,
+        rules_file: Path,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """cache clear 应删除缓存数据库文件。"""
+        cache_path = tmp_path / "cache.db"
+        rc = main(["scan", str(scan_root), "-r", str(rules_file), "--cache-path", str(cache_path)])
+        assert rc == 0
+        assert cache_path.exists()
+        capsys.readouterr()
+
+        rc = main(["cache", "clear", "--cache-path", str(cache_path)])
+        assert rc == 0
+        assert not cache_path.exists()
+        out = capsys.readouterr().out
+        assert "已清空" in out
+
+    def test_cache_clear_nonexistent_db(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """cache clear 在缓存不存在时应提示。"""
+        cache_path = tmp_path / "nonexistent.db"
+        rc = main(["cache", "clear", "--cache-path", str(cache_path)])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "不存在" in out
+
+    def test_cache_prune_removes_stale(
+        self,
+        scan_root: Path,
+        rules_file: Path,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """cache prune --max-age-days 0 应清理所有文件缓存。"""
+        cache_path = tmp_path / "cache.db"
+        rc = main(["scan", str(scan_root), "-r", str(rules_file), "--cache-path", str(cache_path)])
+        assert rc == 0
+        capsys.readouterr()
+
+        rc = main(["cache", "prune", "--cache-path", str(cache_path), "--max-age-days", "0"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "已清理" in out
+
+    def test_scan_no_cache_flag_disables_cache(
+        self,
+        scan_root: Path,
+        rules_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        """--no-cache 时不创建 cache.db。"""
+        cache_path = tmp_path / "cache.db"
+        rc = main(
+            [
+                "scan",
+                str(scan_root),
+                "-r",
+                str(rules_file),
+                "--no-cache",
+                "--cache-path",
+                str(cache_path),
+            ]
+        )
+        assert rc == 0
+        assert not cache_path.exists()
+
+    def test_scan_cache_path_uses_custom_path(
+        self,
+        scan_root: Path,
+        rules_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        """--cache-path 应使用自定义路径创建缓存。"""
+        cache_path = tmp_path / "subdir" / "my_cache.db"
+        rc = main(["scan", str(scan_root), "-r", str(rules_file), "--cache-path", str(cache_path)])
+        assert rc == 0
+        assert cache_path.exists()
+
+    def test_scan_creates_cache_db_by_default(
+        self,
+        scan_root: Path,
+        rules_file: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """默认 scan 应创建 cache.db。"""
+        cache_path = tmp_path / "cache.db"
+        monkeypatch.setenv("HOME", str(tmp_path))
+        rc = main(["scan", str(scan_root), "-r", str(rules_file), "--cache-path", str(cache_path)])
+        assert rc == 0
+        assert cache_path.exists()

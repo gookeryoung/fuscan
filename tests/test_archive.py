@@ -679,6 +679,129 @@ class TestArchiveScanner:
         assert results[0].errors == 1
 
 
+class TestArchiveScannerCache:
+    """压缩包缓存模式测试。"""
+
+    def test_cache_hit_reuses_result(self, tmp_path: Path) -> None:
+        from fuscan.cache import CacheStore
+
+        zip_path = _make_zip(tmp_path / "a.zip", {"secret.txt": "password=abc"})
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
+        try:
+            cache.register_ruleset(rs)
+            scanner1 = ArchiveScanner(rs, cache=cache)
+            results1 = scanner1.scan_archive(zip_path)
+            assert len(results1) == 1
+            assert results1[0].has_hit
+
+            # 第二次扫描应命中缓存
+            scanner2 = ArchiveScanner(rs, cache=cache)
+            results2 = scanner2.scan_archive(zip_path)
+            assert len(results2) == 1
+            assert results2[0].has_hit
+            assert results2[0].hits[0].rule_name == "pwd"
+        finally:
+            cache.close()
+
+    def test_cache_miss_writes_result(self, tmp_path: Path) -> None:
+        from fuscan.cache import CacheStore, hash_bytes
+
+        zip_path = _make_zip(tmp_path / "a.zip", {"a.txt": "password"})
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
+        try:
+            cache.register_ruleset(rs)
+            scanner = ArchiveScanner(rs, cache=cache)
+            scanner.scan_archive(zip_path)
+
+            rule_hashes = cache.get_rule_hashes()
+            file_hash = hash_bytes(b"password")
+            cached = cache.get_cached_hits(file_hash, list(rule_hashes.values()))
+            assert len(cached) == 1
+            assert next(iter(cached.values())) is not None
+        finally:
+            cache.close()
+
+    def test_content_change_triggers_rescan(self, tmp_path: Path) -> None:
+        from fuscan.cache import CacheStore
+
+        zip_path = _make_zip(tmp_path / "a.zip", {"a.txt": "password=old"})
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
+        try:
+            cache.register_ruleset(rs)
+            scanner1 = ArchiveScanner(rs, cache=cache)
+            results1 = scanner1.scan_archive(zip_path)
+            assert results1[0].has_hit
+            assert results1[0].hits[0].match_count == 1
+
+            # 修改压缩包内容
+            _make_zip(zip_path, {"a.txt": "password=new\npassword=again"})
+            scanner2 = ArchiveScanner(rs, cache=cache)
+            results2 = scanner2.scan_archive(zip_path)
+            assert results2[0].has_hit
+            assert results2[0].hits[0].match_count == 2
+        finally:
+            cache.close()
+
+    def test_uncached_mode_unchanged(self, tmp_path: Path) -> None:
+        zip_path = _make_zip(tmp_path / "a.zip", {"secret.txt": "password"})
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = ArchiveScanner(rs)  # 不传 cache
+        assert scanner._cache is None
+        results = scanner.scan_archive(zip_path)
+        assert len(results) == 1
+        assert results[0].has_hit
+
+    def test_cache_none_hit_not_returned(self, tmp_path: Path) -> None:
+        from fuscan.cache import CacheStore
+
+        zip_path = _make_zip(tmp_path / "a.zip", {"clean.txt": "nothing suspicious"})
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
+        try:
+            cache.register_ruleset(rs)
+            scanner1 = ArchiveScanner(rs, cache=cache)
+            results1 = scanner1.scan_archive(zip_path)
+            assert all(not r.has_hit for r in results1)
+
+            scanner2 = ArchiveScanner(rs, cache=cache)
+            results2 = scanner2.scan_archive(zip_path)
+            assert all(not r.has_hit for r in results2)
+        finally:
+            cache.close()
+
+    def test_scanner_with_archive_cache(self, tmp_path: Path) -> None:
+        """主 Scanner 启用 cache + scan_archives 时压缩包内条目应缓存。"""
+        from fuscan.cache import CacheStore
+
+        _make_zip(tmp_path / "a.zip", {"secret.txt": "password"})
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
+        try:
+            scanner1 = Scanner(rs, scan_archives=True, cache=cache)
+            report1 = scanner1.scan(tmp_path)
+            assert report1.stats.matched_files >= 1
+
+            # 第二次扫描应命中缓存
+            scanner2 = Scanner(rs, scan_archives=True, cache=cache)
+            report2 = scanner2.scan(tmp_path)
+            assert report2.stats.matched_files >= 1
+        finally:
+            cache.close()
+
+
 # ----------------------------- 主 Scanner 集成 -----------------------------
 
 

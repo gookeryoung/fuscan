@@ -1,132 +1,75 @@
-"""增量扫描器：仅扫描新增或修改的文件。
+"""增量扫描器：委托 Scanner + CacheStore 实现基于内容哈希的增量扫描。
 
-维护已扫描文件状态（路径 + mtime），每次扫描时跳过未变化的文件，
-只对新增或修改的文件应用规则。适用于托盘驻守场景下的持续监控。
+cache 不为 None 时，Scanner 内部使用哈希缓存跳过未变化文件（文件哈希 + 规则哈希
+均未变则直接复用结果）；cache 为 None 时退化为全量扫描。
+状态持久化由 SQLite 缓存处理，``save_state``/``load_state`` 为空操作（保留签名兼容 TrayApp）。
 """
 
 from __future__ import annotations
 
-import json
 import logging
-from dataclasses import dataclass
+import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from fuscan.rules.model import Rule, RuleSet
+from fuscan.rules.model import RuleSet
 from fuscan.scanner import ScanReport, ScanResult, ScanStats
 from fuscan.scanner.context import FileEntry
-from fuscan.scanner.matchers import Matcher, build_matcher
-from fuscan.scanner.result import RuleHit
-from fuscan.scanner.scanner import default_extract_content
-from fuscan.scanner.walker import FileWalker
+from fuscan.scanner.scanner import Scanner
 
-__all__ = ["FileState", "IncrementalScanner"]
+if TYPE_CHECKING:
+    from fuscan.cache import CacheStore
+
+__all__ = ["IncrementalScanner"]
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class FileState:
-    """文件扫描状态：路径 + 最后修改时间。"""
-
-    path: Path
-    mtime: float
-
-
 class IncrementalScanner:
-    """增量扫描器：跳过未变化文件，仅扫描新增/修改文件。
+    """增量扫描器：委托 Scanner + CacheStore 实现哈希缓存增量扫描。
 
     使用方式：
 
-    1. 首次调用 ``scan()`` 扫描全部文件并记录状态
-    2. 后续调用仅扫描 mtime 变化的文件
-    3. 可通过 ``scan_paths()`` 扫描指定路径列表（由文件监控触发）
-    4. ``save_state()`` / ``load_state()`` 持久化状态
+    1. 构造时传入 ``cache`` 启用哈希缓存（推荐）
+    2. ``scan(root)`` 扫描目录，``scan_paths(paths)`` 扫描指定文件列表
+    3. ``save_state``/``load_state`` 为空操作，缓存由 SQLite 持久化
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         ruleset: RuleSet,
         max_depth: int | None = None,
         scan_archives: bool = False,
         ignore_dirs: tuple[str, ...] = (),
         ignore_extensions: tuple[str, ...] = (),
+        cache: CacheStore | None = None,
     ) -> None:
-        self._ruleset = ruleset
-        self._max_depth = max_depth
-        self._scan_archives = scan_archives
-        self._compiled: list[tuple[Rule, Matcher]] = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
-        # 预计算规则集扩展名并集，避免 _should_scan 对每个文件重算
-        self._has_unrestricted_rule: bool = any(not rule.file_extensions for rule in ruleset.rules)
-        self._all_extensions: frozenset[str] = frozenset(ext for rule in ruleset.rules for ext in rule.file_extensions)
-        self._walker = FileWalker(
+        self._cache: CacheStore | None = cache
+        self._scanner = Scanner(
+            ruleset,
+            max_depth=max_depth,
+            scan_archives=scan_archives,
             ignore_dirs=ignore_dirs,
             ignore_extensions=ignore_extensions,
-            max_depth=max_depth,
+            cache=cache,
         )
-        self._file_states: dict[str, float] = {}  # path_str -> mtime
 
     @property
     def tracked_count(self) -> int:
-        """已跟踪的文件数量。"""
-        return len(self._file_states)
+        """已跟踪的文件数量（基于缓存统计，无缓存时返回 0）。"""
+        if self._cache is None:
+            return 0
+        return self._cache.stats().scanned_files
 
     def scan(self, root: Path) -> ScanReport:
-        """增量扫描目录，跳过未变化文件。"""
-        import time
-
-        start = time.perf_counter()
-        results: list[ScanResult] = []
-        total = 0
-        scanned = 0
-        matched = 0
-        skipped = 0
-        errors = 0
-        matches = 0
-
-        for entry in self._walker.walk(root):
-            total += 1
-            if not self._should_scan(entry):
-                skipped += 1
-                continue
-
-            path_str = str(entry.path)
-
-            # 增量判断：mtime 未变化则跳过
-            if path_str in self._file_states and abs(entry.mtime - self._file_states[path_str]) < 0.001:
-                skipped += 1
-                continue
-
-            try:
-                result = self._scan_entry(entry)
-                scanned += 1
-                if result.has_hit:
-                    matched += 1
-                    matches += result.total_match_count
-                errors += result.errors
-                results.append(result)
-                # 更新状态
-                self._file_states[path_str] = entry.mtime
-            except Exception:
-                errors += 1
-                scanned += 1
-                logger.warning("扫描文件失败 %s", entry.path, exc_info=True)
-
-        duration = time.perf_counter() - start
-        stats = ScanStats(
-            total_files=total,
-            scanned_files=scanned,
-            matched_files=matched,
-            skipped_files=skipped,
-            errors=errors,
-            duration_seconds=duration,
-            total_matches=matches,
-        )
-        return ScanReport(root=root, results=tuple(results), stats=stats)
+        """扫描目录，委托 Scanner 处理缓存命中与规则匹配。"""
+        return self._scanner.scan(root)
 
     def scan_paths(self, paths: list[Path]) -> ScanReport:
-        """扫描指定路径列表（由文件监控触发）。"""
-        import time
+        """扫描指定路径列表（由文件监控触发）。
 
+        跳过不存在、目录、扩展名不匹配的文件。
+        """
         start = time.perf_counter()
         results: list[ScanResult] = []
         scanned = 0
@@ -138,17 +81,16 @@ class IncrementalScanner:
             if not path.exists() or path.is_dir():
                 continue
             entry = FileEntry.from_path(path)
-            if not self._should_scan(entry):
+            if not self._scanner._should_scan(entry):
                 continue
             try:
-                result = self._scan_entry(entry)
+                result = self._scanner.scan_file(path)
                 scanned += 1
                 if result.has_hit:
                     matched += 1
                     matches += result.total_match_count
                 errors += result.errors
                 results.append(result)
-                self._file_states[str(path)] = entry.mtime
             except Exception:
                 errors += 1
                 scanned += 1
@@ -164,66 +106,14 @@ class IncrementalScanner:
         )
         return ScanReport(root=Path(), results=tuple(results), stats=stats)
 
-    def mark_scanned(self, path: Path, mtime: float) -> None:
-        """手动标记文件为已扫描。"""
-        self._file_states[str(path)] = mtime
+    def mark_scanned(self, _path: Path, _mtime: float) -> None:
+        """空操作：缓存模式下由 CacheStore 自动登记文件。"""
 
-    def remove_path(self, path: Path) -> None:
-        """从跟踪状态中移除路径（文件删除时调用）。"""
-        self._file_states.pop(str(path), None)
+    def remove_path(self, _path: Path) -> None:
+        """空操作：缓存基于内容哈希，与路径无关。"""
 
-    def save_state(self, path: Path) -> None:
-        """持久化扫描状态到 JSON 文件。"""
-        data = dict(self._file_states)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    def save_state(self, _path: Path) -> None:
+        """空操作：缓存由 SQLite 持久化，无需额外状态文件。"""
 
-    def load_state(self, path: Path) -> None:
-        """从 JSON 文件加载扫描状态。"""
-        if not path.exists():
-            return
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            self._file_states = {k: float(v) for k, v in data.items()}
-            logger.info("加载扫描状态: %d 个文件", len(self._file_states))
-        except (json.JSONDecodeError, ValueError, OSError):
-            logger.warning("扫描状态文件损坏，忽略", exc_info=True)
-
-    def _should_scan(self, entry: FileEntry) -> bool:
-        """根据规则集的 file_extensions 限制决定是否扫描。"""
-        if entry.is_dir:
-            return False
-        if self._has_unrestricted_rule:
-            return True
-        return entry.extension in self._all_extensions
-
-    def _scan_entry(self, entry: FileEntry) -> ScanResult:
-        """对单个文件应用所有规则。"""
-        from fuscan.scanner.context import MatchContext
-
-        context = MatchContext(entry, content_provider=default_extract_content)
-        hits: list[RuleHit] = []
-        rule_errors = 0
-
-        for rule, matcher in self._compiled:
-            if rule.file_extensions and entry.extension not in rule.file_extensions:
-                continue
-            try:
-                result = matcher.matches(context)
-            except Exception:
-                rule_errors += 1
-                logger.warning("规则 %s 求值失败 %s", rule.name, entry.path, exc_info=True)
-                continue
-            if result.matched:
-                hits.append(
-                    RuleHit(
-                        rule_name=rule.name,
-                        severity=rule.severity,
-                        detail=result.detail,
-                        match_text=result.match_text,
-                        match_count=result.match_count,
-                        target=result.target,
-                    )
-                )
-
-        return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)
+    def load_state(self, _path: Path) -> None:
+        """空操作：缓存由 SQLite 持久化，无需额外状态文件。"""

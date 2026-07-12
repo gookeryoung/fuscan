@@ -28,7 +28,7 @@ import logging
 import re
 from dataclasses import asdict
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
 try:
     from PySide2.QtCore import QPoint, QSize, Qt
@@ -97,6 +97,9 @@ from fuscan.rules import RuleError, load_ruleset, merge_multiple_rulesets
 from fuscan.rules.model import RuleSet, Severity
 from fuscan.scanner import ScanReport, list_drives
 from fuscan.scanner.result import RuleHit, ScanResult
+
+if TYPE_CHECKING:
+    from fuscan.cache import CacheStore
 
 __all__ = ["MainWindow", "ScanState", "WorkflowStage"]
 
@@ -329,6 +332,8 @@ class MainWindow(QMainWindow):
         self._drive_button_group: QButtonGroup | None = None
         self._drive_buttons: list[QPushButton] = []
         self._selected_drive: str | None = None
+        # 扫描结果缓存（启用时惰性创建，关闭窗口时释放）
+        self._cache: CacheStore | None = None
 
         self._bind_widgets()
         self._configure_ui()
@@ -975,6 +980,7 @@ class MainWindow(QMainWindow):
         self._stats_time_label.setText("已用 0.0s | 速度 0 文件/s")
         self._switch_stage(WorkflowStage.SCANNING)
 
+        cache, source_files = self._build_cache_context()
         self._worker = ScanWorker(
             ruleset=self._ruleset,
             roots=roots,
@@ -983,12 +989,34 @@ class MainWindow(QMainWindow):
             max_depth=self._config.max_depth,
             ignore_dirs=tuple(self._config.ignore_dirs),
             ignore_extensions=tuple(self._config.ignore_extensions),
+            cache=cache,
+            source_files=source_files,
         )
         self._worker.progress_info.connect(self._on_scan_progress)
         self._worker.finished_report.connect(self._on_scan_finished)
         self._worker.failed.connect(self._on_scan_failed)
         self._worker.cancelled.connect(self._on_scan_cancelled)
         self._worker.start()
+
+    def _build_cache_context(self) -> tuple[CacheStore | None, dict[Path, str] | None]:
+        """构造扫描缓存上下文。
+
+        根据配置启用缓存时惰性创建 CacheStore，并计算规则来源文件哈希映射。
+        缓存对象在整个主窗口生命周期内复用，关闭窗口时统一释放。
+
+        :returns: (cache, source_files)，禁用时均为 None
+        """
+        if not self._config.cache_enabled:
+            return None, None
+        if self._cache is None:
+            from fuscan.cache import CacheStore, default_cache_path
+
+            cache_path = Path(self._config.cache_path) if self._config.cache_path else default_cache_path()
+            self._cache = CacheStore(cache_path)
+        from fuscan.cache import compute_source_files
+
+        source_files = compute_source_files(self._rules_paths, use_builtin=self._use_builtin)
+        return self._cache, source_files
 
     def _pause_scan(self) -> None:
         """暂停扫描。"""
@@ -1150,11 +1178,21 @@ class MainWindow(QMainWindow):
         """打开设置对话框，修改后保存配置并应用。"""
         from fuscan.gui.settings_dialog import SettingsDialog
 
+        prev_cache_enabled = self._config.cache_enabled
+        prev_cache_path = self._config.cache_path
         dialog = SettingsDialog(self._config, self)
         if dialog.exec_() == QDialog.Accepted:
             self._save_config()
             self._set_use_builtin(self._config.use_builtin)
             self._refresh_drive_buttons()
+            # 缓存配置变更时释放旧 CacheStore，下次扫描按新配置重建
+            cache_changed = not self._config.cache_enabled or self._config.cache_path != prev_cache_path
+            if prev_cache_enabled and cache_changed and self._cache is not None:
+                try:
+                    self._cache.close()
+                except Exception:
+                    logger.warning("缓存关闭失败", exc_info=True)
+                self._cache = None
 
     # ----------------------------- 详情区更新 -----------------------------
 
@@ -1787,9 +1825,15 @@ class MainWindow(QMainWindow):
         return buf.getvalue()
 
     def closeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
-        """关闭时保存配置并终止后台线程。"""
+        """关闭时保存配置、释放缓存并终止后台线程。"""
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(3000)
+        if self._cache is not None:
+            try:
+                self._cache.close()
+            except Exception:
+                logger.warning("缓存关闭失败", exc_info=True)
+            self._cache = None
         self._save_config()
         super().closeEvent(event)

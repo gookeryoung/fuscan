@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, Mapping
 
 try:
     from PySide2.QtCore import QObject, QThread, Signal
@@ -20,6 +21,9 @@ from fuscan.rules.model import RuleSet
 from fuscan.scanner import ScanReport
 from fuscan.scanner.result import ProgressInfo, ScanResult, ScanStats
 from fuscan.scanner.scanner import Scanner
+
+if TYPE_CHECKING:
+    from fuscan.cache import CacheStore
 
 __all__ = ["ScanWorker"]
 
@@ -51,6 +55,8 @@ class ScanWorker(QThread):
         max_workers: int | None = None,
         ignore_dirs: tuple[str, ...] = (),
         ignore_extensions: tuple[str, ...] = (),
+        cache: CacheStore | None = None,
+        source_files: Mapping[Path, str] | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -61,6 +67,8 @@ class ScanWorker(QThread):
         self._max_workers = max_workers
         self._ignore_dirs = ignore_dirs
         self._ignore_extensions = ignore_extensions
+        self._cache: CacheStore | None = cache
+        self._source_files: Mapping[Path, str] | None = source_files
         self._scanner: Scanner | None = None
         self._cancel_requested: bool = False
         # 多根路径累计统计
@@ -119,6 +127,8 @@ class ScanWorker(QThread):
                 on_progress=self._on_progress,
                 ignore_dirs=self._ignore_dirs,
                 ignore_extensions=self._ignore_extensions,
+                cache=self._cache,
+                source_files=self._source_files,
             )
             if self._cancel_requested:
                 self._scanner.cancel()

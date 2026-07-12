@@ -4831,6 +4831,53 @@ class TestSettingsDialog:
         assert accepted_called == [True]
         dialog.close()
 
+    def test_settings_dialog_loads_cache_config(self, qapp: QApplication) -> None:
+        """_load_config 应将缓存配置恢复到控件。"""
+        from fuscan.config import Config
+        from fuscan.gui.settings_dialog import SettingsDialog
+
+        config = Config()
+        config.cache_enabled = False
+        config.cache_path = "/tmp/custom_cache.db"
+
+        dialog = SettingsDialog(config)
+        assert dialog._cache_enabled_check.isChecked() is False
+        assert dialog._cache_path_edit.text() == "/tmp/custom_cache.db"
+        dialog.close()
+
+    def test_settings_dialog_saves_cache_config(self, qapp: QApplication) -> None:
+        """_save_config 应将缓存控件值保存到配置。"""
+        from fuscan.config import Config
+        from fuscan.gui.settings_dialog import SettingsDialog
+
+        config = Config()
+        config.cache_enabled = True
+        config.cache_path = None
+
+        dialog = SettingsDialog(config)
+        dialog._cache_enabled_check.setChecked(False)
+        dialog._cache_path_edit.setText("/tmp/new_cache.db")
+        dialog._save_config()
+
+        assert config.cache_enabled is False
+        assert config.cache_path == "/tmp/new_cache.db"
+        dialog.close()
+
+    def test_settings_dialog_cache_path_empty_becomes_none(self, qapp: QApplication) -> None:
+        """缓存路径为空时保存为 None（使用默认路径）。"""
+        from fuscan.config import Config
+        from fuscan.gui.settings_dialog import SettingsDialog
+
+        config = Config()
+        config.cache_path = "/tmp/old.db"
+
+        dialog = SettingsDialog(config)
+        dialog._cache_path_edit.setText("   ")
+        dialog._save_config()
+
+        assert config.cache_path is None
+        dialog.close()
+
 
 class TestSettingsDialogIgnore:
     """设置对话框忽略项控件测试。"""
@@ -5018,4 +5065,202 @@ class TestDetailPreviewFallback:
         text = window._detail_preview.toPlainText()
         assert "无内容关键词可高亮" in text
         assert "路径规则" in text
+        window.close()
+
+
+class TestGuiCache:
+    """GUI 缓存集成测试。"""
+
+    def test_scan_worker_accepts_cache_params(self, qapp: QApplication, tmp_path: Path) -> None:
+        """ScanWorker 应接受 cache 和 source_files 参数并存储。"""
+        from fuscan.cache import CacheStore
+
+        cache = CacheStore(tmp_path / "cache.db")
+        source_files = {tmp_path / "rules.yaml": "abc123"}
+        try:
+            worker = ScanWorker(
+                ruleset=_build_ruleset(),
+                roots=[tmp_path],
+                cache=cache,
+                source_files=source_files,
+            )
+            assert worker._cache is cache
+            assert worker._source_files is source_files
+        finally:
+            cache.close()
+
+    def test_scan_worker_defaults_cache_none(self, qapp: QApplication, tmp_path: Path) -> None:
+        """未传 cache 时默认为 None。"""
+        worker = ScanWorker(ruleset=_build_ruleset(), roots=[tmp_path])
+        assert worker._cache is None
+        assert worker._source_files is None
+
+    def test_main_window_build_cache_context_creates_cache(self, qapp: QApplication, tmp_path: Path) -> None:
+        """_build_cache_context 启用缓存时应惰性创建 CacheStore 并返回 source_files。"""
+        window = MainWindow()
+        window._config.cache_enabled = True
+        window._config.cache_path = str(tmp_path / "cache.db")
+        try:
+            cache, source_files = window._build_cache_context()
+            assert cache is not None
+            assert source_files is not None
+            assert (tmp_path / "cache.db").exists()
+            # 缓存对象复用：再次调用返回同一实例
+            cache2, _ = window._build_cache_context()
+            assert cache2 is cache
+        finally:
+            if window._cache is not None:
+                window._cache.close()
+            window.close()
+
+    def test_main_window_build_cache_context_disabled(self, qapp: QApplication) -> None:
+        """禁用缓存时 _build_cache_context 返回 (None, None)。"""
+        window = MainWindow()
+        window._config.cache_enabled = False
+        try:
+            cache, source_files = window._build_cache_context()
+            assert cache is None
+            assert source_files is None
+            assert window._cache is None
+        finally:
+            window.close()
+
+    def test_main_window_close_event_closes_cache(
+        self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """closeEvent 应关闭 CacheStore 并置空引用。"""
+        try:
+            from PySide2.QtGui import QCloseEvent
+        except ImportError:  # pragma: no cover
+            from PySide6.QtGui import QCloseEvent
+
+        window = MainWindow()
+        window._config.cache_enabled = True
+        window._config.cache_path = str(tmp_path / "cache.db")
+        window._build_cache_context()
+        assert window._cache is not None
+        cache_ref = window._cache
+        closed: list[bool] = []
+        monkeypatch.setattr(cache_ref, "close", lambda: closed.append(True))
+        # 绕过父类 closeEvent 对事件类型的要求
+        monkeypatch.setattr("fuscan.gui.main_window.QMainWindow.closeEvent", lambda self, event: None)
+        window.closeEvent(QCloseEvent())
+        assert closed == [True]
+        assert window._cache is None
+        window.close()
+
+    def test_main_window_close_event_handles_cache_close_error(
+        self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """closeEvent 中 cache.close() 抛异常时应记录日志但不中断关闭。"""
+        try:
+            from PySide2.QtGui import QCloseEvent
+        except ImportError:  # pragma: no cover
+            from PySide6.QtGui import QCloseEvent
+
+        window = MainWindow()
+        window._config.cache_enabled = True
+        window._config.cache_path = str(tmp_path / "cache.db")
+        window._build_cache_context()
+        assert window._cache is not None
+
+        def raising_close() -> None:
+            raise RuntimeError("close error")
+
+        monkeypatch.setattr(window._cache, "close", raising_close)
+        monkeypatch.setattr("fuscan.gui.main_window.QMainWindow.closeEvent", lambda self, event: None)
+        # 不应抛异常
+        window.closeEvent(QCloseEvent())
+        assert window._cache is None
+        window.close()
+
+    def test_main_window_build_cache_context_default_path(
+        self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """cache_path 为 None 时应使用 default_cache_path()。"""
+
+        cache_db = tmp_path / "default_cache.db"
+        monkeypatch.setattr("fuscan.cache.default_cache_path", lambda: cache_db)
+        # compute_source_files 内部 import hash_bytes，不影响
+        window = MainWindow()
+        window._config.cache_enabled = True
+        window._config.cache_path = None
+        try:
+            cache, _source_files = window._build_cache_context()
+            assert cache is not None
+            assert cache_db.exists()
+        finally:
+            if window._cache is not None:
+                window._cache.close()
+            window.close()
+
+    def test_main_window_settings_releases_cache_when_disabled(
+        self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """设置中关闭缓存后应释放旧 CacheStore。"""
+        window = MainWindow()
+        window._config.cache_enabled = True
+        window._config.cache_path = str(tmp_path / "cache.db")
+        window._build_cache_context()
+        assert window._cache is not None
+
+        from fuscan.gui import settings_dialog as sd_module
+
+        # 模拟对话框 exec_ 返回 Accepted，并在返回前模拟用户关闭缓存
+        def fake_exec(self: sd_module.SettingsDialog) -> int:
+            self._config.cache_enabled = False
+            return 1  # QDialog.Accepted
+
+        monkeypatch.setattr(sd_module.SettingsDialog, "exec_", fake_exec)
+        window._on_settings()
+        assert window._cache is None
+        window.close()
+
+    def test_main_window_settings_releases_cache_on_path_change(
+        self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """设置中改变缓存路径后应释放旧 CacheStore。"""
+        window = MainWindow()
+        window._config.cache_enabled = True
+        window._config.cache_path = str(tmp_path / "cache.db")
+        window._build_cache_context()
+        assert window._cache is not None
+
+        from fuscan.gui import settings_dialog as sd_module
+
+        # 模拟对话框返回 Accepted 并改变缓存路径
+        def fake_exec(self: sd_module.SettingsDialog) -> int:
+            self._config.cache_path = str(tmp_path / "new_cache.db")
+            return 1  # QDialog.Accepted
+
+        monkeypatch.setattr(sd_module.SettingsDialog, "exec_", fake_exec)
+        window._on_settings()
+        assert window._cache is None
+        window.close()
+
+    def test_main_window_settings_cache_close_error(
+        self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """_on_settings 中 cache.close() 抛异常时应记录日志但不中断。"""
+        window = MainWindow()
+        window._config.cache_enabled = True
+        window._config.cache_path = str(tmp_path / "cache.db")
+        window._build_cache_context()
+        assert window._cache is not None
+
+        def raising_close() -> None:
+            raise RuntimeError("close error")
+
+        monkeypatch.setattr(window._cache, "close", raising_close)
+
+        from fuscan.gui import settings_dialog as sd_module
+
+        def fake_exec(self: sd_module.SettingsDialog) -> int:
+            self._config.cache_enabled = False
+            return 1  # QDialog.Accepted
+
+        monkeypatch.setattr(sd_module.SettingsDialog, "exec_", fake_exec)
+        # 不应抛异常
+        window._on_settings()
+        assert window._cache is None
         window.close()

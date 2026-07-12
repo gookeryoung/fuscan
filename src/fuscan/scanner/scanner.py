@@ -7,24 +7,26 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Mapping
 
 from fuscan.extractors import extract_content
 from fuscan.rules.model import Rule, RuleSet
-from fuscan.scanner.context import ContentProvider, FileEntry, MatchContext
+from fuscan.scanner.context import ContentProvider, FileEntry, HashingContentProvider, MatchContext
 from fuscan.scanner.matchers import Matcher, build_matcher
 from fuscan.scanner.result import ProgressInfo, RuleHit, ScanReport, ScanResult, ScanStats
 from fuscan.scanner.walker import FileWalker
 
 if TYPE_CHECKING:
     from fuscan.archive import ArchiveScanner
+    from fuscan.cache import CacheStore
 
-__all__ = ["Scanner", "default_extract_content"]
+__all__ = ["Scanner", "default_extract_content", "default_extract_content_with_hash"]
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,31 @@ def default_extract_content(entry: FileEntry) -> str:
     except Exception:
         logger.debug("提取器提取失败，回退到纯文本: %s", entry.path, exc_info=True)
         return entry.path.read_text(encoding="utf-8", errors="ignore")
+
+
+def default_extract_content_with_hash(entry: FileEntry) -> tuple[str, str]:
+    """带哈希的内容提供器：读字节算 SHA-256，再调提取器。
+
+    复用同一份 I/O：先读字节，算哈希，再调 :func:`extract_content`。
+    缓存模式下，``Scanner`` 用此函数替代 :func:`default_extract_content`，
+    使文件哈希计算与内容提取共享一次磁盘 I/O。
+
+    :param entry: 文件元信息
+    :return: ``(content, file_hash)`` 元组；``file_hash`` 为 64 字符 SHA-256 十六进制摘要
+    """
+    if entry.is_dir or entry.size > 50 * 1024 * 1024:
+        return "", hashlib.sha256(b"").hexdigest()
+    try:
+        data = entry.path.read_bytes()
+    except OSError:
+        logger.debug("读取文件失败: %s", entry.path, exc_info=True)
+        return "", hashlib.sha256(b"").hexdigest()
+    try:
+        content = extract_content(entry.path)
+    except Exception:
+        logger.debug("提取器提取失败，回退到纯文本: %s", entry.path, exc_info=True)
+        content = data.decode("utf-8", errors="ignore")
+    return content, hashlib.sha256(data).hexdigest()
 
 
 class Scanner:
@@ -64,6 +91,8 @@ class Scanner:
         progress_interval: float = 0.15,
         ignore_dirs: tuple[str, ...] = (),
         ignore_extensions: tuple[str, ...] = (),
+        cache: CacheStore | None = None,
+        source_files: Mapping[Path, str] | None = None,
     ) -> None:
         self.ruleset = ruleset
         self._content_provider: ContentProvider = content_provider or default_extract_content
@@ -83,6 +112,18 @@ class Scanner:
         )
         self._scan_archives = scan_archives
         self._max_workers = max_workers
+        # 缓存模式：登记规则集并构造带哈希的编译列表
+        self._cache: CacheStore | None = cache
+        self._rule_hashes: dict[str, str] = {}
+        self._compiled_with_hash: list[tuple[Rule, Matcher, str]] = []
+        self._hashing_content_provider: HashingContentProvider = default_extract_content_with_hash
+        if cache is not None:
+            self._rule_hashes = cache.register_ruleset(ruleset, source_files)
+            self._compiled_with_hash = [
+                (rule, matcher, self._rule_hashes[rule.name])
+                for rule, matcher in self._compiled
+                if rule.name in self._rule_hashes
+            ]
         self._archive_scanner: ArchiveScanner | None = None
         if scan_archives:
             # 惰性导入避免与 archive.scanner 模块的循环依赖
@@ -91,6 +132,7 @@ class Scanner:
             self._archive_scanner = ArchiveScanner(
                 ruleset=ruleset,
                 password=archive_password,
+                cache=cache,
             )
         self._on_progress = on_progress
         self._progress_interval = progress_interval
@@ -391,7 +433,16 @@ class Scanner:
         return entry.extension in self._all_extensions
 
     def _scan_entry(self, entry: FileEntry) -> ScanResult:
-        """对单个文件应用所有规则，返回扫描结果。"""
+        """对单个文件应用所有规则，返回扫描结果。
+
+        缓存模式下委托 :meth:`_scan_entry_cached`，否则走 :meth:`_scan_entry_uncached`。
+        """
+        if self._cache is None:
+            return self._scan_entry_uncached(entry)
+        return self._scan_entry_cached(entry)
+
+    def _scan_entry_uncached(self, entry: FileEntry) -> ScanResult:
+        """对单个文件应用所有规则（无缓存）。"""
         context = MatchContext(entry, content_provider=self._content_provider)
         hits: list[RuleHit] = []
         rule_errors = 0
@@ -416,5 +467,74 @@ class Scanner:
                         target=result.target,
                     )
                 )
+
+        return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)
+
+    def _scan_entry_cached(self, entry: FileEntry) -> ScanResult:
+        """缓存模式扫描：先查缓存，命中直接复用，未命中走匹配器并写入缓存。
+
+        一次 I/O 同时取内容和文件哈希（:func:`default_extract_content_with_hash`），
+        静态闭包包装内容传给 :class:`MatchContext`，避免改 MatchContext 接口。
+        """
+        assert self._cache is not None  # 仅类型收窄，调用方已保证非 None
+        content, file_hash = self._hashing_content_provider(entry)
+
+        def _static_provider(_fe: FileEntry) -> str:
+            return content
+
+        context = MatchContext(entry, content_provider=_static_provider)
+
+        applicable: list[tuple[Rule, Matcher, str]] = [
+            (rule, matcher, rule_hash)
+            for rule, matcher, rule_hash in self._compiled_with_hash
+            if not rule.file_extensions or entry.extension in rule.file_extensions
+        ]
+        rule_hashes = [rh for _, _, rh in applicable]
+        cached: dict[str, RuleHit | None] = self._cache.get_cached_hits(file_hash, rule_hashes) if rule_hashes else {}
+
+        hits: list[RuleHit] = []
+        rule_errors = 0
+        for rule, matcher, rule_hash in applicable:
+            if rule_hash in cached:
+                result = cached[rule_hash]
+                if result is not None:
+                    # 缓存命中（匹配）——填回 rule_name（缓存中为空字符串）
+                    hits.append(
+                        RuleHit(
+                            rule_name=rule.name,
+                            severity=result.severity,
+                            detail=result.detail,
+                            match_text=result.match_text,
+                            match_count=result.match_count,
+                            target=result.target,
+                        )
+                    )
+                # else: 缓存记录为未命中，跳过
+                continue
+            # 未缓存——执行匹配器
+            try:
+                match_result = matcher.matches(context)
+            except Exception:
+                rule_errors += 1
+                logger.warning("规则 %s 求值失败 %s", rule.name, entry.path, exc_info=True)
+                continue
+            if match_result.matched:
+                hit = RuleHit(
+                    rule_name=rule.name,
+                    severity=rule.severity,
+                    detail=match_result.detail,
+                    match_text=match_result.match_text,
+                    match_count=match_result.match_count,
+                    target=match_result.target,
+                )
+                hits.append(hit)
+                self._cache.put_result(file_hash, rule_hash, hit)
+            else:
+                # 未命中也缓存，避免重复扫描
+                self._cache.put_result(file_hash, rule_hash, None)
+
+        # 登记文件元数据
+        self._cache.register_file(file_hash, entry.size)
+        self._cache.register_path(file_hash, entry.path, entry.mtime)
 
         return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)

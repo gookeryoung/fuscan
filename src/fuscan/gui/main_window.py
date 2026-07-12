@@ -1151,7 +1151,7 @@ class MainWindow(QMainWindow):
         from fuscan.gui.settings_dialog import SettingsDialog
 
         dialog = SettingsDialog(self._config, self)
-        if dialog.exec() == QDialog.Accepted:
+        if dialog.exec_() == QDialog.Accepted:
             self._save_config()
             self._set_use_builtin(self._config.use_builtin)
             self._refresh_drive_buttons()
@@ -1420,7 +1420,7 @@ class MainWindow(QMainWindow):
         if self._detail_current_result is None:
             return
         dialog = HitDetailDialog(self._detail_current_result, self)
-        dialog.exec()
+        dialog.exec_()
 
     def _on_copy_path(self) -> None:
         """复制文件路径到剪贴板。"""
@@ -1520,7 +1520,7 @@ class MainWindow(QMainWindow):
             return
         dialog = RuleEditorDialog(self._rules_paths, self)
         dialog.rules_saved.connect(self._on_rules_saved)
-        dialog.exec()
+        dialog.exec_()
 
     def _on_rules_saved(self, _path: str) -> None:
         """规则文件保存后重新加载规则集。"""
@@ -1752,7 +1752,7 @@ class MainWindow(QMainWindow):
         if result is None:
             return
         dialog = HitDetailDialog(result, self)
-        dialog.exec()
+        dialog.exec_()
 
     def _update_scan_button(self) -> None:
         """更新扫描按钮状态（委托给 _update_stage_actions 统一管理）。"""

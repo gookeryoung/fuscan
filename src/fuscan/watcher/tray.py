@@ -131,7 +131,7 @@ class TrayApp(QObject):
         if self._watch_paths:
             self.start_monitoring()
 
-        return app.exec()
+        return app.exec_()
 
     def _init_tray(self) -> None:
         """初始化系统托盘。"""

@@ -365,8 +365,8 @@ class TestBuiltinRules:
 
 
 class TestGuiCommand:
-    def test_gui_launches_when_pyside2_available(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """PySide2 可用时调用 launch 启动 GUI。"""
+    def test_gui_launches_when_pyside_available(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """PySide 可用时调用 launch 启动 GUI。"""
         called = {"launch": False}
 
         def fake_launch() -> int:
@@ -385,12 +385,12 @@ class TestGuiCommand:
         assert rc == 0
         assert called["launch"] is True
 
-    def test_gui_returns_error_when_pyside2_missing(
+    def test_gui_returns_error_when_pyside_missing(
         self,
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """PySide2 不可用时返回错误码 3。"""
+        """PySide 不可用时返回错误码 3。"""
         import builtins
 
         original_import = builtins.__import__
@@ -416,20 +416,20 @@ class TestTrayCommand:
         err = capsys.readouterr().err
         assert "规则文件不存在" in err
 
-    def test_tray_pyside2_missing_returns_error(
+    def test_tray_pyside_missing_returns_error(
         self,
         monkeypatch: pytest.MonkeyPatch,
         rules_file: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """PySide2 不可用时返回错误码 3。"""
+        """PySide2 与 PySide6 均不可用时返回错误码 3。"""
         import builtins
 
         original_import = builtins.__import__
 
         def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
-            if name == "PySide2.QtWidgets":
-                raise ImportError("No module named 'PySide2'")
+            if name in ("PySide2.QtWidgets", "PySide6.QtWidgets"):
+                raise ImportError("No module named 'PySide'")
             return original_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", fake_import)

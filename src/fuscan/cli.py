@@ -222,7 +222,7 @@ def _cmd_gui(_args: argparse.Namespace) -> int:
     try:
         from fuscan.gui import launch
     except ImportError as exc:
-        print(f"GUI 启动失败（PySide2 未安装）: {exc}", file=sys.stderr)
+        print(f"GUI 启动失败（PySide 未安装）: {exc}", file=sys.stderr)
         return 3
     return launch()
 

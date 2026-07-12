@@ -32,7 +32,7 @@ license         = "MIT"
 name            = "fuscan"
 readme          = "README.md"
 requires-python = ">=3.8"
-version         = "0.1.4"
+version         = "0.1.5"
 
 [project.optional-dependencies]
 dev = [
@@ -154,7 +154,7 @@ missing-import      = "ignore" # PySide2/PySide6 双兼容导入，当前环境�
 invalid-inheritance = "ignore" # 双兼容导入导致基类被推断为 Unknown
 
 [tool.bumpversion]
-current_version = "0.1.4"
+current_version = "0.1.5"
 commit = true
 message = "chore: 更新版本 {current_version} → {new_version}"
 tag = true

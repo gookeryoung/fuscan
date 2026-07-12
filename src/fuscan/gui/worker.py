@@ -96,6 +96,9 @@ class ScanWorker(QThread):
                 matched=info.matched + self._cum_matched,
                 errors=info.errors + self._cum_errors,
                 elapsed=elapsed,
+                # skipped_dirs/matched_files 不累计，仅反映最近一次 scan() 的快照
+                skipped_dirs=info.skipped_dirs,
+                matched_files=info.matched_files,
             )
         )
 

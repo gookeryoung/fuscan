@@ -446,6 +446,29 @@ class TestScannerProgress:
         assert last.errors == 0
         assert last.elapsed >= 0
         assert isinstance(last.current_file, str)
+        # 新增字段：命中文件列表应包含 (路径, 规则名) 元组
+        assert isinstance(last.matched_files, tuple)
+        assert any(path.endswith("secret.txt") and rule == "r" for path, rule in last.matched_files)
+        # 新增字段：跳过的目录列表（无忽略目录时为空 tuple）
+        assert isinstance(last.skipped_dirs, tuple)
+
+    def test_progress_info_skipped_dirs_collected(self, tmp_path: Path) -> None:
+        """ignore_dirs 跳过的目录应出现在 ProgressInfo.skipped_dirs 中。"""
+        (tmp_path / ".git").mkdir()
+        (tmp_path / ".git" / "config").write_text("", encoding="utf-8")
+        (tmp_path / "app.py").write_text("password", encoding="utf-8")
+
+        rs = _build_ruleset(_content_rule("r", "password"))
+        received: list[ProgressInfo] = []
+        scanner = Scanner(rs, on_progress=received.append, progress_interval=0.0, ignore_dirs=(".git",))
+        scanner.scan(tmp_path)
+
+        assert len(received) >= 1
+        last = received[-1]
+        # .git 目录应被收集到 skipped_dirs
+        assert any(".git" in d for d in last.skipped_dirs)
+        # app.py 命中应收集到 matched_files
+        assert any(path.endswith("app.py") for path, _ in last.matched_files)
 
 
 class TestScannerControl:

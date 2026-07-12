@@ -104,6 +104,45 @@ class TestFileWalker:
         assert "log.LOG" not in names
         assert "data.txt" in names
 
+    def test_on_skip_dir_called_for_ignored_dirs(self, tmp_path: Path) -> None:
+        """ignore_dirs 跳过目录时应调用 on_skip_dir 回调，参数为目录绝对路径字符串。"""
+        _create_tree(tmp_path)
+        skipped: list[str] = []
+        walker = FileWalker(ignore_dirs=(".git", "node_modules"), on_skip_dir=skipped.append)
+        list(walker.walk(tmp_path))
+        # 两个忽略目录均应上报
+        assert len(skipped) == 2
+        # 路径包含目录名
+        assert any(p.endswith(".git") or p.endswith(".git\\") or p.endswith(".git/") for p in skipped)
+        assert any("node_modules" in p for p in skipped)
+
+    def test_on_skip_dir_called_for_ignored_paths(self, tmp_path: Path) -> None:
+        """ignore_paths glob 跳过目录时应调用 on_skip_dir 回调。"""
+        (tmp_path / "vendor").mkdir()
+        (tmp_path / "vendor" / "lib.js").write_text("", encoding="utf-8")
+        (tmp_path / "main.py").write_text("", encoding="utf-8")
+        skipped: list[str] = []
+        walker = FileWalker(ignore_paths=("vendor/*",), on_skip_dir=skipped.append)
+        list(walker.walk(tmp_path))
+        assert len(skipped) == 1
+        assert "vendor" in skipped[0]
+
+    def test_on_skip_dir_not_called_for_ignored_files(self, tmp_path: Path) -> None:
+        """文件扩展名跳过不应触发 on_skip_dir（仅目录跳过才上报）。"""
+        _create_tree(tmp_path)
+        skipped: list[str] = []
+        walker = FileWalker(ignore_extensions=("pyc",), on_skip_dir=skipped.append)
+        list(walker.walk(tmp_path))
+        assert skipped == []
+
+    def test_on_skip_dir_none_default(self, tmp_path: Path) -> None:
+        """on_skip_dir 默认 None 时不报错，正常遍历。"""
+        _create_tree(tmp_path)
+        walker = FileWalker(ignore_dirs=(".git",))
+        entries = list(walker.walk(tmp_path))
+        names = {e.name for e in entries}
+        assert "config" not in names  # .git 被跳过
+
 
 class TestIgnorePaths:
     """ignore_paths 路径 glob 过滤测试。"""

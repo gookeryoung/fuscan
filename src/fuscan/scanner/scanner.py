@@ -71,12 +71,15 @@ class Scanner:
         # 预计算规则集扩展名并集，避免 _should_scan 对每个文件重算
         self._has_unrestricted_rule: bool = any(not rule.file_extensions for rule in ruleset.rules)
         self._all_extensions: frozenset[str] = frozenset(ext for rule in ruleset.rules for ext in rule.file_extensions)
+        self._skipped_dirs: list[str] = []
+        self._matched_files: list[tuple[str, str]] = []
         self._walker = FileWalker(
             ignore_dirs=ignore_dirs,
             ignore_extensions=ignore_extensions,
             ignore_paths=ruleset.ignore_paths,
             max_depth=max_depth,
             follow_symlinks=follow_symlinks,
+            on_skip_dir=self._on_skip_dir_internal,
         )
         self._scan_archives = scan_archives
         self._max_workers = max_workers
@@ -136,6 +139,10 @@ class Scanner:
         self._pause_event.wait()
         return self._cancel_event.is_set()
 
+    def _on_skip_dir_internal(self, dir_path: str) -> None:
+        """FileWalker 跳过目录时的内部回调：收集到列表供 ProgressInfo 上报。"""
+        self._skipped_dirs.append(dir_path)
+
     def scan(self, root: Path) -> ScanReport:
         """扫描根目录，返回完整报告。
 
@@ -143,6 +150,9 @@ class Scanner:
         ``on_progress`` 回调在遍历和扫描阶段按时间节流反馈进度。
         """
         self._progress_start = time.perf_counter()
+        # 重置每次扫描的收集列表，避免跨多次 scan() 累积
+        self._skipped_dirs = []
+        self._matched_files = []
 
         # 阶段 1：遍历收集待扫描 entry（单线程，I/O 轻量）
         entries: list[FileEntry] = []
@@ -216,6 +226,9 @@ class Scanner:
         if not force and now - self._last_progress_time < self._progress_interval:
             return
         self._last_progress_time = now
+        # 截断到最近 500 条，避免大扫描量时 ProgressInfo 过大
+        recent_skipped = tuple(self._skipped_dirs[-500:])
+        recent_matched = tuple(self._matched_files[-500:])
         self._on_progress(
             ProgressInfo(
                 current_file=current_file,
@@ -225,6 +238,8 @@ class Scanner:
                 matched=matched,
                 errors=errors,
                 elapsed=now - self._progress_start,
+                skipped_dirs=recent_skipped,
+                matched_files=recent_matched,
             )
         )
 
@@ -245,6 +260,8 @@ class Scanner:
                 scanned += 1
                 if result.has_hit:
                     matched += 1
+                    for hit in result.hits:
+                        self._matched_files.append((str(entry.path), hit.rule_name))
                 errors += result.errors
                 results.append(result)
             except Exception:
@@ -280,6 +297,8 @@ class Scanner:
                     result = future.result()
                     if result.has_hit:
                         matched += 1
+                        for hit in result.hits:
+                            self._matched_files.append((str(entry.path), hit.rule_name))
                     errors += result.errors
                     results.append(result)
                 except Exception:
@@ -318,6 +337,8 @@ class Scanner:
                 scanned += 1
                 if ar.has_hit:
                     matched += 1
+                    for hit in ar.hits:
+                        self._matched_files.append((str(ar.path), hit.rule_name))
                 errors += ar.errors
                 results.append(ar)
             self._emit_progress(

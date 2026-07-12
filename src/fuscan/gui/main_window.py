@@ -98,6 +98,13 @@ _SEVERITY_COLORS: dict[Severity, QColor] = {
     Severity.INFO: QColor("#0366d6"),
 }
 
+# 严重等级 → 背景色（浅色，用于整行高亮）
+_SEVERITY_BACKGROUNDS: dict[Severity, QColor] = {
+    Severity.CRITICAL: QColor(255, 235, 235),  # 浅红
+    Severity.WARNING: QColor(255, 243, 224),  # 浅橙
+    Severity.INFO: QColor(235, 244, 255),  # 浅蓝
+}
+
 # 严重等级 → 排序权重（CRITICAL 优先）
 _SEVERITY_RANK: dict[Severity, int] = {
     Severity.INFO: 0,
@@ -112,29 +119,38 @@ def _severity_text(severity: Severity) -> str:
 
 
 def _apply_severity_to_tree_item(item: QTreeWidgetItem, column: int, severity: Severity) -> None:
-    """为 QTreeWidgetItem 的指定列设置中文标签和颜色。"""
+    """为 QTreeWidgetItem 的指定列设置中文标签、前景色和背景色。"""
     item.setText(column, _severity_text(severity))
     item.setForeground(column, _SEVERITY_COLORS[severity])
+    item.setBackground(column, _SEVERITY_BACKGROUNDS[severity])
 
 
 def _apply_severity_to_table_item(item: QTableWidgetItem, severity: Severity) -> None:
-    """为 QTableWidgetItem 设置中文标签和颜色。"""
+    """为 QTableWidgetItem 设置中文标签、前景色和背景色。"""
     item.setText(_severity_text(severity))
     item.setForeground(_SEVERITY_COLORS[severity])
+    item.setBackground(_SEVERITY_BACKGROUNDS[severity])
 
 
 # 图标路径（assets/icons 目录下）
 _ICONS_DIR = Path(__file__).parent.parent / "assets" / "icons"
-_ICON_SCAN = str(_ICONS_DIR / "scan.svg")
-_ICON_PAUSE = str(_ICONS_DIR / "pause.svg")
-_ICON_RESCAN = str(_ICONS_DIR / "rescan.svg")
+_ICON_ABOUT = str(_ICONS_DIR / "about.svg")
 _ICON_ALL_DISK = str(_ICONS_DIR / "all_disk.svg")
 _ICON_DISK = str(_ICONS_DIR / "disk.svg")
+_ICON_EDIT = str(_ICONS_DIR / "edit.svg")
+_ICON_EXPORT = str(_ICONS_DIR / "export.svg")
+_ICON_EXPORT_CSV = str(_ICONS_DIR / "export_csv.svg")
+_ICON_EXPORT_JSON = str(_ICONS_DIR / "export_json.svg")
 _ICON_FOLDER = str(_ICONS_DIR / "folder.svg")
+_ICON_HARD_DISK = str(_ICONS_DIR / "hard_disk.svg")
 _ICON_HISTORY = str(_ICONS_DIR / "history.svg")
 _ICON_LOAD_LIST = str(_ICONS_DIR / "load_list.svg")
+_ICON_PAUSE = str(_ICONS_DIR / "pause.svg")
+_ICON_RESCAN = str(_ICONS_DIR / "rescan.svg")
 _ICON_RIGHT = str(_ICONS_DIR / "right.svg")
-_ICON_HARD_DISK = str(_ICONS_DIR / "hard_disk.svg")
+_ICON_SCAN = str(_ICONS_DIR / "scan.svg")
+_ICON_SETTINGS = str(_ICONS_DIR / "settings.svg")
+_ICON_STOP = str(_ICONS_DIR / "stop.svg")
 
 
 def _format_size(size: int) -> str:
@@ -266,6 +282,10 @@ class MainWindow(QMainWindow):
         # 扫描中页
         self._progress = ui.progress
         self._current_file_label = ui.current_file_label
+        self._stats_counts_label = ui.stats_counts_label
+        self._stats_time_label = ui.stats_time_label
+        self._skipped_dirs_list = ui.skipped_dirs_list
+        self._matched_files_list = ui.matched_files_list
         # 状态栏（stats_label 仍由代码创建挂到 statusBar）
         self._stats_label = QLabel("就绪")
         self._stats_label.setObjectName("stats_label")
@@ -366,6 +386,13 @@ class MainWindow(QMainWindow):
         self._icon_load_list = QIcon(_ICON_LOAD_LIST)
         self._icon_right = QIcon(_ICON_RIGHT)
         self._icon_hard_disk = QIcon(_ICON_HARD_DISK)
+        self._icon_edit = QIcon(_ICON_EDIT)
+        self._icon_export = QIcon(_ICON_EXPORT)
+        self._icon_export_csv = QIcon(_ICON_EXPORT_CSV)
+        self._icon_export_json = QIcon(_ICON_EXPORT_JSON)
+        self._icon_settings = QIcon(_ICON_SETTINGS)
+        self._icon_about = QIcon(_ICON_ABOUT)
+        self._icon_stop = QIcon(_ICON_STOP)
         self._scan_btn.setIcon(self._icon_scan)
         # 扫描模式下拉项图标
         self._scan_mode_combo.setItemIcon(0, self._icon_all_disk)
@@ -376,6 +403,16 @@ class MainWindow(QMainWindow):
         self._load_rules_action.setIcon(self._icon_load_list)
         # 菜单 actions 图标
         self._scan_action.setIcon(self._icon_scan)
+        self._edit_rule_btn.setIcon(self._icon_edit)
+        self._edit_rules_action.setIcon(self._icon_edit)
+        self._export_btn.setIcon(self._icon_export)
+        self._export_csv_action.setIcon(self._icon_export_csv)
+        self._export_json_action.setIcon(self._icon_export_json)
+        self._settings_action.setIcon(self._icon_settings)
+        self._ui.about_action.setIcon(self._icon_about)
+        self._rescan_btn.setIcon(self._icon_rescan)
+        self._cancel_btn.setIcon(self._icon_stop)
+        self._pause_resume_btn.setIcon(self._icon_pause)
 
         # 初始化盘符按钮组（平铺选择，替代下拉）
         self._drive_button_group = QButtonGroup(self)
@@ -848,6 +885,11 @@ class MainWindow(QMainWindow):
         self._progress.setRange(0, 0)
         self._current_file_label.setText("准备扫描...")
         self._stats_label.setText("扫描中...")
+        # 清空扫描中页的列表与统计面板，避免残留上次扫描数据
+        self._skipped_dirs_list.clear()
+        self._matched_files_list.clear()
+        self._stats_counts_label.setText("已扫描 0 | 跳过 0 | 命中 0 | 错误 0")
+        self._stats_time_label.setText("已用 0.0s | 速度 0 文件/s")
         self._switch_stage(WorkflowStage.SCANNING)
 
         self._worker = ScanWorker(
@@ -911,7 +953,7 @@ class MainWindow(QMainWindow):
         self._worker = None
 
     def _on_scan_progress(self, info) -> None:  # type: ignore[no-untyped-def]
-        """扫描实时进度回调。"""
+        """扫描实时进度回调：更新进度条、当前文件、统计面板与两个列表。"""
         # 切换为确定进度模式
         if info.total > 0 and self._progress.maximum() != info.total:
             self._progress.setRange(0, info.total)
@@ -924,12 +966,33 @@ class MainWindow(QMainWindow):
                 path_text = "..." + path_text[-97:]
             self._current_file_label.setText(f"正在解析: {path_text}")
 
-        # 详细统计
+        # 统计面板：计数行 + 时间行（速度 = scanned / elapsed）
+        self._stats_counts_label.setText(
+            f"已扫描 {info.scanned} | 跳过 {info.skipped} | 命中 {info.matched} | 错误 {info.errors}"
+        )
+        speed = info.scanned / info.elapsed if info.elapsed > 0 else 0.0
+        self._stats_time_label.setText(f"已用 {info.elapsed:.1f}s | 速度 {speed:.0f} 文件/s")
+
+        # 状态栏（保留原汇总文本，便于后台查看）
         self._stats_label.setText(
             f"已扫描 {info.scanned} | 跳过 {info.skipped} | "
             f"命中 {info.matched} | 错误 {info.errors} | "
             f"已用 {info.elapsed:.1f}s"
         )
+
+        # 跳过的文件夹列表（仅在新条目增加时刷新，避免重置滚动条）
+        if info.skipped_dirs:
+            self._skipped_dirs_list.clear()
+            for dir_path in info.skipped_dirs:
+                self._skipped_dirs_list.addItem(dir_path)
+            self._skipped_dirs_list.scrollToBottom()
+
+        # 命中的文件列表（格式 "路径 → 规则名"）
+        if info.matched_files:
+            self._matched_files_list.clear()
+            for file_path, rule_name in info.matched_files:
+                self._matched_files_list.addItem(f"{file_path} → {rule_name}")
+            self._matched_files_list.scrollToBottom()
 
     def _on_scan_finished(self, report: ScanReport) -> None:
         """扫描完成回调：填充结果并切换到结果页。"""
@@ -1023,8 +1086,10 @@ class MainWindow(QMainWindow):
         if result is None and item.parent() is not None:
             result = item.parent().data(0, Qt.UserRole)
         if result is None:
+            # 选中分组顶层项（无文件数据）：保持详情区空态，避免误显示"无命中"
             self._detail_clear()
             return
+        logger.debug("选中结果项: %s, 命中数=%d", result.path, len(result.hits))
         self._detail_show_result(result)
 
     def _detail_clear(self) -> None:
@@ -1046,6 +1111,8 @@ class MainWindow(QMainWindow):
         self._populate_detail_file_info(result)
         self._populate_detail_hits_table(result)
         self._populate_detail_preview(result)
+        # 强制刷新当前详情页，避免 Qt 渲染时序导致 stack 未生效
+        self._detail_main_stack.currentWidget().update()
 
     def _populate_detail_file_info(self, result: ScanResult) -> None:
         """填充详情区文件元信息。"""
@@ -1068,6 +1135,7 @@ class MainWindow(QMainWindow):
     def _populate_detail_hits_table(self, result: ScanResult) -> None:
         """填充详情区命中规则表。"""
         hits = result.hits
+        logger.debug("填充命中表: %s, 命中数=%d", result.path, len(hits))
         self._detail_hits_table.setRowCount(len(hits))
         for row, hit in enumerate(hits):
             self._detail_hits_table.setItem(row, 0, QTableWidgetItem(hit.rule_name))
@@ -1105,6 +1173,16 @@ class MainWindow(QMainWindow):
             truncated = True
 
         keywords = _extract_keywords(result.hits)
+        # 命中规则但无法提取关键词（如纯文件名/路径匹配），显示提示避免误判为"无命中"
+        if not keywords and result.hits:
+            rule_names = "、".join(h.rule_name for h in result.hits)
+            self._detail_preview.setPlainText(
+                f"（此文件因【{rule_names}】规则命中，但无内容关键词可高亮。命中详情见上方表格。）"
+            )
+            self._detail_hit_positions = []
+            self._detail_current_hit_index = -1
+            self._update_detail_nav_label()
+            return
         html_content = _build_preview_html(content, keywords)
         if truncated:
             html_content += "<p style='color: #888; font-size: 11px;'>(内容已截断，仅显示前 100KB)</p>"
@@ -1234,11 +1312,13 @@ class MainWindow(QMainWindow):
         if self._ruleset is None:
             return
         for rule in self._ruleset.rules:
-            item = QTreeWidgetItem([
-                rule.name,
-                "",
-                ", ".join(rule.file_extensions) if rule.file_extensions else "(全部)",
-            ])
+            item = QTreeWidgetItem(
+                [
+                    rule.name,
+                    "",
+                    ", ".join(rule.file_extensions) if rule.file_extensions else "(全部)",
+                ]
+            )
             _apply_severity_to_tree_item(item, 1, rule.severity)
             self._rules_tree.addTopLevelItem(item)
 
@@ -1390,24 +1470,32 @@ class MainWindow(QMainWindow):
     def _populate_flat(self, results: list[ScanResult]) -> None:
         """不分组：文件为顶层项，规则命中为子项。"""
         for sr in results:
-            file_item = QTreeWidgetItem([
-                str(sr.path),
-                "",
-                "",
-                str(len(sr.hits)),
-                f"{len(sr.hits)} 条命中",
-            ])
+            file_item = QTreeWidgetItem(
+                [
+                    str(sr.path),
+                    "",
+                    "",
+                    str(len(sr.hits)),
+                    f"{len(sr.hits)} 条命中",
+                ]
+            )
             file_item.setData(0, Qt.UserRole, sr)
             _apply_severity_to_tree_item(file_item, 2, sr.max_severity)
             file_item.setTextAlignment(3, Qt.AlignCenter)
+            # critical 整行背景高亮，区别于仅 severity 列着色
+            if sr.max_severity == Severity.CRITICAL:
+                for col in range(file_item.columnCount()):
+                    file_item.setBackground(col, _SEVERITY_BACKGROUNDS[Severity.CRITICAL])
             for hit in sr.hits:
-                child = QTreeWidgetItem([
-                    "",
-                    hit.rule_name,
-                    "",
-                    "",
-                    hit.detail,
-                ])
+                child = QTreeWidgetItem(
+                    [
+                        "",
+                        hit.rule_name,
+                        "",
+                        "",
+                        hit.detail,
+                    ]
+                )
                 _apply_severity_to_tree_item(child, 2, hit.severity)
                 file_item.addChild(child)
             self._result_tree.addTopLevelItem(file_item)
@@ -1422,22 +1510,28 @@ class MainWindow(QMainWindow):
         for rule_name in sorted(rule_map.keys()):
             entries = rule_map[rule_name]
             hit_count = len(entries)
-            top = QTreeWidgetItem([
-                "",
-                rule_name,
-                "",
-                str(hit_count),
-                f"{hit_count} 个文件",
-            ])
+            top = QTreeWidgetItem(
+                [
+                    "",
+                    rule_name,
+                    "",
+                    str(hit_count),
+                    f"{hit_count} 个文件",
+                ]
+            )
+            # 分组项不可选中，避免选中后详情区被清空产生"无命中"误解
+            top.setFlags(top.flags() & ~Qt.ItemIsSelectable)
             top.setTextAlignment(3, Qt.AlignCenter)
             for sr, hit in entries:
-                child = QTreeWidgetItem([
-                    str(sr.path),
-                    "",
-                    "",
-                    "",
-                    hit.detail,
-                ])
+                child = QTreeWidgetItem(
+                    [
+                        str(sr.path),
+                        "",
+                        "",
+                        "",
+                        hit.detail,
+                    ]
+                )
                 _apply_severity_to_tree_item(child, 2, hit.severity)
                 child.setData(0, Qt.UserRole, sr)
                 top.addChild(child)
@@ -1453,26 +1547,36 @@ class MainWindow(QMainWindow):
         for severity in sorted(severity_map.keys(), key=lambda s: _SEVERITY_RANK[s], reverse=True):
             entries = severity_map[severity]
             file_count = len(entries)
-            top = QTreeWidgetItem([
-                "",
-                "",
-                "",
-                str(file_count),
-                f"{file_count} 个文件",
-            ])
+            top = QTreeWidgetItem(
+                [
+                    "",
+                    "",
+                    "",
+                    str(file_count),
+                    f"{file_count} 个文件",
+                ]
+            )
             _apply_severity_to_tree_item(top, 2, severity)
+            # 分组项不可选中，避免选中后详情区被清空产生"无命中"误解
+            top.setFlags(top.flags() & ~Qt.ItemIsSelectable)
             top.setTextAlignment(3, Qt.AlignCenter)
             for sr in entries:
-                child = QTreeWidgetItem([
-                    str(sr.path),
-                    "",
-                    "",
-                    str(len(sr.hits)),
-                    f"{len(sr.hits)} 条命中",
-                ])
+                child = QTreeWidgetItem(
+                    [
+                        str(sr.path),
+                        "",
+                        "",
+                        str(len(sr.hits)),
+                        f"{len(sr.hits)} 条命中",
+                    ]
+                )
                 _apply_severity_to_tree_item(child, 2, sr.max_severity)
                 child.setData(0, Qt.UserRole, sr)
                 child.setTextAlignment(3, Qt.AlignCenter)
+                # critical 整行背景高亮，区别于仅 severity 列着色
+                if sr.max_severity == Severity.CRITICAL:
+                    for col in range(child.columnCount()):
+                        child.setBackground(col, _SEVERITY_BACKGROUNDS[Severity.CRITICAL])
                 top.addChild(child)
             self._result_tree.addTopLevelItem(top)
 

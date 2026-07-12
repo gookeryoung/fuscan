@@ -222,10 +222,6 @@ class Ui_MainWindow(object):
         self.scanning_layout.setSpacing(12)
         self.scanning_layout.setObjectName(u"scanning_layout")
         self.scanning_layout.setContentsMargins(48, 48, 48, 48)
-        self.scanning_top_spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
-
-        self.scanning_layout.addItem(self.scanning_top_spacer)
-
         self.scanning_title_label = QLabel(self.scanning_page)
         self.scanning_title_label.setObjectName(u"scanning_title_label")
         self.scanning_title_label.setMinimumSize(QSize(0, 40))
@@ -246,6 +242,50 @@ class Ui_MainWindow(object):
         self.current_file_label.setWordWrap(True)
 
         self.scanning_layout.addWidget(self.current_file_label)
+
+        self.stats_group = QGroupBox(self.scanning_page)
+        self.stats_group.setObjectName(u"stats_group")
+        self.stats_form_layout = QFormLayout(self.stats_group)
+        self.stats_form_layout.setObjectName(u"stats_form_layout")
+        self.stats_counts_label = QLabel(self.stats_group)
+        self.stats_counts_label.setObjectName(u"stats_counts_label")
+
+        self.stats_form_layout.setWidget(0, QFormLayout.LabelRole, self.stats_counts_label)
+
+        self.stats_time_label = QLabel(self.stats_group)
+        self.stats_time_label.setObjectName(u"stats_time_label")
+
+        self.stats_form_layout.setWidget(1, QFormLayout.LabelRole, self.stats_time_label)
+
+
+        self.scanning_layout.addWidget(self.stats_group)
+
+        self.lists_splitter = QSplitter(self.scanning_page)
+        self.lists_splitter.setObjectName(u"lists_splitter")
+        self.lists_splitter.setOrientation(Qt.Horizontal)
+        self.lists_splitter.setHandleWidth(6)
+        self.skipped_dirs_group = QGroupBox(self.lists_splitter)
+        self.skipped_dirs_group.setObjectName(u"skipped_dirs_group")
+        self.skipped_dirs_layout = QVBoxLayout(self.skipped_dirs_group)
+        self.skipped_dirs_layout.setObjectName(u"skipped_dirs_layout")
+        self.skipped_dirs_list = QListWidget(self.skipped_dirs_group)
+        self.skipped_dirs_list.setObjectName(u"skipped_dirs_list")
+
+        self.skipped_dirs_layout.addWidget(self.skipped_dirs_list)
+
+        self.lists_splitter.addWidget(self.skipped_dirs_group)
+        self.matched_files_group = QGroupBox(self.lists_splitter)
+        self.matched_files_group.setObjectName(u"matched_files_group")
+        self.matched_files_layout = QVBoxLayout(self.matched_files_group)
+        self.matched_files_layout.setObjectName(u"matched_files_layout")
+        self.matched_files_list = QListWidget(self.matched_files_group)
+        self.matched_files_list.setObjectName(u"matched_files_list")
+
+        self.matched_files_layout.addWidget(self.matched_files_list)
+
+        self.lists_splitter.addWidget(self.matched_files_group)
+
+        self.scanning_layout.addWidget(self.lists_splitter)
 
         self.scanning_btn_row = QHBoxLayout()
         self.scanning_btn_row.setSpacing(12)
@@ -613,6 +653,11 @@ class Ui_MainWindow(object):
         self.scan_btn.setText(QCoreApplication.translate("MainWindow", u"\u5f00\u59cb\u626b\u63cf", None))
         self.scanning_title_label.setText(QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u8fdb\u884c\u4e2d", None))
         self.current_file_label.setText("")
+        self.stats_group.setTitle(QCoreApplication.translate("MainWindow", u"\u7edf\u8ba1", None))
+        self.stats_counts_label.setText(QCoreApplication.translate("MainWindow", u"\u5df2\u626b\u63cf 0 | \u8df3\u8fc7 0 | \u547d\u4e2d 0 | \u9519\u8bef 0", None))
+        self.stats_time_label.setText(QCoreApplication.translate("MainWindow", u"\u5df2\u7528 0.0s | \u901f\u5ea6 0 \u6587\u4ef6/s", None))
+        self.skipped_dirs_group.setTitle(QCoreApplication.translate("MainWindow", u"\u8df3\u8fc7\u7684\u6587\u4ef6\u5939", None))
+        self.matched_files_group.setTitle(QCoreApplication.translate("MainWindow", u"\u547d\u4e2d\u7684\u6587\u4ef6", None))
         self.pause_resume_btn.setText(QCoreApplication.translate("MainWindow", u"\u6682\u505c\u626b\u63cf", None))
         self.cancel_btn.setText(QCoreApplication.translate("MainWindow", u"\u53d6\u6d88\u626b\u63cf", None))
 #if QT_CONFIG(tooltip)

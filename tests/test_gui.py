@@ -2038,6 +2038,39 @@ class TestScanWorkerDirect:
         assert result.current_file == "test.txt"
         assert result.elapsed >= 2.0  # 至少 2 秒
 
+    def test_on_progress_forwards_skipped_dirs_and_matched_files(self, qapp: QApplication) -> None:
+        """_on_progress 应直接透传 skipped_dirs 和 matched_files（不做累计）。"""
+        from fuscan.scanner.result import ProgressInfo
+
+        rs = _build_ruleset()
+        worker = ScanWorker(ruleset=rs, roots=[Path("/tmp")])
+        worker._start_time = time.monotonic()
+
+        emitted: list[Any] = []
+        worker.progress_info.connect(emitted.append)
+
+        info = ProgressInfo(
+            current_file="secret.py",
+            scanned=5,
+            total=8,
+            skipped=1,
+            matched=2,
+            errors=0,
+            elapsed=1.0,
+            skipped_dirs=("/tmp/.git", "/tmp/node_modules"),
+            matched_files=(("/tmp/secret.py", "敏感文件名"), ("/tmp/config.yaml", "明文密码")),
+        )
+        worker._on_progress(info)
+
+        assert len(emitted) == 1
+        result = emitted[0]
+        # 新字段直接透传，不累计
+        assert result.skipped_dirs == ("/tmp/.git", "/tmp/node_modules")
+        assert result.matched_files == (
+            ("/tmp/secret.py", "敏感文件名"),
+            ("/tmp/config.yaml", "明文密码"),
+        )
+
     def test_run_emits_failed_on_exception(
         self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -3666,6 +3699,80 @@ class TestScanCallbacks:
         assert "..." in label_text
         window.close()
 
+    def test_on_scan_progress_updates_skipped_dirs_list(self, qapp: QApplication) -> None:
+        """_on_scan_progress 应将 skipped_dirs 填充到跳过文件夹列表。"""
+        from fuscan.scanner.result import ProgressInfo
+
+        window = MainWindow()
+        info = ProgressInfo(
+            total=10,
+            scanned=5,
+            skipped=2,
+            matched=1,
+            errors=0,
+            current_file="/test/file.txt",
+            elapsed=1.0,
+            skipped_dirs=("/proj/.git", "/proj/node_modules"),
+        )
+        window._on_scan_progress(info)
+        assert window._skipped_dirs_list.count() == 2
+        items = [window._skipped_dirs_list.item(i).text() for i in range(window._skipped_dirs_list.count())]
+        assert any(".git" in t for t in items)
+        assert any("node_modules" in t for t in items)
+        window.close()
+
+    def test_on_scan_progress_updates_matched_files_list(self, qapp: QApplication) -> None:
+        """_on_scan_progress 应将 matched_files 填充到命中文件列表，格式为"路径 → 规则名"。"""
+        from fuscan.scanner.result import ProgressInfo
+
+        window = MainWindow()
+        info = ProgressInfo(
+            total=10,
+            scanned=5,
+            skipped=0,
+            matched=2,
+            errors=0,
+            current_file="/test/file.txt",
+            elapsed=1.0,
+            matched_files=(
+                ("/proj/secret.py", "敏感文件名"),
+                ("/proj/config.yaml", "明文密码"),
+            ),
+        )
+        window._on_scan_progress(info)
+        assert window._matched_files_list.count() == 2
+        text0 = window._matched_files_list.item(0).text()
+        assert "secret.py" in text0
+        assert "敏感文件名" in text0
+        assert "→" in text0
+        window.close()
+
+    def test_on_scan_progress_updates_stats_labels(self, qapp: QApplication) -> None:
+        """_on_scan_progress 应更新统计面板的计数与时间标签。"""
+        from fuscan.scanner.result import ProgressInfo
+
+        window = MainWindow()
+        info = ProgressInfo(
+            total=200,
+            scanned=100,
+            skipped=50,
+            matched=30,
+            errors=5,
+            current_file="/test/file.txt",
+            elapsed=10.0,
+        )
+        window._on_scan_progress(info)
+        counts_text = window._stats_counts_label.text()
+        time_text = window._stats_time_label.text()
+        assert "100" in counts_text
+        assert "50" in counts_text
+        assert "30" in counts_text
+        assert "5" in counts_text
+        assert "10.0s" in time_text
+        # 速度 = 100 / 10.0 = 10 文件/s
+        assert "10" in time_text
+        window.close()
+
     def test_on_scan_failed(self, qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
         """_on_scan_failed 应重置 UI 并弹出错误。"""
         window = MainWindow()
@@ -4165,3 +4272,106 @@ class TestSettingsDialogIgnore:
         dialog._save_config()
         assert config.ignore_dirs == [".git", "node_modules"]
         dialog.close()
+
+
+class TestIcons:
+    """按钮与菜单动作图标接入测试。"""
+
+    def test_all_action_buttons_have_icons(self, qapp: QApplication) -> None:
+        """所有操作按钮应设置图标。"""
+        window = MainWindow()
+        assert not window._edit_rule_btn.icon().isNull()
+        assert not window._export_btn.icon().isNull()
+        assert not window._rescan_btn.icon().isNull()
+        assert not window._cancel_btn.icon().isNull()
+        assert not window._pause_resume_btn.icon().isNull()
+        window.close()
+
+    def test_all_menu_actions_have_icons(self, qapp: QApplication) -> None:
+        """所有菜单动作应设置图标。"""
+        window = MainWindow()
+        assert not window._edit_rules_action.icon().isNull()
+        assert not window._export_csv_action.icon().isNull()
+        assert not window._export_json_action.icon().isNull()
+        assert not window._settings_action.icon().isNull()
+        assert not window._ui.about_action.icon().isNull()
+        window.close()
+
+
+class TestSeverityBackground:
+    """严重等级背景色与分组项可选性测试。"""
+
+    def test_critical_tree_item_has_background(self, qapp: QApplication, tmp_path: Path) -> None:
+        """critical 等级文件项各列应有浅红背景色。"""
+        from fuscan.gui.main_window import _SEVERITY_BACKGROUNDS
+        from fuscan.scanner import Scanner
+
+        (tmp_path / "leak.conf").write_text("AKIAIOSFODNN7EXAMPLE", encoding="utf-8")
+        rs = RuleSet(
+            version="1.0",
+            rules=(
+                Rule(
+                    name="AWS密钥",
+                    severity=Severity.CRITICAL,
+                    match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="AKIA"),
+                ),
+            ),
+        )
+        report = Scanner(rs).scan(tmp_path)
+
+        window = MainWindow()
+        window._last_report = report
+        window._switch_stage(WorkflowStage.RESULTS)
+        window._refresh_result_tree()
+
+        top_item = window._result_tree.topLevelItem(0)
+        assert top_item is not None
+        expected_bg = _SEVERITY_BACKGROUNDS[Severity.CRITICAL]
+        for col in range(top_item.columnCount()):
+            bg = top_item.background(col)
+            assert bg.color().rgb() == expected_bg.rgb()
+        window.close()
+
+    def test_group_items_non_selectable(self, qapp: QApplication, tmp_path: Path) -> None:
+        """按严重等级分组模式下，顶层分组项应不可选中。"""
+        from fuscan.scanner import Scanner
+
+        (tmp_path / "secret.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset()
+        report = Scanner(rs).scan(tmp_path)
+
+        window = MainWindow()
+        window._last_report = report
+        window._switch_stage(WorkflowStage.RESULTS)
+        idx = window._group_mode_combo.findData("severity")
+        window._group_mode_combo.setCurrentIndex(idx)
+        window._refresh_result_tree()
+
+        top_item = window._result_tree.topLevelItem(0)
+        assert top_item is not None
+        assert not (top_item.flags() & Qt.ItemIsSelectable)
+        window.close()
+
+
+class TestDetailPreviewFallback:
+    """详情预览回退提示测试。"""
+
+    def test_preview_shows_fallback_when_no_keywords(self, qapp: QApplication, tmp_path: Path) -> None:
+        """命中规则但 detail 无单引号关键词时，预览应显示回退提示。"""
+        from fuscan.scanner.result import RuleHit, ScanResult
+
+        path = tmp_path / "config.yaml"
+        path.write_text("some: content\nhere: value", encoding="utf-8")
+
+        result = ScanResult(
+            path=path,
+            size=path.stat().st_size,
+            hits=(RuleHit("路径规则", Severity.INFO, "路径匹配"),),
+        )
+
+        window = MainWindow()
+        window._detail_show_result(result)
+        text = window._detail_preview.toPlainText()
+        assert "无内容关键词可高亮" in text
+        assert "路径规则" in text
+        window.close()

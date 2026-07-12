@@ -29,6 +29,10 @@ class ProgressInfo:
     matched: int = 0
     errors: int = 0
     elapsed: float = 0.0
+    # 跳过的目录路径（最近 500 条，避免无限增长）
+    skipped_dirs: tuple[str, ...] = ()
+    # 命中的 (文件路径, 规则名) 列表（最近 500 条）
+    matched_files: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

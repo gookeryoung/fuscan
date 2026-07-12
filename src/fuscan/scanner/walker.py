@@ -7,7 +7,7 @@ import os
 import string
 import sys
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 from fuscan.scanner.context import FileEntry
 
@@ -62,13 +62,14 @@ class FileWalker:
     - 默认不跟随符号链接，避免环
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         ignore_dirs: tuple[str, ...] = (),
         ignore_extensions: tuple[str, ...] = (),
         ignore_paths: tuple[str, ...] = (),
         max_depth: int | None = None,
         follow_symlinks: bool = False,
+        on_skip_dir: Callable[[str], None] | None = None,
     ) -> None:
         self._ignore_dirs: set[str] = {d.lower() for d in ignore_dirs}
         self._ignore_extensions: set[str] = {e.lower().lstrip(".") for e in ignore_extensions}
@@ -76,6 +77,7 @@ class FileWalker:
         self._max_depth = max_depth
         self._follow_symlinks = follow_symlinks
         self._root: Path | None = None
+        self._on_skip_dir = on_skip_dir
 
     def walk(self, root: Path) -> Iterator[FileEntry]:
         """遍历根目录，产出 FileEntry（不包含目录本身）。"""
@@ -105,9 +107,13 @@ class FileWalker:
 
             if is_dir:
                 if name.lower() in self._ignore_dirs:
+                    if self._on_skip_dir is not None:
+                        self._on_skip_dir(str(Path(entry.path)))
                     continue
                 dir_path = Path(entry.path)
                 if self._matches_ignore_path(dir_path):
+                    if self._on_skip_dir is not None:
+                        self._on_skip_dir(str(dir_path))
                     continue
                 yield from self._walk_dir(dir_path, depth + 1)
             else:

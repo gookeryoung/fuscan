@@ -69,7 +69,7 @@ class Ui_MainWindow(object):
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.scan_mode_combo.sizePolicy().hasHeightForWidth())
         self.scan_mode_combo.setSizePolicy(sizePolicy)
-        self.scan_mode_combo.setMinimumSize(QSize(0, 60))
+        self.scan_mode_combo.setMinimumSize(QSize(0, 40))
 
         self.scan_mode_layout.addWidget(self.scan_mode_combo)
 
@@ -108,13 +108,13 @@ class Ui_MainWindow(object):
         self.path_combo.setObjectName(u"path_combo")
         sizePolicy1.setHeightForWidth(self.path_combo.sizePolicy().hasHeightForWidth())
         self.path_combo.setSizePolicy(sizePolicy1)
-        self.path_combo.setMinimumSize(QSize(0, 60))
+        self.path_combo.setMinimumSize(QSize(0, 40))
 
         self.folder_select_layout.addWidget(self.path_combo)
 
         self.select_path_btn = QPushButton(self.folder_select_page)
         self.select_path_btn.setObjectName(u"select_path_btn")
-        self.select_path_btn.setMinimumSize(QSize(0, 60))
+        self.select_path_btn.setMinimumSize(QSize(0, 40))
 
         self.folder_select_layout.addWidget(self.select_path_btn)
 
@@ -592,10 +592,10 @@ class Ui_MainWindow(object):
 
         self.retranslateUi(MainWindow)
 
-        self.main_stack.setCurrentIndex(1)
-        self.target_stack.setCurrentIndex(1)
+        self.main_stack.setCurrentIndex(0)
+        self.target_stack.setCurrentIndex(2)
         self.detail_action_stack.setCurrentIndex(0)
-        self.detail_main_stack.setCurrentIndex(0)
+        self.detail_main_stack.setCurrentIndex(1)
 
 
         QMetaObject.connectSlotsByName(MainWindow)

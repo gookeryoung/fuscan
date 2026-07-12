@@ -36,7 +36,7 @@
     <item>
      <widget class="QStackedWidget" name="main_stack">
       <property name="currentIndex">
-       <number>1</number>
+       <number>0</number>
       </property>
       <widget class="QWidget" name="setup_page">
        <layout class="QVBoxLayout" name="setup_layout">
@@ -92,7 +92,7 @@
                <property name="minimumSize">
                 <size>
                  <width>0</width>
-                 <height>60</height>
+                 <height>40</height>
                 </size>
                </property>
                <property name="toolTip">
@@ -124,7 +124,7 @@
                 </sizepolicy>
                </property>
                <property name="currentIndex">
-                <number>1</number>
+                <number>2</number>
                </property>
                <widget class="QWidget" name="full_scan_page">
                 <layout class="QHBoxLayout" name="full_scan_layout">
@@ -196,7 +196,7 @@
                    <property name="minimumSize">
                     <size>
                      <width>0</width>
-                     <height>60</height>
+                     <height>40</height>
                     </size>
                    </property>
                    <property name="toolTip">
@@ -209,7 +209,7 @@
                    <property name="minimumSize">
                     <size>
                      <width>0</width>
-                     <height>60</height>
+                     <height>40</height>
                     </size>
                    </property>
                    <property name="text">

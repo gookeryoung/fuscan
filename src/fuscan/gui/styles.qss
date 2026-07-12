@@ -64,13 +64,14 @@ QMenu::separator {
     margin: 4px 8px;
 }
 
-/* ========== 顶部操作卡片 ========== */
+/* ========== 阶段页面容器 ========== */
 
-QFrame#control_card {
-    background: #ffffff;
-    border: 1px solid #e1e4e8;
-    border-radius: 8px;
-    margin: 8px;
+QStackedWidget#main_stack {
+    background: #f6f8fa;
+}
+
+QWidget#setup_page, QWidget#scanning_page, QWidget#results_page {
+    background: #f6f8fa;
 }
 
 /* ========== 卡片容器 ========== */
@@ -203,7 +204,7 @@ QPushButton#scan_btn:disabled {
 
 /* ========== 次要按钮 ========== */
 
-QPushButton#export_btn {
+QPushButton#export_btn, QPushButton#rescan_btn, QPushButton#view_results_btn {
     background: #0366d6;
     color: #ffffff;
     border: none;
@@ -214,13 +215,53 @@ QPushButton#export_btn {
     min-height: 32px;
 }
 
-QPushButton#export_btn:hover {
+QPushButton#export_btn:hover, QPushButton#rescan_btn:hover, QPushButton#view_results_btn:hover {
     background: #0256c1;
 }
 
-QPushButton#export_btn:disabled {
+QPushButton#export_btn:disabled, QPushButton#rescan_btn:disabled, QPushButton#view_results_btn:disabled {
     background: #e1e4e8;
     color: #ffffff;
+}
+
+/* ========== 扫描中页按钮 ========== */
+
+QPushButton#pause_resume_btn {
+    background: #d73a49;
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 8px 24px;
+}
+
+QPushButton#pause_resume_btn:hover {
+    background: #c52332;
+}
+
+QPushButton#cancel_btn {
+    background: #ffffff;
+    color: #24292e;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 8px 24px;
+}
+
+QPushButton#cancel_btn:hover {
+    background: #f6f8fa;
+    border-color: #d73a49;
+    color: #d73a49;
+}
+
+/* ========== 扫描中页标题 ========== */
+
+QLabel#scanning_title_label {
+    font-size: 18px;
+    font-weight: bold;
+    color: #0366d6;
 }
 
 QPushButton#detail_prev_btn, QPushButton#detail_next_btn,
@@ -521,35 +562,6 @@ QHeaderView::section {
 
 QHeaderView::section:last {
     border-right: none;
-}
-
-/* ========== Tab ========== */
-
-QTabWidget::pane {
-    border: 1px solid #e1e4e8;
-    border-radius: 6px;
-    background: #ffffff;
-    top: -1px;
-}
-
-QTabBar::tab {
-    background: transparent;
-    color: #586069;
-    padding: 8px 16px;
-    border: none;
-    border-bottom: 3px solid transparent;
-    font-size: 13px;
-    font-weight: bold;
-}
-
-QTabBar::tab:selected {
-    color: #0366d6;
-    border-bottom: 3px solid #0366d6;
-}
-
-QTabBar::tab:hover:!selected {
-    color: #0366d6;
-    border-bottom: 3px solid #d0d7de;
 }
 
 /* ========== 文本编辑 ========== */

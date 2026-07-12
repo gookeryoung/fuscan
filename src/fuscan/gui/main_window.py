@@ -66,7 +66,7 @@ from fuscan.rules.model import RuleSet
 from fuscan.scanner import ScanReport, list_drives
 from fuscan.scanner.result import RuleHit, ScanResult
 
-__all__ = ["MainWindow", "ScanState"]
+__all__ = ["MainWindow", "ScanState", "WorkflowStage"]
 
 logger = logging.getLogger(__name__)
 
@@ -156,8 +156,16 @@ class ScanState(enum.Enum):
     PAUSED = "paused"
 
 
+class WorkflowStage(enum.Enum):
+    """工作流阶段，决定主界面 QStackedWidget 显示哪一页。"""
+
+    SETUP = "setup"
+    SCANNING = "scanning"
+    RESULTS = "results"
+
+
 class MainWindow(QMainWindow):
-    """主窗口：扫描器 GUI 入口，GitHub Desktop 风格 5 区布局。"""
+    """主窗口：扫描器 GUI 入口，基于工作流阶段的三页整页切换布局。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -171,6 +179,7 @@ class MainWindow(QMainWindow):
         self._last_report: ScanReport | None = None
         self._worker: ScanWorker | None = None
         self._scan_state: ScanState = ScanState.IDLE
+        self._workflow_stage: WorkflowStage = WorkflowStage.SETUP
         self._use_builtin: bool = True
         # 扫描模式："full"（全盘）、"drive"（盘符）、"folder"（文件夹）
         self._scan_mode: str = "folder"
@@ -195,34 +204,39 @@ class MainWindow(QMainWindow):
     def _bind_widgets(self) -> None:
         """将 Ui_MainWindow 的部件绑定到本类私有属性，保持业务逻辑兼容。"""
         ui = self._ui
-        # 主操作区
+        # 主堆叠区与阶段页面
+        self._main_stack = ui.main_stack
         self._scan_btn = ui.scan_btn
-        self._progress = ui.progress
+        self._view_results_btn = ui.view_results_btn
+        self._pause_resume_btn = ui.pause_resume_btn
+        self._cancel_btn = ui.cancel_btn
+        self._rescan_btn = ui.rescan_btn
+        self._scanning_title_label = ui.scanning_title_label
+        # 扫描目标区
         self._scan_mode_combo = ui.scan_mode_combo
         self._target_stack = ui.target_stack
         self._drive_buttons_layout = ui.drive_buttons_layout
         self._path_combo = ui.path_combo
         self._select_path_btn = ui.select_path_btn
+        self._history_list = ui.history_list
+        # 规则配置区
         self._load_rules_btn = ui.load_rules_btn
-        # 状态栏（替代原顶部 stats_label/current_file_label）
+        self._rules_file_list = ui.rules_file_list
+        self._edit_rule_btn = ui.edit_rule_btn
+        self._rules_tree = ui.rules_tree
+        # 扫描中页
+        self._progress = ui.progress
+        self._current_file_label = ui.current_file_label
+        # 状态栏（stats_label 仍由代码创建挂到 statusBar）
         self._stats_label = QLabel("就绪")
         self._stats_label.setObjectName("stats_label")
-        self._current_file_label = QLabel("")
-        self._current_file_label.setObjectName("current_file_label")
-        self._current_file_label.setVisible(False)
         self.statusBar().addWidget(self._stats_label, 1)
-        self.statusBar().addPermanentWidget(self._current_file_label)
-        # 列表区
-        self._splitter = ui.splitter
-        self._tab_widget = ui.tab_widget
+        # 结果页
+        self._splitter = ui.results_splitter
         self._result_tree = ui.result_tree
         self._path_filter_input = ui.path_filter_input
         self._rule_filter_combo = ui.rule_filter_combo
         self._group_mode_combo = ui.group_mode_combo
-        self._rules_file_list = ui.rules_file_list
-        self._edit_rule_btn = ui.edit_rule_btn
-        self._rules_tree = ui.rules_tree
-        self._history_list = ui.history_list
         self._note_edit = ui.note_edit
         self._export_btn = ui.export_btn
         # 详情区
@@ -241,9 +255,6 @@ class MainWindow(QMainWindow):
         self._edit_rules_action = ui.edit_rules_action
         self._export_csv_action = ui.export_csv_action
         self._export_json_action = ui.export_json_action
-        self._view_results_action = ui.view_results_action
-        self._view_rules_action = ui.view_rules_action
-        self._view_history_action = ui.view_history_action
         self._settings_action = ui.settings_action
 
     def _configure_ui(self) -> None:
@@ -271,24 +282,27 @@ class MainWindow(QMainWindow):
 
         # layout 伸缩因子（.ui 不支持 stretch vector）
         ui = self._ui
-        # verticalLayout_2: 顶部操作行 / 分割器 / 进度条
-        ui.verticalLayout_2.setSpacing(4)
-        ui.verticalLayout_2.setStretch(0, 0)
-        ui.verticalLayout_2.setStretch(1, 1)
-        ui.verticalLayout_2.setStretch(2, 0)
-        # control_layout: 扫描模式+目标 / 规则 / 扫描按钮（12px 间距分隔）
-        ui.list_layout.setStretch(0, 1)
-        ui.results_layout.setStretch(0, 0)
-        ui.results_layout.setStretch(1, 1)
-        ui.filter_layout.setStretch(0, 2)  # path_filter_input
-        ui.filter_layout.setStretch(1, 1)  # rule_filter_combo
-        ui.filter_layout.setStretch(2, 1)  # group_mode_combo
-        ui.rules_tab_layout.setStretch(0, 0)
-        ui.rules_tab_layout.setStretch(1, 0)
-        ui.rules_tab_layout.setStretch(2, 0)
-        ui.rules_tab_layout.setStretch(3, 1)
-        ui.history_layout.setStretch(0, 0)
-        ui.history_layout.setStretch(1, 1)
+        # 配置页：target_group / rules_group / setup_btn_row
+        ui.setup_layout.setStretch(0, 0)
+        ui.setup_layout.setStretch(1, 1)
+        ui.setup_layout.setStretch(2, 0)
+        # target_group 内：scan_mode_layout / history_label / history_list
+        ui.target_group_layout.setStretch(0, 0)
+        ui.target_group_layout.setStretch(1, 0)
+        ui.target_group_layout.setStretch(2, 1)
+        # rules_group 内：rules_btn_row / rules_file_label / rules_file_list / rules_tree
+        ui.rules_group_layout.setStretch(0, 0)
+        ui.rules_group_layout.setStretch(1, 0)
+        ui.rules_group_layout.setStretch(2, 0)
+        ui.rules_group_layout.setStretch(3, 1)
+        # filter_layout: path_filter_input / rule_filter_combo / group_mode_combo
+        ui.filter_layout.setStretch(0, 2)
+        ui.filter_layout.setStretch(1, 1)
+        ui.filter_layout.setStretch(2, 1)
+        # results_list_layout: filter_bar / result_tree
+        ui.results_list_layout.setStretch(0, 0)
+        ui.results_list_layout.setStretch(1, 1)
+        # detail_layout: detail_action_stack / detail_main_stack
         ui.detail_layout.setStretch(0, 0)
         ui.detail_layout.setStretch(1, 1)
         ui.detail_nonempty_main_layout.setStretch(0, 0)
@@ -297,10 +311,6 @@ class MainWindow(QMainWindow):
         ui.detail_nonempty_main_layout.setStretch(3, 0)
         ui.detail_nonempty_main_layout.setStretch(4, 2)
         ui.detail_nonempty_main_layout.setStretch(5, 0)
-        ui.detail_nonempty_main_layout.setStretch(6, 0)
-
-        # 进度条初始隐藏（.ui 中未设 visible 属性）
-        self._progress.setVisible(False)
 
         # 空白详情面板居中（.ui 中 QVBoxLayout 不支持 alignment 属性）
         ui.detail_empty_main_layout.insertStretch(0)
@@ -325,11 +335,6 @@ class MainWindow(QMainWindow):
         # 加载规则按钮图标
         self._load_rules_btn.setIcon(self._icon_load_list)
         self._load_rules_action.setIcon(self._icon_load_list)
-        # 历史记录按钮图标
-        self._view_history_action.setIcon(self._icon_history)
-        # Tab 图标
-        self._tab_widget.setTabIcon(0, self._icon_scan)
-        self._tab_widget.setTabIcon(2, self._icon_history)
         # 菜单 actions 图标
         self._scan_action.setIcon(self._icon_scan)
 
@@ -341,6 +346,10 @@ class MainWindow(QMainWindow):
 
         # 信号槽连接
         self._scan_btn.clicked.connect(self._on_scan)
+        self._view_results_btn.clicked.connect(self._on_view_results)
+        self._pause_resume_btn.clicked.connect(self._on_pause_resume)
+        self._cancel_btn.clicked.connect(self._on_cancel_scan)
+        self._rescan_btn.clicked.connect(self._on_rescan)
         self._scan_mode_combo.currentIndexChanged.connect(self._on_scan_mode_changed)
         self._path_combo.currentIndexChanged.connect(self._on_path_selected)
         self._select_path_btn.clicked.connect(self._on_select_path)
@@ -365,15 +374,15 @@ class MainWindow(QMainWindow):
         self._ui.quit_action.triggered.connect(self.close)
         self._ui.select_path_action.triggered.connect(self._on_select_path)
         self._scan_action.triggered.connect(self._on_scan)
-        self._view_results_action.triggered.connect(lambda: self._switch_tab(0))
-        self._view_rules_action.triggered.connect(lambda: self._switch_tab(1))
-        self._view_history_action.triggered.connect(lambda: self._switch_tab(2))
         self._ui.about_action.triggered.connect(self._on_about)
         self._settings_action.triggered.connect(self._on_settings)
 
         # 右键菜单与快捷键
         self._setup_context_menus()
         self._setup_shortcuts()
+
+        # 初始阶段：配置页
+        self._switch_stage(WorkflowStage.SETUP)
 
     def _setup_context_menus(self) -> None:
         """为结果树和规则文件列表配置右键菜单策略。"""
@@ -442,14 +451,86 @@ class MainWindow(QMainWindow):
         except RuleError as exc:
             QMessageBox.warning(self, "规则错误", f"重新加载规则失败:\n{exc}")
 
-    def _switch_tab(self, index: int) -> None:
-        """切换列表区 Tab 视图。"""
-        if 0 <= index < self._tab_widget.count():
-            self._tab_widget.setCurrentIndex(index)
+    # ----------------------------- 工作流阶段切换 -----------------------------
 
-    def _on_view_history(self) -> None:
-        """切换到扫描历史视图。"""
-        self._switch_tab(2)
+    def _switch_stage(self, stage: WorkflowStage) -> None:
+        """切换工作流阶段页面并更新控件状态。
+
+        SETUP=0 配置页、SCANNING=1 扫描中页、RESULTS=2 结果页。
+        """
+        self._workflow_stage = stage
+        page_index = {
+            WorkflowStage.SETUP: 0,
+            WorkflowStage.SCANNING: 1,
+            WorkflowStage.RESULTS: 2,
+        }[stage]
+        self._main_stack.setCurrentIndex(page_index)
+        self._update_stage_actions()
+
+    def _update_stage_actions(self) -> None:
+        """根据当前阶段与扫描状态更新按钮和菜单的可用性。"""
+        is_setup = self._workflow_stage == WorkflowStage.SETUP
+        is_results = self._workflow_stage == WorkflowStage.RESULTS
+        has_report = self._last_report is not None
+
+        # 配置页：scan_btn 仅在 SETUP 可用，view_results_btn 仅有结果时可见
+        self._scan_btn.setEnabled(is_setup and self._can_start_scan())
+        self._view_results_btn.setVisible(is_setup and has_report)
+
+        # 扫描中页：pause_resume_btn 文本随 ScanState 切换
+        if self._workflow_stage == WorkflowStage.SCANNING:
+            if self._scan_state == ScanState.PAUSED:
+                self._pause_resume_btn.setText("继续扫描")
+            else:
+                self._pause_resume_btn.setText("暂停扫描")
+
+        # 结果页
+        self._rescan_btn.setEnabled(is_results)
+        if is_results and has_report:
+            self._export_btn.setEnabled(len(self._last_report.hits) > 0)
+        else:
+            self._export_btn.setEnabled(False)
+
+        # 菜单 actions
+        self._scan_action.setEnabled(is_setup and self._can_start_scan())
+        self._ui.select_path_action.setEnabled(is_setup)
+        self._export_csv_action.setEnabled(is_results and has_report)
+        self._export_json_action.setEnabled(is_results and has_report)
+        self._load_rules_action.setEnabled(is_setup)
+        self._edit_rules_action.setEnabled(is_setup)
+
+    def _can_start_scan(self) -> bool:
+        """判断是否满足开始扫描的条件。"""
+        if self._scan_state in (ScanState.RUNNING, ScanState.PAUSED):
+            return True
+        if self._ruleset is None:
+            return False
+        if self._scan_mode == "full":
+            return True
+        if self._scan_mode == "drive":
+            return self._selected_drive is not None
+        return self._scan_root is not None
+
+    def _on_view_results(self) -> None:
+        """配置页"查看结果"按钮：切换到结果页。"""
+        if self._last_report is not None:
+            self._switch_stage(WorkflowStage.RESULTS)
+
+    def _on_rescan(self) -> None:
+        """结果页"重新扫描"按钮：返回配置页。"""
+        self._switch_stage(WorkflowStage.SETUP)
+
+    def _on_pause_resume(self) -> None:
+        """扫描中页"暂停/继续"按钮：根据 ScanState 切换。"""
+        if self._scan_state == ScanState.RUNNING:
+            self._pause_scan()
+        elif self._scan_state == ScanState.PAUSED:
+            self._resume_scan()
+
+    def _on_cancel_scan(self) -> None:
+        """扫描中页"取消扫描"按钮：取消后台扫描。"""
+        if self._worker is not None:
+            self._worker.cancel()
 
     # ----------------------------- 配置持久化 -----------------------------
 
@@ -570,8 +651,7 @@ class MainWindow(QMainWindow):
         self._scan_mode_combo.setCurrentIndex(2)
         self._scan_root = path
         self._add_scan_path_history(path_str)
-        self._update_scan_button()
-        self._switch_tab(0)
+        self._update_stage_actions()
 
     # ----------------------------- 规则加载 -----------------------------
 
@@ -708,29 +788,11 @@ class MainWindow(QMainWindow):
             self._scan_root = path if path.exists() else None
         self._update_scan_button()
 
-    def _set_scan_controls_text(self, text: str) -> None:
-        """同步设置扫描按钮与菜单 action 的文本。"""
-        self._scan_btn.setText(text)
-        self._scan_action.setText(text)
-
-    def _update_scan_button_icon(self) -> None:
-        """根据扫描状态切换扫描按钮图标。"""
-        if self._scan_state == ScanState.RUNNING:
-            icon = self._icon_pause
-        elif self._scan_state == ScanState.PAUSED:
-            icon = self._icon_rescan
-        else:
-            icon = self._icon_scan
-        self._scan_btn.setIcon(icon)
-        self._scan_action.setIcon(icon)
-
     def _on_scan(self) -> None:
-        """扫描按钮：根据当前状态执行开始/暂停/继续。"""
-        if self._scan_state == ScanState.RUNNING:
-            self._pause_scan()
+        """开始扫描（仅配置页可触发，扫描中页的暂停/继续由 _on_pause_resume 处理）。"""
+        if self._workflow_stage != WorkflowStage.SETUP:
             return
-        if self._scan_state == ScanState.PAUSED:
-            self._resume_scan()
+        if self._scan_state in (ScanState.RUNNING, ScanState.PAUSED):
             return
 
         if self._ruleset is None:
@@ -744,13 +806,10 @@ class MainWindow(QMainWindow):
         self._result_tree.clear()
         self._detail_clear()
         self._scan_state = ScanState.RUNNING
-        self._set_scan_controls_text("暂停扫描")
-        self._update_scan_button_icon()
-        self._progress.setVisible(True)
         self._progress.setRange(0, 0)
-        self._current_file_label.setVisible(True)
         self._current_file_label.setText("准备扫描...")
         self._stats_label.setText("扫描中...")
+        self._switch_stage(WorkflowStage.SCANNING)
 
         self._worker = ScanWorker(
             ruleset=self._ruleset,
@@ -770,8 +829,7 @@ class MainWindow(QMainWindow):
         if self._worker is not None:
             self._worker.pause()
         self._scan_state = ScanState.PAUSED
-        self._set_scan_controls_text("继续扫描")
-        self._update_scan_button_icon()
+        self._pause_resume_btn.setText("继续扫描")
         self._stats_label.setText("已暂停")
 
     def _resume_scan(self) -> None:
@@ -779,12 +837,11 @@ class MainWindow(QMainWindow):
         if self._worker is not None:
             self._worker.resume()
         self._scan_state = ScanState.RUNNING
-        self._set_scan_controls_text("暂停扫描")
-        self._update_scan_button_icon()
+        self._pause_resume_btn.setText("暂停扫描")
         self._stats_label.setText("扫描中...")
 
     def _on_scan_cancelled(self, report: ScanReport) -> None:
-        """扫描被取消后的回调。"""
+        """扫描被取消后的回调：有结果切结果页，无结果切配置页。"""
         self._last_report = report
         self._reset_scan_ui()
         self._populate_results(report)
@@ -793,16 +850,16 @@ class MainWindow(QMainWindow):
             f"已取消: 总计 {stats.total_files} | 扫描 {stats.scanned_files} | "
             f"命中 {stats.matched_files} | 耗时 {stats.duration_seconds:.2f}s"
         )
+        if len(report.hits) > 0:
+            self._switch_stage(WorkflowStage.RESULTS)
+        else:
+            self._switch_stage(WorkflowStage.SETUP)
 
     def _reset_scan_ui(self) -> None:
         """重置扫描 UI 到空闲状态。"""
         self._scan_state = ScanState.IDLE
-        self._progress.setVisible(False)
-        self._current_file_label.setVisible(False)
-        self._set_scan_controls_text("开始扫描")
-        self._update_scan_button_icon()
+        self._pause_resume_btn.setText("暂停扫描")
         self._cleanup_worker()
-        self._update_scan_button()
 
     def _cleanup_worker(self) -> None:
         """清理后台扫描线程：等待退出后释放引用。"""
@@ -834,7 +891,7 @@ class MainWindow(QMainWindow):
         )
 
     def _on_scan_finished(self, report: ScanReport) -> None:
-        """扫描完成回调。"""
+        """扫描完成回调：填充结果并切换到结果页。"""
         self._last_report = report
         self._reset_scan_ui()
 
@@ -846,13 +903,13 @@ class MainWindow(QMainWindow):
             f"跳过 {stats.skipped_files} | 命中 {stats.matched_files} | "
             f"错误 {stats.errors} | 耗时 {stats.duration_seconds:.2f}s"
         )
-        # 扫描完成后启用导出按钮
-        self._export_btn.setEnabled(report.hits is not None and len(report.hits) > 0)
+        self._switch_stage(WorkflowStage.RESULTS)
 
     def _on_scan_failed(self, error: str) -> None:
-        """扫描失败回调。"""
+        """扫描失败回调：切回配置页并提示。"""
         self._reset_scan_ui()
         self._stats_label.setText("扫描失败")
+        self._switch_stage(WorkflowStage.SETUP)
         QMessageBox.critical(self, "扫描失败", error)
 
     def _on_export_menu(self) -> None:
@@ -1399,25 +1456,8 @@ class MainWindow(QMainWindow):
         dialog.exec_()
 
     def _update_scan_button(self) -> None:
-        """根据规则、扫描模式与目标就绪状态更新扫描按钮。
-
-        扫描进行中（RUNNING/PAUSED）时按钮始终可用，供暂停/继续使用，
-        不受规则或目标就绪状态影响。
-        """
-        if self._scan_state in (ScanState.RUNNING, ScanState.PAUSED):
-            self._scan_btn.setEnabled(True)
-            self._scan_action.setEnabled(True)
-            return
-        if self._ruleset is None:
-            ready = False
-        elif self._scan_mode == "full":
-            ready = True
-        elif self._scan_mode == "drive":
-            ready = self._selected_drive is not None
-        else:  # folder
-            ready = self._scan_root is not None
-        self._scan_btn.setEnabled(ready)
-        self._scan_action.setEnabled(ready)
+        """更新扫描按钮状态（委托给 _update_stage_actions 统一管理）。"""
+        self._update_stage_actions()
 
     @staticmethod
     def _format_report(report: ScanReport, fmt: str) -> str:

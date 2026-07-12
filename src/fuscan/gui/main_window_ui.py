@@ -33,55 +33,53 @@ class Ui_MainWindow(object):
         self.select_path_action.setObjectName(u"select_path_action")
         self.scan_action = QAction(MainWindow)
         self.scan_action.setObjectName(u"scan_action")
-        self.view_results_action = QAction(MainWindow)
-        self.view_results_action.setObjectName(u"view_results_action")
-        self.view_rules_action = QAction(MainWindow)
-        self.view_rules_action.setObjectName(u"view_rules_action")
-        self.view_history_action = QAction(MainWindow)
-        self.view_history_action.setObjectName(u"view_history_action")
         self.about_action = QAction(MainWindow)
         self.about_action.setObjectName(u"about_action")
         self.settings_action = QAction(MainWindow)
         self.settings_action.setObjectName(u"settings_action")
         self.central = QWidget(MainWindow)
         self.central.setObjectName(u"central")
-        self.verticalLayout_2 = QVBoxLayout(self.central)
-        self.verticalLayout_2.setObjectName(u"verticalLayout_2")
-        self.control_card = QFrame(self.central)
-        self.control_card.setObjectName(u"control_card")
-        sizePolicy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        sizePolicy.setHorizontalStretch(0)
-        sizePolicy.setVerticalStretch(0)
-        sizePolicy.setHeightForWidth(self.control_card.sizePolicy().hasHeightForWidth())
-        self.control_card.setSizePolicy(sizePolicy)
-        self.control_layout = QHBoxLayout(self.control_card)
-        self.control_layout.setSpacing(12)
-        self.control_layout.setObjectName(u"control_layout")
-        self.control_layout.setContentsMargins(12, 10, 12, 10)
+        self.central_layout = QVBoxLayout(self.central)
+        self.central_layout.setObjectName(u"central_layout")
+        self.central_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_stack = QStackedWidget(self.central)
+        self.main_stack.setObjectName(u"main_stack")
+        self.setup_page = QWidget()
+        self.setup_page.setObjectName(u"setup_page")
+        self.setup_layout = QVBoxLayout(self.setup_page)
+        self.setup_layout.setSpacing(8)
+        self.setup_layout.setObjectName(u"setup_layout")
+        self.setup_layout.setContentsMargins(12, 12, 12, 12)
+        self.target_group = QGroupBox(self.setup_page)
+        self.target_group.setObjectName(u"target_group")
+        self.target_group_layout = QVBoxLayout(self.target_group)
+        self.target_group_layout.setSpacing(8)
+        self.target_group_layout.setObjectName(u"target_group_layout")
+        self.target_group_layout.setContentsMargins(12, 16, 12, 12)
         self.scan_mode_layout = QHBoxLayout()
         self.scan_mode_layout.setSpacing(8)
         self.scan_mode_layout.setObjectName(u"scan_mode_layout")
-        self.scan_mode_combo = QComboBox(self.control_card)
+        self.scan_mode_combo = QComboBox(self.target_group)
         self.scan_mode_combo.addItem("")
         self.scan_mode_combo.addItem("")
         self.scan_mode_combo.addItem("")
         self.scan_mode_combo.setObjectName(u"scan_mode_combo")
-        sizePolicy1 = QSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        sizePolicy1.setHorizontalStretch(0)
-        sizePolicy1.setVerticalStretch(0)
-        sizePolicy1.setHeightForWidth(self.scan_mode_combo.sizePolicy().hasHeightForWidth())
-        self.scan_mode_combo.setSizePolicy(sizePolicy1)
+        sizePolicy = QSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.scan_mode_combo.sizePolicy().hasHeightForWidth())
+        self.scan_mode_combo.setSizePolicy(sizePolicy)
         self.scan_mode_combo.setMinimumSize(QSize(0, 60))
 
         self.scan_mode_layout.addWidget(self.scan_mode_combo)
 
-        self.target_stack = QStackedWidget(self.control_card)
+        self.target_stack = QStackedWidget(self.target_group)
         self.target_stack.setObjectName(u"target_stack")
-        sizePolicy2 = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        sizePolicy2.setHorizontalStretch(1)
-        sizePolicy2.setVerticalStretch(0)
-        sizePolicy2.setHeightForWidth(self.target_stack.sizePolicy().hasHeightForWidth())
-        self.target_stack.setSizePolicy(sizePolicy2)
+        sizePolicy1 = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        sizePolicy1.setHorizontalStretch(1)
+        sizePolicy1.setVerticalStretch(0)
+        sizePolicy1.setHeightForWidth(self.target_stack.sizePolicy().hasHeightForWidth())
+        self.target_stack.setSizePolicy(sizePolicy1)
         self.full_scan_page = QWidget()
         self.full_scan_page.setObjectName(u"full_scan_page")
         self.full_scan_layout = QHBoxLayout(self.full_scan_page)
@@ -108,8 +106,8 @@ class Ui_MainWindow(object):
         self.folder_select_layout.setContentsMargins(0, 0, 0, 0)
         self.path_combo = QComboBox(self.folder_select_page)
         self.path_combo.setObjectName(u"path_combo")
-        sizePolicy2.setHeightForWidth(self.path_combo.sizePolicy().hasHeightForWidth())
-        self.path_combo.setSizePolicy(sizePolicy2)
+        sizePolicy1.setHeightForWidth(self.path_combo.sizePolicy().hasHeightForWidth())
+        self.path_combo.setSizePolicy(sizePolicy1)
         self.path_combo.setMinimumSize(QSize(0, 60))
 
         self.folder_select_layout.addWidget(self.path_combo)
@@ -125,54 +123,201 @@ class Ui_MainWindow(object):
         self.scan_mode_layout.addWidget(self.target_stack)
 
 
-        self.control_layout.addLayout(self.scan_mode_layout)
+        self.target_group_layout.addLayout(self.scan_mode_layout)
 
-        self.rules_layout = QHBoxLayout()
-        self.rules_layout.setSpacing(8)
-        self.rules_layout.setObjectName(u"rules_layout")
-        self.load_rules_btn = QPushButton(self.control_card)
+        self.history_label = QLabel(self.target_group)
+        self.history_label.setObjectName(u"history_label")
+
+        self.target_group_layout.addWidget(self.history_label)
+
+        self.history_list = QListWidget(self.target_group)
+        self.history_list.setObjectName(u"history_list")
+        self.history_list.setMaximumSize(QSize(16777215, 120))
+
+        self.target_group_layout.addWidget(self.history_list)
+
+
+        self.setup_layout.addWidget(self.target_group)
+
+        self.rules_group = QGroupBox(self.setup_page)
+        self.rules_group.setObjectName(u"rules_group")
+        self.rules_group_layout = QVBoxLayout(self.rules_group)
+        self.rules_group_layout.setSpacing(6)
+        self.rules_group_layout.setObjectName(u"rules_group_layout")
+        self.rules_group_layout.setContentsMargins(12, 16, 12, 12)
+        self.rules_btn_row = QHBoxLayout()
+        self.rules_btn_row.setSpacing(8)
+        self.rules_btn_row.setObjectName(u"rules_btn_row")
+        self.load_rules_btn = QPushButton(self.rules_group)
         self.load_rules_btn.setObjectName(u"load_rules_btn")
-        self.load_rules_btn.setMinimumSize(QSize(150, 60))
+        self.load_rules_btn.setMinimumSize(QSize(150, 40))
 
-        self.rules_layout.addWidget(self.load_rules_btn)
+        self.rules_btn_row.addWidget(self.load_rules_btn)
+
+        self.edit_rule_btn = QPushButton(self.rules_group)
+        self.edit_rule_btn.setObjectName(u"edit_rule_btn")
+
+        self.rules_btn_row.addWidget(self.edit_rule_btn)
+
+        self.rules_btn_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self.rules_btn_row.addItem(self.rules_btn_spacer)
 
 
-        self.control_layout.addLayout(self.rules_layout)
+        self.rules_group_layout.addLayout(self.rules_btn_row)
 
-        self.scan_btn = QPushButton(self.control_card)
+        self.rules_file_label = QLabel(self.rules_group)
+        self.rules_file_label.setObjectName(u"rules_file_label")
+
+        self.rules_group_layout.addWidget(self.rules_file_label)
+
+        self.rules_file_list = QListWidget(self.rules_group)
+        self.rules_file_list.setObjectName(u"rules_file_list")
+        self.rules_file_list.setMaximumSize(QSize(16777215, 120))
+
+        self.rules_group_layout.addWidget(self.rules_file_list)
+
+        self.rules_tree = QTreeWidget(self.rules_group)
+        self.rules_tree.setObjectName(u"rules_tree")
+        self.rules_tree.setRootIsDecorated(False)
+
+        self.rules_group_layout.addWidget(self.rules_tree)
+
+
+        self.setup_layout.addWidget(self.rules_group)
+
+        self.setup_btn_row = QHBoxLayout()
+        self.setup_btn_row.setSpacing(8)
+        self.setup_btn_row.setObjectName(u"setup_btn_row")
+        self.setup_btn_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self.setup_btn_row.addItem(self.setup_btn_spacer)
+
+        self.view_results_btn = QPushButton(self.setup_page)
+        self.view_results_btn.setObjectName(u"view_results_btn")
+        self.view_results_btn.setVisible(False)
+
+        self.setup_btn_row.addWidget(self.view_results_btn)
+
+        self.scan_btn = QPushButton(self.setup_page)
         self.scan_btn.setObjectName(u"scan_btn")
         self.scan_btn.setEnabled(False)
         self.scan_btn.setMinimumSize(QSize(0, 60))
         self.scan_btn.setCursor(QCursor(Qt.PointingHandCursor))
 
-        self.control_layout.addWidget(self.scan_btn)
+        self.setup_btn_row.addWidget(self.scan_btn)
 
 
-        self.verticalLayout_2.addWidget(self.control_card)
+        self.setup_layout.addLayout(self.setup_btn_row)
 
-        self.splitter = QSplitter(self.central)
-        self.splitter.setObjectName(u"splitter")
-        self.splitter.setOrientation(Qt.Horizontal)
-        self.list_area = QWidget(self.splitter)
-        self.list_area.setObjectName(u"list_area")
-        sizePolicy3 = QSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        sizePolicy3.setHorizontalStretch(0)
-        sizePolicy3.setVerticalStretch(0)
-        sizePolicy3.setHeightForWidth(self.list_area.sizePolicy().hasHeightForWidth())
-        self.list_area.setSizePolicy(sizePolicy3)
-        self.list_layout = QVBoxLayout(self.list_area)
-        self.list_layout.setSpacing(4)
-        self.list_layout.setObjectName(u"list_layout")
-        self.list_layout.setContentsMargins(0, 0, 0, 0)
-        self.tab_widget = QTabWidget(self.list_area)
-        self.tab_widget.setObjectName(u"tab_widget")
-        self.results_tab = QWidget()
-        self.results_tab.setObjectName(u"results_tab")
-        self.results_layout = QVBoxLayout(self.results_tab)
-        self.results_layout.setSpacing(4)
-        self.results_layout.setObjectName(u"results_layout")
-        self.results_layout.setContentsMargins(0, 0, 0, 0)
-        self.filter_bar = QFrame(self.results_tab)
+        self.main_stack.addWidget(self.setup_page)
+        self.scanning_page = QWidget()
+        self.scanning_page.setObjectName(u"scanning_page")
+        self.scanning_layout = QVBoxLayout(self.scanning_page)
+        self.scanning_layout.setSpacing(12)
+        self.scanning_layout.setObjectName(u"scanning_layout")
+        self.scanning_layout.setContentsMargins(48, 48, 48, 48)
+        self.scanning_top_spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+
+        self.scanning_layout.addItem(self.scanning_top_spacer)
+
+        self.scanning_title_label = QLabel(self.scanning_page)
+        self.scanning_title_label.setObjectName(u"scanning_title_label")
+        self.scanning_title_label.setAlignment(Qt.AlignCenter)
+        self.scanning_title_label.setMinimumSize(QSize(0, 40))
+
+        self.scanning_layout.addWidget(self.scanning_title_label)
+
+        self.progress = QProgressBar(self.scanning_page)
+        self.progress.setObjectName(u"progress")
+        self.progress.setValue(0)
+        self.progress.setMinimumSize(QSize(0, 30))
+
+        self.scanning_layout.addWidget(self.progress)
+
+        self.current_file_label = QLabel(self.scanning_page)
+        self.current_file_label.setObjectName(u"current_file_label")
+        self.current_file_label.setAlignment(Qt.AlignCenter)
+        self.current_file_label.setWordWrap(True)
+
+        self.scanning_layout.addWidget(self.current_file_label)
+
+        self.scanning_btn_row = QHBoxLayout()
+        self.scanning_btn_row.setSpacing(12)
+        self.scanning_btn_row.setObjectName(u"scanning_btn_row")
+        self.scanning_btn_left_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self.scanning_btn_row.addItem(self.scanning_btn_left_spacer)
+
+        self.pause_resume_btn = QPushButton(self.scanning_page)
+        self.pause_resume_btn.setObjectName(u"pause_resume_btn")
+        self.pause_resume_btn.setMinimumSize(QSize(140, 44))
+
+        self.scanning_btn_row.addWidget(self.pause_resume_btn)
+
+        self.cancel_btn = QPushButton(self.scanning_page)
+        self.cancel_btn.setObjectName(u"cancel_btn")
+        self.cancel_btn.setMinimumSize(QSize(140, 44))
+
+        self.scanning_btn_row.addWidget(self.cancel_btn)
+
+        self.scanning_btn_right_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self.scanning_btn_row.addItem(self.scanning_btn_right_spacer)
+
+
+        self.scanning_layout.addLayout(self.scanning_btn_row)
+
+        self.scanning_bottom_spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+
+        self.scanning_layout.addItem(self.scanning_bottom_spacer)
+
+        self.main_stack.addWidget(self.scanning_page)
+        self.results_page = QWidget()
+        self.results_page.setObjectName(u"results_page")
+        self.results_page_layout = QVBoxLayout(self.results_page)
+        self.results_page_layout.setSpacing(4)
+        self.results_page_layout.setObjectName(u"results_page_layout")
+        self.results_page_layout.setContentsMargins(0, 4, 0, 0)
+        self.results_top_bar = QFrame(self.results_page)
+        self.results_top_bar.setObjectName(u"results_top_bar")
+        self.results_top_layout = QHBoxLayout(self.results_top_bar)
+        self.results_top_layout.setSpacing(8)
+        self.results_top_layout.setObjectName(u"results_top_layout")
+        self.results_top_layout.setContentsMargins(8, 4, 8, 4)
+        self.rescan_btn = QPushButton(self.results_top_bar)
+        self.rescan_btn.setObjectName(u"rescan_btn")
+
+        self.results_top_layout.addWidget(self.rescan_btn)
+
+        self.results_top_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self.results_top_layout.addItem(self.results_top_spacer)
+
+        self.export_btn = QPushButton(self.results_top_bar)
+        self.export_btn.setObjectName(u"export_btn")
+        self.export_btn.setEnabled(False)
+
+        self.results_top_layout.addWidget(self.export_btn)
+
+
+        self.results_page_layout.addWidget(self.results_top_bar)
+
+        self.results_splitter = QSplitter(self.results_page)
+        self.results_splitter.setObjectName(u"results_splitter")
+        self.results_splitter.setOrientation(Qt.Horizontal)
+        self.results_list_area = QWidget(self.results_splitter)
+        self.results_list_area.setObjectName(u"results_list_area")
+        sizePolicy2 = QSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        sizePolicy2.setHorizontalStretch(0)
+        sizePolicy2.setVerticalStretch(0)
+        sizePolicy2.setHeightForWidth(self.results_list_area.sizePolicy().hasHeightForWidth())
+        self.results_list_area.setSizePolicy(sizePolicy2)
+        self.results_list_layout = QVBoxLayout(self.results_list_area)
+        self.results_list_layout.setSpacing(4)
+        self.results_list_layout.setObjectName(u"results_list_layout")
+        self.results_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.filter_bar = QFrame(self.results_list_area)
         self.filter_bar.setObjectName(u"filter_bar")
         self.filter_layout = QHBoxLayout(self.filter_bar)
         self.filter_layout.setSpacing(6)
@@ -195,75 +340,21 @@ class Ui_MainWindow(object):
         self.filter_layout.addWidget(self.group_mode_combo)
 
 
-        self.results_layout.addWidget(self.filter_bar)
+        self.results_list_layout.addWidget(self.filter_bar)
 
-        self.result_tree = QTreeWidget(self.results_tab)
+        self.result_tree = QTreeWidget(self.results_list_area)
         self.result_tree.setObjectName(u"result_tree")
         self.result_tree.setAlternatingRowColors(True)
         self.result_tree.setRootIsDecorated(True)
         self.result_tree.setSortingEnabled(True)
 
-        self.results_layout.addWidget(self.result_tree)
+        self.results_list_layout.addWidget(self.result_tree)
 
-        self.tab_widget.addTab(self.results_tab, "")
-        self.rules_tab = QWidget()
-        self.rules_tab.setObjectName(u"rules_tab")
-        self.rules_tab_layout = QVBoxLayout(self.rules_tab)
-        self.rules_tab_layout.setSpacing(4)
-        self.rules_tab_layout.setObjectName(u"rules_tab_layout")
-        self.rules_tab_layout.setContentsMargins(0, 0, 0, 0)
-        self.rules_file_label = QLabel(self.rules_tab)
-        self.rules_file_label.setObjectName(u"rules_file_label")
-
-        self.rules_tab_layout.addWidget(self.rules_file_label)
-
-        self.rules_file_list = QListWidget(self.rules_tab)
-        self.rules_file_list.setObjectName(u"rules_file_list")
-
-        self.rules_tab_layout.addWidget(self.rules_file_list)
-
-        self.rules_btn_row = QHBoxLayout()
-        self.rules_btn_row.setObjectName(u"rules_btn_row")
-        self.edit_rule_btn = QPushButton(self.rules_tab)
-        self.edit_rule_btn.setObjectName(u"edit_rule_btn")
-
-        self.rules_btn_row.addWidget(self.edit_rule_btn)
-
-
-        self.rules_tab_layout.addLayout(self.rules_btn_row)
-
-        self.rules_tree = QTreeWidget(self.rules_tab)
-        self.rules_tree.setObjectName(u"rules_tree")
-        self.rules_tree.setRootIsDecorated(False)
-
-        self.rules_tab_layout.addWidget(self.rules_tree)
-
-        self.tab_widget.addTab(self.rules_tab, "")
-        self.history_tab = QWidget()
-        self.history_tab.setObjectName(u"history_tab")
-        self.history_layout = QVBoxLayout(self.history_tab)
-        self.history_layout.setSpacing(4)
-        self.history_layout.setObjectName(u"history_layout")
-        self.history_layout.setContentsMargins(0, 0, 0, 0)
-        self.history_label = QLabel(self.history_tab)
-        self.history_label.setObjectName(u"history_label")
-
-        self.history_layout.addWidget(self.history_label)
-
-        self.history_list = QListWidget(self.history_tab)
-        self.history_list.setObjectName(u"history_list")
-
-        self.history_layout.addWidget(self.history_list)
-
-        self.tab_widget.addTab(self.history_tab, "")
-
-        self.list_layout.addWidget(self.tab_widget)
-
-        self.splitter.addWidget(self.list_area)
-        self.detail_area = QWidget(self.splitter)
+        self.results_splitter.addWidget(self.results_list_area)
+        self.detail_area = QWidget(self.results_splitter)
         self.detail_area.setObjectName(u"detail_area")
-        sizePolicy3.setHeightForWidth(self.detail_area.sizePolicy().hasHeightForWidth())
-        self.detail_area.setSizePolicy(sizePolicy3)
+        sizePolicy2.setHeightForWidth(self.detail_area.sizePolicy().hasHeightForWidth())
+        self.detail_area.setSizePolicy(sizePolicy2)
         self.detail_layout = QVBoxLayout(self.detail_area)
         self.detail_layout.setSpacing(4)
         self.detail_layout.setObjectName(u"detail_layout")
@@ -385,34 +476,17 @@ class Ui_MainWindow(object):
 
         self.detail_nonempty_main_layout.addWidget(self.note_edit)
 
-        self.detail_export_row = QHBoxLayout()
-        self.detail_export_row.setObjectName(u"detail_export_row")
-        self.detail_export_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-
-        self.detail_export_row.addItem(self.detail_export_spacer)
-
-        self.export_btn = QPushButton(self.detail_nonempty_main)
-        self.export_btn.setObjectName(u"export_btn")
-        self.export_btn.setEnabled(False)
-
-        self.detail_export_row.addWidget(self.export_btn)
-
-
-        self.detail_nonempty_main_layout.addLayout(self.detail_export_row)
-
         self.detail_main_stack.addWidget(self.detail_nonempty_main)
 
         self.detail_layout.addWidget(self.detail_main_stack)
 
-        self.splitter.addWidget(self.detail_area)
+        self.results_splitter.addWidget(self.detail_area)
 
-        self.verticalLayout_2.addWidget(self.splitter)
+        self.results_page_layout.addWidget(self.results_splitter)
 
-        self.progress = QProgressBar(self.central)
-        self.progress.setObjectName(u"progress")
-        self.progress.setValue(24)
+        self.main_stack.addWidget(self.results_page)
 
-        self.verticalLayout_2.addWidget(self.progress)
+        self.central_layout.addWidget(self.main_stack)
 
         MainWindow.setCentralWidget(self.central)
         self.menubar = QMenuBar(MainWindow)
@@ -422,15 +496,12 @@ class Ui_MainWindow(object):
         self.file_menu.setObjectName(u"file_menu")
         self.scan_menu = QMenu(self.menubar)
         self.scan_menu.setObjectName(u"scan_menu")
-        self.view_menu = QMenu(self.menubar)
-        self.view_menu.setObjectName(u"view_menu")
         self.help_menu = QMenu(self.menubar)
         self.help_menu.setObjectName(u"help_menu")
         MainWindow.setMenuBar(self.menubar)
 
         self.menubar.addAction(self.file_menu.menuAction())
         self.menubar.addAction(self.scan_menu.menuAction())
-        self.menubar.addAction(self.view_menu.menuAction())
         self.menubar.addAction(self.help_menu.menuAction())
         self.file_menu.addAction(self.load_rules_action)
         self.file_menu.addAction(self.edit_rules_action)
@@ -443,15 +514,12 @@ class Ui_MainWindow(object):
         self.file_menu.addAction(self.quit_action)
         self.scan_menu.addAction(self.select_path_action)
         self.scan_menu.addAction(self.scan_action)
-        self.view_menu.addAction(self.view_results_action)
-        self.view_menu.addAction(self.view_rules_action)
-        self.view_menu.addAction(self.view_history_action)
         self.help_menu.addAction(self.about_action)
 
         self.retranslateUi(MainWindow)
 
+        self.main_stack.setCurrentIndex(0)
         self.target_stack.setCurrentIndex(1)
-        self.tab_widget.setCurrentIndex(0)
         self.detail_action_stack.setCurrentIndex(0)
         self.detail_main_stack.setCurrentIndex(0)
 
@@ -486,23 +554,12 @@ class Ui_MainWindow(object):
 #if QT_CONFIG(shortcut)
         self.scan_action.setShortcut(QCoreApplication.translate("MainWindow", u"F5", None))
 #endif // QT_CONFIG(shortcut)
-        self.view_results_action.setText(QCoreApplication.translate("MainWindow", u"\u5207\u6362\u5230\u626b\u63cf\u7ed3\u679c", None))
-#if QT_CONFIG(shortcut)
-        self.view_results_action.setShortcut(QCoreApplication.translate("MainWindow", u"Ctrl+1", None))
-#endif // QT_CONFIG(shortcut)
-        self.view_rules_action.setText(QCoreApplication.translate("MainWindow", u"\u5207\u6362\u5230\u89c4\u5219\u6587\u4ef6", None))
-#if QT_CONFIG(shortcut)
-        self.view_rules_action.setShortcut(QCoreApplication.translate("MainWindow", u"Ctrl+2", None))
-#endif // QT_CONFIG(shortcut)
-        self.view_history_action.setText(QCoreApplication.translate("MainWindow", u"\u5207\u6362\u5230\u626b\u63cf\u5386\u53f2", None))
-#if QT_CONFIG(shortcut)
-        self.view_history_action.setShortcut(QCoreApplication.translate("MainWindow", u"Ctrl+3", None))
-#endif // QT_CONFIG(shortcut)
         self.about_action.setText(QCoreApplication.translate("MainWindow", u"\u5173\u4e8e", None))
         self.settings_action.setText(QCoreApplication.translate("MainWindow", u"\u8bbe\u7f6e...", None))
 #if QT_CONFIG(shortcut)
         self.settings_action.setShortcut(QCoreApplication.translate("MainWindow", u"Ctrl+,", None))
 #endif // QT_CONFIG(shortcut)
+        self.target_group.setTitle(QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u76ee\u6807", None))
         self.scan_mode_combo.setItemText(0, QCoreApplication.translate("MainWindow", u"\u5168\u76d8\u626b\u63cf", None))
         self.scan_mode_combo.setItemText(1, QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u76d8\u7b26", None))
         self.scan_mode_combo.setItemText(2, QCoreApplication.translate("MainWindow", u"\u9009\u62e9\u6587\u4ef6\u5939", None))
@@ -515,8 +572,41 @@ class Ui_MainWindow(object):
         self.path_combo.setToolTip(QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u8def\u5f84\uff08\u53ef\u4ece\u5386\u53f2\u8bb0\u5f55\u4e2d\u9009\u62e9\uff09", None))
 #endif // QT_CONFIG(tooltip)
         self.select_path_btn.setText(QCoreApplication.translate("MainWindow", u"\u9009\u62e9...", None))
+        self.history_label.setText(QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u5386\u53f2\uff08\u53cc\u51fb\u5feb\u901f\u9009\u62e9\uff09", None))
+#if QT_CONFIG(tooltip)
+        self.history_list.setToolTip(QCoreApplication.translate("MainWindow", u"\u6700\u8fd1\u626b\u63cf\u8fc7\u7684\u8def\u5f84\uff0c\u53cc\u51fb\u53ef\u5feb\u901f\u9009\u62e9", None))
+#endif // QT_CONFIG(tooltip)
+        self.rules_group.setTitle(QCoreApplication.translate("MainWindow", u"\u89c4\u5219\u914d\u7f6e", None))
         self.load_rules_btn.setText(QCoreApplication.translate("MainWindow", u"\u52a0\u8f7d\u89c4\u5219...", None))
+#if QT_CONFIG(tooltip)
+        self.edit_rule_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u7f16\u8f91\u9009\u4e2d\u7684\u89c4\u5219\u6587\u4ef6", None))
+#endif // QT_CONFIG(tooltip)
+        self.edit_rule_btn.setText(QCoreApplication.translate("MainWindow", u"\u7f16\u8f91", None))
+        self.rules_file_label.setText(QCoreApplication.translate("MainWindow", u"\u89c4\u5219\u6587\u4ef6\uff08\u987a\u5e8f\u4ece\u4e0a\u5230\u4e0b\uff0c\u540e\u8005\u8986\u76d6\u524d\u8005\uff09", None))
+#if QT_CONFIG(tooltip)
+        self.rules_file_list.setToolTip(QCoreApplication.translate("MainWindow", u"\u5df2\u52a0\u8f7d\u7684\u89c4\u5219\u6587\u4ef6\uff0c\u5217\u8868\u987a\u5e8f\u4ee3\u8868\u4f18\u5148\u7ea7\uff08\u4ece\u4f4e\u5230\u9ad8\uff09", None))
+#endif // QT_CONFIG(tooltip)
+        ___qtreewidgetitem = self.rules_tree.headerItem()
+        ___qtreewidgetitem.setText(2, QCoreApplication.translate("MainWindow", u"\u6269\u5c55\u540d", None));
+        ___qtreewidgetitem.setText(1, QCoreApplication.translate("MainWindow", u"\u4e25\u91cd\u7b49\u7ea7", None));
+        ___qtreewidgetitem.setText(0, QCoreApplication.translate("MainWindow", u"\u89c4\u5219\u540d", None));
+#if QT_CONFIG(tooltip)
+        self.view_results_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u67e5\u770b\u4e0a\u6b21\u626b\u63cf\u7ed3\u679c", None))
+#endif // QT_CONFIG(tooltip)
+        self.view_results_btn.setText(QCoreApplication.translate("MainWindow", u"\u67e5\u770b\u7ed3\u679c", None))
         self.scan_btn.setText(QCoreApplication.translate("MainWindow", u"\u5f00\u59cb\u626b\u63cf", None))
+        self.scanning_title_label.setText(QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u8fdb\u884c\u4e2d", None))
+        self.current_file_label.setText("")
+        self.pause_resume_btn.setText(QCoreApplication.translate("MainWindow", u"\u6682\u505c\u626b\u63cf", None))
+        self.cancel_btn.setText(QCoreApplication.translate("MainWindow", u"\u53d6\u6d88\u626b\u63cf", None))
+#if QT_CONFIG(tooltip)
+        self.rescan_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u8fd4\u56de\u914d\u7f6e\u9875\u91cd\u65b0\u626b\u63cf", None))
+#endif // QT_CONFIG(tooltip)
+        self.rescan_btn.setText(QCoreApplication.translate("MainWindow", u"\u91cd\u65b0\u626b\u63cf", None))
+#if QT_CONFIG(tooltip)
+        self.export_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u5bfc\u51fa\u626b\u63cf\u7ed3\u679c\u5230\u6587\u4ef6", None))
+#endif // QT_CONFIG(tooltip)
+        self.export_btn.setText(QCoreApplication.translate("MainWindow", u"\u5bfc\u51fa\u7ed3\u679c", None))
         self.path_filter_input.setPlaceholderText(QCoreApplication.translate("MainWindow", u"\u6309\u8def\u5f84\u7b5b\u9009...", None))
 #if QT_CONFIG(tooltip)
         self.rule_filter_combo.setToolTip(QCoreApplication.translate("MainWindow", u"\u6309\u89c4\u5219\u7b5b\u9009", None))
@@ -524,31 +614,12 @@ class Ui_MainWindow(object):
 #if QT_CONFIG(tooltip)
         self.group_mode_combo.setToolTip(QCoreApplication.translate("MainWindow", u"\u5206\u7ec4\u6a21\u5f0f", None))
 #endif // QT_CONFIG(tooltip)
-        ___qtreewidgetitem = self.result_tree.headerItem()
-        ___qtreewidgetitem.setText(4, QCoreApplication.translate("MainWindow", u"\u8be6\u60c5", None));
-        ___qtreewidgetitem.setText(3, QCoreApplication.translate("MainWindow", u"\u547d\u4e2d\u6570", None));
-        ___qtreewidgetitem.setText(2, QCoreApplication.translate("MainWindow", u"\u4e25\u91cd\u7b49\u7ea7", None));
-        ___qtreewidgetitem.setText(1, QCoreApplication.translate("MainWindow", u"\u89c4\u5219", None));
-        ___qtreewidgetitem.setText(0, QCoreApplication.translate("MainWindow", u"\u8def\u5f84", None));
-        self.tab_widget.setTabText(self.tab_widget.indexOf(self.results_tab), QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u7ed3\u679c", None))
-        self.rules_file_label.setText(QCoreApplication.translate("MainWindow", u"\u89c4\u5219\u6587\u4ef6\uff08\u987a\u5e8f\u4ece\u4e0a\u5230\u4e0b\uff0c\u540e\u8005\u8986\u76d6\u524d\u8005\uff09", None))
-#if QT_CONFIG(tooltip)
-        self.rules_file_list.setToolTip(QCoreApplication.translate("MainWindow", u"\u5df2\u52a0\u8f7d\u7684\u89c4\u5219\u6587\u4ef6\uff0c\u5217\u8868\u987a\u5e8f\u4ee3\u8868\u4f18\u5148\u7ea7\uff08\u4ece\u4f4e\u5230\u9ad8\uff09", None))
-#endif // QT_CONFIG(tooltip)
-#if QT_CONFIG(tooltip)
-        self.edit_rule_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u7f16\u8f91\u9009\u4e2d\u7684\u89c4\u5219\u6587\u4ef6", None))
-#endif // QT_CONFIG(tooltip)
-        self.edit_rule_btn.setText(QCoreApplication.translate("MainWindow", u"\u7f16\u8f91", None))
-        ___qtreewidgetitem1 = self.rules_tree.headerItem()
-        ___qtreewidgetitem1.setText(2, QCoreApplication.translate("MainWindow", u"\u6269\u5c55\u540d", None));
-        ___qtreewidgetitem1.setText(1, QCoreApplication.translate("MainWindow", u"\u4e25\u91cd\u7b49\u7ea7", None));
-        ___qtreewidgetitem1.setText(0, QCoreApplication.translate("MainWindow", u"\u89c4\u5219\u540d", None));
-        self.tab_widget.setTabText(self.tab_widget.indexOf(self.rules_tab), QCoreApplication.translate("MainWindow", u"\u89c4\u5219\u6587\u4ef6", None))
-        self.history_label.setText(QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u5386\u53f2\uff08\u6700\u8fd1\u4f18\u5148\uff09", None))
-#if QT_CONFIG(tooltip)
-        self.history_list.setToolTip(QCoreApplication.translate("MainWindow", u"\u6700\u8fd1\u626b\u63cf\u8fc7\u7684\u8def\u5f84\uff0c\u53cc\u51fb\u53ef\u5feb\u901f\u9009\u62e9", None))
-#endif // QT_CONFIG(tooltip)
-        self.tab_widget.setTabText(self.tab_widget.indexOf(self.history_tab), QCoreApplication.translate("MainWindow", u"\u626b\u63cf\u5386\u53f2", None))
+        ___qtreewidgetitem1 = self.result_tree.headerItem()
+        ___qtreewidgetitem1.setText(4, QCoreApplication.translate("MainWindow", u"\u8be6\u60c5", None));
+        ___qtreewidgetitem1.setText(3, QCoreApplication.translate("MainWindow", u"\u547d\u4e2d\u6570", None));
+        ___qtreewidgetitem1.setText(2, QCoreApplication.translate("MainWindow", u"\u4e25\u91cd\u7b49\u7ea7", None));
+        ___qtreewidgetitem1.setText(1, QCoreApplication.translate("MainWindow", u"\u89c4\u5219", None));
+        ___qtreewidgetitem1.setText(0, QCoreApplication.translate("MainWindow", u"\u8def\u5f84", None));
         self.detail_action_title_label.setText(QCoreApplication.translate("MainWindow", u"\u8be6\u60c5\u64cd\u4f5c:", None))
         self.detail_action_hint.setText(QCoreApplication.translate("MainWindow", u"\u672a\u9009\u4e2d\u4efb\u4f55\u9879", None))
 #if QT_CONFIG(tooltip)
@@ -565,7 +636,7 @@ class Ui_MainWindow(object):
 #endif // QT_CONFIG(tooltip)
         self.detail_open_location_btn.setText(QCoreApplication.translate("MainWindow", u"\u6253\u5f00\u6587\u4ef6\u4f4d\u7f6e", None))
         self.detail_empty_hint.setText(QCoreApplication.translate("MainWindow", u"\u672a\u9009\u4e2d\u4efb\u4f55\u9879\n"
-"\u8bf7\u5148\u5f00\u59cb\u626b\u63cf\u6216\u5728\u5de6\u4fa7\u5217\u8868\u9009\u62e9\u4e00\u9879", None))
+"\u8bf7\u9009\u62e9\u5de6\u4fa7\u7ed3\u679c\u9879\u67e5\u770b\u8be6\u60c5", None))
         self.detail_hits_title_label.setText(QCoreApplication.translate("MainWindow", u"\u547d\u4e2d\u89c4\u5219:", None))
         ___qtablewidgetitem = self.detail_hits_table.horizontalHeaderItem(0)
         ___qtablewidgetitem.setText(QCoreApplication.translate("MainWindow", u"\u89c4\u5219\u540d", None));
@@ -575,13 +646,8 @@ class Ui_MainWindow(object):
         ___qtablewidgetitem2.setText(QCoreApplication.translate("MainWindow", u"\u8be6\u60c5", None));
         self.detail_preview_title_label.setText(QCoreApplication.translate("MainWindow", u"\u5185\u5bb9\u9884\u89c8 (\u5173\u952e\u8bcd\u9ad8\u4eae):", None))
         self.note_edit.setPlaceholderText(QCoreApplication.translate("MainWindow", u"\u5907\u6ce8/\u6279\u6ce8/\u5bfc\u51fa\u8bf4\u660e...", None))
-#if QT_CONFIG(tooltip)
-        self.export_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u5bfc\u51fa\u626b\u63cf\u7ed3\u679c\u5230\u6587\u4ef6", None))
-#endif // QT_CONFIG(tooltip)
-        self.export_btn.setText(QCoreApplication.translate("MainWindow", u"\u5bfc\u51fa\u7ed3\u679c", None))
         self.file_menu.setTitle(QCoreApplication.translate("MainWindow", u"\u6587\u4ef6(&F)", None))
         self.scan_menu.setTitle(QCoreApplication.translate("MainWindow", u"\u626b\u63cf(&S)", None))
-        self.view_menu.setTitle(QCoreApplication.translate("MainWindow", u"\u89c6\u56fe(&V)", None))
         self.help_menu.setTitle(QCoreApplication.translate("MainWindow", u"\u5e2e\u52a9(&H)", None))
     # retranslateUi
 

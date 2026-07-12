@@ -23,7 +23,7 @@ try:
     from PySide2.QtWidgets import QApplication, QMenu
 
     from fuscan.gui.detail_dialog import HitDetailDialog
-    from fuscan.gui.main_window import MainWindow, ScanState
+    from fuscan.gui.main_window import MainWindow, ScanState, WorkflowStage
     from fuscan.gui.worker import ScanWorker
     from fuscan.rules import load_ruleset
     from fuscan.rules.model import (
@@ -796,6 +796,7 @@ class TestConfigPersistence:
         _save_impl(config, tmp_path / "config.yaml")
 
         window = MainWindow()
+        window._switch_stage(WorkflowStage.RESULTS)
         window.show()
         qapp.processEvents()
         sizes = window._splitter.sizes()
@@ -914,17 +915,6 @@ class TestScanControlUI:
         assert window._scan_action.text() == "开始扫描"
         window.close()
 
-    def test_set_scan_controls_text_updates_both(self, qapp: QApplication) -> None:
-        """_set_scan_controls_text 应同步更新按钮和 action 文本。"""
-        window = MainWindow()
-        window._set_scan_controls_text("暂停扫描")
-        assert window._scan_btn.text() == "暂停扫描"
-        assert window._scan_action.text() == "暂停扫描"
-        window._set_scan_controls_text("继续扫描")
-        assert window._scan_btn.text() == "继续扫描"
-        assert window._scan_action.text() == "继续扫描"
-        window.close()
-
     def test_update_scan_button_running_stays_enabled(self, qapp: QApplication) -> None:
         """RUNNING 状态下扫描按钮应始终可用，即使无规则集。"""
         window = MainWindow()
@@ -951,8 +941,7 @@ class TestScanControlUI:
         window._scan_state = ScanState.RUNNING
         window._pause_scan()
         assert window._scan_state == ScanState.PAUSED
-        assert window._scan_btn.text() == "继续扫描"
-        assert window._scan_action.text() == "继续扫描"
+        assert window._pause_resume_btn.text() == "继续扫描"
         assert "已暂停" in window._stats_label.text()
         window.close()
 
@@ -962,21 +951,17 @@ class TestScanControlUI:
         window._scan_state = ScanState.PAUSED
         window._resume_scan()
         assert window._scan_state == ScanState.RUNNING
-        assert window._scan_btn.text() == "暂停扫描"
-        assert window._scan_action.text() == "暂停扫描"
+        assert window._pause_resume_btn.text() == "暂停扫描"
         window.close()
 
     def test_reset_scan_ui_resets_state(self, qapp: QApplication) -> None:
-        """_reset_scan_ui 应重置到 IDLE 状态并恢复"开始扫描"文本。"""
+        """_reset_scan_ui 应重置到 IDLE 状态并恢复 pause_resume_btn 文本。"""
         window = MainWindow()
         window._scan_state = ScanState.RUNNING
-        window._set_scan_controls_text("暂停扫描")
         window._reset_scan_ui()
         assert window._scan_state == ScanState.IDLE
-        assert window._scan_btn.text() == "开始扫描"
-        assert window._scan_action.text() == "开始扫描"
-        assert not window._progress.isVisible()
-        assert not window._current_file_label.isVisible()
+        assert window._pause_resume_btn.text() == "暂停扫描"
+        assert window._worker is None
         window.close()
 
     def test_on_scan_with_no_ruleset_does_nothing(self, qapp: QApplication) -> None:
@@ -988,24 +973,22 @@ class TestScanControlUI:
         assert window._worker is None
         window.close()
 
-    def test_on_scan_running_triggers_pause(self, qapp: QApplication) -> None:
-        """RUNNING 状态点击扫描按钮应触发暂停。"""
+    def test_on_pause_resume_running_triggers_pause(self, qapp: QApplication) -> None:
+        """RUNNING 状态点击 pause_resume_btn 应触发暂停。"""
         window = MainWindow()
         window._scan_state = ScanState.RUNNING
-        window._set_scan_controls_text("暂停扫描")
-        window._on_scan()
+        window._on_pause_resume()
         assert window._scan_state == ScanState.PAUSED
-        assert window._scan_btn.text() == "继续扫描"
+        assert window._pause_resume_btn.text() == "继续扫描"
         window.close()
 
-    def test_on_scan_paused_triggers_resume(self, qapp: QApplication) -> None:
-        """PAUSED 状态点击扫描按钮应触发恢复。"""
+    def test_on_pause_resume_paused_triggers_resume(self, qapp: QApplication) -> None:
+        """PAUSED 状态点击 pause_resume_btn 应触发恢复。"""
         window = MainWindow()
         window._scan_state = ScanState.PAUSED
-        window._set_scan_controls_text("继续扫描")
-        window._on_scan()
+        window._on_pause_resume()
         assert window._scan_state == ScanState.RUNNING
-        assert window._scan_btn.text() == "暂停扫描"
+        assert window._pause_resume_btn.text() == "暂停扫描"
         window.close()
 
 
@@ -1028,7 +1011,8 @@ class TestScanControlIntegration:
         window._on_scan()
 
         assert window._scan_state == ScanState.RUNNING
-        assert window._scan_btn.text() == "暂停扫描"
+        assert window._pause_resume_btn.text() == "暂停扫描"
+        assert window._main_stack.currentIndex() == 1
 
         loop = QEventLoop()
         QTimer.singleShot(10000, loop.quit)
@@ -1039,7 +1023,7 @@ class TestScanControlIntegration:
             window._worker.wait(2000)
 
         assert window._scan_state == ScanState.IDLE
-        assert window._scan_btn.text() == "开始扫描"
+        assert window._main_stack.currentIndex() == 2
         assert window._result_tree.topLevelItemCount() >= 1
         assert window._worker is None
         window.close()
@@ -1056,8 +1040,6 @@ class TestScanControlIntegration:
 
         # 模拟扫描中状态
         window._scan_state = ScanState.RUNNING
-        window._set_scan_controls_text("暂停扫描")
-        window._progress.setVisible(True)
 
         # 直接调用 _on_scan_cancelled 模拟取消回调
         report = ScanReport(
@@ -1069,7 +1051,7 @@ class TestScanControlIntegration:
         window._on_scan_cancelled(report)
 
         assert window._scan_state == ScanState.IDLE
-        assert window._scan_btn.text() == "开始扫描"
+        assert window._main_stack.currentIndex() == 0
         assert "已取消" in window._stats_label.text()
         window.close()
 
@@ -1098,6 +1080,256 @@ class TestScanControlIntegration:
         window._on_scan()
         assert warned["called"]
         assert window._scan_state == ScanState.IDLE
+        window.close()
+
+
+class TestWorkflowStage:
+    """工作流阶段切换测试：SETUP/SCANNING/RESULTS 三页切换与控件状态。"""
+
+    def test_initial_stage_is_setup(self, qapp: QApplication) -> None:
+        """新建窗口应在 SETUP 阶段（配置页）。"""
+        window = MainWindow()
+        assert window._workflow_stage == WorkflowStage.SETUP
+        assert window._main_stack.currentIndex() == 0
+        window.close()
+
+    def test_setup_to_scanning(self, qapp: QApplication, tmp_path: Path) -> None:
+        """从 SETUP 启动扫描应切换到 SCANNING 页。"""
+        (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
+        window = MainWindow()
+        window._ruleset = _build_ruleset()
+        window._scan_root = tmp_path
+        window._scan_mode = "folder"
+        window._on_scan()
+        assert window._scan_state == ScanState.RUNNING
+        assert window._main_stack.currentIndex() == 1
+        assert window._workflow_stage == WorkflowStage.SCANNING
+        # 清理后台线程
+        if window._worker is not None:
+            window._worker.wait(2000)
+            window._worker = None
+        window.close()
+
+    def test_scanning_to_results_on_finish(self, qapp: QApplication, tmp_path: Path) -> None:
+        """扫描完成应切换到 RESULTS 页。"""
+        from fuscan.scanner import Scanner
+
+        (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
+        rs = _build_ruleset()
+        scanner = Scanner(rs)
+        report = scanner.scan(tmp_path)
+
+        window = MainWindow()
+        window._scan_state = ScanState.RUNNING
+        window._on_scan_finished(report)
+        assert window._main_stack.currentIndex() == 2
+        assert window._workflow_stage == WorkflowStage.RESULTS
+        window.close()
+
+    def test_scanning_to_setup_on_fail(self, qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+        """扫描失败应切回 SETUP 页。"""
+        monkeypatch.setattr(
+            "fuscan.gui.main_window.QMessageBox.critical",
+            lambda *args, **kwargs: None,
+        )
+        window = MainWindow()
+        window._scan_state = ScanState.RUNNING
+        window._on_scan_failed("测试错误")
+        assert window._main_stack.currentIndex() == 0
+        assert window._workflow_stage == WorkflowStage.SETUP
+        window.close()
+
+    def test_results_to_setup_on_rescan(self, qapp: QApplication) -> None:
+        """结果页点击重新扫描应返回 SETUP 页。"""
+        window = MainWindow()
+        window._switch_stage(WorkflowStage.RESULTS)
+        window._on_rescan()
+        assert window._main_stack.currentIndex() == 0
+        assert window._workflow_stage == WorkflowStage.SETUP
+        window.close()
+
+    def test_setup_to_results_on_view_results(self, qapp: QApplication, tmp_path: Path) -> None:
+        """配置页有报告时点击查看结果应切换到 RESULTS 页。"""
+        from fuscan.scanner import Scanner
+
+        (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
+        rs = _build_ruleset()
+        report = Scanner(rs).scan(tmp_path)
+
+        window = MainWindow()
+        window._last_report = report
+        window._update_stage_actions()
+        window._on_view_results()
+        assert window._main_stack.currentIndex() == 2
+        window.close()
+
+    def test_view_results_btn_hidden_initially(self, qapp: QApplication) -> None:
+        """新建窗口无报告时查看结果按钮不可见。"""
+        window = MainWindow()
+        window.show()
+        qapp.processEvents()
+        assert not window._view_results_btn.isVisible()
+        window.close()
+
+    def test_view_results_btn_visible_with_report(self, qapp: QApplication, tmp_path: Path) -> None:
+        """配置页有报告时查看结果按钮应可见。"""
+        from fuscan.scanner import Scanner
+
+        (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
+        rs = _build_ruleset()
+        report = Scanner(rs).scan(tmp_path)
+
+        window = MainWindow()
+        window._last_report = report
+        window._update_stage_actions()
+        window.show()
+        qapp.processEvents()
+        assert window._view_results_btn.isVisible()
+        window.close()
+
+    def test_scan_btn_disabled_without_ruleset(self, qapp: QApplication) -> None:
+        """无规则集时扫描按钮应禁用。"""
+        window = MainWindow()
+        window._ruleset = None
+        window._update_stage_actions()
+        assert not window._scan_btn.isEnabled()
+        window.close()
+
+    def test_scan_btn_enabled_with_ruleset_and_target(self, qapp: QApplication, tmp_path: Path) -> None:
+        """有规则集和有效目标时扫描按钮应可用。"""
+        (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
+        window = MainWindow()
+        window._ruleset = _build_ruleset()
+        window._scan_root = tmp_path
+        window._scan_mode = "folder"
+        window._update_stage_actions()
+        assert window._scan_btn.isEnabled()
+        window.close()
+
+    def test_rescan_btn_disabled_in_setup(self, qapp: QApplication) -> None:
+        """SETUP 阶段重新扫描按钮应禁用，RESULTS 阶段应启用。"""
+        window = MainWindow()
+        window._update_stage_actions()
+        assert not window._rescan_btn.isEnabled()
+        window._switch_stage(WorkflowStage.RESULTS)
+        assert window._rescan_btn.isEnabled()
+        window.close()
+
+    def test_pause_resume_btn_text_in_scanning_running(self, qapp: QApplication) -> None:
+        """SCANNING 阶段 RUNNING 状态 pause_resume_btn 文本为"暂停扫描"。"""
+        window = MainWindow()
+        window._scan_state = ScanState.RUNNING
+        window._switch_stage(WorkflowStage.SCANNING)
+        assert window._pause_resume_btn.text() == "暂停扫描"
+        window.close()
+
+    def test_pause_resume_btn_text_in_scanning_paused(self, qapp: QApplication) -> None:
+        """SCANNING 阶段 PAUSED 状态 pause_resume_btn 文本为"继续扫描"。"""
+        window = MainWindow()
+        window._scan_state = ScanState.PAUSED
+        window._switch_stage(WorkflowStage.SCANNING)
+        assert window._pause_resume_btn.text() == "继续扫描"
+        window.close()
+
+    def test_on_pause_resume_idle_does_nothing(self, qapp: QApplication) -> None:
+        """IDLE 状态调用 _on_pause_resume 不应改变状态。"""
+        window = MainWindow()
+        window._on_pause_resume()
+        assert window._scan_state == ScanState.IDLE
+        window.close()
+
+    def test_on_cancel_scan_calls_worker_cancel(self, qapp: QApplication) -> None:
+        """_on_cancel_scan 应调用 worker.cancel()。"""
+
+        class _FakeWorker:
+            def __init__(self) -> None:
+                self.cancelled = False
+
+            def cancel(self) -> None:
+                self.cancelled = True
+
+        window = MainWindow()
+        fake = _FakeWorker()
+        window._worker = fake  # type: ignore[assignment]
+        window._on_cancel_scan()
+        assert fake.cancelled
+        window._worker = None
+        window.close()
+
+    def test_on_cancel_scan_without_worker_does_nothing(self, qapp: QApplication) -> None:
+        """无 worker 时 _on_cancel_scan 不应崩溃。"""
+        window = MainWindow()
+        window._worker = None
+        window._on_cancel_scan()
+        window.close()
+
+    def test_cancel_scan_with_hits_returns_to_results(self, qapp: QApplication, tmp_path: Path) -> None:
+        """取消扫描有命中时应切换到 RESULTS 页。"""
+        from fuscan.scanner import Scanner
+
+        (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
+        rs = _build_ruleset()
+        report = Scanner(rs).scan(tmp_path)
+
+        window = MainWindow()
+        window._scan_state = ScanState.RUNNING
+        window._on_scan_cancelled(report)
+        assert window._main_stack.currentIndex() == 2
+        window.close()
+
+    def test_cancel_scan_without_hits_returns_to_setup(self, qapp: QApplication, tmp_path: Path) -> None:
+        """取消扫描无命中时应返回 SETUP 页。"""
+        from fuscan.scanner import ScanReport
+        from fuscan.scanner.result import ScanStats
+
+        report = ScanReport(
+            root=tmp_path,
+            results=(),
+            stats=ScanStats(total_files=10, scanned_files=5, matched_files=0),
+            cancelled=True,
+        )
+        window = MainWindow()
+        window._scan_state = ScanState.RUNNING
+        window._on_scan_cancelled(report)
+        assert window._main_stack.currentIndex() == 0
+        window.close()
+
+    def test_scan_action_disabled_in_scanning(self, qapp: QApplication) -> None:
+        """SCANNING 阶段扫描菜单项应禁用。"""
+        window = MainWindow()
+        window._switch_stage(WorkflowStage.SCANNING)
+        assert not window._scan_action.isEnabled()
+        window.close()
+
+    def test_export_actions_disabled_in_setup(self, qapp: QApplication) -> None:
+        """SETUP 阶段导出菜单项应禁用。"""
+        window = MainWindow()
+        window._update_stage_actions()
+        assert not window._export_csv_action.isEnabled()
+        assert not window._export_json_action.isEnabled()
+        window.close()
+
+    def test_export_actions_enabled_in_results_with_report(self, qapp: QApplication, tmp_path: Path) -> None:
+        """RESULTS 阶段有报告时导出菜单项应可用。"""
+        from fuscan.scanner import Scanner
+
+        (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
+        rs = _build_ruleset()
+        report = Scanner(rs).scan(tmp_path)
+
+        window = MainWindow()
+        window._last_report = report
+        window._switch_stage(WorkflowStage.RESULTS)
+        assert window._export_csv_action.isEnabled()
+        assert window._export_json_action.isEnabled()
+        window.close()
+
+    def test_load_edit_rules_actions_disabled_in_results(self, qapp: QApplication) -> None:
+        """RESULTS 阶段加载/编辑规则菜单项应禁用。"""
+        window = MainWindow()
+        window._switch_stage(WorkflowStage.RESULTS)
+        assert not window._load_rules_action.isEnabled()
+        assert not window._edit_rules_action.isEnabled()
         window.close()
 
 
@@ -3351,11 +3583,11 @@ class TestScanCallbacks:
 
         window._pause_scan()
         assert window._scan_state == ScanState.PAUSED
-        assert "继续" in window._scan_btn.text()
+        assert "继续" in window._pause_resume_btn.text()
 
         window._resume_scan()
         assert window._scan_state == ScanState.RUNNING
-        assert "暂停" in window._scan_btn.text()
+        assert "暂停" in window._pause_resume_btn.text()
 
         window._worker = None
         window.close()
@@ -3433,6 +3665,56 @@ class TestExportAndMenu:
         assert not out_path.exists()
         window.close()
 
+    def test_export_menu_with_report_select_csv(
+        self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """导出菜单选择 CSV 格式应写文件。"""
+        from fuscan.scanner import Scanner
+
+        (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
+        rs = _build_ruleset()
+        report = Scanner(rs).scan(tmp_path)
+
+        out_path = tmp_path / "export.csv"
+        window = MainWindow()
+        window._last_report = report
+        monkeypatch.setattr(
+            "fuscan.gui.main_window.QInputDialog.getItem",
+            lambda *args, **kwargs: ("CSV 文件 (*.csv)", True),
+        )
+        monkeypatch.setattr(
+            "fuscan.gui.main_window.QFileDialog.getSaveFileName",
+            lambda *args, **kwargs: (str(out_path), ""),
+        )
+        monkeypatch.setattr(
+            "fuscan.gui.main_window.QMessageBox.information",
+            lambda *args, **kwargs: None,
+        )
+        window._on_export_menu()
+        assert out_path.exists()
+        window.close()
+
+    def test_export_menu_with_report_cancel_dialog(
+        self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """导出菜单取消格式选择不应写文件。"""
+        from fuscan.scanner import Scanner
+
+        (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
+        rs = _build_ruleset()
+        report = Scanner(rs).scan(tmp_path)
+
+        out_path = tmp_path / "export.csv"
+        window = MainWindow()
+        window._last_report = report
+        monkeypatch.setattr(
+            "fuscan.gui.main_window.QInputDialog.getItem",
+            lambda *args, **kwargs: ("CSV 文件 (*.csv)", False),
+        )
+        window._on_export_menu()
+        assert not out_path.exists()
+        window.close()
+
     def test_about_dialog(self, qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
         """关于对话框应弹出。"""
         window = MainWindow()
@@ -3443,24 +3725,6 @@ class TestExportAndMenu:
         )
         window._on_about()
         assert about_called["called"]
-        window.close()
-
-    def test_switch_tab(self, qapp: QApplication) -> None:
-        """_switch_tab 应切换 Tab 页。"""
-        window = MainWindow()
-        window._switch_tab(1)
-        assert window._tab_widget.currentIndex() == 1
-        window._switch_tab(2)
-        assert window._tab_widget.currentIndex() == 2
-        window._switch_tab(0)
-        assert window._tab_widget.currentIndex() == 0
-        window.close()
-
-    def test_on_view_history(self, qapp: QApplication) -> None:
-        """_on_view_history 应切换到历史 Tab。"""
-        window = MainWindow()
-        window._on_view_history()
-        assert window._tab_widget.currentIndex() == 2
         window.close()
 
     def test_history_item_double_clicked(self, qapp: QApplication, tmp_path: Path) -> None:

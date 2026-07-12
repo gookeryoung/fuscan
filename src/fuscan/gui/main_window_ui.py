@@ -522,8 +522,8 @@ class Ui_MainWindow(object):
         self.detail_nonempty_main_layout.addWidget(self.detail_hits_title_label)
 
         self.detail_hits_table = QTableWidget(self.detail_nonempty_main)
-        if (self.detail_hits_table.columnCount() < 4):
-            self.detail_hits_table.setColumnCount(4)
+        if (self.detail_hits_table.columnCount() < 5):
+            self.detail_hits_table.setColumnCount(5)
         __qtablewidgetitem = QTableWidgetItem()
         self.detail_hits_table.setHorizontalHeaderItem(0, __qtablewidgetitem)
         __qtablewidgetitem1 = QTableWidgetItem()
@@ -532,6 +532,8 @@ class Ui_MainWindow(object):
         self.detail_hits_table.setHorizontalHeaderItem(2, __qtablewidgetitem2)
         __qtablewidgetitem3 = QTableWidgetItem()
         self.detail_hits_table.setHorizontalHeaderItem(3, __qtablewidgetitem3)
+        __qtablewidgetitem4 = QTableWidgetItem()
+        self.detail_hits_table.setHorizontalHeaderItem(4, __qtablewidgetitem4)
         self.detail_hits_table.setObjectName(u"detail_hits_table")
 
         self.detail_nonempty_main_layout.addWidget(self.detail_hits_table)
@@ -727,7 +729,9 @@ class Ui_MainWindow(object):
         ___qtablewidgetitem2 = self.detail_hits_table.horizontalHeaderItem(2)
         ___qtablewidgetitem2.setText(QCoreApplication.translate("MainWindow", u"\u6761\u6570", None));
         ___qtablewidgetitem3 = self.detail_hits_table.horizontalHeaderItem(3)
-        ___qtablewidgetitem3.setText(QCoreApplication.translate("MainWindow", u"\u8be6\u60c5", None));
+        ___qtablewidgetitem3.setText(QCoreApplication.translate("MainWindow", u"\u4f4d\u7f6e\u6570", None));
+        ___qtablewidgetitem4 = self.detail_hits_table.horizontalHeaderItem(4)
+        ___qtablewidgetitem4.setText(QCoreApplication.translate("MainWindow", u"\u8be6\u60c5", None));
         self.detail_preview_title_label.setText(QCoreApplication.translate("MainWindow", u"\u5185\u5bb9\u9884\u89c8 (\u5173\u952e\u8bcd\u9ad8\u4eae):", None))
         self.note_edit.setPlaceholderText(QCoreApplication.translate("MainWindow", u"\u5907\u6ce8/\u6279\u6ce8/\u5bfc\u51fa\u8bf4\u660e...", None))
         self.file_menu.setTitle(QCoreApplication.translate("MainWindow", u"\u6587\u4ef6(&F)", None))

@@ -34,8 +34,8 @@ class Ui_HitDetailDialog(object):
         self.main_layout.addWidget(self.hits_title_label)
 
         self.hits_table = QTableWidget(HitDetailDialog)
-        if (self.hits_table.columnCount() < 4):
-            self.hits_table.setColumnCount(4)
+        if (self.hits_table.columnCount() < 5):
+            self.hits_table.setColumnCount(5)
         __qtablewidgetitem = QTableWidgetItem()
         self.hits_table.setHorizontalHeaderItem(0, __qtablewidgetitem)
         __qtablewidgetitem1 = QTableWidgetItem()
@@ -44,6 +44,8 @@ class Ui_HitDetailDialog(object):
         self.hits_table.setHorizontalHeaderItem(2, __qtablewidgetitem2)
         __qtablewidgetitem3 = QTableWidgetItem()
         self.hits_table.setHorizontalHeaderItem(3, __qtablewidgetitem3)
+        __qtablewidgetitem4 = QTableWidgetItem()
+        self.hits_table.setHorizontalHeaderItem(4, __qtablewidgetitem4)
         self.hits_table.setObjectName(u"hits_table")
         self.hits_table.horizontalHeader().setStretchLastSection(True)
         self.hits_table.verticalHeader().setVisible(False)
@@ -122,7 +124,9 @@ class Ui_HitDetailDialog(object):
         ___qtablewidgetitem2 = self.hits_table.horizontalHeaderItem(2)
         ___qtablewidgetitem2.setText(QCoreApplication.translate("HitDetailDialog", u"\u6761\u6570", None));
         ___qtablewidgetitem3 = self.hits_table.horizontalHeaderItem(3)
-        ___qtablewidgetitem3.setText(QCoreApplication.translate("HitDetailDialog", u"\u8be6\u60c5", None));
+        ___qtablewidgetitem3.setText(QCoreApplication.translate("HitDetailDialog", u"\u4f4d\u7f6e\u6570", None));
+        ___qtablewidgetitem4 = self.hits_table.horizontalHeaderItem(4)
+        ___qtablewidgetitem4.setText(QCoreApplication.translate("HitDetailDialog", u"\u8be6\u60c5", None));
         self.preview_title_label.setText(QCoreApplication.translate("HitDetailDialog", u"\u5185\u5bb9\u9884\u89c8 (\u5173\u952e\u8bcd\u9ad8\u4eae):", None))
         self.nav_title_label.setText(QCoreApplication.translate("HitDetailDialog", u"\u547d\u4e2d\u5b9a\u4f4d:", None))
 #if QT_CONFIG(tooltip)

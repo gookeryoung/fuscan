@@ -216,6 +216,38 @@ def _build_preview_html(content: str, keywords: Sequence[str]) -> str:
     return f"<pre style='{_PREVIEW_STYLE}'>{escaped}</pre>"
 
 
+def _build_keyword_to_rule_map(hits: Sequence[RuleHit]) -> dict[str, int]:
+    """构建关键词到规则索引的映射，同一关键词仅归属首条规则。
+
+    优先使用 ``RuleHit.match_text`` 作为关键词；为空时回退到从 ``detail``
+    中提取单引号包裹的内容。同一关键词被多条规则命中时，仅归属到首条规则，
+    避免同一位置被重复计数。
+    """
+    keyword_to_rule: dict[str, int] = {}
+    for rule_idx, hit in enumerate(hits):
+        kw = hit.match_text
+        if not kw:
+            for match in _KEYWORD_RE.finditer(hit.detail):
+                kw = match.group(1)
+                if kw:
+                    break
+        if kw and kw not in keyword_to_rule:
+            keyword_to_rule[kw] = rule_idx
+    return keyword_to_rule
+
+
+def _compile_keyword_pattern(kw: str) -> str:
+    """将关键词编译为正则模式字符串。
+
+    关键词中的换行符（\\r\\n/\\r/\\n）规范化为 ``\\s+`` 以支持跨行匹配；
+    其他字符按字面量转义。
+    """
+    if re.search(r"[\r\n]", kw):
+        parts = [p for p in re.split(r"[\r\n]+", kw) if p]
+        return r"\s+".join(re.escape(p) for p in parts)
+    return re.escape(kw)
+
+
 class ScanState(enum.Enum):
     """扫描状态。"""
 
@@ -251,8 +283,8 @@ class MainWindow(QMainWindow):
         self._use_builtin: bool = True
         # 扫描模式："full"（全盘）、"drive"（盘符）、"folder"（文件夹）
         self._scan_mode: str = "folder"
-        # 详情区命中导航状态
-        self._detail_hit_positions: list[tuple[int, int]] = []
+        # 详情区命中导航状态：每个位置记录 (start, end, rule_index)
+        self._detail_hit_positions: list[tuple[int, int, int]] = []
         self._detail_current_hit_index: int = -1
         self._detail_current_result: ScanResult | None = None
         # 扫描历史记录
@@ -342,6 +374,7 @@ class MainWindow(QMainWindow):
         self._detail_hits_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self._detail_hits_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._detail_hits_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self._detail_hits_table.cellClicked.connect(self._on_detail_hits_row_clicked)
 
         # QComboBox 初始项
         self._rule_filter_combo.addItem("全部规则", "")
@@ -1123,8 +1156,9 @@ class MainWindow(QMainWindow):
         self._detail_action_stack.setCurrentIndex(1)
         self._detail_main_stack.setCurrentIndex(1)
         self._populate_detail_file_info(result)
-        self._populate_detail_hits_table(result)
+        # 先填充预览以计算高亮位置，再填充命中表（位置数列依赖位置数据）
         self._populate_detail_preview(result)
+        self._populate_detail_hits_table(result)
         # 强制刷新当前详情页，避免 Qt 渲染时序导致 stack 未生效
         self._detail_main_stack.currentWidget().update()
 
@@ -1151,6 +1185,10 @@ class MainWindow(QMainWindow):
         hits = result.hits
         logger.debug("填充命中表: %s, 命中数=%d", result.path, len(hits))
         self._detail_hits_table.setRowCount(len(hits))
+        # 统计每条规则在预览中的高亮位置数
+        position_counts: dict[int, int] = {}
+        for _, _, rule_idx in self._detail_hit_positions:
+            position_counts[rule_idx] = position_counts.get(rule_idx, 0) + 1
         for row, hit in enumerate(hits):
             self._detail_hits_table.setItem(row, 0, QTableWidgetItem(hit.rule_name))
             sev_item = QTableWidgetItem("")
@@ -1159,7 +1197,11 @@ class MainWindow(QMainWindow):
             count_item = QTableWidgetItem(str(hit.match_count))
             count_item.setTextAlignment(Qt.AlignCenter)
             self._detail_hits_table.setItem(row, 2, count_item)
-            self._detail_hits_table.setItem(row, 3, QTableWidgetItem(hit.detail))
+            pos_item = QTableWidgetItem(str(position_counts.get(row, 0)))
+            pos_item.setTextAlignment(Qt.AlignCenter)
+            pos_item.setToolTip("该规则在预览中可高亮跳转的位置数")
+            self._detail_hits_table.setItem(row, 3, pos_item)
+            self._detail_hits_table.setItem(row, 4, QTableWidgetItem(hit.detail))
 
     def _populate_detail_preview(self, result: ScanResult) -> None:
         """填充详情区内容预览，命中关键词高亮并定位到首个命中。"""
@@ -1206,34 +1248,34 @@ class MainWindow(QMainWindow):
         self._detail_preview.setHtml(html_content)
 
         # 查找所有关键词位置并定位到首个命中
-        self._find_detail_hit_positions(keywords)
+        self._find_detail_hit_positions(result.hits)
         if self._detail_hit_positions:
             self._detail_current_hit_index = 0
             self._highlight_current_detail_hit()
             self._scroll_to_current_detail_hit()
         self._update_detail_nav_label()
 
-    def _find_detail_hit_positions(self, keywords: Sequence[str]) -> None:
+    def _find_detail_hit_positions(self, hits: Sequence[RuleHit]) -> None:
         """在详情区预览文档中查找所有关键词出现位置，按位置排序后存储。
 
         使用 Python :func:`re.finditer` 在 :meth:`toPlainText` 返回的纯文本上查找，
         避免 :meth:`QTextDocument.find` 无法跨越段落边界的限制。
         关键词中的换行符（\\r\\n/\\r/\\n）规范化为 ``\\s+`` 正则，支持跨行命中的定位。
+
+        每个位置记录为 ``(start, end, rule_index)`` 三元组，``rule_index`` 为命中
+        规则在 ``hits`` 中的索引，用于点击规则表行时跳转到对应高亮位置。
+        同一关键词若被多条规则命中，仅归属到首条规则（避免位置重复计数）。
         """
         self._detail_hit_positions = []
-        if not keywords:
+        if not hits:
             return
         plain = self._detail_preview.toPlainText()
         if not plain:
             return
+        keyword_to_rule = _build_keyword_to_rule_map(hits)
         seen: set[tuple[int, int]] = set()
-        for kw in sorted(set(keywords), key=len, reverse=True):
-            # 包含换行符时，将换行段替换为 \s+ 以支持跨段落查找
-            if re.search(r"[\r\n]", kw):
-                parts = [p for p in re.split(r"[\r\n]+", kw) if p]
-                pattern = r"\s+".join(re.escape(p) for p in parts)
-            else:
-                pattern = re.escape(kw)
+        for kw, rule_idx in sorted(keyword_to_rule.items(), key=lambda x: len(x[0]), reverse=True):
+            pattern = _compile_keyword_pattern(kw)
             try:
                 regex = re.compile(pattern, re.IGNORECASE)
             except re.error:
@@ -1242,7 +1284,7 @@ class MainWindow(QMainWindow):
                 pos = (m.start(), m.end())
                 if pos not in seen:
                     seen.add(pos)
-                    self._detail_hit_positions.append(pos)
+                    self._detail_hit_positions.append((m.start(), m.end(), rule_idx))
         self._detail_hit_positions.sort()
 
     def _highlight_current_detail_hit(self) -> None:
@@ -1250,7 +1292,7 @@ class MainWindow(QMainWindow):
         if self._detail_current_hit_index < 0 or self._detail_current_hit_index >= len(self._detail_hit_positions):
             self._detail_preview.setExtraSelections([])
             return
-        start, end = self._detail_hit_positions[self._detail_current_hit_index]
+        start, end, _ = self._detail_hit_positions[self._detail_current_hit_index]
         sel = QTextEdit.ExtraSelection()
         cursor = self._detail_preview.textCursor()
         cursor.setPosition(start)
@@ -1265,7 +1307,7 @@ class MainWindow(QMainWindow):
         """滚动详情区预览使当前命中位置可见。"""
         if self._detail_current_hit_index < 0 or self._detail_current_hit_index >= len(self._detail_hit_positions):
             return
-        start, _ = self._detail_hit_positions[self._detail_current_hit_index]
+        start, _, _ = self._detail_hit_positions[self._detail_current_hit_index]
         cursor = self._detail_preview.textCursor()
         cursor.setPosition(start)
         self._detail_preview.setTextCursor(cursor)
@@ -1285,6 +1327,27 @@ class MainWindow(QMainWindow):
         if not self._detail_hit_positions:
             return
         self._detail_current_hit_index = (self._detail_current_hit_index + 1) % len(self._detail_hit_positions)
+        self._highlight_current_detail_hit()
+        self._scroll_to_current_detail_hit()
+        self._update_detail_nav_label()
+
+    def _on_detail_hits_row_clicked(self, row: int, _col: int) -> None:
+        """点击命中规则表行，跳转到该规则对应的高亮位置。
+
+        若当前已处于该规则的某个位置，则跳转到该规则的下一个位置（循环）；
+        否则跳转到该规则的首个高亮位置。
+        """
+        if not self._detail_hit_positions:
+            return
+        rule_indices = [i for i, (_, _, ri) in enumerate(self._detail_hit_positions) if ri == row]
+        if not rule_indices:
+            return
+        target = rule_indices[0]
+        for i in rule_indices:
+            if i > self._detail_current_hit_index:
+                target = i
+                break
+        self._detail_current_hit_index = target
         self._highlight_current_detail_hit()
         self._scroll_to_current_detail_hit()
         self._update_detail_nav_label()

@@ -2663,6 +2663,71 @@ class TestHitDetailDialogNavigation:
         assert "1 / 2" in dialog._nav_label.text()
         dialog.close()
 
+    def _make_dialog_multi_rule(self, qapp: QApplication, tmp_path: Path) -> HitDetailDialog:
+        """构造多规则多位置命中对话框，用于测试点击跳转与位置数列。
+
+        复用 ``_build_multi_rule_report`` 的扫描产物：
+        - 规则"密码"匹配 password（2 处）
+        - 规则"令牌"匹配 token（1 处）
+        """
+        report = _build_multi_rule_report(tmp_path)
+        return HitDetailDialog(report.hits[0])
+
+    def test_dialog_hits_table_has_position_count_column(self, qapp: QApplication, tmp_path: Path) -> None:
+        """对话框命中规则表应包含5列，第4列为'位置数'。"""
+        dialog = self._make_dialog_multi_rule(qapp, tmp_path)
+        assert dialog._hits_table.columnCount() == 5
+        assert dialog._hits_table.horizontalHeaderItem(3).text() == "位置数"
+        dialog.close()
+
+    def test_dialog_hits_table_position_count_values(self, qapp: QApplication, tmp_path: Path) -> None:
+        """对话框位置数列应显示每条规则在预览中的高亮位置数。"""
+        dialog = self._make_dialog_multi_rule(qapp, tmp_path)
+        # 规则0(密码): 2处password, 规则1(令牌): 1处token
+        assert dialog._hits_table.item(0, 3).text() == "2"
+        assert dialog._hits_table.item(1, 3).text() == "1"
+        dialog.close()
+
+    def test_dialog_click_hits_row_jumps_to_rule_highlight(self, qapp: QApplication, tmp_path: Path) -> None:
+        """对话框中点击规则表行应跳转到该规则对应的高亮位置。"""
+        dialog = self._make_dialog_multi_rule(qapp, tmp_path)
+        # 位置排序: [(0,8,0), (13,18,1), (23,31,0)]
+        # 初始定位到位置0(规则0的首个password)
+        assert dialog._current_hit_index == 0
+        # 点击规则1(令牌) → 跳到位置1(token)
+        dialog._on_hits_row_clicked(1, 0)
+        assert dialog._current_hit_index == 1
+        dialog.close()
+
+    def test_dialog_click_hits_row_cycles_within_rule(self, qapp: QApplication, tmp_path: Path) -> None:
+        """对话框中重复点击同一规则行应在该规则的位置间循环。"""
+        dialog = self._make_dialog_multi_rule(qapp, tmp_path)
+        # 初始在位置0(规则0)
+        assert dialog._current_hit_index == 0
+        # 再次点击规则0 → 跳到位置2(规则0的第二个password)
+        dialog._on_hits_row_clicked(0, 0)
+        assert dialog._current_hit_index == 2
+        # 再次点击规则0 → 回到位置0(循环)
+        dialog._on_hits_row_clicked(0, 0)
+        assert dialog._current_hit_index == 0
+        dialog.close()
+
+    def test_dialog_click_hits_row_no_positions_no_crash(self, qapp: QApplication) -> None:
+        """对话框无高亮位置时点击规则表行不应崩溃。"""
+        from fuscan.gui.detail_dialog import HitDetailDialog
+        from fuscan.scanner.result import RuleHit, ScanResult
+
+        result = ScanResult(
+            path=Path("/nonexistent.txt"),
+            size=0,
+            hits=(RuleHit("r", Severity.WARNING, "包含 'keyword'"),),
+        )
+        dialog = HitDetailDialog(result)
+        assert len(dialog._hit_positions) == 0
+        dialog._on_hits_row_clicked(0, 0)
+        assert dialog._current_hit_index == -1
+        dialog.close()
+
 
 class TestMatchTextHighlighting:
     """``match_text`` 字段驱动的关键词提取与跨行定位测试。
@@ -3100,6 +3165,36 @@ def _build_multi_match_report(tmp_path: Path) -> ScanReport:
                 name="密码",
                 severity=Severity.WARNING,
                 match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="secret"),
+            ),
+        ),
+    )
+    scanner = Scanner(rs)
+    return scanner.scan(tmp_path)
+
+
+def _build_multi_rule_report(tmp_path: Path) -> ScanReport:
+    """构造多规则多位置命中报告，用于测试点击跳转与位置数列。
+
+    multi_rule.txt 内容 ``password=abc\\ntoken=xyz\\npassword=def``：
+    - 规则"密码"匹配 password（2 处）
+    - 规则"令牌"匹配 token（1 处）
+    """
+    from fuscan.rules.model import LeafMatch, MatchMode, MatchTarget, Rule, RuleSet, Severity
+    from fuscan.scanner import Scanner
+
+    (tmp_path / "multi_rule.txt").write_text("password=abc\ntoken=xyz\npassword=def", encoding="utf-8")
+    rs = RuleSet(
+        version="1.0",
+        rules=(
+            Rule(
+                name="密码",
+                severity=Severity.CRITICAL,
+                match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="password"),
+            ),
+            Rule(
+                name="令牌",
+                severity=Severity.WARNING,
+                match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="token"),
             ),
         ),
     )
@@ -3558,7 +3653,7 @@ class TestDetailArea:
         window._detail_action_stack.setCurrentIndex(1)
         window._detail_main_stack.setCurrentIndex(1)
         window._detail_current_result = object()  # type: ignore[assignment]
-        window._detail_hit_positions = [(0, 1)]
+        window._detail_hit_positions = [(0, 1, 0)]
         window._detail_current_hit_index = 0
         window._detail_clear()
         assert window._detail_action_stack.currentIndex() == 0
@@ -3662,7 +3757,7 @@ class TestDetailArea:
     def test_detail_nav_label_with_hits(self, qapp: QApplication) -> None:
         """有命中时导航标签应显示进度且按钮启用。"""
         window = MainWindow()
-        window._detail_hit_positions = [(0, 1), (5, 6)]
+        window._detail_hit_positions = [(0, 1, 0), (5, 6, 0)]
         window._detail_current_hit_index = 0
         window._update_detail_nav_label()
         assert "1 / 2" in window._detail_nav_label.text()
@@ -3673,7 +3768,7 @@ class TestDetailArea:
     def test_detail_prev_next_wrap_around(self, qapp: QApplication) -> None:
         """命中导航应在到达首尾时循环。"""
         window = MainWindow()
-        window._detail_hit_positions = [(0, 1), (5, 6)]
+        window._detail_hit_positions = [(0, 1, 0), (5, 6, 0)]
         window._detail_current_hit_index = 0
         # 在索引 0 时上一个应循环到最后
         window._on_prev_detail_hit()
@@ -3857,7 +3952,7 @@ class TestDetailArea:
     def test_shortcut_next_triggers_nav(self, qapp: QApplication) -> None:
         """F3 快捷键的 activated 信号应触发下一条命中导航。"""
         window = MainWindow()
-        window._detail_hit_positions = [(0, 1), (5, 6)]
+        window._detail_hit_positions = [(0, 1, 0), (5, 6, 0)]
         window._detail_current_hit_index = 0
         window._shortcut_next.activated.emit()
         assert window._detail_current_hit_index == 1
@@ -3866,10 +3961,66 @@ class TestDetailArea:
     def test_shortcut_prev_triggers_nav(self, qapp: QApplication) -> None:
         """Shift+F3 快捷键的 activated 信号应触发上一条命中导航。"""
         window = MainWindow()
-        window._detail_hit_positions = [(0, 1), (5, 6)]
+        window._detail_hit_positions = [(0, 1, 0), (5, 6, 0)]
         window._detail_current_hit_index = 1
         window._shortcut_prev.activated.emit()
         assert window._detail_current_hit_index == 0
+        window.close()
+
+    def test_detail_hits_table_has_position_count_column(self, qapp: QApplication, tmp_path: Path) -> None:
+        """命中规则表应包含5列，第4列为'位置数'。"""
+        report = _build_multi_rule_report(tmp_path)
+        window = MainWindow()
+        window._detail_show_result(report.hits[0])
+        assert window._detail_hits_table.columnCount() == 5
+        assert window._detail_hits_table.horizontalHeaderItem(3).text() == "位置数"
+        window.close()
+
+    def test_detail_hits_table_position_count_values(self, qapp: QApplication, tmp_path: Path) -> None:
+        """位置数列应显示每条规则在预览中的高亮位置数。"""
+        report = _build_multi_rule_report(tmp_path)
+        window = MainWindow()
+        window._detail_show_result(report.hits[0])
+        # 规则0(密码): 2处password, 规则1(令牌): 1处token
+        assert window._detail_hits_table.item(0, 3).text() == "2"
+        assert window._detail_hits_table.item(1, 3).text() == "1"
+        window.close()
+
+    def test_click_hits_row_jumps_to_rule_highlight(self, qapp: QApplication, tmp_path: Path) -> None:
+        """点击规则表行应跳转到该规则对应的高亮位置。"""
+        report = _build_multi_rule_report(tmp_path)
+        window = MainWindow()
+        window._detail_show_result(report.hits[0])
+        # 位置排序: [(0,8,0), (13,18,1), (23,31,0)]
+        # 初始定位到位置0(规则0的首个password)
+        assert window._detail_current_hit_index == 0
+        # 点击规则1(令牌) → 跳到位置1(token)
+        window._on_detail_hits_row_clicked(1, 0)
+        assert window._detail_current_hit_index == 1
+        window.close()
+
+    def test_click_hits_row_cycles_within_rule(self, qapp: QApplication, tmp_path: Path) -> None:
+        """重复点击同一规则行应在该规则的位置间循环。"""
+        report = _build_multi_rule_report(tmp_path)
+        window = MainWindow()
+        window._detail_show_result(report.hits[0])
+        # 初始在位置0(规则0)
+        assert window._detail_current_hit_index == 0
+        # 再次点击规则0 → 跳到位置2(规则0的第二个password)
+        window._on_detail_hits_row_clicked(0, 0)
+        assert window._detail_current_hit_index == 2
+        # 再次点击规则0 → 回到位置0(循环)
+        window._on_detail_hits_row_clicked(0, 0)
+        assert window._detail_current_hit_index == 0
+        window.close()
+
+    def test_click_hits_row_no_positions_no_crash(self, qapp: QApplication) -> None:
+        """无高亮位置时点击规则表行不应崩溃。"""
+        window = MainWindow()
+        window._detail_hit_positions = []
+        window._detail_current_hit_index = -1
+        window._on_detail_hits_row_clicked(0, 0)
+        assert window._detail_current_hit_index == -1
         window.close()
 
     def test_rules_file_list_context_menu_no_selection(self, qapp: QApplication) -> None:

@@ -5132,11 +5132,11 @@ class TestSettingsDialog:
 
         dialog = SettingsDialog(config)
         # 修改控件值
-        dialog._max_workers_spin.setValue(8)
-        dialog._max_depth_spin.setValue(20)
-        dialog._scan_archives_check.setChecked(True)
-        dialog._include_network_check.setChecked(False)
-        dialog._use_builtin_check.setChecked(True)
+        dialog._ui.max_workers_spin.setValue(8)
+        dialog._ui.max_depth_spin.setValue(20)
+        dialog._ui.scan_archives_check.setChecked(True)
+        dialog._ui.include_network_check.setChecked(False)
+        dialog._ui.use_builtin_check.setChecked(True)
 
         dialog._save_config()
 
@@ -5159,7 +5159,7 @@ class TestSettingsDialog:
         config.max_depth = 5
 
         dialog = SettingsDialog(config)
-        dialog._max_depth_spin.setValue(0)
+        dialog._ui.max_depth_spin.setValue(0)
         dialog._save_config()
 
         assert config.max_depth is None
@@ -5174,7 +5174,7 @@ class TestSettingsDialog:
         config.max_workers = 2
 
         dialog = SettingsDialog(config)
-        dialog._max_workers_spin.setValue(16)
+        dialog._ui.max_workers_spin.setValue(16)
 
         accepted_called: list[bool] = []
         monkeypatch.setattr(dialog, "accept", lambda: accepted_called.append(True))
@@ -5195,8 +5195,8 @@ class TestSettingsDialog:
         config.cache_path = "/tmp/custom_cache.db"
 
         dialog = SettingsDialog(config)
-        assert dialog._cache_enabled_check.isChecked() is False
-        assert dialog._cache_path_edit.text() == "/tmp/custom_cache.db"
+        assert dialog._ui.cache_enabled_check.isChecked() is False
+        assert dialog._ui.cache_path_edit.text() == "/tmp/custom_cache.db"
         dialog.close()
 
     def test_settings_dialog_saves_cache_config(self, qapp: QApplication) -> None:
@@ -5209,8 +5209,8 @@ class TestSettingsDialog:
         config.cache_path = None
 
         dialog = SettingsDialog(config)
-        dialog._cache_enabled_check.setChecked(False)
-        dialog._cache_path_edit.setText("/tmp/new_cache.db")
+        dialog._ui.cache_enabled_check.setChecked(False)
+        dialog._ui.cache_path_edit.setText("/tmp/new_cache.db")
         dialog._save_config()
 
         assert config.cache_enabled is False
@@ -5226,7 +5226,7 @@ class TestSettingsDialog:
         config.cache_path = "/tmp/old.db"
 
         dialog = SettingsDialog(config)
-        dialog._cache_path_edit.setText("   ")
+        dialog._ui.cache_path_edit.setText("   ")
         dialog._save_config()
 
         assert config.cache_path is None
@@ -5242,10 +5242,10 @@ class TestSettingsDialogIgnore:
         from fuscan.gui.settings_dialog import SettingsDialog
 
         dialog = SettingsDialog(Config())
-        assert dialog._ignore_dirs_edit is not None
-        assert dialog._ignore_extensions_edit is not None
-        assert "目录名" in dialog._ignore_dirs_edit.placeholderText()
-        assert "扩展名" in dialog._ignore_extensions_edit.placeholderText()
+        assert dialog._ui.ignore_dirs_edit is not None
+        assert dialog._ui.ignore_extensions_edit is not None
+        assert "目录名" in dialog._ui.ignore_dirs_edit.placeholderText()
+        assert "扩展名" in dialog._ui.ignore_extensions_edit.placeholderText()
         dialog.close()
 
     def test_default_ignore_dirs_loaded(self, qapp: QApplication) -> None:
@@ -5254,7 +5254,7 @@ class TestSettingsDialogIgnore:
         from fuscan.gui.settings_dialog import SettingsDialog
 
         dialog = SettingsDialog(Config())
-        lines = dialog._ignore_dirs_edit.toPlainText().splitlines()
+        lines = dialog._ui.ignore_dirs_edit.toPlainText().splitlines()
         assert ".git" in lines
         assert "node_modules" in lines
         assert "__pycache__" in lines
@@ -5266,7 +5266,7 @@ class TestSettingsDialogIgnore:
         from fuscan.gui.settings_dialog import SettingsDialog
 
         dialog = SettingsDialog(Config())
-        lines = dialog._ignore_extensions_edit.toPlainText().splitlines()
+        lines = dialog._ui.ignore_extensions_edit.toPlainText().splitlines()
         assert "pyc" in lines
         assert "exe" in lines
         assert "zip" in lines
@@ -5279,7 +5279,7 @@ class TestSettingsDialogIgnore:
 
         config = Config(ignore_dirs=["custom_dir", ".git"])
         dialog = SettingsDialog(config)
-        assert dialog._ignore_dirs_edit.toPlainText().splitlines() == ["custom_dir", ".git"]
+        assert dialog._ui.ignore_dirs_edit.toPlainText().splitlines() == ["custom_dir", ".git"]
         dialog.close()
 
     def test_save_config_writes_ignore_dirs(self, qapp: QApplication) -> None:
@@ -5289,7 +5289,7 @@ class TestSettingsDialogIgnore:
 
         config = Config()
         dialog = SettingsDialog(config)
-        dialog._ignore_dirs_edit.setPlainText("new_dir\n.git\n\n  \n")
+        dialog._ui.ignore_dirs_edit.setPlainText("new_dir\n.git\n\n  \n")
         dialog._save_config()
         assert config.ignore_dirs == ["new_dir", ".git"]
         dialog.close()
@@ -5301,7 +5301,7 @@ class TestSettingsDialogIgnore:
 
         config = Config()
         dialog = SettingsDialog(config)
-        dialog._ignore_extensions_edit.setPlainText("pyc\nexe\n\n")
+        dialog._ui.ignore_extensions_edit.setPlainText("pyc\nexe\n\n")
         dialog._save_config()
         assert config.ignore_extensions == ["pyc", "exe"]
         dialog.close()
@@ -5313,7 +5313,7 @@ class TestSettingsDialogIgnore:
 
         config = Config()
         dialog = SettingsDialog(config)
-        dialog._ignore_dirs_edit.setPlainText("  .git  \n  node_modules  \n")
+        dialog._ui.ignore_dirs_edit.setPlainText("  .git  \n  node_modules  \n")
         dialog._save_config()
         assert config.ignore_dirs == [".git", "node_modules"]
         dialog.close()

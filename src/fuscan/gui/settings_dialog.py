@@ -30,22 +30,8 @@ class SettingsDialog(QDialog):
         self._config = config
         self._ui = Ui_SettingsDialog()
         self._ui.setupUi(self)
-        self._bind_widgets()
         self._configure_ui()
         self._load_config()
-
-    def _bind_widgets(self) -> None:
-        """将 Ui_SettingsDialog 的部件绑定到本类私有属性，保持业务逻辑兼容。"""
-        ui = self._ui
-        self._max_workers_spin = ui.max_workers_spin
-        self._max_depth_spin = ui.max_depth_spin
-        self._scan_archives_check = ui.scan_archives_check
-        self._ignore_dirs_edit = ui.ignore_dirs_edit
-        self._ignore_extensions_edit = ui.ignore_extensions_edit
-        self._include_network_check = ui.include_network_check
-        self._use_builtin_check = ui.use_builtin_check
-        self._cache_enabled_check = ui.cache_enabled_check
-        self._cache_path_edit = ui.cache_path_edit
 
     def _configure_ui(self) -> None:
         """配置 .ui 无法静态表达的信号槽连接。"""
@@ -55,32 +41,34 @@ class SettingsDialog(QDialog):
 
     def _load_config(self) -> None:
         """加载当前配置到控件。"""
-        self._max_workers_spin.setValue(self._config.max_workers)
-        self._max_depth_spin.setValue(self._config.max_depth or 0)
-        self._scan_archives_check.setChecked(self._config.scan_archives)
-        self._include_network_check.setChecked(self._config.include_network_drives)
-        self._use_builtin_check.setChecked(self._config.use_builtin)
-        self._ignore_dirs_edit.setPlainText("\n".join(self._config.ignore_dirs))
-        self._ignore_extensions_edit.setPlainText("\n".join(self._config.ignore_extensions))
-        self._cache_enabled_check.setChecked(self._config.cache_enabled)
-        self._cache_path_edit.setText(self._config.cache_path or "")
+        ui = self._ui
+        ui.max_workers_spin.setValue(self._config.max_workers)
+        ui.max_depth_spin.setValue(self._config.max_depth or 0)
+        ui.scan_archives_check.setChecked(self._config.scan_archives)
+        ui.include_network_check.setChecked(self._config.include_network_drives)
+        ui.use_builtin_check.setChecked(self._config.use_builtin)
+        ui.ignore_dirs_edit.setPlainText("\n".join(self._config.ignore_dirs))
+        ui.ignore_extensions_edit.setPlainText("\n".join(self._config.ignore_extensions))
+        ui.cache_enabled_check.setChecked(self._config.cache_enabled)
+        ui.cache_path_edit.setText(self._config.cache_path or "")
 
     def _save_config(self) -> None:
         """将控件值保存到配置。"""
-        self._config.max_workers = self._max_workers_spin.value()
-        depth = self._max_depth_spin.value()
+        ui = self._ui
+        self._config.max_workers = ui.max_workers_spin.value()
+        depth = ui.max_depth_spin.value()
         self._config.max_depth = depth if depth > 0 else None
-        self._config.scan_archives = self._scan_archives_check.isChecked()
-        self._config.include_network_drives = self._include_network_check.isChecked()
-        self._config.use_builtin = self._use_builtin_check.isChecked()
+        self._config.scan_archives = ui.scan_archives_check.isChecked()
+        self._config.include_network_drives = ui.include_network_check.isChecked()
+        self._config.use_builtin = ui.use_builtin_check.isChecked()
         self._config.ignore_dirs = [
-            line.strip() for line in self._ignore_dirs_edit.toPlainText().splitlines() if line.strip()
+            line.strip() for line in ui.ignore_dirs_edit.toPlainText().splitlines() if line.strip()
         ]
         self._config.ignore_extensions = [
-            line.strip() for line in self._ignore_extensions_edit.toPlainText().splitlines() if line.strip()
+            line.strip() for line in ui.ignore_extensions_edit.toPlainText().splitlines() if line.strip()
         ]
-        self._config.cache_enabled = self._cache_enabled_check.isChecked()
-        path_text = self._cache_path_edit.text().strip()
+        self._config.cache_enabled = ui.cache_enabled_check.isChecked()
+        path_text = ui.cache_path_edit.text().strip()
         self._config.cache_path = path_text or None
 
     def _on_accept(self) -> None:

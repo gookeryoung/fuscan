@@ -5562,7 +5562,7 @@ class TestGuiCache:
 
         # 模拟对话框 exec_ 返回 Accepted，并在返回前模拟用户关闭缓存
         def fake_exec(self: sd_module.SettingsDialog) -> int:
-            self._config.cache_enabled = False
+            self.config.cache_enabled = False
             return 1  # QDialog.Accepted
 
         monkeypatch.setattr(sd_module.SettingsDialog, "exec_", fake_exec)
@@ -5584,7 +5584,7 @@ class TestGuiCache:
 
         # 模拟对话框返回 Accepted 并改变缓存路径
         def fake_exec(self: sd_module.SettingsDialog) -> int:
-            self._config.cache_path = str(tmp_path / "new_cache.db")
+            self.config.cache_path = str(tmp_path / "new_cache.db")
             return 1  # QDialog.Accepted
 
         monkeypatch.setattr(sd_module.SettingsDialog, "exec_", fake_exec)
@@ -5610,7 +5610,7 @@ class TestGuiCache:
         from fuscan.gui import settings_dialog as sd_module
 
         def fake_exec(self: sd_module.SettingsDialog) -> int:
-            self._config.cache_enabled = False
+            self.config.cache_enabled = False
             return 1  # QDialog.Accepted
 
         monkeypatch.setattr(sd_module.SettingsDialog, "exec_", fake_exec)

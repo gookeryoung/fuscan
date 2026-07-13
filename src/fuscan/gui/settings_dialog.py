@@ -22,54 +22,51 @@ from fuscan.gui.settings_dialog_ui import Ui_SettingsDialog
 __all__ = ["SettingsDialog"]
 
 
-class SettingsDialog(QDialog):
+class SettingsDialog(QDialog, Ui_SettingsDialog):
     """设置对话框，多页面 Tab 形式展示。"""
 
     def __init__(self, config: Config, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._config = config
-        self._ui = Ui_SettingsDialog()
-        self._ui.setupUi(self)
+        self.config = config
+        self.setupUi(self)
+
         self._configure_ui()
         self._load_config()
 
     def _configure_ui(self) -> None:
         """配置 .ui 无法静态表达的信号槽连接。"""
-        ui = self._ui
-        ui.button_box.accepted.connect(self._on_accept)
-        ui.button_box.rejected.connect(self.reject)
+        self.button_box.accepted.connect(self._on_accept)
+        self.button_box.rejected.connect(self.reject)
 
     def _load_config(self) -> None:
         """加载当前配置到控件。"""
-        ui = self._ui
-        ui.max_workers_spin.setValue(self._config.max_workers)
-        ui.max_depth_spin.setValue(self._config.max_depth or 0)
-        ui.scan_archives_check.setChecked(self._config.scan_archives)
-        ui.include_network_check.setChecked(self._config.include_network_drives)
-        ui.use_builtin_check.setChecked(self._config.use_builtin)
-        ui.ignore_dirs_edit.setPlainText("\n".join(self._config.ignore_dirs))
-        ui.ignore_extensions_edit.setPlainText("\n".join(self._config.ignore_extensions))
-        ui.cache_enabled_check.setChecked(self._config.cache_enabled)
-        ui.cache_path_edit.setText(self._config.cache_path or "")
+        self.max_workers_spin.setValue(self.config.max_workers)
+        self.max_depth_spin.setValue(self.config.max_depth or 0)
+        self.scan_archives_check.setChecked(self.config.scan_archives)
+        self.include_network_check.setChecked(self.config.include_network_drives)
+        self.use_builtin_check.setChecked(self.config.use_builtin)
+        self.ignore_dirs_edit.setPlainText("\n".join(self.config.ignore_dirs))
+        self.ignore_extensions_edit.setPlainText("\n".join(self.config.ignore_extensions))
+        self.cache_enabled_check.setChecked(self.config.cache_enabled)
+        self.cache_path_edit.setText(self.config.cache_path or "")
 
     def _save_config(self) -> None:
         """将控件值保存到配置。"""
-        ui = self._ui
-        self._config.max_workers = ui.max_workers_spin.value()
-        depth = ui.max_depth_spin.value()
-        self._config.max_depth = depth if depth > 0 else None
-        self._config.scan_archives = ui.scan_archives_check.isChecked()
-        self._config.include_network_drives = ui.include_network_check.isChecked()
-        self._config.use_builtin = ui.use_builtin_check.isChecked()
-        self._config.ignore_dirs = [
-            line.strip() for line in ui.ignore_dirs_edit.toPlainText().splitlines() if line.strip()
+        self.config.max_workers = self.max_workers_spin.value()
+        depth = self.max_depth_spin.value()
+        self.config.max_depth = depth if depth > 0 else None
+        self.config.scan_archives = self.scan_archives_check.isChecked()
+        self.config.include_network_drives = self.include_network_check.isChecked()
+        self.config.use_builtin = self.use_builtin_check.isChecked()
+        self.config.ignore_dirs = [
+            line.strip() for line in self.ignore_dirs_edit.toPlainText().splitlines() if line.strip()
         ]
-        self._config.ignore_extensions = [
-            line.strip() for line in ui.ignore_extensions_edit.toPlainText().splitlines() if line.strip()
+        self.config.ignore_extensions = [
+            line.strip() for line in self.ignore_extensions_edit.toPlainText().splitlines() if line.strip()
         ]
-        self._config.cache_enabled = ui.cache_enabled_check.isChecked()
-        path_text = ui.cache_path_edit.text().strip()
-        self._config.cache_path = path_text or None
+        self.config.cache_enabled = self.cache_enabled_check.isChecked()
+        path_text = self.cache_path_edit.text().strip()
+        self.config.cache_path = path_text or None
 
     def _on_accept(self) -> None:
         """确定按钮：保存配置并关闭对话框。"""
@@ -78,4 +75,4 @@ class SettingsDialog(QDialog):
 
     def get_config(self) -> Config:
         """获取当前对话框中的配置。"""
-        return self._config
+        return self.config

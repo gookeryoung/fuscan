@@ -26,6 +26,8 @@ import io
 import json
 import logging
 import re
+import subprocess
+import sys
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -88,12 +90,22 @@ except ImportError:  # pragma: no cover
         QWidget,
     )
 
-from fuscan import theme
+from fuscan import __version__, theme
 from fuscan.builtin import load_with_builtin
 from fuscan.config import MAX_HISTORY, Config, load_config, save_config
 from fuscan.extractors import extract_content
 from fuscan.gui.detail_dialog import HitDetailDialog
 from fuscan.gui.main_window_ui import Ui_MainWindow
+from fuscan.gui.preview_utils import (
+    PREVIEW_MAX_CHARS,
+    SEVERITY_COLORS,
+    SEVERITY_LABELS,
+    build_keyword_to_rule_map,
+    build_preview_html,
+    compile_keyword_pattern,
+    extract_keywords,
+    format_size,
+)
 from fuscan.gui.worker import ScanWorker
 from fuscan.rules import RuleError, load_ruleset, merge_multiple_rulesets
 from fuscan.rules.model import RuleSet, Severity
@@ -106,34 +118,6 @@ if TYPE_CHECKING:
 __all__ = ["MainWindow", "ScanState", "WorkflowStage"]
 
 logger = logging.getLogger(__name__)
-
-# 内容预览最大字符数，避免大文件阻塞 UI
-_PREVIEW_MAX_CHARS = 100 * 1024
-
-# 从 detail 中提取关键词的正则，匹配单引号包裹的内容
-_KEYWORD_RE = re.compile(r"'([^']+)'")
-
-# 内容预览 pre 标签样式
-_PREVIEW_STYLE = (
-    "font-family: Consolas, 'Courier New', monospace; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;"
-)
-
-# 关键词高亮 span 样式
-_HIGHLIGHT_STYLE = "background-color: yellow; color: black;"
-
-# 严重等级 → 中文标签
-_SEVERITY_LABELS: dict[Severity, str] = {
-    Severity.CRITICAL: "严重",
-    Severity.WARNING: "警告",
-    Severity.INFO: "一般",
-}
-
-# 严重等级 → 前景色（QColor，色值集中定义在 fuscan.theme）
-_SEVERITY_COLORS: dict[Severity, QColor] = {
-    Severity.CRITICAL: QColor(theme.COLOR_DANGER),
-    Severity.WARNING: QColor(theme.COLOR_WARNING),
-    Severity.INFO: QColor(theme.COLOR_INFO),
-}
 
 # 严重等级 → 背景色（浅色，用于整行高亮）
 _SEVERITY_BACKGROUNDS: dict[Severity, QColor] = {
@@ -152,20 +136,20 @@ _SEVERITY_RANK: dict[Severity, int] = {
 
 def _severity_text(severity: Severity) -> str:
     """返回严重等级的中文标签。"""
-    return _SEVERITY_LABELS.get(severity, severity.value)
+    return SEVERITY_LABELS.get(severity, severity.value)
 
 
 def _apply_severity_to_tree_item(item: QTreeWidgetItem, column: int, severity: Severity) -> None:
     """为 QTreeWidgetItem 的指定列设置中文标签、前景色和背景色。"""
     item.setText(column, _severity_text(severity))
-    item.setForeground(column, _SEVERITY_COLORS[severity])
+    item.setForeground(column, SEVERITY_COLORS[severity])
     item.setBackground(column, _SEVERITY_BACKGROUNDS[severity])
 
 
 def _apply_severity_to_table_item(item: QTableWidgetItem, severity: Severity) -> None:
     """为 QTableWidgetItem 设置中文标签、前景色和背景色。"""
     item.setText(_severity_text(severity))
-    item.setForeground(_SEVERITY_COLORS[severity])
+    item.setForeground(SEVERITY_COLORS[severity])
     item.setBackground(_SEVERITY_BACKGROUNDS[severity])
 
 
@@ -184,7 +168,6 @@ _ICON_HISTORY = str(_ICONS_DIR / "history.svg")
 _ICON_LOAD_LIST = str(_ICONS_DIR / "load_list.svg")
 _ICON_PAUSE = str(_ICONS_DIR / "pause.svg")
 _ICON_RESCAN = str(_ICONS_DIR / "rescan.svg")
-_ICON_RIGHT = str(_ICONS_DIR / "right.svg")
 _ICON_SCAN = str(_ICONS_DIR / "scan.svg")
 _ICON_SETTINGS = str(_ICONS_DIR / "settings.svg")
 _ICON_STOP = str(_ICONS_DIR / "stop.svg")
@@ -229,105 +212,6 @@ def _load_themed_icon(svg_path: str, color: str) -> QIcon:
     except (OSError, ValueError):
         logger.warning("主题图标加载失败，回退原始文件: %s", svg_path, exc_info=True)
         return QIcon(svg_path)
-
-
-def _format_size(size: int) -> str:
-    """将字节数格式化为人类可读字符串。"""
-    if size < 1024:
-        return f"{size} B"
-    if size < 1024 * 1024:
-        return f"{size / 1024:.1f} KB"
-    if size < 1024 * 1024 * 1024:
-        return f"{size / (1024 * 1024):.1f} MB"
-    return f"{size / (1024 * 1024 * 1024):.2f} GB"
-
-
-def _extract_keywords(hits: Sequence[RuleHit]) -> list[str]:
-    """从命中规则中提取高亮关键词。
-
-    优先使用 ``RuleHit.match_text``（原始匹配文本，无 repr 转义）；
-    对于组合规则 ``match_text`` 为空时，回退到从 ``detail`` 中提取单引号包裹的内容。
-    """
-    keywords: list[str] = []
-    seen: set[str] = set()
-    for hit in hits:
-        kw = hit.match_text
-        if not kw:
-            # 组合规则无单一匹配文本，回退到 detail 解析
-            for match in _KEYWORD_RE.finditer(hit.detail):
-                kw = match.group(1)
-                if kw:
-                    break
-        if kw and kw not in seen:
-            seen.add(kw)
-            keywords.append(kw)
-    return keywords
-
-
-def _build_preview_html(content: str, keywords: Sequence[str]) -> str:
-    """构建内容预览 HTML，关键词以黄色背景高亮。
-
-    先对内容做 html.escape 转义，再用单次正则替换插入高亮 span，
-    避免多次 replace 破坏已插入的 HTML 标签。
-    关键词中的换行符规范化为 ``\\s+`` 以支持跨行高亮。
-    """
-    escaped = html.escape(content)
-    if keywords:
-        kw_patterns: list[str] = []
-        for kw in sorted({k for k in keywords if k}, key=len, reverse=True):
-            escaped_kw = html.escape(kw)
-            if re.search(r"[\r\n]", escaped_kw):
-                # 包含换行符：分段转义，用 \s+ 连接以支持跨行高亮
-                parts = [p for p in re.split(r"[\r\n]+", escaped_kw) if p]
-                kw_patterns.append(r"\s+".join(re.escape(p) for p in parts))
-            else:
-                kw_patterns.append(re.escape(escaped_kw))
-        if kw_patterns:
-            pattern = "|".join(kw_patterns)
-            regex = re.compile(pattern, re.IGNORECASE)
-            escaped = regex.sub(
-                lambda m: f'<span style="{_HIGHLIGHT_STYLE}">{m.group(0)}</span>',
-                escaped,
-            )
-    # 保留换行
-    escaped = escaped.replace("\n", "<br>")
-    return f"<pre style='{_PREVIEW_STYLE}'>{escaped}</pre>"
-
-
-def _build_keyword_to_rule_map(hits: Sequence[RuleHit]) -> dict[str, int]:
-    """构建关键词到规则索引的映射，同一关键词仅归属首条规则。
-
-    优先使用 ``RuleHit.match_text`` 作为关键词；为空时回退到从 ``detail``
-    中提取单引号包裹的内容。同一关键词被多条规则命中时，仅归属到首条规则，
-    避免同一位置被重复计数。
-    ``target=="filename"`` 的规则跳过（文件名匹配不应在内容预览中搜索高亮，
-    否则可能产生误导性的高亮位置）。
-    """
-    keyword_to_rule: dict[str, int] = {}
-    for rule_idx, hit in enumerate(hits):
-        if hit.target == "filename":
-            continue
-        kw = hit.match_text
-        if not kw:
-            for match in _KEYWORD_RE.finditer(hit.detail):
-                kw = match.group(1)
-                if kw:
-                    break
-        if kw and kw not in keyword_to_rule:
-            keyword_to_rule[kw] = rule_idx
-    return keyword_to_rule
-
-
-def _compile_keyword_pattern(kw: str) -> str:
-    """将关键词编译为正则模式字符串。
-
-    关键词中的换行符（\\r\\n/\\r/\\n）规范化为 ``\\s+`` 以支持跨行匹配；
-    其他字符按字面量转义。
-    """
-    if re.search(r"[\r\n]", kw):
-        parts = [p for p in re.split(r"[\r\n]+", kw) if p]
-        return r"\s+".join(re.escape(p) for p in parts)
-    return re.escape(kw)
 
 
 class ScanState(enum.Enum):
@@ -503,7 +387,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._icon_folder = _load_themed_icon(_ICON_FOLDER, theme.COLOR_PRIMARY)
         self._icon_history = _load_themed_icon(_ICON_HISTORY, theme.COLOR_PRIMARY)
         self._icon_load_list = _load_themed_icon(_ICON_LOAD_LIST, theme.COLOR_PRIMARY)
-        self._icon_right = _load_themed_icon(_ICON_RIGHT, theme.COLOR_PRIMARY)
         self._icon_hard_disk = _load_themed_icon(_ICON_HARD_DISK, theme.COLOR_PRIMARY)
         self._icon_edit = _load_themed_icon(_ICON_EDIT, theme.COLOR_PRIMARY)
         self._icon_export = _load_themed_icon(_ICON_EXPORT, theme.COLOR_PRIMARY)
@@ -1107,10 +990,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         if not self._config.cache_enabled:
             return None, None
         if self._cache is None:
+            # 延迟加载 cache 模块，避免主窗口启动时初始化 SQLite
             from fuscan.cache import CacheStore, default_cache_path
 
             cache_path = Path(self._config.cache_path) if self._config.cache_path else default_cache_path()
             self._cache = CacheStore(cache_path)
+        # 同上，cache 模块按需加载
         from fuscan.cache import compute_source_files
 
         source_files = compute_source_files(self._rules_paths, use_builtin=self._use_builtin)
@@ -1311,8 +1196,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def _on_about(self) -> None:
         """关于对话框。"""
-        from fuscan import __version__
-
         QMessageBox.about(
             self,
             "关于 fuscan",
@@ -1321,6 +1204,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def _on_settings(self) -> None:
         """打开设置对话框，修改后保存配置并应用。"""
+        # 延迟加载 GUI 子对话框，加速主窗口启动
         from fuscan.gui.settings_dialog import SettingsDialog
 
         prev_cache_enabled = self._config.cache_enabled
@@ -1393,7 +1277,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         info_html = (
             f"<b>文件路径:</b> {html.escape(str(path))}<br>"
-            f"<b>文件大小:</b> {_format_size(size)} ({size} 字节)<br>"
+            f"<b>文件大小:</b> {format_size(size)} ({size} 字节)<br>"
             f"<b>修改时间:</b> {html.escape(mtime_str)}<br>"
             f"<b>命中规则数:</b> {len(result.hits)} | <b>匹配条数:</b> {result.total_match_count}"
             f" | <b>可切换位置:</b> {len(self._detail_hit_positions)}"
@@ -1454,11 +1338,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             return
 
         # 截断过长内容
-        if len(content) > _PREVIEW_MAX_CHARS:
-            content = content[:_PREVIEW_MAX_CHARS]
+        if len(content) > PREVIEW_MAX_CHARS:
+            content = content[:PREVIEW_MAX_CHARS]
             truncated = True
 
-        keywords = _extract_keywords(result.hits)
+        keywords = extract_keywords(result.hits)
         # 命中规则但无法提取关键词（如纯文件名/路径匹配），显示提示避免误判为"无命中"
         if not keywords and result.hits:
             rule_names = "、".join(h.rule_name for h in result.hits)
@@ -1469,7 +1353,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             self._detail_current_hit_index = -1
             self._update_detail_nav_label()
             return
-        html_content = _build_preview_html(content, keywords)
+        html_content = build_preview_html(content, keywords)
         if truncated:
             html_content += "<p style='color: #888; font-size: 11px;'>(内容已截断，仅显示前 100KB)</p>"
         self.detail_preview.setHtml(html_content)
@@ -1499,10 +1383,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         plain = self.detail_preview.toPlainText()
         if not plain:
             return
-        keyword_to_rule = _build_keyword_to_rule_map(hits)
+        keyword_to_rule = build_keyword_to_rule_map(hits)
         seen: set[tuple[int, int]] = set()
         for kw, rule_idx in sorted(keyword_to_rule.items(), key=lambda x: len(x[0]), reverse=True):
-            pattern = _compile_keyword_pattern(kw)
+            pattern = compile_keyword_pattern(kw)
             try:
                 regex = re.compile(pattern, re.IGNORECASE)
             except re.error:
@@ -1620,16 +1504,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             return
         path = self._detail_current_result.path
         try:
-            import subprocess
-            import sys
-
             if sys.platform == "win32":
                 subprocess.Popen(["explorer", "/select,", str(path)])
             elif sys.platform == "darwin":
                 subprocess.Popen(["open", "-R", str(path)])
             else:
                 subprocess.Popen(["xdg-open", str(path.parent)])
-        except Exception as exc:
+        except (OSError, FileNotFoundError) as exc:
             logger.warning("打开文件位置失败: %s", exc, exc_info=True)
             QMessageBox.warning(self, "提示", f"打开文件位置失败:\n{exc}")
 
@@ -1696,6 +1577,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def _on_edit_rules(self) -> None:
         """打开规则编辑器对话框。"""
+        # 延迟加载 GUI 子对话框，加速主窗口启动
         from fuscan.gui.rule_editor import RuleEditorDialog
 
         if not self._rules_paths:

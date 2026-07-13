@@ -28,6 +28,7 @@ try:
 
     from fuscan.gui.detail_dialog import HitDetailDialog
     from fuscan.gui.main_window import MainWindow, ScanState, WorkflowStage, _severity_text
+    from fuscan.gui.preview_utils import build_preview_html, extract_keywords, format_size
     from fuscan.gui.worker import ScanWorker
     from fuscan.rules import load_ruleset
     from fuscan.rules.model import (
@@ -1906,92 +1907,80 @@ class TestHitDetailDialogHelpers:
     """详情对话框辅助函数测试。"""
 
     def test_format_size_bytes(self) -> None:
-        from fuscan.gui.detail_dialog import _format_size
 
-        assert _format_size(0) == "0 B"
-        assert _format_size(512) == "512 B"
-        assert _format_size(1023) == "1023 B"
+        assert format_size(0) == "0 B"
+        assert format_size(512) == "512 B"
+        assert format_size(1023) == "1023 B"
 
     def test_format_size_kb(self) -> None:
-        from fuscan.gui.detail_dialog import _format_size
 
-        assert _format_size(1024) == "1.0 KB"
-        assert _format_size(2048) == "2.0 KB"
+        assert format_size(1024) == "1.0 KB"
+        assert format_size(2048) == "2.0 KB"
 
     def test_format_size_mb(self) -> None:
-        from fuscan.gui.detail_dialog import _format_size
 
-        assert _format_size(1024 * 1024) == "1.0 MB"
+        assert format_size(1024 * 1024) == "1.0 MB"
 
     def test_format_size_gb(self) -> None:
-        from fuscan.gui.detail_dialog import _format_size
 
-        assert "GB" in _format_size(1024 * 1024 * 1024)
+        assert "GB" in format_size(1024 * 1024 * 1024)
 
     def test_extract_keywords_contains(self) -> None:
-        from fuscan.gui.detail_dialog import _extract_keywords
         from fuscan.scanner import RuleHit
 
         hits = (
             RuleHit("r1", Severity.WARNING, "包含 'password'"),
             RuleHit("r2", Severity.CRITICAL, "包含 'secret'"),
         )
-        kws = _extract_keywords(hits)
+        kws = extract_keywords(hits)
         assert "password" in kws
         assert "secret" in kws
 
     def test_extract_keywords_regex(self) -> None:
-        from fuscan.gui.detail_dialog import _extract_keywords
         from fuscan.scanner import RuleHit
 
         hits = (RuleHit("r", Severity.CRITICAL, "正则命中: 'AKIA1234'"),)
-        kws = _extract_keywords(hits)
+        kws = extract_keywords(hits)
         assert "AKIA1234" in kws
 
     def test_extract_keywords_dedup(self) -> None:
-        from fuscan.gui.detail_dialog import _extract_keywords
         from fuscan.scanner import RuleHit
 
         hits = (
             RuleHit("r1", Severity.WARNING, "包含 'password'"),
             RuleHit("r2", Severity.WARNING, "包含 'password'"),
         )
-        kws = _extract_keywords(hits)
+        kws = extract_keywords(hits)
         assert kws.count("password") == 1
 
     def test_extract_keywords_no_match(self) -> None:
-        from fuscan.gui.detail_dialog import _extract_keywords
         from fuscan.scanner import RuleHit
 
         hits = (RuleHit("r", Severity.INFO, "完全相等"),)
-        kws = _extract_keywords(hits)
+        kws = extract_keywords(hits)
         assert kws == []
 
     def test_build_preview_html_no_keywords(self) -> None:
-        from fuscan.gui.detail_dialog import _build_preview_html
 
-        result = _build_preview_html("hello world", [])
+        result = build_preview_html("hello world", [])
         assert "hello" in result
         assert "<span" not in result
 
     def test_build_preview_html_with_keywords(self) -> None:
-        from fuscan.gui.detail_dialog import _build_preview_html
 
-        result = _build_preview_html("hello password world", ["password"])
+        result = build_preview_html("hello password world", ["password"])
         assert "span" in result
         assert "background-color: yellow" in result
 
     def test_build_preview_html_escapes_html(self) -> None:
-        from fuscan.gui.detail_dialog import _build_preview_html
 
-        result = _build_preview_html("<script>alert(1)</script>", [])
+        result = build_preview_html("<script>alert(1)</script>", [])
         assert "<script>" not in result
         assert "&lt;script&gt;" in result
 
     def test_build_preview_html_case_insensitive(self) -> None:
-        from fuscan.gui.detail_dialog import _build_preview_html
 
-        result = _build_preview_html("PASSWORD password Password", ["password"])
+        result = build_preview_html("PASSWORD password Password", ["password"])
         # 所有大小的 password 都应被高亮（3 次匹配 = 6 个 span 标签：开+关）
         assert result.count("<span") == 3
 
@@ -3000,55 +2989,50 @@ class TestMatchTextHighlighting:
     """``match_text`` 字段驱动的关键词提取与跨行定位测试。
 
     覆盖数据库连接串密码与 Bearer 令牌的详情定位修复：
-    - ``_extract_keywords`` 优先使用 ``match_text`` 而非从 detail 解析
+    - ``extract_keywords`` 优先使用 ``match_text`` 而非从 detail 解析
     - 特殊字符（反斜杠、单引号）的关键词正确定位
     - 跨行 Bearer 令牌的换行规范化为 ``\\s+`` 后跨段落定位
     """
 
     def test_extract_keywords_prefers_match_text(self) -> None:
         """``_extract_keywords`` 应优先使用 ``match_text`` 而非从 detail 解析。"""
-        from fuscan.gui.detail_dialog import _extract_keywords
         from fuscan.scanner.result import RuleHit
 
         hits = (RuleHit("r", Severity.CRITICAL, "正则命中: 'repr_escape'", match_text="raw_text"),)
-        kws = _extract_keywords(hits)
+        kws = extract_keywords(hits)
         assert kws == ["raw_text"]
 
     def test_extract_keywords_match_text_with_backslash(self) -> None:
         """``match_text`` 含反斜杠时应原样使用，不经过 repr 转义。"""
-        from fuscan.gui.detail_dialog import _extract_keywords
         from fuscan.scanner.result import RuleHit
 
         hits = (RuleHit("r", Severity.WARNING, "正则命中: 'pass\\\\123'", match_text=r"pass\123"),)
-        kws = _extract_keywords(hits)
+        kws = extract_keywords(hits)
         assert kws == [r"pass\123"]
 
     def test_extract_keywords_match_text_with_single_quote(self) -> None:
         """``match_text`` 含单引号时应原样使用。"""
-        from fuscan.gui.detail_dialog import _extract_keywords
         from fuscan.scanner.result import RuleHit
 
         hits = (RuleHit("r", Severity.WARNING, "正则命中", match_text="pa'ss"),)
-        kws = _extract_keywords(hits)
+        kws = extract_keywords(hits)
         assert kws == ["pa'ss"]
 
     def test_extract_keywords_match_text_with_newline(self) -> None:
         """``match_text`` 含换行符时应原样保留，供跨行定位使用。"""
-        from fuscan.gui.detail_dialog import _extract_keywords
         from fuscan.scanner.result import RuleHit
 
         hits = (RuleHit("r", Severity.INFO, "正则命中", match_text="Bearer\n  eyJhbGci"),)
-        kws = _extract_keywords(hits)
+        kws = extract_keywords(hits)
         assert len(kws) == 1
         assert "\n" in kws[0]
 
     def test_extract_keywords_falls_back_to_detail_when_match_text_empty(self) -> None:
         """``match_text`` 为空时应回退到从 detail 中提取单引号内容。"""
-        from fuscan.gui.detail_dialog import _extract_keywords
         from fuscan.scanner.result import RuleHit
 
         hits = (RuleHit("r", Severity.CRITICAL, "包含 'password'", match_text=""),)
-        kws = _extract_keywords(hits)
+        kws = extract_keywords(hits)
         assert kws == ["password"]
 
     def test_dialog_positions_db_connection_with_backslash(self, qapp: QApplication, tmp_path: Path) -> None:
@@ -3871,18 +3855,16 @@ class TestMainWindowHelpers:
     """main_window.py 模块级辅助函数测试。"""
 
     def test_format_size_bytes(self) -> None:
-        """_format_size 应正确格式化字节数。"""
-        from fuscan.gui.main_window import _format_size
+        """format_size 应正确格式化字节数。"""
 
-        assert _format_size(0) == "0 B"
-        assert _format_size(512) == "512 B"
-        assert _format_size(1024) == "1.0 KB"
-        assert _format_size(1024 * 1024) == "1.0 MB"
-        assert _format_size(1024 * 1024 * 1024) == "1.00 GB"
+        assert format_size(0) == "0 B"
+        assert format_size(512) == "512 B"
+        assert format_size(1024) == "1.0 KB"
+        assert format_size(1024 * 1024) == "1.0 MB"
+        assert format_size(1024 * 1024 * 1024) == "1.00 GB"
 
     def test_extract_keywords(self) -> None:
-        """_extract_keywords 应从 detail 中提取单引号包裹的关键词。"""
-        from fuscan.gui.main_window import _extract_keywords
+        """extract_keywords 应从 detail 中提取单引号包裹的关键词。"""
         from fuscan.rules.model import Severity
         from fuscan.scanner.result import RuleHit
 
@@ -3891,12 +3873,11 @@ class TestMainWindowHelpers:
             RuleHit(rule_name="r2", severity=Severity.CRITICAL, detail="正则命中: 'AKIA1234'"),
             RuleHit(rule_name="r3", severity=Severity.INFO, detail="无关键词"),
         ]
-        keywords = _extract_keywords(hits)
+        keywords = extract_keywords(hits)
         assert keywords == ["password", "AKIA1234"]
 
     def test_extract_keywords_dedup(self) -> None:
         """_extract_keywords 应去重相同关键词。"""
-        from fuscan.gui.main_window import _extract_keywords
         from fuscan.rules.model import Severity
         from fuscan.scanner.result import RuleHit
 
@@ -3904,30 +3885,27 @@ class TestMainWindowHelpers:
             RuleHit(rule_name="r1", severity=Severity.WARNING, detail="包含 'secret'"),
             RuleHit(rule_name="r2", severity=Severity.WARNING, detail="包含 'secret'"),
         ]
-        keywords = _extract_keywords(hits)
+        keywords = extract_keywords(hits)
         assert keywords == ["secret"]
 
     def test_build_preview_html_no_keywords(self) -> None:
-        """_build_preview_html 无关键词时只转义不高亮。"""
-        from fuscan.gui.main_window import _build_preview_html
+        """build_preview_html 无关键词时只转义不高亮。"""
 
-        result = _build_preview_html("hello & world", [])
+        result = build_preview_html("hello & world", [])
         assert "hello &amp; world" in result
         assert "<span" not in result
 
     def test_build_preview_html_with_keywords(self) -> None:
         """_build_preview_html 有关键词时应高亮。"""
-        from fuscan.gui.main_window import _build_preview_html
 
-        result = _build_preview_html("hello password world", ["password"])
+        result = build_preview_html("hello password world", ["password"])
         assert "<span" in result
         assert "password" in result
 
     def test_build_preview_html_escapes_html(self) -> None:
-        """_build_preview_html 应先转义再高亮，避免 XSS。"""
-        from fuscan.gui.main_window import _build_preview_html
+        """build_preview_html 应先转义再高亮，避免 XSS。"""
 
-        result = _build_preview_html("<script>alert(1)</script>", ["script"])
+        result = build_preview_html("<script>alert(1)</script>", ["script"])
         # 原始 <script> 标签不应原样出现（已转义）
         assert "<script>" not in result
         assert "&lt;" in result

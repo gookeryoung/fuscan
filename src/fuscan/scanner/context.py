@@ -52,8 +52,8 @@ ContentProvider = Callable[["FileEntry"], str]
 HashingContentProvider = Callable[["FileEntry"], Tuple[str, str]]
 
 
-def default_content_provider(entry: FileEntry, *, max_size: int = 50 * 1024 * 1024) -> str:
-    """默认内容提供器：读取文本文件内容，限制最大 50MB。
+def default_content_provider(entry: FileEntry, *, max_size: int = 100 * 1024 * 1024) -> str:
+    """默认内容提供器：读取文本文件内容，限制最大 100MB。
 
     二进制文件或超大文件返回空字符串，由上层决定是否跳过。
     """

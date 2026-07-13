@@ -57,7 +57,7 @@ def compute_file_hash(path: Path) -> str:
     """计算文件内容的 SHA-256 哈希。
 
     读取失败时抛 ``OSError``，由调用方决定是否跳过。
-    大文件一次性读入内存，与 ``default_extract_content`` 的 50MB 上限对齐。
+    大文件一次性读入内存，与 :func:`default_extract_content_with_hash` 的 100MB 上限对齐。
 
     :param path: 文件路径
     :return: 64 字符十六进制 SHA-256 摘要

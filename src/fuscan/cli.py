@@ -204,6 +204,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
     cache_path = _resolve_cache_path(args.cache_path, config.cache_path)
 
     if use_cache and cache_path is not None:
+        # 仅在启用缓存时加载 SQLite 依赖
         from fuscan.cache import CacheStore, compute_source_files
 
         cache = CacheStore(cache_path)
@@ -266,6 +267,7 @@ def _cmd_rules(args: argparse.Namespace) -> int:
 def _cmd_gui(_args: argparse.Namespace) -> int:
     """执行 gui 子命令：启动图形界面。"""
     try:
+        # 仅在 gui 子命令时加载 PySide
         from fuscan.gui import launch
     except ImportError as exc:
         print(f"GUI 启动失败（PySide 未安装）: {exc}", file=sys.stderr)
@@ -281,6 +283,7 @@ def _cmd_tray(args: argparse.Namespace) -> int:
         except ImportError:  # pragma: no cover
             from PySide6.QtWidgets import QApplication
 
+        # 仅在 tray 子命令时加载 PySide 与 watchdog
         from fuscan.watcher.tray import TrayApp
     except ImportError as exc:
         print(f"托盘启动失败（PySide 未安装）: {exc}", file=sys.stderr)
@@ -299,6 +302,7 @@ def _cmd_tray(args: argparse.Namespace) -> int:
 
     cache = None
     if config.cache_enabled:
+        # 仅在启用缓存时加载 SQLite 依赖
         from fuscan.cache import CacheStore
 
         cache_path = _resolve_cache_path(None, config.cache_path)
@@ -327,6 +331,7 @@ def _resolve_cache_path(arg_path: Path | None, config_path: str | None) -> Path 
         return arg_path
     if config_path:
         return Path(config_path)
+    # 延迟加载避免无缓存场景的 SQLite 依赖
     from fuscan.cache import default_cache_path
 
     return default_cache_path()
@@ -334,6 +339,7 @@ def _resolve_cache_path(arg_path: Path | None, config_path: str | None) -> Path 
 
 def _cmd_cache(args: argparse.Namespace) -> int:
     """执行 cache 子命令：管理扫描结果缓存。"""
+    # 仅在 cache 子命令时加载 SQLite 依赖
     from fuscan.cache import CacheStore, default_cache_path
 
     action: str = args.cache_action

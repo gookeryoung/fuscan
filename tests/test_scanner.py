@@ -1125,15 +1125,15 @@ class TestScannerCache:
         assert file_hash == hashlib.sha256(b"password content").hexdigest()
 
     def test_default_extract_content_with_hash_oversize_returns_empty(self, tmp_path: Path) -> None:
-        """超过 50MB 的文件返回空内容和空哈希。"""
+        """超过 100MB 的文件返回空内容和空哈希。"""
         import hashlib
 
         from fuscan.scanner.context import FileEntry
         from fuscan.scanner.scanner import default_extract_content_with_hash
 
         path = tmp_path / "big.txt"
-        # 写入 50MB+1 字节
-        path.write_bytes(b"x" * (50 * 1024 * 1024 + 1))
+        # 写入 100MB+1 字节
+        path.write_bytes(b"x" * (100 * 1024 * 1024 + 1))
         entry = FileEntry.from_path(path)
         content, file_hash = default_extract_content_with_hash(entry)
         assert content == ""

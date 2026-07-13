@@ -53,7 +53,7 @@ def default_extract_content_with_hash(entry: FileEntry) -> tuple[str, str]:
     :param entry: 文件元信息
     :return: ``(content, file_hash)`` 元组；``file_hash`` 为 64 字符 SHA-256 十六进制摘要
     """
-    if entry.is_dir or entry.size > 50 * 1024 * 1024:
+    if entry.is_dir or entry.size > 100 * 1024 * 1024:
         return "", hashlib.sha256(b"").hexdigest()
     try:
         data = entry.path.read_bytes()

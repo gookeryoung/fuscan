@@ -32,8 +32,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
 try:
-    from PySide2.QtCore import QPoint, QSize, Qt
-    from PySide2.QtGui import QColor, QIcon, QKeySequence, QTextCharFormat, QTextCursor
+    from PySide2.QtCore import QByteArray, QPoint, QSize, Qt
+    from PySide2.QtGui import QColor, QIcon, QKeySequence, QPainter, QPixmap, QTextCharFormat, QTextCursor
+    from PySide2.QtSvg import QSvgRenderer
     from PySide2.QtWidgets import (
         QAbstractButton,
         QAction,
@@ -189,6 +190,47 @@ _ICON_RIGHT = str(_ICONS_DIR / "right.svg")
 _ICON_SCAN = str(_ICONS_DIR / "scan.svg")
 _ICON_SETTINGS = str(_ICONS_DIR / "settings.svg")
 _ICON_STOP = str(_ICONS_DIR / "stop.svg")
+
+# 主题图标渲染分辨率（高分辨率保证 DPI 缩放下清晰）
+_ICON_RENDER_SIZE = 128
+# 移除 SVG 中所有 fill="..." 属性的正则
+_SVG_FILL_RE = re.compile(r'\sfill="[^"]*"')
+
+
+def _load_themed_icon(svg_path: str, color: str) -> QIcon:
+    """加载 SVG 文件并以指定主题色着色后返回 QIcon。
+
+    读取 SVG 文本后:(1) 移除所有 fill 属性消除原色;(2) 在根 <svg> 标签注入
+    ``fill="<color>"`` 作为默认填充色;(3) 通过 QSvgRenderer 渲染到透明 QPixmap
+    后构造 QIcon。主题色变更时需重新调用本函数重建图标。
+
+    :param svg_path: SVG 文件绝对路径
+    :param color: 主题色 hex 字符串（如 ``theme.COLOR_PRIMARY``）
+    :returns: 已着色的 QIcon，渲染失败时回退到原始文件加载
+    """
+    try:
+        text = Path(svg_path).read_text(encoding="utf-8")
+        # 移除所有 fill 属性，确保主题色统一覆盖原图标颜色
+        text = _SVG_FILL_RE.sub("", text)
+        # 在首个 <svg ...> 开标签内注入 fill 属性作为默认填充
+        text = re.sub(
+            r"(<svg\b[^>]*?)(/?>)",
+            rf'\1 fill="{color}"\2',
+            text,
+            count=1,
+        )
+        renderer = QSvgRenderer(QByteArray(text.encode("utf-8")))
+        if not renderer.isValid():
+            return QIcon(svg_path)
+        pixmap = QPixmap(_ICON_RENDER_SIZE, _ICON_RENDER_SIZE)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        renderer.render(painter)
+        painter.end()
+        return QIcon(pixmap)
+    except (OSError, ValueError):
+        logger.warning("主题图标加载失败，回退原始文件: %s", svg_path, exc_info=True)
+        return QIcon(svg_path)
 
 
 def _format_size(size: int) -> str:
@@ -370,7 +412,6 @@ class MainWindow(QMainWindow):
         self._pause_resume_btn = ui.pause_resume_btn
         self._cancel_btn = ui.cancel_btn
         self._rescan_btn = ui.rescan_btn
-        self._scanning_title_label = ui.scanning_title_label
         # 扫描目标区
         self._scan_mode_combo = ui.scan_mode_combo
         self._target_stack = ui.target_stack
@@ -398,7 +439,10 @@ class MainWindow(QMainWindow):
         self._progress = QProgressBar()
         self._progress.setObjectName("progress")
         self._progress.setFixedWidth(200)
-        self._progress.setRange(0, 0)
+        # 初始为确定模式（0/100），避免未启动扫描时显示 indeterminate 动画；
+        # 扫描真正启动时（_start_scan）才切换为 setRange(0, 0)
+        self._progress.setRange(0, 100)
+        self._progress.setValue(0)
         self._progress.setVisible(False)
         self.statusBar().addPermanentWidget(self._progress)
         # 结果页
@@ -496,23 +540,30 @@ class MainWindow(QMainWindow):
         ui.detail_empty_main_layout.addStretch()
 
         # 加载图标并为扫描控制按钮设置
-        self._icon_scan = QIcon(_ICON_SCAN)
-        self._icon_pause = QIcon(_ICON_PAUSE)
-        self._icon_rescan = QIcon(_ICON_RESCAN)
-        self._icon_all_disk = QIcon(_ICON_ALL_DISK)
-        self._icon_disk = QIcon(_ICON_DISK)
-        self._icon_folder = QIcon(_ICON_FOLDER)
-        self._icon_history = QIcon(_ICON_HISTORY)
-        self._icon_load_list = QIcon(_ICON_LOAD_LIST)
-        self._icon_right = QIcon(_ICON_RIGHT)
-        self._icon_hard_disk = QIcon(_ICON_HARD_DISK)
-        self._icon_edit = QIcon(_ICON_EDIT)
-        self._icon_export = QIcon(_ICON_EXPORT)
-        self._icon_export_csv = QIcon(_ICON_EXPORT_CSV)
-        self._icon_export_json = QIcon(_ICON_EXPORT_JSON)
-        self._icon_settings = QIcon(_ICON_SETTINGS)
-        self._icon_about = QIcon(_ICON_ABOUT)
-        self._icon_stop = QIcon(_ICON_STOP)
+        self._icon_scan = _load_themed_icon(_ICON_SCAN, theme.COLOR_PRIMARY)
+        self._icon_pause = _load_themed_icon(_ICON_PAUSE, theme.COLOR_PRIMARY)
+        self._icon_rescan = _load_themed_icon(_ICON_RESCAN, theme.COLOR_PRIMARY)
+        self._icon_all_disk = _load_themed_icon(_ICON_ALL_DISK, theme.COLOR_PRIMARY)
+        self._icon_disk = _load_themed_icon(_ICON_DISK, theme.COLOR_PRIMARY)
+        self._icon_folder = _load_themed_icon(_ICON_FOLDER, theme.COLOR_PRIMARY)
+        self._icon_history = _load_themed_icon(_ICON_HISTORY, theme.COLOR_PRIMARY)
+        self._icon_load_list = _load_themed_icon(_ICON_LOAD_LIST, theme.COLOR_PRIMARY)
+        self._icon_right = _load_themed_icon(_ICON_RIGHT, theme.COLOR_PRIMARY)
+        self._icon_hard_disk = _load_themed_icon(_ICON_HARD_DISK, theme.COLOR_PRIMARY)
+        self._icon_edit = _load_themed_icon(_ICON_EDIT, theme.COLOR_PRIMARY)
+        self._icon_export = _load_themed_icon(_ICON_EXPORT, theme.COLOR_PRIMARY)
+        self._icon_export_csv = _load_themed_icon(_ICON_EXPORT_CSV, theme.COLOR_PRIMARY)
+        self._icon_export_json = _load_themed_icon(_ICON_EXPORT_JSON, theme.COLOR_PRIMARY)
+        self._icon_settings = _load_themed_icon(_ICON_SETTINGS, theme.COLOR_PRIMARY)
+        self._icon_about = _load_themed_icon(_ICON_ABOUT, theme.COLOR_PRIMARY)
+        self._icon_stop = _load_themed_icon(_ICON_STOP, theme.COLOR_PRIMARY)
+        # 深色背景（头部栏/侧边栏）专用白色变体
+        self._icon_scan_on_primary = _load_themed_icon(_ICON_SCAN, theme.COLOR_TEXT_ON_PRIMARY)
+        self._icon_folder_on_primary = _load_themed_icon(_ICON_FOLDER, theme.COLOR_TEXT_ON_PRIMARY)
+        self._icon_history_on_primary = _load_themed_icon(_ICON_HISTORY, theme.COLOR_TEXT_ON_PRIMARY)
+        self._icon_load_list_on_primary = _load_themed_icon(_ICON_LOAD_LIST, theme.COLOR_TEXT_ON_PRIMARY)
+        self._icon_settings_on_primary = _load_themed_icon(_ICON_SETTINGS, theme.COLOR_TEXT_ON_PRIMARY)
+        self._icon_about_on_primary = _load_themed_icon(_ICON_ABOUT, theme.COLOR_TEXT_ON_PRIMARY)
         self._scan_btn.setIcon(self._icon_scan)
         # 扫描模式下拉项图标
         self._scan_mode_combo.setItemIcon(0, self._icon_all_disk)
@@ -534,12 +585,12 @@ class MainWindow(QMainWindow):
         self._cancel_btn.setIcon(self._icon_stop)
         self._pause_resume_btn.setIcon(self._icon_pause)
 
-        # 头部栏按钮图标（rule-12 HeaderBar）
-        self._tab_scan_btn.setIcon(self._icon_scan)
-        self._tab_rules_btn.setIcon(self._icon_load_list)
-        self._tab_history_btn.setIcon(self._icon_history)
-        self._settings_btn.setIcon(self._icon_settings)
-        self._about_btn.setIcon(self._icon_about)
+        # 头部栏按钮图标（深色背景用白色变体，rule-12 HeaderBar）
+        self._tab_scan_btn.setIcon(self._icon_scan_on_primary)
+        self._tab_rules_btn.setIcon(self._icon_load_list_on_primary)
+        self._tab_history_btn.setIcon(self._icon_history_on_primary)
+        self._settings_btn.setIcon(self._icon_settings_on_primary)
+        self._about_btn.setIcon(self._icon_about_on_primary)
 
         # 头部 Tab 按钮互斥组（id 0=扫描 / 1=规则 / 2=历史）
         self._header_button_group = QButtonGroup(self)
@@ -548,12 +599,12 @@ class MainWindow(QMainWindow):
         self._header_button_group.addButton(self._tab_rules_btn, 1)
         self._header_button_group.addButton(self._tab_history_btn, 2)
 
-        # 侧边栏阶段项（配置 / 扫描中 / 结果）
+        # 侧边栏阶段项（深色背景用白色变体；配置 / 扫描中 / 结果）
         self._sidebar.blockSignals(True)
         self._sidebar.clear()
-        self._sidebar.addItem(QListWidgetItem(self._icon_folder, "配置"))
-        self._sidebar.addItem(QListWidgetItem(self._icon_scan, "扫描中"))
-        self._sidebar.addItem(QListWidgetItem(self._icon_history, "结果"))
+        self._sidebar.addItem(QListWidgetItem(self._icon_folder_on_primary, "配置"))
+        self._sidebar.addItem(QListWidgetItem(self._icon_scan_on_primary, "扫描中"))
+        self._sidebar.addItem(QListWidgetItem(self._icon_history_on_primary, "结果"))
         self._sidebar.setCurrentRow(0)
         self._sidebar.blockSignals(False)
 
@@ -728,7 +779,9 @@ class MainWindow(QMainWindow):
         self._view_results_btn.setVisible(is_setup)
         self._view_results_btn.setEnabled(has_report)
 
-        # 状态栏进度条与当前文件标签：仅扫描中可见
+        # 状态栏进度条与当前文件标签：扫描中阶段可见，其余阶段隐藏。
+        # 进度条初始为确定模式（0/100），不会显示 indeterminate 动画；
+        # 仅在 _start_scan 中切换为 indeterminate 模式。
         self._progress.setVisible(is_scanning)
         self._current_file_label.setVisible(is_scanning)
 
@@ -1146,6 +1199,10 @@ class MainWindow(QMainWindow):
         """重置扫描 UI 到空闲状态。"""
         self._scan_state = ScanState.IDLE
         self._pause_resume_btn.setText("暂停扫描")
+        # 重置进度条为确定模式（0/100），避免下次进入扫描页时残留 indeterminate 动画
+        self._progress.setRange(0, 100)
+        self._progress.setValue(0)
+        self._current_file_label.setText("")
         self._cleanup_worker()
 
     def _cleanup_worker(self) -> None:
@@ -1202,13 +1259,18 @@ class MainWindow(QMainWindow):
             return
         if new_dirs == old_dirs:
             return
-        if len(new_dirs) > len(old_dirs) and new_dirs[: len(old_dirs)] == old_dirs:
-            # 增量 append：旧列表是新列表前缀，只添加新增尾部
-            self._skipped_dirs_list.addItems(new_dirs[len(old_dirs) :])
-        else:
-            # 全量重建（滚动截断或内容变化）
-            self._skipped_dirs_list.clear()
-            self._skipped_dirs_list.addItems(new_dirs)
+        # 关闭更新以避免逐项 addItems 触发重绘，批量完成后统一刷新
+        self._skipped_dirs_list.setUpdatesEnabled(False)
+        try:
+            if len(new_dirs) > len(old_dirs) and new_dirs[: len(old_dirs)] == old_dirs:
+                # 增量 append：旧列表是新列表前缀，只添加新增尾部
+                self._skipped_dirs_list.addItems(new_dirs[len(old_dirs) :])
+            else:
+                # 全量重建（滚动截断或内容变化）
+                self._skipped_dirs_list.clear()
+                self._skipped_dirs_list.addItems(new_dirs)
+        finally:
+            self._skipped_dirs_list.setUpdatesEnabled(True)
         self._skipped_dirs_list.scrollToBottom()
         self._last_skipped_dirs = new_dirs
 
@@ -1219,15 +1281,20 @@ class MainWindow(QMainWindow):
             return
         if new_files == old_files:
             return
-        if len(new_files) > len(old_files) and new_files[: len(old_files)] == old_files:
-            # 增量 append：格式 "路径 → 规则名"
-            items = [f"{fp} → {rn}" for fp, rn in new_files[len(old_files) :]]
-            self._matched_files_list.addItems(items)
-        else:
-            # 全量重建
-            self._matched_files_list.clear()
-            items = [f"{fp} → {rn}" for fp, rn in new_files]
-            self._matched_files_list.addItems(items)
+        # 关闭更新以避免逐项 addItems 触发重绘，批量完成后统一刷新
+        self._matched_files_list.setUpdatesEnabled(False)
+        try:
+            if len(new_files) > len(old_files) and new_files[: len(old_files)] == old_files:
+                # 增量 append：格式 "路径 → 规则名"
+                items = [f"{fp} → {rn}" for fp, rn in new_files[len(old_files) :]]
+                self._matched_files_list.addItems(items)
+            else:
+                # 全量重建
+                self._matched_files_list.clear()
+                items = [f"{fp} → {rn}" for fp, rn in new_files]
+                self._matched_files_list.addItems(items)
+        finally:
+            self._matched_files_list.setUpdatesEnabled(True)
         self._matched_files_list.scrollToBottom()
         self._last_matched_files = new_files
 

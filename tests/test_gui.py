@@ -1413,12 +1413,12 @@ class TestSetupActionBar:
         window.close()
 
     def test_scan_btn_qss_uses_primary_blue(self) -> None:
-        """QSS 中 scan_btn 应使用 PRIMARY 蓝 #0366d6，不应保留绿色 #2ea44f。"""
+        """QSS 中 scan_btn 应使用 PRIMARY 蓝 #40a9ff，不应保留绿色 #2ea44f。"""
         from fuscan.gui.app import load_stylesheet
 
         qss = load_stylesheet()
         scan_btn_section = qss[qss.find("QPushButton#scan_btn") :]
-        assert "#0366d6" in scan_btn_section
+        assert "#40a9ff" in scan_btn_section
         assert "#2ea44f" not in qss
 
     def test_view_results_btn_qss_is_outline(self) -> None:
@@ -1429,7 +1429,7 @@ class TestSetupActionBar:
         assert "QPushButton#view_results_btn" in qss
         view_results_section = qss[qss.find("QPushButton#view_results_btn") :]
         assert "background: #ffffff" in view_results_section[:200]
-        assert "border: 1px solid #0366d6" in view_results_section[:200]
+        assert "border: 1px solid #40a9ff" in view_results_section[:200]
 
     def test_view_results_btn_same_size_as_scan_btn(self, qapp: QApplication) -> None:
         """view_results_btn 与 scan_btn 最小尺寸应一致（180x44）。"""

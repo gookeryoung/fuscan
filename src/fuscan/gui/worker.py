@@ -57,6 +57,7 @@ class ScanWorker(QThread):
         ignore_extensions: tuple[str, ...] = (),
         cache: CacheStore | None = None,
         source_files: Mapping[Path, str] | None = None,
+        progress_interval: float = 0.3,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -69,6 +70,7 @@ class ScanWorker(QThread):
         self._ignore_extensions = ignore_extensions
         self._cache: CacheStore | None = cache
         self._source_files: Mapping[Path, str] | None = source_files
+        self._progress_interval: float = progress_interval
         self._scanner: Scanner | None = None
         self._cancel_requested: bool = False
         # 多根路径累计统计
@@ -129,6 +131,7 @@ class ScanWorker(QThread):
                 ignore_extensions=self._ignore_extensions,
                 cache=self._cache,
                 source_files=self._source_files,
+                progress_interval=self._progress_interval,
             )
             if self._cancel_requested:
                 self._scanner.cancel()

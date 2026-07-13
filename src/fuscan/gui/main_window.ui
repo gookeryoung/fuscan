@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1280</width>
-    <height>800</height>
+    <width>1246</width>
+    <height>758</height>
    </rect>
   </property>
   <property name="minimumSize">
@@ -166,7 +166,7 @@
           </widget>
           <widget class="QStackedWidget" name="main_stack">
            <property name="currentIndex">
-            <number>0</number>
+            <number>1</number>
            </property>
            <widget class="QWidget" name="setup_page">
             <layout class="QVBoxLayout" name="setup_layout">
@@ -442,39 +442,17 @@
               <number>12</number>
              </property>
              <property name="leftMargin">
-              <number>48</number>
+              <number>12</number>
              </property>
              <property name="topMargin">
-              <number>48</number>
+              <number>24</number>
              </property>
              <property name="rightMargin">
-              <number>48</number>
+              <number>12</number>
              </property>
              <property name="bottomMargin">
-              <number>48</number>
+              <number>12</number>
              </property>
-             <item>
-              <widget class="QLabel" name="scanning_title_label">
-               <property name="sizePolicy">
-                <sizepolicy hsizetype="Preferred" vsizetype="Minimum">
-                 <horstretch>0</horstretch>
-                 <verstretch>0</verstretch>
-                </sizepolicy>
-               </property>
-               <property name="minimumSize">
-                <size>
-                 <width>0</width>
-                 <height>40</height>
-                </size>
-               </property>
-               <property name="text">
-                <string>扫描进行中</string>
-               </property>
-               <property name="alignment">
-                <set>Qt::AlignCenter</set>
-               </property>
-              </widget>
-             </item>
              <item>
               <widget class="QSplitter" name="lists_splitter">
                <property name="sizePolicy">
@@ -1256,7 +1234,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1280</width>
+     <width>1246</width>
      <height>26</height>
     </rect>
    </property>

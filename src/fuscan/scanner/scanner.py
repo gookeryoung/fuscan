@@ -297,9 +297,9 @@ class Scanner:
         if not force and now - self._last_progress_time < self._progress_interval:
             return
         self._last_progress_time = now
-        # 截断到最近 500 条，避免大扫描量时 ProgressInfo 过大
-        recent_skipped = tuple(self._skipped_dirs[-500:])
-        recent_matched = tuple(self._matched_files[-500:])
+        # 截断到最近 200 条，避免大扫描量时 ProgressInfo 过大且 addItems 阻塞主线程
+        recent_skipped = tuple(self._skipped_dirs[-200:])
+        recent_matched = tuple(self._matched_files[-200:])
         self._on_progress(
             ProgressInfo(
                 current_file=current_file,

@@ -1,0 +1,345 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SettingsDialog</class>
+ <widget class="QDialog" name="SettingsDialog">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>500</width>
+    <height>460</height>
+   </rect>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>500</width>
+    <height>460</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>设置</string>
+  </property>
+  <layout class="QVBoxLayout" name="main_layout">
+   <property name="spacing">
+    <number>12</number>
+   </property>
+   <property name="leftMargin">
+    <number>16</number>
+   </property>
+   <property name="topMargin">
+    <number>16</number>
+   </property>
+   <property name="rightMargin">
+    <number>16</number>
+   </property>
+   <property name="bottomMargin">
+    <number>16</number>
+   </property>
+   <item>
+    <widget class="QTabWidget" name="settings_tab_widget">
+     <widget class="QWidget" name="scan_page">
+      <attribute name="title">
+       <string>扫描设置</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="scan_page_layout">
+       <property name="spacing">
+        <number>12</number>
+       </property>
+       <property name="leftMargin">
+        <number>8</number>
+       </property>
+       <property name="topMargin">
+        <number>8</number>
+       </property>
+       <property name="rightMargin">
+        <number>8</number>
+       </property>
+       <property name="bottomMargin">
+        <number>8</number>
+       </property>
+       <item>
+        <widget class="QGroupBox" name="workers_group">
+         <property name="title">
+          <string>扫描线程</string>
+         </property>
+         <layout class="QFormLayout" name="workers_layout">
+          <property name="spacing">
+           <number>8</number>
+          </property>
+          <item row="0" column="0">
+           <widget class="QLabel" name="max_workers_label">
+            <property name="text">
+             <string>最大工作线程数:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QSpinBox" name="max_workers_spin">
+            <property name="toolTip">
+             <string>扫描时使用的最大线程数</string>
+            </property>
+            <property name="minimum">
+             <number>1</number>
+            </property>
+            <property name="maximum">
+             <number>32</number>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="depth_group">
+         <property name="title">
+          <string>扫描深度</string>
+         </property>
+         <layout class="QFormLayout" name="depth_layout">
+          <property name="spacing">
+           <number>8</number>
+          </property>
+          <item row="0" column="0">
+           <widget class="QLabel" name="max_depth_label">
+            <property name="text">
+             <string>最大扫描深度:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QSpinBox" name="max_depth_spin">
+            <property name="toolTip">
+             <string>0 表示无限制</string>
+            </property>
+            <property name="minimum">
+             <number>0</number>
+            </property>
+            <property name="maximum">
+             <number>999</number>
+            </property>
+            <property name="specialValueText">
+             <string>无限制</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="options_group">
+         <property name="title">
+          <string>扫描选项</string>
+         </property>
+         <layout class="QVBoxLayout" name="options_layout">
+          <property name="spacing">
+           <number>8</number>
+          </property>
+          <item>
+           <widget class="QCheckBox" name="scan_archives_check">
+            <property name="toolTip">
+             <string>扫描压缩文件内的文件内容</string>
+            </property>
+            <property name="text">
+             <string>扫描压缩包（ZIP/RAR）</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="ignore_group">
+         <property name="title">
+          <string>忽略项</string>
+         </property>
+         <layout class="QFormLayout" name="ignore_layout">
+          <property name="spacing">
+           <number>8</number>
+          </property>
+          <item row="0" column="0">
+           <widget class="QLabel" name="ignore_dirs_label">
+            <property name="text">
+             <string>忽略目录:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QPlainTextEdit" name="ignore_dirs_edit">
+            <property name="maximumHeight">
+             <number>80</number>
+            </property>
+            <property name="placeholderText">
+             <string>一行一个目录名（大小写不敏感）
+如：.git
+    node_modules</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="ignore_extensions_label">
+            <property name="text">
+             <string>忽略扩展名:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QPlainTextEdit" name="ignore_extensions_edit">
+            <property name="maximumHeight">
+             <number>80</number>
+            </property>
+            <property name="placeholderText">
+             <string>一行一个扩展名（不含点）
+如：pyc
+    exe</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <spacer name="scan_page_spacer">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="general_page">
+      <attribute name="title">
+       <string>通用设置</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="general_page_layout">
+       <property name="spacing">
+        <number>12</number>
+       </property>
+       <property name="leftMargin">
+        <number>8</number>
+       </property>
+       <property name="topMargin">
+        <number>8</number>
+       </property>
+       <property name="rightMargin">
+        <number>8</number>
+       </property>
+       <property name="bottomMargin">
+        <number>8</number>
+       </property>
+       <item>
+        <widget class="QGroupBox" name="drive_group">
+         <property name="title">
+          <string>盘符扫描</string>
+         </property>
+         <layout class="QVBoxLayout" name="drive_layout">
+          <property name="spacing">
+           <number>8</number>
+          </property>
+          <item>
+           <widget class="QCheckBox" name="include_network_check">
+            <property name="toolTip">
+             <string>全盘扫描和盘符选择时包含网络驱动器</string>
+            </property>
+            <property name="text">
+             <string>包含网络映射盘</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="rules_group">
+         <property name="title">
+          <string>规则设置</string>
+         </property>
+         <layout class="QVBoxLayout" name="rules_layout">
+          <property name="spacing">
+           <number>8</number>
+          </property>
+          <item>
+           <widget class="QCheckBox" name="use_builtin_check">
+            <property name="toolTip">
+             <string>启用随包分发的安全扫描规则</string>
+            </property>
+            <property name="text">
+             <string>启用内置通用规则</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="cache_group">
+         <property name="title">
+          <string>缓存设置</string>
+         </property>
+         <layout class="QFormLayout" name="cache_layout">
+          <property name="spacing">
+           <number>8</number>
+          </property>
+          <item row="0" column="0" colspan="2">
+           <widget class="QCheckBox" name="cache_enabled_check">
+            <property name="toolTip">
+             <string>基于内容哈希跳过未变化文件，提升二次扫描速度；禁用后每次全量扫描</string>
+            </property>
+            <property name="text">
+             <string>启用扫描结果缓存</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="cache_path_label">
+            <property name="text">
+             <string>缓存路径:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="cache_path_edit">
+            <property name="toolTip">
+             <string>自定义缓存数据库路径</string>
+            </property>
+            <property name="placeholderText">
+             <string>留空使用默认路径 ~/.fuscan/cache.db</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <spacer name="general_page_spacer">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="button_box">
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

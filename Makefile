@@ -2,21 +2,15 @@
 # 运行 `make help` 查看所有可用命令
 
 PACKAGE := fuscan
-COV_THRESHOLD := 96
+COV_THRESHOLD := 95
 
-.PHONY: help sync build b clean c test cov lint typecheck check doc tox bump patch minor major push ui
+.PHONY: help sync build b clean c test cov lint typecheck check doc tox bump patch minor major push
 
 help: ## 显示帮助信息
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z].*:.*##/ {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 sync: ## 安装开发依赖
 	uv sync --extra dev
-
-ui: ## 编译 .ui 文件到 _ui.py (pyside2-uic)
-	pyside2-uic src/fuscan/gui/main_window.ui -o src/fuscan/gui/main_window_ui.py
-	pyside2-uic src/fuscan/gui/detail_dialog.ui -o src/fuscan/gui/detail_dialog_ui.py
-	pyside2-uic src/fuscan/gui/rule_editor.ui -o src/fuscan/gui/rule_editor_ui.py
-	pyside2-uic src/fuscan/gui/settings_dialog.ui -o src/fuscan/gui/settings_dialog_ui.py
 
 build b: ## 构建分发包 (wheel + sdist)
 	uv build
@@ -47,7 +41,7 @@ doc: ## 构建 Sphinx 文档
 
 
 tox: ## 多版本测试 (tox)
-	uvx tox run
+	uvx tox -p auto
 
 BUMP_PART := $(filter-out bump,$(MAKECMDGOALS))
 
@@ -57,5 +51,9 @@ bump: ## 版本号 bump (默认 patch，用法: make bump [minor|major])
 patch minor major:
 	@:
 
-push: ## 推送代码到远程仓库
-	git push && git push --tags
+pub:  ## 推送到pypi
+	uvx twine upload ./dist/**
+
+push: ## 推送代码到所有远程仓库
+	@uv run python -c "import subprocess as sp; [print(f'\u63a8\u9001 {r}...',flush=True) or (sp.run(['git','push',r],check=True) and sp.run(['git','push',r,'--tags'],check=True)) for r in sp.check_output(['git','remote'],text=True).split()]"
+

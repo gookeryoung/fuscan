@@ -309,6 +309,9 @@ class TestWalkerErrorHandling:
                     raise OSError("模拟访问失败")
                 return self._entry.is_dir(follow_symlinks=follow_symlinks)
 
+            def stat(self) -> os.stat_result:
+                return self._entry.stat()
+
         def mock_scandir(path: object) -> Iterator[FakeEntry]:
             for entry in original_scandir(Path(str(path))):
                 yield FakeEntry(entry)  # type: ignore[misc]

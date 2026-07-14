@@ -59,17 +59,21 @@ class LeafMatcher(Matcher):
     def __init__(self, spec: LeafMatch) -> None:
         self.spec = spec
         self._compiled: Pattern[str] | None = None
+        # 预编译不区分大小写的 CONTAINS 正则，避免每次匹配重复 re.escape + 编译
+        self._compiled_contains_ci: Pattern[str] | None = None
         if spec.mode == MatchMode.REGEX:
             flags = 0 if spec.case_sensitive else re.IGNORECASE
             try:
                 self._compiled = re.compile(spec.pattern, flags)
             except re.error as exc:
                 raise ValueError(f"正则表达式编译失败 {spec.pattern!r}: {exc}") from exc
+        elif spec.mode == MatchMode.CONTAINS and not spec.case_sensitive and spec.pattern:
+            self._compiled_contains_ci = re.compile(re.escape(spec.pattern), re.IGNORECASE)
 
     @override
     def matches(self, context: MatchContext) -> MatchResult:
         text = self._extract_text(context)
-        result = _apply_leaf(text, self.spec, self._compiled)
+        result = _apply_leaf(text, self.spec, self._compiled, self._compiled_contains_ci)
         if result.matched and not result.target:
             return MatchResult(
                 matched=result.matched,
@@ -191,31 +195,42 @@ class NotMatcherImpl(Matcher):
 
 
 def _apply_regex(text: str, compiled: Pattern[str] | None) -> MatchResult:
-    """正则模式匹配：用 ``finditer`` 收集所有匹配。"""
+    """正则模式匹配：用迭代器收集匹配，避免大文本一次性加载全部 match 对象。"""
     if compiled is None:
         return MatchResult(matched=False, detail="正则未编译")
-    matches = list(compiled.finditer(text))
-    if not matches:
+    iterator = compiled.finditer(text)
+    first_match = next(iterator, None)
+    if first_match is None:
         return MatchResult(matched=False)
-    first = matches[0].group(0)
+    first = first_match.group(0)
+    # 已消耗 1 个匹配，剩余迭代计数；避免 list() 对大文本创建大列表
+    count = 1 + sum(1 for _ in iterator)
     return MatchResult(
         matched=True,
         detail=f"正则命中: {first!r}",
         match_text=first,
-        match_count=len(matches),
+        match_count=count,
     )
 
 
-def _apply_contains(text: str, pattern: str, case_sensitive: bool) -> MatchResult:
+def _apply_contains(
+    text: str,
+    pattern: str,
+    case_sensitive: bool,
+    compiled_ci: Pattern[str] | None,
+) -> MatchResult:
     """CONTAINS 模式：统计非重叠出现次数。
 
-    不区分大小写时用 ``re.finditer`` 避免对整个大文本做 ``lower()`` 创建临时字符串。
+    不区分大小写时用预编译正则 ``compiled_ci`` 的 ``finditer``，
+    避免每次匹配重复 ``re.escape`` 与编译，且避免对整个大文本做 ``lower()``。
     """
     if not pattern:
         return MatchResult(matched=False)
     if case_sensitive:
         count = text.count(pattern)
-    else:
+    elif compiled_ci is not None:
+        count = sum(1 for _ in compiled_ci.finditer(text))
+    else:  # pragma: no cover - 预编译应已覆盖所有非空 pattern
         count = sum(1 for _ in re.finditer(re.escape(pattern), text, re.IGNORECASE))
     if count > 0:
         return MatchResult(matched=True, detail=f"包含 {pattern!r}", match_text=pattern, match_count=count)
@@ -238,19 +253,24 @@ def _apply_equality(text: str, pattern: str, mode: MatchMode, case_sensitive: bo
     return MatchResult(matched=False)
 
 
-def _apply_leaf(text: str, spec: LeafMatch, compiled: Pattern[str] | None) -> MatchResult:
+def _apply_leaf(
+    text: str,
+    spec: LeafMatch,
+    compiled: Pattern[str] | None,
+    compiled_contains_ci: Pattern[str] | None,
+) -> MatchResult:
     """对文本应用叶子匹配规格。
 
-    regex 模式用 ``finditer`` 收集所有匹配，``match_count`` 为匹配条数，
+    regex 模式用 ``finditer`` 迭代器收集所有匹配，``match_count`` 为匹配条数，
     ``match_text`` 取首个匹配文本用于高亮定位；
     contains 模式用 ``count`` 统计非重叠出现次数作为 ``match_count``，
-    不区分大小写时用 ``re.finditer`` 避免对整个大文本做 ``lower()`` 创建临时字符串；
+    不区分大小写时复用预编译正则避免重复编译；
     equals/startswith/endswith 命中时 ``match_count`` 固定为 1。
     """
     if spec.mode == MatchMode.REGEX:
         return _apply_regex(text, compiled)
     if spec.mode == MatchMode.CONTAINS:
-        return _apply_contains(text, spec.pattern, spec.case_sensitive)
+        return _apply_contains(text, spec.pattern, spec.case_sensitive, compiled_contains_ci)
     if spec.mode in (MatchMode.EQUALS, MatchMode.STARTSWITH, MatchMode.ENDSWITH):
         return _apply_equality(text, spec.pattern, spec.mode, spec.case_sensitive)
     return MatchResult(matched=False, detail=f"未知模式 {spec.mode.value}")

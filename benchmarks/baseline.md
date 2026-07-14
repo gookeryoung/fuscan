@@ -1,6 +1,6 @@
 # fuscan 性能基线
 
-> 测量时间：2026-07-14
+> 测量时间：2026-07-14（扫描热路径性能优化后）
 > 测量方式：`uv run pytest -m slow tests/test_benchmark.py` + `uv run python benchmarks/bench_scan.py`
 
 ## 测量环境
@@ -45,17 +45,33 @@
 
 | 场景 | 耗时 (s) | 文件/秒 | MB/秒 | 缓存命中率 |
 |------|--------:|--------:|------:|----------:|
-| S1 单线程无缓存 | 5.04 | 99.2 | 2.5 | - |
-| S2 4 线程无缓存 | 2.91 | 171.6 | 4.3 | - |
-| S3 24 线程无缓存 | 2.96 | 168.9 | 4.2 | - |
-| S4 4 线程+冷缓存 | 3.18 | 157.1 | - | 0% |
-| S5 4 线程+热缓存 | 3.04 | 164.3 | - | 100% |
+| S1 单线程无缓存 | 4.70 | 106.5 | 2.6 | - |
+| S2 4 线程无缓存 | 2.80 | 178.6 | 4.4 | - |
+| S3 24 线程无缓存 | 2.91 | 171.8 | 4.3 | - |
+| S4 4 线程+冷缓存 | 2.98 | 167.6 | - | 0% |
+| S5 4 线程+热缓存 | 2.98 | 167.5 | - | 100% |
 
 **观察**：
+- 单线程较优化前（99.2 → 106.5 files/s）提升约 7.4%，主要来自减少系统调用
+  （DirEntry.stat 复用 scandir 缓存 + 合并 stat/is_dir 判断）
 - 4 线程相比单线程提升约 1.7 倍（受 GIL 和 I/O 竞争限制）
 - 24 线程与 4 线程相当，说明 4 线程已接近最优并发度
 - 热缓存命中率 100%，但吞吐量与无缓存相近，因 CONTENT 规则仍需读取文件计算哈希
 - 缓存收益主要体现在 filename-only 规则（跳过文件 I/O，见 test_cache_throughput ≥ 200 files/s）
+
+## 性能优化记录（iter-37）
+
+扫描热路径三项优化，单线程吞吐量提升约 7%：
+
+1. **walker + context 减少 syscall**：`FileEntry.from_direntry` 复用 `os.scandir` 的
+   `DirEntry.stat()`（Windows 平台缓存 stat 结果），并用 `stat.st_mode` 位运算判断目录，
+   避免原 `path.stat()` + `path.is_dir()` 两次系统调用
+2. **matchers 预编译 CONTAINS 正则**：不区分大小写的 CONTAINS 模式在 `LeafMatcher.__init__`
+   预编译 `re.compile(re.escape(pattern), re.IGNORECASE)`，避免每次匹配重复编译；
+   `_apply_regex` 改用迭代器收集匹配，避免 `list(finditer)` 对大文本创建大列表
+3. **archive scanner 内存版提取**：`_extract_content_from_bytes` 直接调用
+   `extract_content_from_bytes`，删除原 `_extract_via_temp` 写临时文件再读回的逻辑，
+   消除压缩包每个二进制条目的 2 次冗余磁盘 I/O
 
 ## slow 回归断言阈值
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import stat as stat_mod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Tuple
@@ -24,20 +26,50 @@ class FileEntry:
     def from_path(cls, path: Path) -> FileEntry:
         """从路径构造 FileEntry，执行一次 stat 调用。"""
         try:
-            stat = path.stat()
+            st = path.stat()
             return cls(
                 path=path,
                 name=path.name,
-                size=stat.st_size,
-                mtime=stat.st_mtime,
+                size=st.st_size,
+                mtime=st.st_mtime,
                 extension=path.suffix.lower().lstrip("."),
-                is_dir=path.is_dir(),
+                # 复用 stat 结果判断目录，避免再调用 path.is_dir() 产生第二次系统调用
+                is_dir=stat_mod.S_ISDIR(st.st_mode),
             )
         except OSError:
             # 文件不可访问时返回空元信息，由扫描器决定是否跳过
             return cls(
                 path=path,
                 name=path.name,
+                size=0,
+                mtime=0.0,
+                extension=path.suffix.lower().lstrip("."),
+                is_dir=False,
+            )
+
+    @classmethod
+    def from_direntry(cls, entry: os.DirEntry[str]) -> FileEntry:
+        """从 os.scandir 的 DirEntry 构造 FileEntry。
+
+        Windows 平台 DirEntry.stat() 复用 scandir 已获取的文件属性，
+        比 Path.stat() 更高效；同时用 stat 结果判断目录，避免额外系统调用。
+        """
+        try:
+            st = entry.stat()
+            path = Path(entry.path)
+            return cls(
+                path=path,
+                name=entry.name,
+                size=st.st_size,
+                mtime=st.st_mtime,
+                extension=path.suffix.lower().lstrip("."),
+                is_dir=stat_mod.S_ISDIR(st.st_mode),
+            )
+        except OSError:
+            path = Path(entry.path)
+            return cls(
+                path=path,
+                name=entry.name,
                 size=0,
                 mtime=0.0,
                 extension=path.suffix.lower().lstrip("."),

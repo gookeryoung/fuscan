@@ -119,7 +119,8 @@ class FileWalker:
             else:
                 if self._is_ignored_file(name):
                     continue
-                yield FileEntry.from_path(Path(entry.path))
+                # 用 DirEntry 构造，复用 scandir 已缓存的 stat，避免 Path.stat() 重复系统调用
+                yield FileEntry.from_direntry(entry)
 
     def _matches_ignore_path(self, path: Path) -> bool:
         """检查目录相对路径是否匹配 ignore_paths 中的任一 glob 模式。

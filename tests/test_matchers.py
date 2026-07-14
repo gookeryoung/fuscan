@@ -772,14 +772,14 @@ class TestContainsOptimization:
         """
         from fuscan.scanner.matchers import _apply_contains
 
-        result = _apply_contains("some content", "", case_sensitive=False)
+        result = _apply_contains("some content", "", case_sensitive=False, compiled_ci=None)
         assert result.matched is False
 
     def test_contains_empty_pattern_no_match_case_sensitive(self) -> None:
         """空 pattern 区分大小写时也不应匹配。"""
         from fuscan.scanner.matchers import _apply_contains
 
-        result = _apply_contains("some content", "", case_sensitive=True)
+        result = _apply_contains("some content", "", case_sensitive=True, compiled_ci=None)
         assert result.matched is False
 
     def test_contains_regex_special_chars_escaped(self, tmp_path: Path) -> None:

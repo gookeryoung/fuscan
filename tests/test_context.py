@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -36,6 +37,46 @@ class TestFileEntry:
         entry = FileEntry.from_path(tmp_path / "missing")
         assert entry.size == 0
         assert entry.mtime == 0.0
+
+    def test_from_direntry_file(self, tmp_path: Path) -> None:
+        """from_direntry 从 scandir 的 DirEntry 构造 FileEntry。"""
+        path = tmp_path / "data.csv"
+        path.write_text("a,b,c", encoding="utf-8")
+        entries = list(os.scandir(tmp_path))
+        assert len(entries) == 1
+        entry = FileEntry.from_direntry(entries[0])
+        assert entry.path == path
+        assert entry.name == "data.csv"
+        assert entry.size == 5
+        assert entry.extension == "csv"
+        assert entry.is_dir is False
+
+    def test_from_direntry_directory(self, tmp_path: Path) -> None:
+        """from_direntry 正确识别目录。"""
+        (tmp_path / "subdir").mkdir()
+        entries = list(os.scandir(tmp_path))
+        assert len(entries) == 1
+        entry = FileEntry.from_direntry(entries[0])
+        assert entry.is_dir is True
+        assert entry.name == "subdir"
+
+    def test_from_direntry_stat_oserror(self, tmp_path: Path) -> None:
+        """DirEntry.stat() 抛 OSError 时返回空元信息。"""
+        path = tmp_path / "err.txt"
+        path.write_text("x", encoding="utf-8")
+
+        class FakeEntry:
+            def __init__(self) -> None:
+                self.name = "err.txt"
+                self.path = str(path)
+
+            def stat(self) -> os.stat_result:
+                raise OSError("模拟 stat 失败")
+
+        entry = FileEntry.from_direntry(FakeEntry())  # type: ignore[arg-type]
+        assert entry.size == 0
+        assert entry.mtime == 0.0
+        assert entry.is_dir is False
 
 
 class TestMatchContext:

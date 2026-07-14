@@ -1,15 +1,13 @@
 """压缩文件扫描器：对压缩包内条目应用规则集。
 
 读取压缩包（ZIP/RAR）内文件，为每个条目构造合成 FileEntry，
-通过临时文件复用已有提取器链，最终输出 ScanResult 列表。
+通过内存字节直接复用已有提取器链，避免临时文件磁盘 I/O，最终输出 ScanResult 列表。
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
-import os
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,7 +17,7 @@ from fuscan.archive.base import (
     ArchiveReader,
     get_reader,
 )
-from fuscan.extractors import extract_content
+from fuscan.extractors import ExtractorError, extract_content_from_bytes
 from fuscan.rules.model import Rule, RuleSet
 from fuscan.scanner.context import FileEntry, MatchContext
 from fuscan.scanner.matchers import Matcher, build_matcher
@@ -297,24 +295,12 @@ class ArchiveScanner:
         if entry.extension in _TEXT_EXTENSIONS:
             return _decode_bytes(data)
         if _has_extractor(entry.extension):
-            return self._extract_via_temp(data, entry)
-        return _decode_bytes(data)
-
-    def _extract_via_temp(self, data: bytes, entry: ArchiveEntry) -> str:
-        """写入临时文件并调用提取器。"""
-        suffix = f".{entry.extension}" if entry.extension else ""
-        fd, tmp_name = tempfile.mkstemp(suffix=suffix)
-        tmp_path = Path(tmp_name)
-        os.close(fd)
-        try:
-            tmp_path.write_bytes(data)
             try:
-                return extract_content(tmp_path)
-            except Exception:
-                logger.debug("临时文件提取失败: %s", entry.display_path, exc_info=True)
+                return extract_content_from_bytes(data, entry.extension)
+            except (ExtractorError, OSError, ValueError):
+                logger.warning("提取器提取失败，回退纯文本: %s", entry.display_path, exc_info=True)
                 return _decode_bytes(data)
-        finally:
-            _safe_unlink(tmp_path)
+        return _decode_bytes(data)
 
     @staticmethod
     def _close_reader(reader: ArchiveReader) -> None:
@@ -326,14 +312,6 @@ class ArchiveScanner:
             close()
         except Exception:  # pragma: no cover - 关闭异常无需上报
             logger.debug("关闭读取器失败", exc_info=True)
-
-
-def _safe_unlink(path: Path) -> None:
-    """安全删除文件，忽略 Windows 上的文件锁定错误。"""
-    try:
-        path.unlink(missing_ok=True)
-    except PermissionError:
-        logger.debug("临时文件被锁定，跳过删除: %s", path)
 
 
 def _has_extractor(extension: str) -> bool:

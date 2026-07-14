@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from fuscan.rules.model import Severity
@@ -127,3 +128,21 @@ class ScanReport:
     def hits(self) -> tuple[ScanResult, ...]:
         """仅返回有命中的结果。"""
         return tuple(r for r in self.results if r.has_hit)
+
+    @classmethod
+    def to_json(cls, report: ScanReport) -> str:
+        """将扫描报告转换为 JSON 字符串。"""
+        data = {
+            "root": str(report.root),
+            "stats": asdict(report.stats),
+            "hits": [
+                {
+                    "path": str(r.path),
+                    "size": r.size,
+                    "max_severity": r.max_severity.value,
+                    "rules": [asdict(h) for h in r.hits],
+                }
+                for r in report.hits
+            ],
+        }
+        return json.dumps(data, ensure_ascii=False, indent=2)

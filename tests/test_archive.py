@@ -1141,7 +1141,9 @@ class TestArchiveScannerErrorPaths:
         assert len(hits) == 1
         assert "inner.docx" in str(hits[0].path)
 
-    def test_extract_failure_falls_back_to_decode(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_extract_failure_falls_back_to_decode(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """提取器失败时回退到字节解码。"""
         # 创建一个 .docx 条目但让 extract_content_from_bytes 抛异常
         zip_path = tmp_path / "a.zip"

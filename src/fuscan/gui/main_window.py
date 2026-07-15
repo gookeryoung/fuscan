@@ -28,8 +28,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
 try:
-    from PySide2.QtCore import QByteArray, QPoint, QSize, Qt
-    from PySide2.QtGui import QColor, QIcon, QKeySequence, QPainter, QPixmap, QTextCharFormat, QTextCursor
+    from PySide2.QtCore import QByteArray, QPoint, QSize, Qt, QUrl
+    from PySide2.QtGui import (
+        QColor,
+        QDesktopServices,
+        QIcon,
+        QKeySequence,
+        QPainter,
+        QPixmap,
+        QTextCharFormat,
+        QTextCursor,
+    )
     from PySide2.QtSvg import QSvgRenderer
     from PySide2.QtWidgets import (
         QAbstractButton,
@@ -54,7 +63,7 @@ try:
         QWidget,
     )
 except ImportError:  # pragma: no cover
-    from PySide6.QtCore import QPoint, QSize, Qt
+    from PySide6.QtCore import QPoint, QSize, Qt, QUrl
     from PySide6.QtGui import (
         QAction,
         QColor,
@@ -148,6 +157,8 @@ def _apply_severity_to_table_item(item: QTableWidgetItem, severity: Severity) ->
 
 # 图标路径（assets/icons 目录下）
 _ICONS_DIR = Path(__file__).parent.parent / "assets" / "icons"
+# 用户手册 PDF 路径（assets/docs 目录下，随包分发）
+_MANUAL_PDF = Path(__file__).parent.parent / "assets" / "docs" / "fuscan-用户手册.pdf"
 _ICON_ABOUT = str(_ICONS_DIR / "about.svg")
 _ICON_ALL_DISK = str(_ICONS_DIR / "all_disk.svg")
 _ICON_DISK = str(_ICONS_DIR / "disk.svg")
@@ -488,6 +499,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.select_path_action.triggered.connect(self._on_select_path)
         self.scan_action.triggered.connect(self._on_scan)
         self.about_action.triggered.connect(self._on_about)
+        self.manual_action.triggered.connect(self._on_open_manual)
         self.settings_action.triggered.connect(self._on_settings)
 
     def _setup_context_menus(self) -> None:
@@ -1182,6 +1194,30 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             "关于 fuscan",
             f"fuscan {__version__}\n\n通用文件扫描器\n支持多格式与压缩文件扫描\n\n技术栈: Python + PySide",
         )
+
+    def _on_open_manual(self) -> None:
+        """打开用户手册 PDF（随包分发的 assets/docs/fuscan-用户手册.pdf）。
+
+        使用系统默认 PDF 阅读器打开。PDF 缺失时提示用户并通过日志记录，
+        不阻塞主流程。PDF 由 ``scripts/generate_manual_pdf.py`` 生成，
+        版本升级时须重新生成（见 ``.trae/rules/rule-12-文档与版本发布.md``）。
+        """
+        url = QUrl.fromLocalFile(str(_MANUAL_PDF))
+        if not _MANUAL_PDF.exists():
+            logger.warning("用户手册 PDF 不存在: %s", _MANUAL_PDF)
+            QMessageBox.information(
+                self,
+                "提示",
+                f"用户手册 PDF 未找到:\n{_MANUAL_PDF}\n\n请运行 scripts/generate_manual_pdf.py 生成。",
+            )
+            return
+        if not QDesktopServices.openUrl(url):
+            logger.warning("无法打开用户手册 PDF: %s", _MANUAL_PDF)
+            QMessageBox.warning(
+                self,
+                "打开失败",
+                f"无法打开用户手册 PDF，请检查系统是否安装 PDF 阅读器:\n{_MANUAL_PDF}",
+            )
 
     def _on_settings(self) -> None:
         """打开设置对话框，修改后保存配置并应用。"""

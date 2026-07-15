@@ -44,6 +44,8 @@ dev = [
     "prek>=0.4.5",
     "tox-uv>=1.13.1",
     "tox>=4.25.0",
+    "reportlab>=3.6.13,<4.0; python_version < '3.9'",
+    "reportlab>=4.0.0; python_version >= '3.9'",
 ]
 docs = ["myst-parser>=3.0", "sphinx-rtd-theme>=2.0", "sphinx>=7.0"]
 lint = ["pyrefly>=1.1.1", "ruff>=0.8.0"]
@@ -74,6 +76,7 @@ packages = ["src/fuscan"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/fuscan/py.typed" = "fuscan/py.typed"
+"src/fuscan/assets/docs/fuscan-用户手册.pdf" = "fuscan/assets/docs/fuscan-用户手册.pdf"
 
 [dependency-groups]
 dev = ["fuscan[dev,docs]"]
@@ -135,6 +138,7 @@ select = [
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["ARG001", "ARG002", "ARG005", "PLR0913"]
 "**/*_ui.py" = ["F401", "F403", "F405", "UP004", "UP009", "UP025"]
+"scripts/**" = ["PLR0911", "PLR0912", "PLR0915"]
 "src/fuscan/cli.py" = ["PLR0911"]
 "src/fuscan/scanner/matchers.py" = ["PLR0911"]
 "src/fuscan/scanner/scanner.py" = ["PLR0913"]
@@ -142,11 +146,10 @@ select = [
 
 [tool.pyrefly]
 preset           = "strict"
-project-excludes = [".venv/**", "**/*_ui.py"]
+project-excludes = [".venv/**", "**/*_ui.py", "scripts/**"]
 project-includes = ["**/*.ipynb", "**/*.py*"]
 python-version   = "3.8"
 search-path      = ["."]
-
 # PySide2 类型 stub 与实际 API 存在系统性偏差，以下规则在 GUI 代码中产生大量误报
 [tool.pyrefly.errors]
 missing-argument    = "ignore" # stub 方法签名与实际 API 不匹配（如 setSectionResizeMode/addWidget）

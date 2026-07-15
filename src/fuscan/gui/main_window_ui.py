@@ -358,7 +358,7 @@ class Ui_MainWindow:
 
         self.results_list_layout.addWidget(self.filter_bar)
 
-        self.result_tree = QTreeWidget(self.results_list_area)
+        self.result_tree = QTreeView(self.results_list_area)
         self.result_tree.setObjectName("result_tree")
         self.result_tree.setAlternatingRowColors(True)
         self.result_tree.setRootIsDecorated(True)
@@ -756,13 +756,6 @@ class Ui_MainWindow:
         # if QT_CONFIG(tooltip)
         self.group_mode_combo.setToolTip(QCoreApplication.translate("MainWindow", "\u5206\u7ec4\u6a21\u5f0f", None))
         # endif // QT_CONFIG(tooltip)
-        ___qtreewidgetitem = self.result_tree.headerItem()
-        ___qtreewidgetitem.setText(5, QCoreApplication.translate("MainWindow", "\u8be6\u60c5", None))
-        ___qtreewidgetitem.setText(4, QCoreApplication.translate("MainWindow", "\u6761\u6570", None))
-        ___qtreewidgetitem.setText(3, QCoreApplication.translate("MainWindow", "\u547d\u4e2d\u6570", None))
-        ___qtreewidgetitem.setText(2, QCoreApplication.translate("MainWindow", "\u4e25\u91cd\u7b49\u7ea7", None))
-        ___qtreewidgetitem.setText(1, QCoreApplication.translate("MainWindow", "\u89c4\u5219", None))
-        ___qtreewidgetitem.setText(0, QCoreApplication.translate("MainWindow", "\u8def\u5f84", None))
         self.detail_action_title_label.setText(
             QCoreApplication.translate("MainWindow", "\u8be6\u60c5\u64cd\u4f5c:", None)
         )

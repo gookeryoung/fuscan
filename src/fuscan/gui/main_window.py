@@ -12,7 +12,7 @@
 
 - GitHub Desktop 风格：QGroupBox 分组操作区，状态栏承载扫描统计
 - 扫描在 ScanWorker（QThread）中执行，避免阻塞 UI
-- 结果以 QTreeWidget 展示（QAbstractItemView 迁移见后续迭代）
+- 结果以 QTreeView + QStandardItemModel 展示（rule-12 Model/View 架构）
 - 详情区嵌入命中预览（文件信息+命中表+内容预览+命中导航+备注+导出）
 """
 
@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
 try:
-    from PySide2.QtCore import QByteArray, QFile, QPoint, QSize, Qt, QTimer, QUrl, Slot
+    from PySide2.QtCore import QByteArray, QFile, QModelIndex, QPoint, QSize, Qt, QTimer, QUrl, Slot
     from PySide2.QtGui import (
         QColor,
         QDesktopServices,
@@ -36,6 +36,8 @@ try:
         QKeySequence,
         QPainter,
         QPixmap,
+        QStandardItem,
+        QStandardItemModel,
         QTextCharFormat,
         QTextCursor,
     )
@@ -63,13 +65,14 @@ try:
         QWidget,
     )
 except ImportError:  # pragma: no cover
-    from PySide6.QtCore import QPoint, QSize, Qt, QUrl, Slot
+    from PySide6.QtCore import QFile, QPoint, QSize, Qt, QUrl, Slot
     from PySide6.QtGui import (
         QAction,
         QColor,
         QIcon,
         QKeySequence,
         QShortcut,
+        QStandardItemModel,
         QTextCharFormat,
         QTextCursor,
     )
@@ -147,6 +150,40 @@ def _apply_severity_to_tree_item(item: QTreeWidgetItem, column: int, severity: S
     item.setText(column, _severity_text(severity))
     item.setForeground(column, SEVERITY_COLORS[severity])
     item.setBackground(column, _SEVERITY_BACKGROUNDS[severity])
+
+
+def _apply_severity_to_standard_item(item: QStandardItem, severity: Severity) -> None:
+    """为 QStandardItem 设置中文严重等级标签、前景色和背景色（Model/View 架构）。
+
+    :param item: 结果树中代表"严重等级"列的 QStandardItem
+    :param severity: 严重等级枚举值
+    """
+    item.setText(_severity_text(severity))
+    item.setForeground(SEVERITY_COLORS[severity])
+    item.setBackground(_SEVERITY_BACKGROUNDS[severity])
+
+
+def _make_result_row(texts: Sequence[str]) -> list[QStandardItem]:
+    """根据文本序列构造一行不可编辑的 QStandardItem 列表（Model/View 架构）。
+
+    :param texts: 各列文本（顺序对应表头：路径/规则/严重等级/命中数/条数/详情）
+    :returns: QStandardItem 列表，长度与 ``texts`` 相同，每项已禁用编辑
+    """
+    row: list[QStandardItem] = []
+    for text in texts:
+        cell = QStandardItem(text)
+        cell.setEditable(False)
+        row.append(cell)
+    return row
+
+
+def _clear_row_selectable(row: list[QStandardItem]) -> None:
+    """清除一行 QStandardItem 的选择标志（用于分组顶层项不可选）。
+
+    :param row: QStandardItem 列表，每个 cell 将清除 ``Qt.ItemIsSelectable`` 标志
+    """
+    for cell in row:
+        cell.setFlags(cell.flags() & ~Qt.ItemIsSelectable)
 
 
 def _apply_severity_to_table_item(item: QTableWidgetItem, severity: Severity) -> None:
@@ -296,6 +333,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._result_filter_timer.setSingleShot(True)
         self._result_filter_timer.setInterval(300)
         self._result_filter_timer.timeout.connect(self._refresh_result_tree)
+        # 结果树 Model/View 架构（rule-12）：QStandardItemModel 驱动 QTreeView
+        self._result_model: QStandardItemModel = QStandardItemModel()
+        self._result_model.setHorizontalHeaderLabels(["路径", "规则", "严重等级", "命中数", "条数", "详情"])
 
         self._configure_ui()
         self._apply_config()
@@ -342,7 +382,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.statusBar().addPermanentWidget(self.progress)
 
     def _setup_results_tree(self) -> None:
-        """设置结果树列宽（.ui 不支持每列独立宽度）。"""
+        """设置结果树列宽与 Model/View 架构（.ui 不支持每列独立宽度与 setModel）。
+
+        rule-12：result_tree 是大数据量控件，从 QTreeWidget 便利类迁移到
+        QStandardItemModel + QTreeView。模型在 ``__init__`` 中创建并配置表头，
+        此处绑定到视图，触发 QTreeView 创建默认 selectionModel。
+        """
+        self.result_tree.setModel(self._result_model)
         self.result_tree.setColumnWidth(0, 400)
         self.result_tree.setColumnWidth(1, 150)
         self.result_tree.setColumnWidth(2, 80)
@@ -541,9 +587,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # 规则
         self.load_rules_btn.clicked.connect(self._on_load_rules)
         self.edit_rule_btn.clicked.connect(self._on_edit_rules)
-        # 结果树
-        self.result_tree.itemDoubleClicked.connect(self._on_result_double_clicked)
-        self.result_tree.itemSelectionChanged.connect(self._on_result_selection_changed)
+        # 结果树（rule-12 Model/View：doubleClicked 携带 QModelIndex，selectionModel().selectionChanged 双参槽）
+        self.result_tree.doubleClicked.connect(self._on_result_double_clicked)
+        self.result_tree.selectionModel().selectionChanged.connect(self._on_result_selection_changed)
         # 筛选（需求9：路径输入节流 300ms，避免连续按键触发全量重建；combo 切换立即响应）
         self.path_filter_input.textChanged.connect(self._schedule_result_refresh)
         self.rule_filter_combo.currentIndexChanged.connect(self._refresh_result_tree)
@@ -1023,7 +1069,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             QMessageBox.warning(self, "提示", "未选择有效的扫描目标")
             return
 
-        self.result_tree.clear()
+        self.result_tree.model().clear()
+        # model.clear() 会清除表头，需重新设置（QStandardItemModel 与 QTreeWidget.clear() 行为差异）
+        self._result_model.setHorizontalHeaderLabels(["路径", "规则", "严重等级", "命中数", "条数", "详情"])
         self._detail_clear()
         self._scan_state = ScanState.RUNNING
         self.progress.setRange(0, 0)
@@ -1339,16 +1387,27 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     # ----------------------------- 详情区更新 -----------------------------
 
-    def _on_result_selection_changed(self) -> None:
-        """结果树选中变化：更新详情区主体。"""
-        items = self.result_tree.selectedItems()
-        if not items:
+    def _on_result_selection_changed(self, *_args: object) -> None:
+        """结果树选中变化：更新详情区主体。
+
+        ``selectionModel().selectionChanged`` 信号传递 (selected, deselected) 两个
+        QItemSelection 参数，本槽通过 ``*_args`` 忽略，统一从 ``selectedIndexes()``
+        取当前选中项。
+        """
+        indexes = self.result_tree.selectionModel().selectedIndexes()
+        if not indexes:
             self._detail_clear()
             return
-        item = items[0]
-        result = item.data(0, Qt.UserRole)
-        if result is None and item.parent() is not None:
-            result = item.parent().data(0, Qt.UserRole)
+        # selectedIndexes 可能包含多列；取第一个 index 所在行第 0 列 cell
+        # itemFromIndex 对有效 index 必返回 QStandardItem（model.clear 触发的空选已由 not indexes 处理）
+        first = indexes[0]
+        first_col = self._result_model.itemFromIndex(first.sibling(first.row(), 0))
+        result = first_col.data(Qt.UserRole)
+        if result is None:
+            # _populate_flat 中命中规则子行未存 data，向上取父行（文件项）第 0 列
+            parent = first_col.parent()
+            if parent is not None:
+                result = parent.data(Qt.UserRole)
         if result is None:
             # 选中分组顶层项（无文件数据）：保持详情区空态，避免误显示"无命中"
             self._detail_clear()
@@ -1773,10 +1832,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def _refresh_result_tree(self) -> None:
         """根据当前筛选条件与分组模式刷新结果树。"""
-        # 需求9：批量插入期间禁用重绘，避免每个 addTopLevelItem 触发一次重绘
+        # 需求9：批量插入期间禁用重绘，避免每个 appendRow 触发一次重绘
         self.result_tree.setUpdatesEnabled(False)
         try:
-            self.result_tree.clear()
+            self._result_model.clear()
+            # model.clear() 会清除表头，需重新设置（QStandardItemModel 与 QTreeWidget.clear() 行为差异）
+            self._result_model.setHorizontalHeaderLabels(["路径", "规则", "严重等级", "命中数", "条数", "详情"])
             if self._last_report is None:
                 return
 
@@ -1799,39 +1860,25 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def _populate_flat(self, report: ScanReport) -> None:
         """不分组：文件为顶层项，规则命中为子项。"""
         for sr in report.hits:
-            file_item = QTreeWidgetItem(
-                [
-                    str(sr.path),
-                    "",
-                    "",
-                    str(len(sr.hits)),
-                    str(sr.total_match_count),
-                    sr.summary(),
-                ]
+            file_row = _make_result_row(
+                [str(sr.path), "", "", str(len(sr.hits)), str(sr.total_match_count), sr.summary()]
             )
-            file_item.setData(0, Qt.UserRole, sr)
-            _apply_severity_to_tree_item(file_item, 2, sr.max_severity)
-            file_item.setTextAlignment(3, Qt.AlignCenter)
-            file_item.setTextAlignment(4, Qt.AlignCenter)
+            # ScanResult 存在该行第 0 列 UserRole，双击/选中时通过 sibling(row, 0) 取回
+            file_row[0].setData(sr, Qt.UserRole)
+            _apply_severity_to_standard_item(file_row[2], sr.max_severity)
+            file_row[3].setTextAlignment(Qt.AlignCenter)
+            file_row[4].setTextAlignment(Qt.AlignCenter)
             # critical 整行背景高亮，区别于仅 severity 列着色
             if sr.max_severity == Severity.CRITICAL:
-                for col in range(file_item.columnCount()):
-                    file_item.setBackground(col, _SEVERITY_BACKGROUNDS[Severity.CRITICAL])
+                for cell in file_row:
+                    cell.setBackground(_SEVERITY_BACKGROUNDS[Severity.CRITICAL])
             for hit in sr.hits:
-                child = QTreeWidgetItem(
-                    [
-                        "",
-                        hit.rule_name,
-                        "",
-                        "",
-                        str(hit.match_count),
-                        hit.detail,
-                    ]
-                )
-                _apply_severity_to_tree_item(child, 2, hit.severity)
-                child.setTextAlignment(4, Qt.AlignCenter)
-                file_item.addChild(child)
-            self.result_tree.addTopLevelItem(file_item)
+                child_row = _make_result_row(["", hit.rule_name, "", "", str(hit.match_count), hit.detail])
+                _apply_severity_to_standard_item(child_row[2], hit.severity)
+                child_row[4].setTextAlignment(Qt.AlignCenter)
+                # 子行挂载在第 0 列 cell 上（QStandardItem.appendRow 是 cell 方法）
+                file_row[0].appendRow(child_row)
+            self._result_model.appendRow(file_row)
 
     def _populate_grouped_by_rule(self, report: ScanReport) -> None:
         """按规则分组：规则名为顶层项，文件为子项。"""
@@ -1841,36 +1888,20 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             entries = rule_map[rule_name]
             hit_count = len(entries)
             match_sum = sum(h.match_count for _, h in entries)
-            top = QTreeWidgetItem(
-                [
-                    "",
-                    rule_name,
-                    "",
-                    str(hit_count),
-                    str(match_sum),
-                    f"{hit_count} 个文件 / {match_sum} 处匹配",
-                ]
+            top_row = _make_result_row(
+                ["", rule_name, "", str(hit_count), str(match_sum), f"{hit_count} 个文件 / {match_sum} 处匹配"]
             )
             # 分组项不可选中，避免选中后详情区被清空产生"无命中"误解
-            top.setFlags(top.flags() & ~Qt.ItemIsSelectable)
-            top.setTextAlignment(3, Qt.AlignCenter)
-            top.setTextAlignment(4, Qt.AlignCenter)
+            _clear_row_selectable(top_row)
+            top_row[3].setTextAlignment(Qt.AlignCenter)
+            top_row[4].setTextAlignment(Qt.AlignCenter)
             for sr, hit in entries:
-                child = QTreeWidgetItem(
-                    [
-                        str(sr.path),
-                        "",
-                        "",
-                        "",
-                        str(hit.match_count),
-                        hit.detail,
-                    ]
-                )
-                _apply_severity_to_tree_item(child, 2, hit.severity)
-                child.setTextAlignment(4, Qt.AlignCenter)
-                child.setData(0, Qt.UserRole, sr)
-                top.addChild(child)
-            self.result_tree.addTopLevelItem(top)
+                child_row = _make_result_row([str(sr.path), "", "", "", str(hit.match_count), hit.detail])
+                _apply_severity_to_standard_item(child_row[2], hit.severity)
+                child_row[4].setTextAlignment(Qt.AlignCenter)
+                child_row[0].setData(sr, Qt.UserRole)
+                top_row[0].appendRow(child_row)
+            self._result_model.appendRow(top_row)
 
     def _populate_grouped_by_severity(self, report: ScanReport) -> None:
         """按严重等级分组：等级为顶层项，文件为子项。"""
@@ -1880,52 +1911,44 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             entries = severity_map[severity]
             file_count = len(entries)
             match_sum = sum(sr.total_match_count for sr in entries)
-            top = QTreeWidgetItem(
-                [
-                    "",
-                    "",
-                    "",
-                    str(file_count),
-                    str(match_sum),
-                    f"{file_count} 个文件 / {match_sum} 处匹配",
-                ]
+            top_row = _make_result_row(
+                ["", "", "", str(file_count), str(match_sum), f"{file_count} 个文件 / {match_sum} 处匹配"]
             )
-            _apply_severity_to_tree_item(top, 2, severity)
+            _apply_severity_to_standard_item(top_row[2], severity)
             # 分组项不可选中，避免选中后详情区被清空产生"无命中"误解
-            top.setFlags(top.flags() & ~Qt.ItemIsSelectable)
-            top.setTextAlignment(3, Qt.AlignCenter)
-            top.setTextAlignment(4, Qt.AlignCenter)
+            _clear_row_selectable(top_row)
+            top_row[3].setTextAlignment(Qt.AlignCenter)
+            top_row[4].setTextAlignment(Qt.AlignCenter)
             for sr in entries:
-                child = QTreeWidgetItem(
-                    [
-                        str(sr.path),
-                        "",
-                        "",
-                        str(len(sr.hits)),
-                        str(sr.total_match_count),
-                        sr.summary(),
-                    ]
+                child_row = _make_result_row(
+                    [str(sr.path), "", "", str(len(sr.hits)), str(sr.total_match_count), sr.summary()]
                 )
-                _apply_severity_to_tree_item(child, 2, sr.max_severity)
-                child.setData(0, Qt.UserRole, sr)
-                child.setTextAlignment(3, Qt.AlignCenter)
-                child.setTextAlignment(4, Qt.AlignCenter)
+                _apply_severity_to_standard_item(child_row[2], sr.max_severity)
+                child_row[0].setData(sr, Qt.UserRole)
+                child_row[3].setTextAlignment(Qt.AlignCenter)
+                child_row[4].setTextAlignment(Qt.AlignCenter)
                 # critical 整行背景高亮，区别于仅 severity 列着色
                 if sr.max_severity == Severity.CRITICAL:
-                    for col in range(child.columnCount()):
-                        child.setBackground(col, _SEVERITY_BACKGROUNDS[Severity.CRITICAL])
-                top.addChild(child)
-            self.result_tree.addTopLevelItem(top)
+                    for cell in child_row:
+                        cell.setBackground(_SEVERITY_BACKGROUNDS[Severity.CRITICAL])
+                top_row[0].appendRow(child_row)
+            self._result_model.appendRow(top_row)
 
-    def _on_result_double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
+    def _on_result_double_clicked(self, index: QModelIndex) -> None:
         """双击结果项：在新窗口打开详情对话框。
 
-        选中变化已通过 itemSelectionChanged 触发详情区更新，
+        选中变化已通过 selectionModel().selectionChanged 触发详情区更新，
         双击额外弹出独立对话框供放大查看。
         """
-        result = item.data(0, Qt.UserRole)
-        if result is None and item.parent() is not None:
-            result = item.parent().data(0, Qt.UserRole)
+        # ScanResult 存在该行第 0 列；双击可能是任意列，统一通过 sibling(row, 0) 取第 0 列 cell
+        # itemFromIndex 对有效 index 必返回 QStandardItem（model 中所有 cell 均由 _make_result_row 创建）
+        first_col = self._result_model.itemFromIndex(index.sibling(index.row(), 0))
+        result = first_col.data(Qt.UserRole)
+        if result is None:
+            # _populate_flat 中命中规则子行未存 data，向上取父行（文件项）第 0 列
+            parent = first_col.parent()
+            if parent is not None:
+                result = parent.data(Qt.UserRole)
         if result is None:
             return
         dialog = HitDetailDialog(result, self)

@@ -729,7 +729,7 @@
                   </widget>
                  </item>
                  <item>
-                  <widget class="QTreeWidget" name="result_tree">
+                  <widget class="QTreeView" name="result_tree">
                    <property name="alternatingRowColors">
                     <bool>true</bool>
                    </property>
@@ -739,36 +739,6 @@
                    <property name="sortingEnabled">
                     <bool>true</bool>
                    </property>
-                   <column>
-                    <property name="text">
-                     <string>路径</string>
-                    </property>
-                   </column>
-                   <column>
-                    <property name="text">
-                     <string>规则</string>
-                    </property>
-                   </column>
-                   <column>
-                    <property name="text">
-                     <string>严重等级</string>
-                    </property>
-                   </column>
-                   <column>
-                    <property name="text">
-                     <string>命中数</string>
-                    </property>
-                   </column>
-                   <column>
-                    <property name="text">
-                     <string>条数</string>
-                    </property>
-                   </column>
-                   <column>
-                    <property name="text">
-                     <string>详情</string>
-                    </property>
-                   </column>
                   </widget>
                  </item>
                 </layout>

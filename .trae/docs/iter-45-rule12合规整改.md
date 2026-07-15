@@ -2,7 +2,7 @@
 
 ## 需求清单
 
-参见 `.trae/req/req-10-rule12合规整改.md`，共 4 项（3 项实施 + 1 项评估延迟）。
+参见 `.trae/req/req-10-rule12合规整改.md`，共 4 项全部实施。
 
 ## 迭代目标
 
@@ -10,7 +10,7 @@
 1. 跨线程槽加 `@Slot()` 装饰
 2. 内联 QSS 提到 theme 令牌
 3. SVG 图标纳入 `.qrc` 资源系统
-4. Model/View 迁移评估
+4. `result_tree` 从 QTreeWidget 迁移到 QStandardItemModel + QTreeView（Model/View 架构）
 
 ## 改动文件清单
 
@@ -21,11 +21,13 @@
 | `src/fuscan/gui/rule_editor.ui` | objectName `editor`→`rule_editor`，删除内联 `styleSheet` |
 | `src/fuscan/gui/rule_editor_ui.py` | 恢复基线风格（双兼容 try/except、无 u 前缀、无 `(object)`），保留 `self.rule_editor` |
 | `src/fuscan/gui/rule_editor.py` | `self.editor`→`self.rule_editor`（7 处） |
-| `src/fuscan/gui/main_window.py` | 加 `Slot`/`QFile` 导入（双兼容），4 槽加 `@Slot` 装饰，19 个图标路径改 `:/` 前缀，新增 `_read_svg_text` 支持 `QFile` 读取，import `resources_rc` 注册资源 |
+| `src/fuscan/gui/main_window.py` | P1：加 `Slot`/`QFile` 导入（双兼容），4 槽加 `@Slot` 装饰，19 个图标路径改 `:/` 前缀，新增 `_read_svg_text` 支持 `QFile` 读取，import `resources_rc` 注册资源；P3：`QTreeWidget`→`QTreeView`+`QStandardItemModel`，新增 `_apply_severity_to_standard_item`/`_make_result_row`/`_clear_row_selectable` 辅助函数，重写 3 种分组 populate 与双击/选中事件处理 |
+| `src/fuscan/gui/main_window.ui` | `result_tree` 从 `QTreeWidget` 改为 `QTreeView`，删除 6 个 `<column>` 定义 |
+| `src/fuscan/gui/main_window_ui.py` | 定向编辑：`QTreeWidget`→`QTreeView`，删除 `result_tree.headerItem()` 段（表头改由 model 管理） |
 | `src/fuscan/gui/detail_dialog.py` | `_ICON_TARGET` 改 `:/icons/target.svg`，移除未用的 `Path` 导入 |
 | `src/fuscan/gui/resources_rc.py` | 新增：pyside2-rcc 编译产物 + 双兼容补丁 |
 | `src/fuscan/assets/resources.qrc` | 新增：19 个 SVG 图标资源声明 |
-| `tests/test_gui.py` | `dialog.editor`→`dialog.rule_editor`（13 处） |
+| `tests/test_gui.py` | P2：`dialog.editor`→`dialog.rule_editor`（13 处）；P3：78 处 `result_tree` 测试 API 迁移（`topLevelItemCount`→`rowCount`、`topLevelItem`→`item`、`setCurrentItem`→`setCurrentIndex` 等），新增 2 个测试覆盖 parent 查找与无 data 顶层项路径 |
 
 ## 关键决策与依据
 
@@ -44,37 +46,54 @@
 - **资源注册**：`main_window.py` 顶部 `from fuscan.gui import resources_rc  # noqa: F401`，import 时自动调 `qInitResources()` 注册。测试中 `import MainWindow` 也会触发注册。
 - **打包**：`resources_rc.py` 在 `src/fuscan/gui/` 下，hatchling 默认包含；SVG 原文件保留在 `assets/icons/` 供 rcc 重新编译，不影响运行时（资源已嵌入二进制）。
 
-### P3：Model/View 迁移评估（延迟）
+### P3：result_tree Model/View 迁移
 
-- **评估 7 个 widget**：仅 `result_tree`（扫描结果，可达上千条）符合 rule-12"大数据量"。其余（rules_tree/history_list/matched_files_list/skipped_dirs_list/rules_file_list/sidebar）数据量小，无迁移收益。
-- **延迟依据**：`result_tree` 当前已有 `setUpdatesEnabled(False)` + 300ms 防抖节流（iter-44），典型扫描量下性能充足。完整迁移需：改 `.ui`（QTreeWidget→QTreeView）、重写 3 种分组模式（flat/by-rule/by-severity）、severity 着色、排序、筛选，500+ 行重构，高回归风险。
-- **rule-12 用词**："优先用"非"必须用"，rule-01 要求"避免过度工程化"。延迟至万级文件性能瓶颈再迁移。
+- **迁移范围**：仅 `result_tree`（扫描结果树，可达上千条）。`rules_tree` 等其余控件数据量小，保留 `QTreeWidget` 便利类无迁移收益。
+- **架构**：`QTreeWidget` → `QTreeView` + `QStandardItemModel`。模型在 `__init__` 创建并配置 6 列表头，`_setup_results_tree` 中 `setModel` 绑定到视图。
+- **API 映射**：
+  - `QTreeWidgetItem([col0, col1, ...])` → `list[QStandardItem]`（`_make_result_row` 构造，默认不可编辑）
+  - `item.setData(col, role, val)` → `cell.setData(val, role)`（单列无 col 参数）
+  - `item.addChild(child)` → `parent_cell.appendRow(child_row)`
+  - `tree.addTopLevelItem(item)` → `model.appendRow(row_list)`
+  - `tree.clear()` → `model.clear()` + 重设 `setHorizontalHeaderLabels`（model.clear 清表头）
+  - `tree.selectedItems()` → `tree.selectionModel().selectedIndexes()`
+  - `itemDoubleClicked(QTreeWidgetItem, int)` → `doubleClicked(QModelIndex)`
+  - `itemSelectionChanged()` → `selectionModel().selectionChanged(...)`（槽用 `*_args` 忽略参数，ruff ARG002 豁免）
+- **3 个辅助函数**：`_apply_severity_to_standard_item`（severity 列着色）、`_make_result_row`（构造不可编辑行）、`_clear_row_selectable`（分组顶层项清除 `ItemIsSelectable` 标志，简化原 `_set_row_flags` 双分支为单分支）。
+- **3 种分组模式**：`_populate_flat`（文件→命中子行）、`_populate_grouped_by_rule`（规则→文件子行）、`_populate_grouped_by_severity`（等级→文件子行）全部重写为 Model/View API。`ScanResult` 存于第 0 列 `Qt.UserRole`。
+- **事件处理**：`_on_result_double_clicked(QModelIndex)` 通过 `sibling(row, 0)` 取第 0 列 cell，子行无 data 时向上取父行；`_on_result_selection_changed(*_args)` 从 `selectedIndexes()` 取选中项，同样支持父行查找。
+- **死代码移除**：`itemFromIndex` 对有效 index 必返回 QStandardItem（model 中所有 cell 由 `_make_result_row` 创建），移除 `_on_result_double_clicked` 与 `_on_result_selection_changed` 中的防御性 `if first_col is None` 检查；`_set_row_flags` 的 `selectable=True` 分支从未使用，简化为 `_clear_row_selectable` 单分支。
+- **.ui / _ui.py**：`QTreeWidget`→`QTreeView`，删除 `<column>` 定义与 `headerItem()` 段（表头由 model `setHorizontalHeaderLabels` 管理）。`_ui.py` 编辑后易被 IDE 自动重新生成，需 `git checkout HEAD --` 恢复后定向修改。
 
 ## 代码实现情况
 
 - P1：7 文件改动，@Slot 装饰 4 槽 + FONT_FAMILY_MONO 令牌 + objectName 对齐 + _ui.py 恢复基线
 - P2：4 文件改动 + 2 新增文件，.qrc 编译 + 双兼容补丁 + 图标路径迁移 + _read_svg_text 辅助
-- P3：仅评估，无代码改动
+- P3：4 文件改动，QTreeWidget→QTreeView+QStandardItemModel，3 种分组 populate 重写，事件处理迁移，78 处测试 API 迁移 + 2 个新测试
 
 ## 整合优化情况
 
 - `_read_svg_text` 从 `_load_themed_icon` 提取为独立函数，支持 `:/` 与磁盘路径双模式
 - `detail_dialog.py` 移除未用的 `Path` 导入（图标路径改 `:/` 后不再需要）
+- P3 移除 `_set_row_flags` 未使用的 `selectable=True` 分支，简化为 `_clear_row_selectable`
+- P3 移除 `_on_result_double_clicked`/`_on_result_selection_changed` 中不可达的 `itemFromIndex is None` 防御性检查
 
 ## 测试验证结果
 
 | 门禁 | 结果 |
 |------|------|
-| ruff check | 605 errors（基线一致） |
+| ruff check | 599 errors（基线 605，-6） |
 | ruff format | 80 files already formatted |
-| pyrefly | 814 errors（812 基线 + 2 PySide2 stub：`QFile.open` overload + `PySide6` import） |
-| pytest | 1306 passed, 16 deselected, coverage 96.00% ≥ 95% |
+| pyrefly | 784 errors（基线 814，-30；+8 `appendRow` PySide2 stub 限制，按惯例接受） |
+| pytest | 1308 passed, 0 failed, 16 deselected, coverage 96.05% ≥ 95%（基线 1304 passed/2 failed/96.10%） |
+
+覆盖率说明：main_window.py missed 从基线 64 降至 62（实际改善），总覆盖率 96.05% vs 基线 96.10% 差 0.05%，源于 P3 新增代码（+25 stmts）稀释百分比。基线 2 个 failing 测试（`test_detail_hits_table_*`）现已全部通过。
 
 ## 遗留事项
 
-- P3（Model/View 迁移）延迟，待万级文件性能瓶颈再实施
 - `resources_rc.py` 重新编译需 `pyside2-rcc`（在 `.venv\Scripts\` 中），SVG 变更后须重新编译并提交
+- pyrefly `appendRow` stub 限制（8 处）为 PySide2 已知问题，按项目惯例接受
 
 ## 下一轮计划
 
-无明确下一轮。rule-12 合规整改已闭环（3 项实施 + 1 项评估延迟）。
+无明确下一轮。rule-12 合规整改 4 项全部实施闭环。

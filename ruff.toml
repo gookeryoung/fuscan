@@ -1,4 +1,4 @@
-extend-exclude = ["template", "docs"]
+extend-exclude = ["template", "docs", "*_ui.py"]
 line-length    = 120
 target-version = "py38"
 
@@ -6,6 +6,8 @@ target-version = "py38"
 ignore = [
     "E501",    # line too long (handled by formatter)
     "PLC0415", # import should be at top-level (intentional for lazy imports)
+    "PLR0911", # too many return statements (intentional for CLI dispatch)
+    "PLR0913", # too many arguments (intentional for Scanner/Worker core APIs)
     "PLR0915", # too many statements (intentional for complex methods)
     "PLR2004", # magic value comparison
     "RUF001",  # ambiguous unicode characters in string
@@ -33,4 +35,4 @@ select = [
 ]
 
 [lint.per-file-ignores]
-"**/tests/**" = ["ARG001", "ARG002"]
+"**/tests/**" = ["ARG001", "ARG002", "ARG005", "PLR0913"]

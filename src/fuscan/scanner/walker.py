@@ -80,7 +80,7 @@ class FileWalker:
     - 默认不跟随符号链接，避免环
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         ignore_dirs: tuple[str, ...] = (),
         ignore_extensions: tuple[str, ...] = (),

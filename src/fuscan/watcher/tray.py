@@ -59,7 +59,7 @@ class TrayApp(QObject):
     scan_completed = Signal(object)
     file_hit = Signal(str, int)
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         ruleset: RuleSet,
         watch_paths: list[Path] | None = None,

@@ -35,7 +35,7 @@ class IncrementalScanner:
     3. ``save_state``/``load_state`` 为空操作，缓存由 SQLite 持久化
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         ruleset: RuleSet,
         max_depth: int | None = None,

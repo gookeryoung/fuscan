@@ -61,10 +61,13 @@ def _is_network_drive(drive: Path) -> bool:
     """
     import ctypes
 
+    windll = getattr(ctypes, "windll", None)
+    if windll is None:
+        return False
     DRIVE_REMOTE = 4
     drive_str = str(drive)
     try:
-        drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive_str)
+        drive_type = windll.kernel32.GetDriveTypeW(drive_str)
     except OSError:
         return False
     return drive_type == DRIVE_REMOTE

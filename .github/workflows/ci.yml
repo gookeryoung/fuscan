@@ -28,10 +28,10 @@ jobs:
         run: uv sync --frozen --extra lint
 
       - name: Ruff check
-        run: uv run ruff check src tests
+        run: uv run ruff check src tests benchmarks
 
       - name: Ruff format check
-        run: uv run ruff format --check src tests
+        run: uv run ruff format --check src tests benchmarks
 
       - name: Pyrefly check
         # 规避 ubuntu 3.8 ctypes 查询 libpython 失败：

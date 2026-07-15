@@ -89,7 +89,7 @@ class ScenarioResult:
         return self.cache_hits / self.cache_total if self.cache_total > 0 else 0.0
 
 
-def run_scenario(  # noqa: PLR0913
+def run_scenario(
     label: str,
     root: Path,
     total_bytes: int,

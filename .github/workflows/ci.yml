@@ -24,11 +24,8 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
-      - name: Set up Python 3.11
-        run: uv python install 3.11
-
       - name: Sync dependencies
-        run: uv sync --frozen --extra lint --python 3.11
+        run: uv sync --frozen --extra lint
 
       - name: Ruff check
         run: uv run ruff check src tests
@@ -37,7 +34,9 @@ jobs:
         run: uv run ruff format --check src tests
 
       - name: Pyrefly check
-        run: uv run pyrefly check
+        run: |
+          SITE_PACKAGES=$(uv run python -c "import sysconfig; print(sysconfig.get_path('purelib'))")
+          uv run pyrefly check --site-package-path "$SITE_PACKAGES" --python-platform linux --skip-interpreter-query
 
   test:
     name: Test (Python 3.8 & 3.14)

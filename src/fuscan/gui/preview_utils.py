@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover
 
 from fuscan import theme
 from fuscan.rules.model import Severity
-from fuscan.scanner.result import RuleHit
+from fuscan.scanner.result import RuleHit, format_size
 
 __all__ = [
     "HIGHLIGHT_STYLE",
@@ -65,17 +65,6 @@ SEVERITY_COLORS: dict[Severity, QColor] = {
     Severity.WARNING: QColor(theme.COLOR_WARNING),
     Severity.INFO: QColor(theme.COLOR_INFO),
 }
-
-
-def format_size(size: int) -> str:
-    """将字节数格式化为人类可读字符串。"""
-    if size < 1024:
-        return f"{size} B"
-    if size < 1024 * 1024:
-        return f"{size / 1024:.1f} KB"
-    if size < 1024 * 1024 * 1024:
-        return f"{size / (1024 * 1024):.1f} MB"
-    return f"{size / (1024 * 1024 * 1024):.2f} GB"
 
 
 def extract_keywords(hits: Sequence[RuleHit]) -> list[str]:

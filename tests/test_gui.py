@@ -157,7 +157,7 @@ rules:
         window = MainWindow()
         window._last_report = report
         out_path = tmp_path / "out.csv"
-        content = MainWindow._format_report(report, "csv")
+        content = report.to_format("csv")
         out_path.write_text(content, encoding="utf-8")
         assert out_path.exists()
         text = out_path.read_text(encoding="utf-8")
@@ -176,7 +176,7 @@ rules:
         window = MainWindow()
         window._last_report = report
         out_path = tmp_path / "out.json"
-        content = MainWindow._format_report(report, "json")
+        content = report.to_format("json")
         out_path.write_text(content, encoding="utf-8")
         import json
 

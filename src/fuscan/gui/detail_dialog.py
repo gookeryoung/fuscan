@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-import datetime
-import html
 import logging
 import re
 from typing import Sequence
@@ -44,7 +42,6 @@ from fuscan.gui.preview_utils import (
     build_preview_html,
     compile_keyword_pattern,
     extract_keywords,
-    format_size,
 )
 from fuscan.scanner.result import RuleHit, ScanResult
 
@@ -100,22 +97,9 @@ class HitDetailDialog(QDialog, Ui_HitDetailDialog):
 
     def _populate_file_info(self) -> None:
         """填充文件元信息。"""
-        path = self._result.path
-        size = self._result.size
-        try:
-            mtime = datetime.datetime.fromtimestamp(path.stat().st_mtime)
-            mtime_str = mtime.strftime("%Y-%m-%d %H:%M:%S")
-        except OSError:
-            mtime_str = "无法获取"
-
-        info_html = (
-            f"<b>文件路径:</b> {html.escape(str(path))}<br>"
-            f"<b>文件大小:</b> {format_size(size)} ({size} 字节)<br>"
-            f"<b>修改时间:</b> {html.escape(mtime_str)}<br>"
-            f"<b>命中规则数:</b> {len(self._result.hits)} | <b>匹配条数:</b> {self._result.total_match_count}"
-            f" | <b>可切换位置:</b> {len(self._hit_positions)}"
-        )
-        self.hit_info_label.setText(info_html)
+        # 文件信息 HTML 由 ScanResult.file_info_html 构造，GUI 仅追加自身状态字段
+        extra = f"<b>可切换位置:</b> {len(self._hit_positions)}"
+        self.hit_info_label.setText(self._result.file_info_html(extra=extra))
 
     def _populate_hits_table(self) -> None:
         """填充命中规则表。"""

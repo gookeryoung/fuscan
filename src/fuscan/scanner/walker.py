@@ -32,14 +32,29 @@ def list_drives(include_network: bool = False) -> list[Path]:
 
 
 def _list_windows_drives() -> list[Path]:
-    """枚举 Windows 所有存在的盘符。"""
-    return [Path(f"{letter}:\\") for letter in string.ascii_uppercase if Path(f"{letter}:\\").exists()]
+    """枚举 Windows 所有可访问的盘符。
+
+    使用 ``Path.exists()`` 探测盘符；对未就绪的光驱/虚拟盘等会抛
+    ``OSError [WinError 1]`` 的盘符视为不可用并跳过。
+    """
+    drives: list[Path] = []
+    for letter in string.ascii_uppercase:
+        path = Path(f"{letter}:\\")
+        try:
+            if not path.exists():
+                continue
+        except OSError:
+            # 未就绪的光驱/特殊文件系统：函数不正确(1)、设备未就绪(21) 等
+            continue
+        drives.append(path)
+    return drives
 
 
 def _is_network_drive(drive: Path) -> bool:
     """判断盘符是否为网络映射盘。
 
     使用 Windows API GetDriveTypeW 检测驱动器类型，DRIVE_REMOTE=4 表示网络驱动器。
+    探测失败时返回 False（视为本地盘，避免误排除可用盘符）。
 
     :param drive: 盘符路径（如 ``C:\\``）
     :return: True 表示网络映射盘
@@ -48,7 +63,10 @@ def _is_network_drive(drive: Path) -> bool:
 
     DRIVE_REMOTE = 4
     drive_str = str(drive)
-    drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive_str)
+    try:
+        drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive_str)
+    except OSError:
+        return False
     return drive_type == DRIVE_REMOTE
 
 

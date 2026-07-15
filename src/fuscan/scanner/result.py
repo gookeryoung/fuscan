@@ -1,14 +1,20 @@
 """扫描结果数据结构。
 
 除 ``MatchResult``/``ProgressInfo`` 外，``ScanResult``/``ScanStats``/``ScanReport``
-均提供数据层方法（``rule_names``/``filter``/``group_by_*``/``to_*``/``summary``），
-将"如何序列化、如何筛选、如何分组"下沉到 dataclass，CLI/GUI 仅做展示，
+均提供数据层方法（``rule_names``/``filter``/``group_by_*``/``to_*``/``summary``/
+``file_info_html``/``notification_message``/``to_format``），将"如何序列化、如何
+筛选、如何分组、如何格式化展示文本"下沉到 dataclass，CLI/GUI 仅做展示，
 避免展示层重复实现相同逻辑。
+
+模块级 ``format_size`` 为字节数人类可读格式化，原属 GUI 层，提升至数据层后
+供 dataclass 与 GUI 共享。
 """
 
 from __future__ import annotations
 
 import csv
+import datetime
+import html
 import io
 import json
 from dataclasses import asdict, dataclass, field
@@ -16,7 +22,26 @@ from pathlib import Path
 
 from fuscan.rules.model import Severity
 
-__all__ = ["MatchResult", "ProgressInfo", "RuleHit", "ScanReport", "ScanResult", "ScanStats"]
+__all__ = [
+    "MatchResult",
+    "ProgressInfo",
+    "RuleHit",
+    "ScanReport",
+    "ScanResult",
+    "ScanStats",
+    "format_size",
+]
+
+
+def format_size(size: int) -> str:
+    """将字节数格式化为人类可读字符串（B/KB/MB/GB）。"""
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    if size < 1024 * 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} MB"
+    return f"{size / (1024 * 1024 * 1024):.2f} GB"
 
 
 @dataclass(frozen=True)
@@ -55,6 +80,19 @@ class ProgressInfo:
     skipped_dirs: tuple[str, ...] = ()
     # 命中的 (文件路径, 规则名) 列表（最近 500 条）
     matched_files: tuple[tuple[str, str], ...] = ()
+
+    def summary(self) -> str:
+        """返回实时进度状态栏文本（含速度计算）。
+
+        与 ``ScanStats.summary`` 不同，此处不含 ``total_files`` 与 ``cancelled``
+        前缀，仅展示当前已扫描的实时指标，供 GUI 进度回调直接调用。
+        """
+        speed = self.scanned / self.elapsed if self.elapsed > 0 else 0.0
+        return (
+            f"已扫描 {self.scanned} | 跳过 {self.skipped} | "
+            f"命中 {self.matched} | 条数 {self.matches} | 错误 {self.errors} | "
+            f"已用 {self.elapsed:.1f}s | 速度 {speed:.0f} 文件/s"
+        )
 
 
 @dataclass(frozen=True)
@@ -123,6 +161,31 @@ class ScanResult:
         """返回简洁摘要：``N 条规则 / M 处匹配``。"""
         return f"{len(self.hits)} 条规则 / {self.total_match_count} 处匹配"
 
+    def file_info_html(self, extra: str = "") -> str:
+        """返回文件元信息 HTML 片段（供 GUI 详情区/对话框共用）。
+
+        含文件路径、大小、修改时间、命中规则数、匹配条数。
+        ``extra`` 用于 GUI 追加自身状态相关的字段（如"可切换位置"数），
+        为已格式化的 HTML 片段，将以 `` | `` 分隔附加在末尾。
+
+        修改时间通过 ``Path.stat`` 获取，失败时显示"无法获取"。
+        """
+        try:
+            mtime = datetime.datetime.fromtimestamp(self.path.stat().st_mtime)
+            mtime_str = mtime.strftime("%Y-%m-%d %H:%M:%S")
+        except OSError:
+            mtime_str = "无法获取"
+
+        info = (
+            f"<b>文件路径:</b> {html.escape(str(self.path))}<br>"
+            f"<b>文件大小:</b> {format_size(self.size)} ({self.size} 字节)<br>"
+            f"<b>修改时间:</b> {html.escape(mtime_str)}<br>"
+            f"<b>命中规则数:</b> {len(self.hits)} | <b>匹配条数:</b> {self.total_match_count}"
+        )
+        if extra:
+            info += f" | {extra}"
+        return info
+
 
 @dataclass(frozen=True)
 class ScanStats:
@@ -185,6 +248,26 @@ class ScanReport:
     def summary(self) -> str:
         """返回状态栏摘要文本（自动识别 ``cancelled`` 标志）。"""
         return self.stats.summary(cancelled=self.cancelled)
+
+    def notification_message(self) -> str:
+        """返回托盘/通知消息正文。
+
+        形如 ``发现 3 个文件命中规则，共 7 处匹配``；无命中时返回 ``未发现命中``。
+        """
+        if not self.hits:
+            return "未发现命中"
+        return f"发现 {len(self.hits)} 个文件命中规则，共 {self.stats.total_matches} 处匹配"
+
+    def to_format(self, fmt: str) -> str:
+        """按格式名渲染报告（``json``/``csv``/``text``）。
+
+        调用方无需维护 if-else 调度，未知格式回退到 ``text``。
+        """
+        if fmt == "json":
+            return self.to_json()
+        if fmt == "csv":
+            return self.to_csv()
+        return self.to_text()
 
     def filter(self, path_query: str = "", rule_name: str = "") -> ScanReport:
         """按路径子串与规则名筛选，返回新的 ScanReport（不修改原对象）。

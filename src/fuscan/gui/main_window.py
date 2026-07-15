@@ -18,9 +18,7 @@
 
 from __future__ import annotations
 
-import datetime
 import enum
-import html
 import logging
 import re
 import subprocess
@@ -100,7 +98,6 @@ from fuscan.gui.preview_utils import (
     build_preview_html,
     compile_keyword_pattern,
     extract_keywords,
-    format_size,
 )
 from fuscan.gui.worker import ScanWorker
 from fuscan.rules import RuleError, load_ruleset, merge_multiple_rulesets
@@ -1062,13 +1059,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 path_text = "..." + path_text[-97:]
             self.current_file_label.setText(f"正在解析: {path_text}")
 
-        # 状态栏汇总文本（速度 = scanned / elapsed）
-        speed = info.scanned / info.elapsed if info.elapsed > 0 else 0.0
-        self.stats_label.setText(
-            f"已扫描 {info.scanned} | 跳过 {info.skipped} | "
-            f"命中 {info.matched} | 条数 {info.matches} | 错误 {info.errors} | "
-            f"已用 {info.elapsed:.1f}s | 速度 {speed:.0f} 文件/s"
-        )
+        # 状态栏汇总文本（速度计算下沉到 ProgressInfo.summary）
+        self.stats_label.setText(info.summary())
 
         # 列表更新独立节流：0.5 秒一次，低于进度条/状态栏频率
         now = time.perf_counter()
@@ -1177,7 +1169,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             return
         path = Path(path_str)
         try:
-            content = self._format_report(self._last_report, fmt)
+            content = self._last_report.to_format(fmt)
             path.write_text(content, encoding="utf-8")
             QMessageBox.information(self, "导出成功", f"已导出到:\n{path}")
         except OSError as exc:
@@ -1256,22 +1248,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def _populate_detail_file_info(self, result: ScanResult) -> None:
         """填充详情区文件元信息。"""
-        path = result.path
-        size = result.size
-        try:
-            mtime = datetime.datetime.fromtimestamp(path.stat().st_mtime)
-            mtime_str = mtime.strftime("%Y-%m-%d %H:%M:%S")
-        except OSError:
-            mtime_str = "无法获取"
-
-        info_html = (
-            f"<b>文件路径:</b> {html.escape(str(path))}<br>"
-            f"<b>文件大小:</b> {format_size(size)} ({size} 字节)<br>"
-            f"<b>修改时间:</b> {html.escape(mtime_str)}<br>"
-            f"<b>命中规则数:</b> {len(result.hits)} | <b>匹配条数:</b> {result.total_match_count}"
-            f" | <b>可切换位置:</b> {len(self._detail_hit_positions)}"
-        )
-        self.detail_info_label.setText(info_html)
+        # 文件信息 HTML 由 ScanResult.file_info_html 构造，GUI 仅追加自身状态字段
+        extra = f"<b>可切换位置:</b> {len(self._detail_hit_positions)}"
+        self.detail_info_label.setText(result.file_info_html(extra=extra))
 
     def _populate_detail_hits_table(self, result: ScanResult) -> None:
         """填充详情区命中规则表。"""
@@ -1756,14 +1735,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def _update_scan_button(self) -> None:
         """更新扫描按钮状态（委托给 _update_stage_actions 统一管理）。"""
         self._update_stage_actions()
-
-    @staticmethod
-    def _format_report(report: ScanReport, fmt: str) -> str:
-        """格式化报告为字符串（委托给 ScanReport 的数据层方法）。"""
-        if fmt == "json":
-            return report.to_json()
-        # CSV
-        return report.to_csv()
 
     def closeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         """关闭时保存配置、释放缓存并终止后台线程。"""

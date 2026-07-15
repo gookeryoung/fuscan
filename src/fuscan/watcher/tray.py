@@ -268,12 +268,11 @@ class TrayApp(QObject):
         for result in report.hits:
             self.file_hit.emit(str(result.path), len(result.hits))
 
-        # 托盘通知
+        # 托盘通知（通知文本由 ScanReport.notification_message 构造）
         if self._tray is not None and self._tray.isVisible():
-            count = len(report.hits)
             self._tray.showMessage(
                 "fuscan 发现命中",
-                f"发现 {count} 个文件命中规则",
+                report.notification_message(),
                 QSystemTrayIcon.Information,
                 3000,
             )

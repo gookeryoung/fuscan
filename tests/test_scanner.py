@@ -567,6 +567,142 @@ class TestScanReport:
         assert "secret.txt" in text
         assert str(tmp_path) not in text.split("命中项")[1]
 
+    def test_notification_message_with_hits(self, tmp_path: Path) -> None:
+        report = self._build_report(tmp_path)
+        msg = report.notification_message()
+        # 2 个命中文件，total_matches=6
+        assert "2 个文件" in msg
+        assert "7 处匹配" not in msg  # 防止误读
+        assert "6 处匹配" in msg
+
+    def test_notification_message_no_hits(self, tmp_path: Path) -> None:
+        report = ScanReport(root=tmp_path, results=(), stats=ScanStats())
+        assert report.notification_message() == "未发现命中"
+
+    def test_to_format_json(self, tmp_path: Path) -> None:
+        import json as _json
+
+        report = self._build_report(tmp_path)
+        # to_format("json") 应等价于 to_json
+        assert _json.loads(report.to_format("json")) == _json.loads(report.to_json())
+
+    def test_to_format_csv(self, tmp_path: Path) -> None:
+        report = self._build_report(tmp_path)
+        assert report.to_format("csv") == report.to_csv()
+
+    def test_to_format_text(self, tmp_path: Path) -> None:
+        report = self._build_report(tmp_path)
+        assert report.to_format("text") == report.to_text()
+
+    def test_to_format_unknown_falls_back_to_text(self, tmp_path: Path) -> None:
+        report = self._build_report(tmp_path)
+        # 未知格式应回退到 text
+        assert report.to_format("unknown") == report.to_text()
+
+
+class TestFormatSize:
+    def test_bytes(self) -> None:
+        from fuscan.scanner.result import format_size
+
+        assert format_size(0) == "0 B"
+        assert format_size(1023) == "1023 B"
+
+    def test_kb(self) -> None:
+        from fuscan.scanner.result import format_size
+
+        assert format_size(1024) == "1.0 KB"
+        assert format_size(2048) == "2.0 KB"
+
+    def test_mb(self) -> None:
+        from fuscan.scanner.result import format_size
+
+        assert format_size(1024 * 1024) == "1.0 MB"
+
+    def test_gb(self) -> None:
+        from fuscan.scanner.result import format_size
+
+        assert format_size(1024 * 1024 * 1024) == "1.00 GB"
+
+
+class TestProgressInfoSummary:
+    def test_summary_with_speed(self) -> None:
+        from fuscan.scanner.result import ProgressInfo
+
+        info = ProgressInfo(scanned=100, elapsed=10.0, skipped=2, matched=5, errors=1, matches=8)
+        s = info.summary()
+        assert "已扫描 100" in s
+        assert "跳过 2" in s
+        assert "命中 5" in s
+        assert "条数 8" in s
+        assert "错误 1" in s
+        assert "已用 10.0s" in s
+        assert "速度 10 文件/s" in s  # 100/10.0
+
+    def test_summary_zero_elapsed_speed_zero(self) -> None:
+        from fuscan.scanner.result import ProgressInfo
+
+        info = ProgressInfo(scanned=5, elapsed=0.0)
+        s = info.summary()
+        assert "速度 0 文件/s" in s
+
+
+class TestScanResultFileInfoHtml:
+    def test_html_contains_path_size_hits(self, tmp_path: Path) -> None:
+        from fuscan.scanner.result import RuleHit
+
+        path = tmp_path / "f.txt"
+        path.write_text("hello", encoding="utf-8")
+        result = ScanResult(
+            path=path,
+            size=5,
+            hits=(RuleHit("r1", Severity.WARNING, "d1", match_count=2),),
+        )
+        html_text = result.file_info_html()
+        assert "文件路径:" in html_text
+        assert "f.txt" in html_text
+        assert "5 B" in html_text
+        assert "5 字节" in html_text
+        assert "命中规则数:" in html_text
+        assert "匹配条数:" in html_text
+
+    def test_html_includes_extra(self, tmp_path: Path) -> None:
+        result = ScanResult(path=tmp_path / "x", size=0, hits=())
+        html_text = result.file_info_html(extra="<b>可切换位置:</b> 3")
+        assert "可切换位置:" in html_text
+        assert "3" in html_text
+
+    def test_html_without_extra(self, tmp_path: Path) -> None:
+        result = ScanResult(path=tmp_path / "x", size=0, hits=())
+        # 无 extra 时不追加尾部分隔符
+        assert not result.file_info_html().endswith("|")
+
+    def test_html_mtime_unavailable_on_oserror(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from fuscan.scanner.result import RuleHit
+
+        path = tmp_path / "f.txt"
+        path.write_text("", encoding="utf-8")
+        result = ScanResult(path=path, size=0, hits=(RuleHit("r", Severity.INFO, "d"),))
+
+        def raise_oserror(self: Path, *args: object, **kwargs: object) -> object:
+            raise OSError("mock")
+
+        monkeypatch.setattr(Path, "stat", raise_oserror)
+        html_text = result.file_info_html()
+        assert "无法获取" in html_text
+
+    def test_html_escapes_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # 路径含 HTML 特殊字符时应被转义（Windows 不允许文件名含 <，用 mock 路径绕过）
+        result = ScanResult(path=Path("<weird&name>.txt"), size=0, hits=())
+
+        # mock stat 避免 OSError 干扰
+        class _FakeStat:
+            st_mtime = 0.0
+
+        monkeypatch.setattr(Path, "stat", lambda self, *a, **kw: _FakeStat())
+        html_text = result.file_info_html()
+        assert "<weird" not in html_text  # 原文不应直接出现
+        assert "&lt;weird" in html_text
+
 
 class TestScannerErrorHandling:
     def test_scan_continues_on_content_error(self, tmp_path: Path) -> None:

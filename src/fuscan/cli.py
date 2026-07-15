@@ -226,7 +226,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         )
         report = _run_scan(scanner, scan_path, args)
 
-    output = _format_report(report, args.output_format)
+    output = report.to_format(args.output_format)
     _write_output(output, args.output_file)
     _print_summary(report)
     return 0
@@ -388,15 +388,6 @@ def _cmd_cache(args: argparse.Namespace) -> int:
 
     print(f"未知缓存操作: {action}", file=sys.stderr)
     return 1  # pragma: no cover
-
-
-def _format_report(report: ScanReport, fmt: str) -> str:
-    """按指定格式渲染扫描报告（委托给 ScanReport 的数据层方法）。"""
-    if fmt == "json":
-        return report.to_json()
-    if fmt == "csv":
-        return report.to_csv()
-    return report.to_text()
 
 
 def _write_output(content: str, output_file: Path | None) -> None:

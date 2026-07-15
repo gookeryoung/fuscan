@@ -265,6 +265,30 @@ class TestListDrives:
             # 至少有一个盘符存在（通常是 C:）
             assert all(isinstance(d, Path) for d in drives)
 
+    def test_list_drives_skips_unready_drive(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """盘符 exists() 抛 OSError（如未就绪光驱 G:\\）时跳过而非崩溃。"""
+        import sys
+
+        if sys.platform != "win32":
+            return
+
+        from fuscan.scanner import walker as walker_mod
+
+        real_exists = Path.exists
+
+        def fake_exists(self: Path, *args: object, **kwargs: object) -> bool:
+            if str(self).upper().startswith("G:"):
+                raise OSError(1, "函数不正确。")
+            return real_exists(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "exists", fake_exists)
+        drives = walker_mod.list_drives()
+        # G:\\ 应被跳过，其他盘符仍正常返回
+        assert all(isinstance(d, Path) for d in drives)
+        assert not any(str(d).upper().startswith("G:") for d in drives)
+        # C:\\ 这类正常盘符应仍在列表中
+        assert any(str(d).upper().startswith("C:") for d in drives)
+
 
 class TestWalkerErrorHandling:
     """异常路径测试。"""

@@ -100,11 +100,42 @@ dialog.rules_saved.connect(saved_paths.append)  # pyrefly: ignore[missing-attrib
 
 CI lint job（ruff check + ruff format check + pyrefly check）与 test job（pytest + 覆盖率）均将通过。
 
+## CI pyrefly ctypes 失败修复（追加）
+
+### 问题
+
+CI run 017ffe1 lint job 的 Pyrefly check 步骤失败（ruff check / ruff format check 均通过）。根因：pyrefly 在 ubuntu + Python 3.8 查询 Python 解释器时用 ctypes 调用 libpython C API，ubuntu 的 Python 3.8（deadsnakes PPA）无共享库 `libpython3.8.so`，ctypes 加载失败。本地 Windows + Python 3.8 无此问题（Windows Python 自带共享库）。
+
+### 修复方案
+
+lint job 显式指定 Python 3.11（commit e695714）：
+
+```yaml
+- name: Set up Python 3.11
+  run: uv python install 3.11
+- name: Sync dependencies
+  run: uv sync --frozen --extra lint --python 3.11
+```
+
+### 方案选型依据
+
+| 方案 | 评估 | 是否采用 |
+|------|------|---------|
+| lint job 用 Python 3.11 | ubuntu 3.11 自带 libpython3.11.so，ctypes 正常；代码已有 `# pyrefly: ignore[missing-import]` 处理 PySide2 import（3.11 装 PySide6）；pyrefly.toml `python-version="3.8"` 仍按 3.8 语法检查 | 采用 |
+| pyrefly.toml 配置 site-package-path | 跨平台路径问题，Windows/Linux 路径不同无法统一配置 | 未采用 |
+| CI 安装 libpython3.8 | 需 sudo + deadsnakes PPA 依赖，且 Python 3.8 已 EOL | 未采用 |
+| 升级 pyrefly | uv.lock 锁定 1.1.1，升级需 `uv lock --upgrade-package` | 未采用 |
+
+### PySide2 import 兼容性
+
+Python 3.11 下 `uv sync --extra lint` 装 PySide6（pyproject.toml 标记 `python_version >= '3.11'`），不装 PySide2。代码采用双兼容 `try: from PySide2... except ImportError: from PySide6...`，所有 PySide2/PySide6 import 行已有 `# pyrefly: ignore[missing-import]` 注释（iter-46 suppress 处理），pyrefly 不会报 missing-import。其他 PySide API stub 限制错误也均有对应 `# pyrefly: ignore[规则码]` 注释。
+
 ## 遗留事项
 
 - 435 个 `# pyrefly: ignore[规则码]` 注释为技术债。未来 PySide2 stub 改进或迁移 PySide6 后，可用 `uv run pyrefly suppress --remove-unused` 清理失效注释。
 - `benchmarks/sample_files.py` 被 suppress 修改，但不在 `ruff check src tests` 范围。若后续 benchmarks 纳入 lint，需单独验证。
+- lint job 用 Python 3.11 而非项目最低支持版本 3.8，理论上存在"本地 3.8 pyrefly 通过但 CI 3.11 报错"的盲区。但 pyrefly.toml `python-version="3.8"` 确保语法按 3.8 检查，且 Python 3.11 对 3.8 语法完全兼容，风险可忽略。
 
 ## 下一轮计划
 
-无明确下一轮计划。本次 CI/CD lint 全门禁修复完成，待用户确认后续方向。
+无明确下一轮计划。本次 CI/CD lint 全门禁修复完成（含 ctypes 修复），待 CI 验证通过后收尾。

@@ -75,6 +75,9 @@ class HitDetailDialog(QDialog, Ui_HitDetailDialog):  # pyrefly: ignore [invalid-
         self.setWindowIcon(QIcon(_ICON_TARGET))
         self._hit_positions: list[tuple[int, int, int]] = []
         self._current_hit_index: int = -1
+        # 预览纯文本缓存：_find_hit_positions 时一次性取 toPlainText()，
+        # 后续 _highlight/_scroll 导航复用，避免每次导航分配 100KB 字符串
+        self._plain_text: str = ""
         self._configure_ui()
         # 先填充预览以计算高亮位置，再填充文件信息和命中表（均依赖位置数据）
         self._populate_preview()
@@ -192,12 +195,17 @@ class HitDetailDialog(QDialog, Ui_HitDetailDialog):  # pyrefly: ignore [invalid-
         每个位置记录为 ``(start, end, rule_index)`` 三元组，``rule_index`` 为命中
         规则在 ``hits`` 中的索引，用于点击规则表行时跳转到对应高亮位置。
         同一关键词若被多条规则命中，仅归属到首条规则（避免位置重复计数）。
+
+        纯文本一次性缓存到 ``self._plain_text``，后续 :meth:`_highlight_current_hit`/
+        :meth:`_scroll_to_current_hit` 复用，避免每次导航重复调用 ``toPlainText()``
+        分配大字符串。
         """
         self._hit_positions = []
         if not hits:
             return
-        plain = self.preview.toPlainText()
-        if not plain:
+        # 缓存纯文本：_highlight/_scroll 复用，避免重复 toPlainText() 调用
+        self._plain_text = self.preview.toPlainText()
+        if not self._plain_text:
             return
         keyword_to_rule = build_keyword_to_rule_map(hits)
         seen: set[tuple[int, int]] = set()
@@ -207,7 +215,7 @@ class HitDetailDialog(QDialog, Ui_HitDetailDialog):  # pyrefly: ignore [invalid-
                 regex = re.compile(pattern, re.IGNORECASE)
             except re.error:
                 continue
-            for m in regex.finditer(plain):
+            for m in regex.finditer(self._plain_text):
                 pos = (m.start(), m.end())
                 if pos not in seen:
                     seen.add(pos)
@@ -220,7 +228,7 @@ class HitDetailDialog(QDialog, Ui_HitDetailDialog):  # pyrefly: ignore [invalid-
             self.preview.setExtraSelections([])
             return
         start, end, _ = self._hit_positions[self._current_hit_index]
-        doc_length = len(self.preview.toPlainText())
+        doc_length = len(self._plain_text)
         if start >= doc_length or end > doc_length:
             self.preview.setExtraSelections([])
             return
@@ -239,7 +247,7 @@ class HitDetailDialog(QDialog, Ui_HitDetailDialog):  # pyrefly: ignore [invalid-
         if self._current_hit_index < 0 or self._current_hit_index >= len(self._hit_positions):
             return
         start, _, _ = self._hit_positions[self._current_hit_index]
-        doc_length = len(self.preview.toPlainText())
+        doc_length = len(self._plain_text)
         if start >= doc_length:
             return
         cursor = self.preview.textCursor()

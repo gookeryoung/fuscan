@@ -3037,6 +3037,8 @@ class TestHitDetailDialogNavigation:
         )
         dialog = HitDetailDialog(result)
         dialog.preview.setPlainText("short")
+        # 同步 plain_text 缓存（_highlight/_scroll 复用缓存而非 toPlainText）
+        dialog._plain_text = "short"
         dialog._hit_positions = [(0, 3, 0), (100, 200, 0)]
         dialog._current_hit_index = 1
         dialog._highlight_current_hit()
@@ -4364,9 +4366,7 @@ class TestDetailArea:
         exec_calls: list[Any] = []
         monkeypatch.setattr(
             "fuscan.gui.main_window.HitDetailDialog",
-            lambda result, parent: exec_calls.append(result) or type(
-                "FakeDialog", (), {"exec_": lambda self: None}
-            )(),
+            lambda result, parent: exec_calls.append(result) or type("FakeDialog", (), {"exec_": lambda self: None})(),
         )
         window._detail_panel.open_in_window()
         assert len(exec_calls) == 1

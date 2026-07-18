@@ -74,7 +74,7 @@ except ImportError:  # pragma: no cover
 
 from fuscan import __version__, theme
 from fuscan.builtin import load_with_builtin
-from fuscan.config import MAX_HISTORY, Config, load_config, save_config
+from fuscan.config import Config, load_config, save_config
 from fuscan.gui import resources_rc  # noqa: F401 注册 .qrc 资源（:/ 前缀图标）
 from fuscan.gui.detail_dialog import HitDetailDialog
 from fuscan.gui.detail_panel import DetailControls, DetailPanel
@@ -145,6 +145,7 @@ from fuscan.gui.preview_utils import (
     SEVERITY_COLORS,
     SEVERITY_LABELS,
 )
+from fuscan.gui.scan_path_history import ScanPathHistory
 from fuscan.gui.scan_progress_lists import ScanListUpdater
 from fuscan.gui.worker import ScanWorker
 from fuscan.rules import RuleError, load_ruleset, merge_multiple_rulesets
@@ -255,8 +256,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         # 详情面板控制器：setupUi 已创建详情区 UI 控件，立即构造 DetailPanel，
         # 使后续 _connect_signals/_setup_shortcuts 可安全引用（非 None）
         self._detail_panel: DetailPanel = self._create_detail_panel()
-        # 扫描历史记录
-        self._scan_history: list[str] = []
+        # 扫描路径历史：维护去重 + 最近优先 + 限量的路径列表，同步
+        # path_combo 与 history_list 两个控件（单一数据源避免内容漂移）
+        self._path_history: ScanPathHistory = ScanPathHistory(self.path_combo, self.history_list)
         # 盘符按钮组（平铺选择，替代下拉）
         self._drive_button_group: QButtonGroup | None = None
         self._drive_buttons: list[QPushButton] = []
@@ -767,14 +769,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
 
         self._rules_paths = [Path(p) for p in self._config.rules_paths if Path(p).exists()]
 
-        self.path_combo.blockSignals(True)
-        for p in self._config.scan_paths:
-            self.path_combo.addItem(p)  # pyrefly: ignore [missing-argument]
-        self.path_combo.blockSignals(False)
-
-        # 恢复扫描历史
-        self._scan_history = list(self._config.scan_paths)
-        self._refresh_history_list()
+        # 恢复扫描路径历史（同步 path_combo 与 history_list 两个控件）
+        self._path_history.load_from_config(self._config.scan_paths)
 
         # 恢复首个有效路径作为扫描目标，启用扫描按钮
         if self._scan_mode == "folder" and self.path_combo.count() > 0:
@@ -792,36 +788,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self._config.last_drive = self._selected_drive
         self._config.rules_paths = [str(p) for p in self._rules_paths]
         self._config.use_builtin = self._use_builtin
-        self._config.scan_paths = [self.path_combo.itemText(i) for i in range(self.path_combo.count())]
+        self._config.scan_paths = self._path_history.get_paths()
         save_config(self._config)
 
     def _add_scan_path_history(self, path_str: str) -> None:
-        """将路径添加到扫描历史下拉与历史列表（去重、最近优先、限制数量）。"""
-        self.path_combo.blockSignals(True)
-        idx = self.path_combo.findText(path_str)
-        if idx >= 0:
-            self.path_combo.removeItem(idx)
-        self.path_combo.insertItem(0, path_str)  # pyrefly: ignore [bad-argument-type, missing-argument]
-        while self.path_combo.count() > MAX_HISTORY:
-            self.path_combo.removeItem(self.path_combo.count() - 1)
-        self.path_combo.setCurrentIndex(0)
-        self.path_combo.blockSignals(False)
-
-        # 同步扫描历史
-        if path_str in self._scan_history:
-            self._scan_history.remove(path_str)
-        self._scan_history.insert(0, path_str)
-        while len(self._scan_history) > MAX_HISTORY:
-            self._scan_history.pop()
-        self._refresh_history_list()
-
-    def _refresh_history_list(self) -> None:
-        """刷新扫描历史列表。"""
-        self.history_list.clear()
-        for path_str in self._scan_history:
-            item = QListWidgetItem(path_str)
-            item.setToolTip(path_str)
-            self.history_list.addItem(item)  # pyrefly: ignore [missing-argument]
+        """将路径添加到扫描历史（去重、最近优先、限制数量，同步两个控件）。"""
+        self._path_history.add(path_str)
 
     def _on_history_item_double_clicked(self, item: QListWidgetItem) -> None:
         """双击历史列表项切换到 folder 模式并选择该路径。"""

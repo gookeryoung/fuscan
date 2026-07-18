@@ -231,5 +231,4 @@ match:
 ## 更多资源
 
 - 基础示例：[example.yaml](../example.yaml)
-- 代码集成示例：见 [examples/](../../examples/)
 - 完整 API 文档：见 [README.md](../../README.md)

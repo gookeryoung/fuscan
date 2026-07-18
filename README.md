@@ -109,7 +109,7 @@ rules:
           pattern: password
 ```
 
-更多场景化规则示例见 [rules/examples/](rules/examples/)，程序化使用示例见 [examples/](examples/)。
+更多场景化规则示例见 [rules/examples/](rules/examples/)。
 
 ## 开发
 

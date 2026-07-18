@@ -20,23 +20,15 @@ from __future__ import annotations
 
 import enum
 import logging
-import re
-import subprocess
-import sys
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 try:
-    from PySide2.QtCore import QByteArray, QFile, QPoint, QSize, Qt, QTimer, QUrl, Slot
+    from PySide2.QtCore import QPoint, QSize, Qt, QTimer, QUrl, Slot
     from PySide2.QtGui import (
         QDesktopServices,
-        QIcon,
         QKeySequence,
-        QPainter,
-        QPixmap,
     )
-    from PySide2.QtSvg import QSvgRenderer
     from PySide2.QtWidgets import (
         QAbstractButton,
         QAction,
@@ -57,10 +49,9 @@ try:
         QWidget,
     )
 except ImportError:  # pragma: no cover
-    from PySide6.QtCore import QFile, QPoint, QSize, Qt, QUrl, Slot  # pyrefly: ignore [missing-import]
+    from PySide6.QtCore import QPoint, QSize, Qt, QUrl, Slot  # pyrefly: ignore [missing-import]
     from PySide6.QtGui import (  # pyrefly: ignore [missing-import]
         QAction,
-        QIcon,
         QKeySequence,
         QShortcut,
     )
@@ -87,12 +78,74 @@ from fuscan.config import MAX_HISTORY, Config, load_config, save_config
 from fuscan.gui import resources_rc  # noqa: F401 注册 .qrc 资源（:/ 前缀图标）
 from fuscan.gui.detail_dialog import HitDetailDialog
 from fuscan.gui.detail_panel import DetailControls, DetailPanel
+from fuscan.gui.explorer import open_path_in_explorer
+from fuscan.gui.icons import (
+    ICON_ABOUT as _ICON_ABOUT,
+)
+from fuscan.gui.icons import (
+    ICON_ALL_DISK as _ICON_ALL_DISK,
+)
+from fuscan.gui.icons import (
+    ICON_DISK as _ICON_DISK,
+)
+from fuscan.gui.icons import (
+    ICON_EDIT as _ICON_EDIT,
+)
+from fuscan.gui.icons import (
+    ICON_EXPORT as _ICON_EXPORT,
+)
+from fuscan.gui.icons import (
+    ICON_EXPORT_CSV as _ICON_EXPORT_CSV,
+)
+from fuscan.gui.icons import (
+    ICON_EXPORT_JSON as _ICON_EXPORT_JSON,
+)
+from fuscan.gui.icons import (
+    ICON_FOLDER as _ICON_FOLDER,
+)
+from fuscan.gui.icons import (
+    ICON_HARD_DISK as _ICON_HARD_DISK,
+)
+from fuscan.gui.icons import (
+    ICON_HISTORY as _ICON_HISTORY,
+)
+from fuscan.gui.icons import (
+    ICON_LOAD_LIST as _ICON_LOAD_LIST,
+)
+from fuscan.gui.icons import (
+    ICON_MANUAL as _ICON_MANUAL,
+)
+from fuscan.gui.icons import (
+    ICON_PAUSE as _ICON_PAUSE,
+)
+from fuscan.gui.icons import (
+    ICON_RESCAN as _ICON_RESCAN,
+)
+from fuscan.gui.icons import (
+    ICON_SCAN as _ICON_SCAN,
+)
+from fuscan.gui.icons import (
+    ICON_SEARCH as _ICON_SEARCH,
+)
+from fuscan.gui.icons import (
+    ICON_SETTINGS as _ICON_SETTINGS,
+)
+from fuscan.gui.icons import (
+    ICON_STOP as _ICON_STOP,
+)
+from fuscan.gui.icons import (
+    MANUAL_PDF as _MANUAL_PDF,
+)
+from fuscan.gui.icons import (
+    load_themed_icon as _load_themed_icon,
+)
 from fuscan.gui.main_window_ui import Ui_MainWindow
 from fuscan.gui.preview_utils import (
     SEVERITY_BACKGROUNDS,
     SEVERITY_COLORS,
     SEVERITY_LABELS,
 )
+from fuscan.gui.scan_progress_lists import ScanListUpdater
 from fuscan.gui.worker import ScanWorker
 from fuscan.rules import RuleError, load_ruleset, merge_multiple_rulesets
 from fuscan.rules.model import RuleSet, Severity
@@ -118,89 +171,6 @@ def _apply_severity_to_tree_item(item: QTreeWidgetItem, column: int, severity: S
     item.setText(column, _severity_text(severity))
     item.setForeground(column, SEVERITY_COLORS[severity])
     item.setBackground(column, SEVERITY_BACKGROUNDS[severity])
-
-
-# 图标路径（.qrc 资源系统，:/ 前缀引用编译嵌入的资源）
-# 用户手册 PDF 路径（assets/docs 目录下，随包分发；PDF 由外部阅读器打开，不入 .qrc）
-_MANUAL_PDF = Path(__file__).parent.parent / "assets" / "docs" / "fuscan-用户手册.pdf"
-_ICON_ABOUT = ":/icons/about.svg"
-_ICON_ALL_DISK = ":/icons/all_disk.svg"
-_ICON_DISK = ":/icons/disk.svg"
-_ICON_EDIT = ":/icons/edit.svg"
-_ICON_EXPORT = ":/icons/export.svg"
-_ICON_EXPORT_CSV = ":/icons/export_csv.svg"
-_ICON_EXPORT_JSON = ":/icons/export_json.svg"
-_ICON_FOLDER = ":/icons/folder.svg"
-_ICON_HARD_DISK = ":/icons/hard_disk.svg"
-_ICON_HISTORY = ":/icons/history.svg"
-_ICON_LOAD_LIST = ":/icons/load_list.svg"
-_ICON_MANUAL = ":/icons/manual.svg"
-_ICON_PAUSE = ":/icons/pause.svg"
-_ICON_RESCAN = ":/icons/rescan.svg"
-_ICON_SCAN = ":/icons/scan.svg"
-_ICON_SETTINGS = ":/icons/settings.svg"
-_ICON_STOP = ":/icons/stop.svg"
-_ICON_SEARCH = ":/icons/search.svg"
-
-
-# 主题图标渲染分辨率（高分辨率保证 DPI 缩放下清晰）
-_ICON_RENDER_SIZE = 128
-# 移除 SVG 中所有 fill="..." 属性的正则
-_SVG_FILL_RE = re.compile(r'\sfill="[^"]*"')
-
-
-def _read_svg_text(svg_path: str) -> str:
-    """读取 SVG 文本，支持 .qrc 资源路径（``:/`` 前缀）与磁盘路径。
-
-    :param svg_path: ``:/icons/xxx.svg`` 资源路径或磁盘绝对路径
-    :returns: SVG 文件文本
-    :raises OSError: 文件打开或读取失败
-    """
-    if svg_path.startswith(":"):
-        file = QFile(svg_path)
-        if not file.open(QFile.ReadOnly | QFile.Text):  # pyrefly: ignore [missing-argument]
-            raise OSError(f"无法打开 Qt 资源: {svg_path}")
-        try:
-            return bytes(file.readAll()).decode("utf-8")
-        finally:
-            file.close()
-    return Path(svg_path).read_text(encoding="utf-8")
-
-
-def _load_themed_icon(svg_path: str, color: str) -> QIcon:
-    """加载 SVG 文件并以指定主题色着色后返回 QIcon。
-
-    读取 SVG 文本后:(1) 移除所有 fill 属性消除原色;(2) 在根 <svg> 标签注入
-    ``fill="<color>"`` 作为默认填充色;(3) 通过 QSvgRenderer 渲染到透明 QPixmap
-    后构造 QIcon。主题色变更时需重新调用本函数重建图标。
-
-    :param svg_path: SVG 资源路径（``:/icons/xxx.svg``）或磁盘绝对路径
-    :param color: 主题色 hex 字符串（如 ``theme.COLOR_PRIMARY``）
-    :returns: 已着色的 QIcon，渲染失败时回退到原始文件加载
-    """
-    try:
-        text = _read_svg_text(svg_path)
-        # 移除所有 fill 属性，确保主题色统一覆盖原图标颜色
-        text = _SVG_FILL_RE.sub("", text)
-        # 在首个 <svg ...> 开标签内注入 fill 属性作为默认填充
-        text = re.sub(
-            r"(<svg\b[^>]*?)(/?>)",
-            rf'\1 fill="{color}"\2',
-            text,
-            count=1,
-        )
-        renderer = QSvgRenderer(QByteArray(text.encode("utf-8")))
-        if not renderer.isValid():
-            return QIcon(svg_path)
-        pixmap = QPixmap(_ICON_RENDER_SIZE, _ICON_RENDER_SIZE)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        renderer.render(painter)  # pyrefly: ignore [missing-argument]
-        painter.end()
-        return QIcon(pixmap)
-    except (OSError, ValueError):
-        logger.warning("主题图标加载失败，回退原始文件: %s", svg_path, exc_info=True)
-        return QIcon(svg_path)
 
 
 class ScanState(enum.Enum):
@@ -248,12 +218,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self._selected_drive: str | None = None
         # 扫描结果缓存（启用时惰性创建，关闭窗口时释放）
         self._cache: CacheStore | None = None
-        # 扫描中列表增量更新状态：记录上次已显示的列表快照与节流时间戳，
-        # 避免每次进度回调全量 clear+重添导致主线程阻塞（点击设置卡滞根因）
-        self._last_skipped_dirs: tuple[str, ...] = ()
-        self._last_matched_files: tuple[tuple[str, str], ...] = ()
-        # 初始 -1.0 确保首次回调不被节流（time.perf_counter 在新进程可能返回小值）
-        self._last_list_update_time: float = -1.0
+        # 扫描中列表增量更新器：封装跳过目录与命中文件列表的 0.5 秒节流 + 增量
+        # append 算法，避免每次进度回调全量 clear+重添导致主线程阻塞（点击设置卡滞根因）
+        self._list_updater: ScanListUpdater = ScanListUpdater(self.skipped_dirs_list, self.matched_files_list)
         # 结果树筛选节流 timer（需求9）：避免每次按键触发全量重建导致 UI 卡滞
         self._result_filter_timer: QTimer = QTimer(self)
         self._result_filter_timer.setSingleShot(True)
@@ -994,13 +961,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self.progress.setRange(0, 0)
         self.current_file_label.setText("准备扫描...")
         self.stats_label.setText("扫描中...")
-        # 清空扫描中页的列表，避免残留上次扫描数据（统计已由状态栏 stats_label 承载）
-        self.skipped_dirs_list.clear()
-        self.matched_files_list.clear()
-        # 重置增量更新状态，避免上次扫描的快照干扰本次增量对比
-        self._last_skipped_dirs = ()
-        self._last_matched_files = ()
-        self._last_list_update_time = -1.0
+        # 重置扫描中页列表与增量更新状态：避免上次扫描数据残留、快照干扰本次增量对比
+        self._list_updater.reset()
         # 重置扫描中页的分类统计面板（需求6/7）
         self._update_scan_stats(0, 0, 0, 0)
         self._switch_stage(WorkflowStage.SCANNING)
@@ -1115,67 +1077,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         # 状态栏汇总文本（速度计算下沉到 ProgressInfo.summary）
         self.stats_label.setText(info.summary())
 
-        # 列表更新独立节流：0.5 秒一次，低于进度条/状态栏频率
-        now = time.perf_counter()
-        if now - self._last_list_update_time < 0.5:
-            return
-        self._last_list_update_time = now
-
-        self._update_skipped_dirs_list(info.skipped_dirs)
-        self._update_matched_files_list(info.matched_files)
-        # 同步刷新分类统计面板（需求6/7）：已通过 = 已扫描 - 命中 - 错误
-        passed = max(info.scanned - info.matched - info.errors, 0)
-        self._update_scan_stats(passed, info.matched, info.skipped, info.errors)
-
-    def _update_skipped_dirs_list(self, new_dirs: tuple[str, ...]) -> None:
-        """增量更新跳过目录列表。
-
-        若新列表是旧列表的扩展（旧列表是新列表前缀），只 append 新增尾部条目；
-        否则（滚动截断或内容变化）全量重建用 addItems 批量添加。
-        """
-        old_dirs = self._last_skipped_dirs
-        if not new_dirs:
-            return
-        if new_dirs == old_dirs:
-            return
-        # 关闭更新以避免逐项 addItems 触发重绘，批量完成后统一刷新
-        self.skipped_dirs_list.setUpdatesEnabled(False)
-        try:
-            if len(new_dirs) > len(old_dirs) and new_dirs[: len(old_dirs)] == old_dirs:
-                # 增量 append：旧列表是新列表前缀，只添加新增尾部
-                self.skipped_dirs_list.addItems(new_dirs[len(old_dirs) :])
-            else:
-                # 全量重建（滚动截断或内容变化）
-                self.skipped_dirs_list.clear()
-                self.skipped_dirs_list.addItems(new_dirs)
-        finally:
-            self.skipped_dirs_list.setUpdatesEnabled(True)
-        self.skipped_dirs_list.scrollToBottom()
-        self._last_skipped_dirs = new_dirs
-
-    def _update_matched_files_list(self, new_files: tuple[tuple[str, str], ...]) -> None:
-        """增量更新命中文件列表，逻辑同 _update_skipped_dirs_list。"""
-        old_files = self._last_matched_files
-        if not new_files:
-            return
-        if new_files == old_files:
-            return
-        # 关闭更新以避免逐项 addItems 触发重绘，批量完成后统一刷新
-        self.matched_files_list.setUpdatesEnabled(False)
-        try:
-            if len(new_files) > len(old_files) and new_files[: len(old_files)] == old_files:
-                # 增量 append：格式 "路径 → 规则名"
-                items = [f"{fp} → {rn}" for fp, rn in new_files[len(old_files) :]]
-                self.matched_files_list.addItems(items)
-            else:
-                # 全量重建
-                self.matched_files_list.clear()
-                items = [f"{fp} → {rn}" for fp, rn in new_files]
-                self.matched_files_list.addItems(items)
-        finally:
-            self.matched_files_list.setUpdatesEnabled(True)
-        self.matched_files_list.scrollToBottom()
-        self._last_matched_files = new_files
+        # 列表更新下沉到 ScanListUpdater：0.5 秒节流 + 增量 append，避免高频回调阻塞主线程。
+        # 仅在本次实际刷新列表时同步刷新分类统计面板（需求6/7），被节流跳过时不重复计算。
+        if self._list_updater.try_update(info.skipped_dirs, info.matched_files):
+            passed = max(info.scanned - info.matched - info.errors, 0)
+            self._update_scan_stats(passed, info.matched, info.skipped, info.errors)
 
     @Slot(object)  # pyrefly: ignore [not-callable]
     def _on_scan_finished(self, report: ScanReport) -> None:
@@ -1344,19 +1250,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
     def _open_path_in_explorer(self, path: Path) -> None:
         """在文件管理器中打开指定文件所在目录并选中该文件。
 
-        跨平台实现：Windows 用 ``explorer /select,``、macOS 用 ``open -R``、
-        其他平台用 ``xdg-open`` 打开父目录。失败时弹提示但不抛异常。
+        跨平台命令分派委托给 :func:`fuscan.gui.explorer.open_path_in_explorer`，
+        本方法仅负责异常捕获与用户提示。失败时弹 warning 不抛异常。
 
         :param path: 待定位的文件路径
         """
         try:
-            if sys.platform == "win32":
-                subprocess.Popen(["explorer", "/select,", str(path)])
-            elif sys.platform == "darwin":
-                subprocess.Popen(["open", "-R", str(path)])
-            else:
-                subprocess.Popen(["xdg-open", str(path.parent)])
-        except (OSError, FileNotFoundError) as exc:
+            open_path_in_explorer(path)
+        except OSError as exc:
             logger.warning("打开文件位置失败: %s", exc, exc_info=True)
             QMessageBox.warning(self, "提示", f"打开文件位置失败:\n{exc}")
 

@@ -917,7 +917,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
     # ----------------------------- 槽函数 -----------------------------
 
     def _on_load_rules(self) -> None:
-        """加载规则文件，追加到已加载列表末尾。"""
+        """加载规则文件，追加到已加载列表末尾。
+
+        若选择的文件已在列表中（如用户在外部编辑器修改后想刷新），
+        弹出询问对话框确认后重新加载规则集，不重复添加路径。
+        """
         last_dir = str(self._rules_paths[-1].parent) if self._rules_paths else str(Path.home())
         path_str, _ = QFileDialog.getOpenFileName(
             self,
@@ -929,7 +933,18 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
             return
         path = Path(path_str)
         if path in self._rules_paths:
-            QMessageBox.information(self, "提示", f"该规则文件已在列表中:\n{path.name}")
+            # 文件已加载：询问是否重新加载（用户可能在外部修改了文件内容）
+            reply = QMessageBox.question(
+                self,
+                "规则文件已加载",
+                f"该规则文件已在列表中:\n{path.name}\n\n是否重新加载以应用最新内容？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if reply != QMessageBox.Yes:
+                return
+            # _reload_and_refresh 内部已捕获 RuleError 并弹警告框
+            self._reload_and_refresh()
             return
         self._rules_paths.append(path)
         try:

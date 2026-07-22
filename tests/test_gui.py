@@ -443,10 +443,10 @@ class TestMultiRulesList:
         assert window.rules_tree.topLevelItemCount() == 2
         window.close()
 
-    def test_load_duplicate_rule_ignored(
+    def test_load_duplicate_rule_cancelled_no_reload(
         self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """重复加载同一文件不应追加。"""
+        """重复加载同一文件时用户取消应保留原规则集，不追加路径。"""
         r1 = tmp_path / "r1.yaml"
         r1.write_text(
             'version: "1.0"\nrules:\n  - name: 规则1\n    severity: warning\n    match:\n      type: filename\n      mode: contains\n      pattern: a\n',
@@ -460,15 +460,101 @@ class TestMultiRulesList:
             "fuscan.gui.main_window.QFileDialog.getOpenFileName",
             lambda *args, **kwargs: (str(r1), ""),
         )
-        # 抑制提示框
+        # 拦截询问对话框，模拟用户选择"否"（取消重新加载）
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QMessageBox.information",
-            lambda *args, **kwargs: None,
+            "fuscan.gui.main_window.QMessageBox.question",
+            lambda *_args, **_kwargs: QMessageBox.No,
         )
         window._on_load_rules()
-        window._on_load_rules()  # 重复加载
+        original_rule_count = len(window._ruleset.rules) if window._ruleset else 0
+        window._on_load_rules()  # 重复加载，用户取消
 
         assert len(window._rules_paths) == 1
+        # 规则集未变
+        assert window._ruleset is not None
+        assert len(window._ruleset.rules) == original_rule_count
+        window.close()
+
+    def test_load_duplicate_rule_reload_on_confirm(
+        self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """重复加载同一文件时用户确认应重新加载规则集，不追加路径。"""
+        r1 = tmp_path / "r1.yaml"
+        r1.write_text(
+            'version: "1.0"\nrules:\n  - name: 规则1\n    severity: warning\n    match:\n      type: filename\n      mode: contains\n      pattern: a\n',
+            encoding="utf-8",
+        )
+
+        window = MainWindow()
+        window._set_use_builtin(False)
+
+        monkeypatch.setattr(
+            "fuscan.gui.main_window.QFileDialog.getOpenFileName",
+            lambda *args, **kwargs: (str(r1), ""),
+        )
+        window._on_load_rules()
+        assert window._ruleset is not None
+        assert len(window._ruleset.rules) == 1
+
+        # 模拟用户在外部编辑器修改文件内容（新增一条规则）
+        r1.write_text(
+            'version: "1.0"\nrules:\n  - name: 规则1\n    severity: warning\n    match:\n      type: filename\n      mode: contains\n      pattern: a\n  - name: 规则2\n    severity: critical\n    match:\n      type: filename\n      mode: contains\n      pattern: b\n',
+            encoding="utf-8",
+        )
+
+        # 拦截询问对话框，模拟用户选择"是"（确认重新加载）
+        monkeypatch.setattr(
+            "fuscan.gui.main_window.QMessageBox.question",
+            lambda *_args, **_kwargs: QMessageBox.Yes,
+        )
+        window._on_load_rules()  # 重复加载，用户确认
+
+        # 路径不重复追加
+        assert len(window._rules_paths) == 1
+        # 规则集已刷新为最新内容（2 条规则）
+        assert window._ruleset is not None
+        assert len(window._ruleset.rules) == 2
+        assert window._ruleset.rules[1].name == "规则2"
+        window.close()
+
+    def test_load_duplicate_rule_reload_parse_error_warns(
+        self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """重复加载同一文件时用户确认但解析失败应弹警告。"""
+        r1 = tmp_path / "r1.yaml"
+        r1.write_text(
+            'version: "1.0"\nrules:\n  - name: 规则1\n    severity: warning\n    match:\n      type: filename\n      mode: contains\n      pattern: a\n',
+            encoding="utf-8",
+        )
+
+        window = MainWindow()
+        window._set_use_builtin(False)
+
+        monkeypatch.setattr(
+            "fuscan.gui.main_window.QFileDialog.getOpenFileName",
+            lambda *args, **kwargs: (str(r1), ""),
+        )
+        window._on_load_rules()
+        assert window._ruleset is not None
+
+        # 模拟用户破坏文件内容
+        r1.write_text(
+            'version: "1.0"\nrules:\n  - name: 规则1\n    match:\n      type: unknown_type\n      mode: contains\n      pattern: x\n',
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(
+            "fuscan.gui.main_window.QMessageBox.question",
+            lambda *_args, **_kwargs: QMessageBox.Yes,
+        )
+        warned = {"called": False}
+        monkeypatch.setattr(
+            "fuscan.gui.main_window.QMessageBox.warning",
+            lambda *_args, **_kwargs: warned.update(called=True),
+        )
+        # 不应抛异常
+        window._on_load_rules()
+        assert warned["called"]
         window.close()
 
     def test_move_rule_up(self, qapp: QApplication, tmp_path: Path) -> None:

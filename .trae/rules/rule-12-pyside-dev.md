@@ -31,3 +31,7 @@ alwaysApply: true
 - 输入触发的列表重建用 `QTimer.singleShot(300ms)` 防抖；重置数据时 `stop()` 挂起 timer，避免重复刷新。
 - 批量插入 `QTreeWidget`/`QListWidget` 用 `setUpdatesEnabled(False)` + `try/finally`。
 - 避免重复连接信号槽，每个信号槽对每个信号只连接一次。
+
+## 详细参考
+
+本规则为硬约束简表，详细设计令牌、四区布局规范、UI 设计规范、实现模式与代码模板见 `gui-pyside` SKILL（含 SKILL.md / UI-DESIGN.md / LAYOUT.md / PATTERNS.md 四文档，调用指引见 `rule-03-触发场景.md`）。

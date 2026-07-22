@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping
 from fuscan.cache.hashes import hash_bytes
 from fuscan.cache.store import BatchWriteItem
 from fuscan.extractors import extract_content_from_bytes, extract_content_with_fallback
+from fuscan.perf import PerfStats
 from fuscan.rules.model import MatchSpec, MatchTarget, Rule, RuleSet
 from fuscan.scanner.context import ContentProvider, FileEntry, MatchContext
 from fuscan.scanner.matchers import Matcher, build_matcher
@@ -224,6 +225,9 @@ class Scanner:
         # _batch_lock 保护 _pending_batch 跨 worker 线程的并发累积与 flush。
         self._pending_batch: list[BatchWriteItem] = []
         self._batch_lock = threading.Lock()
+        # 性能聚合统计（iter-65）：FUSCAN_PERF=1 时累计各阶段耗时，扫描末尾输出汇总。
+        # 未启用时 PerfStats.measure/record 零开销（仅一次 bool 检查），不影响生产性能。
+        self._perf: PerfStats = PerfStats()
 
     @staticmethod
     def _normalize_max_file_size(value: int | None) -> int:
@@ -285,6 +289,8 @@ class Scanner:
         # 重置每次扫描的收集列表，避免跨多次 scan() 累积
         self._skipped_dirs.clear()
         self._matched_files.clear()
+        # 重置性能统计，使每次 scan() 的汇总独立
+        self._perf.reset()
 
         results: list[ScanResult] = []
         entries: list[FileEntry] = []
@@ -343,6 +349,8 @@ class Scanner:
 
         # 强制发送最终进度
         self._emit_progress("", scanned, matched, errors, matches, force=True)
+        # 输出性能汇总（FUSCAN_PERF=1 时才产生日志，否则零开销）
+        self._perf.report(logger)
 
         duration = time.perf_counter() - self._progress_start
         stats = ScanStats(
@@ -758,7 +766,8 @@ class Scanner:
             if rule.file_extensions and entry.extension not in rule.file_extensions:
                 continue
             try:
-                result = matcher.matches(context)
+                with self._perf.measure("match"):
+                    result = matcher.matches(context)
             except Exception:
                 rule_errors += 1
                 logger.warning("规则 %s 求值失败 %s", rule.name, entry.path, exc_info=True)
@@ -789,6 +798,10 @@ class Scanner:
         - 未命中则提取并写入缓存（非空内容才写）
         - 大文件跳过阈值由 ``Scanner(max_file_size=...)`` 控制，0 表示不限制
 
+        各阶段接入 ``PerfStats`` 计时（``FUSCAN_PERF=1`` 启用）：
+        ``read_bytes`` / ``hash`` / ``cache_lookup_extract`` / ``extract`` /
+        ``cache_put_extract``，便于定位 I/O 与 CPU 瓶颈。
+
         :param entry: 文件元信息
         :return: ``(content, file_hash)`` 元组
         """
@@ -796,24 +809,29 @@ class Scanner:
         if entry.is_dir or (self._max_file_size > 0 and entry.size > self._max_file_size):
             return "", hash_bytes(b"")
         try:
-            data = entry.path.read_bytes()
+            with self._perf.measure("read_bytes"):
+                data = entry.path.read_bytes()
         except OSError:
             logger.debug("读取文件失败: %s", entry.path, exc_info=True)
             return "", hash_bytes(b"")
-        file_hash = hash_bytes(data)
+        with self._perf.measure("hash"):
+            file_hash = hash_bytes(data)
         # 查提取内容缓存
-        cached_content = self._cache.get_extracted_content(file_hash)
+        with self._perf.measure("cache_lookup_extract"):
+            cached_content = self._cache.get_extracted_content(file_hash)
         if cached_content is not None:
             return cached_content, file_hash
         # 未命中，执行提取
         try:
-            content = extract_content_from_bytes(data, entry.extension)
+            with self._perf.measure("extract"):
+                content = extract_content_from_bytes(data, entry.extension)
         except Exception:
             logger.debug("提取器提取失败，回退到纯文本: %s", entry.path, exc_info=True)
             content = data.decode("utf-8", errors="ignore")
         # 写入提取内容缓存（非空才写）
         if content:
-            self._cache.put_extracted_content(file_hash, content, entry.extension)
+            with self._perf.measure("cache_put_extract"):
+                self._cache.put_extracted_content(file_hash, content, entry.extension)
         return content, file_hash
 
     def _scan_entry_cached(self, entry: FileEntry) -> ScanResult:
@@ -853,23 +871,25 @@ class Scanner:
 
         # mtime 预筛：若 (path, mtime, size) 已登记且所有规则都已缓存，
         # 完全跳过 read_bytes，仅从缓存重建 ScanResult。
-        cached_file_hash = self._cache.lookup_file_hash(entry.path, entry.mtime, entry.size)
-        if cached_file_hash is not None and rule_hashes:
-            cached = self._cache.get_cached_hits(cached_file_hash, rule_hashes)
-            if all(rh in cached for rh in rule_hashes):
-                # 全部规则已缓存命中（含未命中记录），无需读文件
-                hits, rule_errors = self._build_hits_from_cache(applicable, cached)
-                # 累积元数据刷新到批量缓冲（无新 scan_results 需写入，hits=()）
-                self._add_to_batch(
-                    BatchWriteItem(
-                        file_hash=cached_file_hash,
-                        size=entry.size,
-                        path=entry.path,
-                        mtime=entry.mtime,
-                        hits=(),
-                    )
+        cached: dict[str, RuleHit | None] | None = None
+        with self._perf.measure("cache_lookup"):
+            cached_file_hash = self._cache.lookup_file_hash(entry.path, entry.mtime, entry.size)
+            if cached_file_hash is not None and rule_hashes:
+                cached = self._cache.get_cached_hits(cached_file_hash, rule_hashes)
+        if cached_file_hash is not None and cached is not None and all(rh in cached for rh in rule_hashes):
+            # 全部规则已缓存命中（含未命中记录），无需读文件
+            hits, rule_errors = self._build_hits_from_cache(applicable, cached)
+            # 累积元数据刷新到批量缓冲（无新 scan_results 需写入，hits=()）
+            self._add_to_batch(
+                BatchWriteItem(
+                    file_hash=cached_file_hash,
+                    size=entry.size,
+                    path=entry.path,
+                    mtime=entry.mtime,
+                    hits=(),
                 )
-                return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)
+            )
+            return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)
 
         # 常规路径：读文件 + 算哈希 + 查提取内容缓存 + 未命中执行提取
         content, file_hash = self._extract_with_cache(entry)
@@ -879,7 +899,8 @@ class Scanner:
 
         context = MatchContext(entry, content_provider=_static_provider)
 
-        cached: dict[str, RuleHit | None] = self._cache.get_cached_hits(file_hash, rule_hashes) if rule_hashes else {}
+        with self._perf.measure("cache_lookup_hits"):
+            cached = self._cache.get_cached_hits(file_hash, rule_hashes) if rule_hashes else {}
 
         hits: list[RuleHit] = []
         rule_errors = 0
@@ -905,7 +926,8 @@ class Scanner:
                 continue
             # 未缓存——执行匹配器
             try:
-                match_result = matcher.matches(context)
+                with self._perf.measure("match"):
+                    match_result = matcher.matches(context)
             except Exception:
                 rule_errors += 1
                 logger.warning("规则 %s 求值失败 %s", rule.name, entry.path, exc_info=True)
@@ -972,7 +994,8 @@ class Scanner:
             return
         items = self._pending_batch
         self._pending_batch = []
-        self._cache.batch_put_results(items)
+        with self._perf.measure("cache_write"):
+            self._cache.batch_put_results(items)
 
     @staticmethod
     def _build_hits_from_cache(

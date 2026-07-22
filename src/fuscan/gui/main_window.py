@@ -140,7 +140,6 @@ from fuscan.gui.icons import (
     load_themed_icon as _load_themed_icon,
 )
 from fuscan.gui.main_window_ui import Ui_MainWindow
-from fuscan.gui.perf import PerfTimer
 from fuscan.gui.preview_utils import (
     SEVERITY_BACKGROUNDS,
     SEVERITY_LABELS,
@@ -148,6 +147,7 @@ from fuscan.gui.preview_utils import (
 from fuscan.gui.scan_path_history import ScanPathHistory
 from fuscan.gui.scan_progress_lists import ScanListUpdater
 from fuscan.gui.worker import ScanWorker
+from fuscan.perf import PerfTimer
 from fuscan.rules import RuleError, load_ruleset, merge_multiple_rulesets
 from fuscan.rules.model import RuleSet, Severity
 from fuscan.scanner import ScanReport, list_drives

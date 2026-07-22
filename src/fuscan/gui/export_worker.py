@@ -22,7 +22,7 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import QObject, QThread, Signal  # pyrefly: ignore [missing-import]
 
-from fuscan.gui.perf import PerfTimer
+from fuscan.perf import PerfTimer
 from fuscan.scanner import ScanReport
 from fuscan.scanner.export import save_report
 

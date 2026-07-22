@@ -1828,7 +1828,7 @@ class TestSeverityDisplay:
         item = window.detail_hits_table.item(0, 1)
         assert item is not None
         assert item.text() == "警告"
-        assert item.background().color().rgb() == expected_bg.rgb()  # pyrefly: ignore [missing-argument]
+        assert item.background().color().rgb() == expected_bg.rgb()
         window.close()
 
     def test_rules_tree_shows_severity_colors(self, qapp: QApplication) -> None:
@@ -1848,10 +1848,9 @@ class TestSeverityDisplay:
         sev_text = item.text(1)
         assert sev_text in ("严重", "警告", "一般")
         expected_bgs = {
-            sev: SEVERITY_BACKGROUNDS[sev].rgb()
-            for sev in (Severity.CRITICAL, Severity.WARNING, Severity.INFO)
+            sev: SEVERITY_BACKGROUNDS[sev].rgb() for sev in (Severity.CRITICAL, Severity.WARNING, Severity.INFO)
         }
-        bg_rgb = item.background(1).color().rgb()  # pyrefly: ignore [missing-argument]
+        bg_rgb = item.background(1).color().rgb()
         assert bg_rgb in expected_bgs.values()
         window.close()
 

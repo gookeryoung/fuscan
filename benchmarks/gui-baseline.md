@@ -139,8 +139,10 @@ FUSCAN_PERF=1 uv run python -m fuscan.gui
 [perf] < MainWindow.__init__ 45.2ms
 ```
 
-嵌套层级通过空格缩进表达，输出到 `fuscan.gui.perf` logger（DEBUG 级别），
-可被统一日志配置捕获。
+嵌套层级通过空格缩进表达，输出到 `fuscan.perf` logger（DEBUG 级别），
+可被统一日志配置捕获。iter-65 起 `perf.py` 从 `fuscan.gui.perf` 提升到
+`fuscan.perf`（公共模块），GUI 与扫描器共用；新增 `PerfStats` 聚合统计类
+供扫描器分阶段瓶颈分析。
 
 ## 后续测量计划
 

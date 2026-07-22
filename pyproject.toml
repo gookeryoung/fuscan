@@ -72,12 +72,8 @@ packages = ["src/fuscan"]
 "src/fuscan/py.typed" = "fuscan/py.typed"
 "src/fuscan/assets/docs/fuscan-用户手册.pdf" = "fuscan/assets/docs/fuscan-用户手册.pdf"
 
-# fspack 打包入口配置（fspack b）
-# 键为入口名（生成同名 exe），值为入口脚本相对项目根的路径
-# 打包命令：fspack b --py-version 3.10.11（PySide2 需 Python ≤ 3.10）
 [tool.fspack.entries]
-fuscan = "src/fuscan/__main__.py"
-fuscan-gui = "src/fuscan/gui/__main__.py"
+fuscan = "src/fuscan/gui/__main__.py"
 
 [dependency-groups]
 dev = ["fuscan[dev,docs]"]

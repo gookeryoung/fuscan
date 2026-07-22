@@ -332,17 +332,16 @@ class TestIncrementalScanner:
         assert report.stats.scanned_files == 0
 
     def test_scan_paths_skips_non_matching_extension(self, tmp_path: Path) -> None:
-        """scan_paths 传入不匹配扩展名的文件应跳过。"""
+        """scan_paths 传入不匹配 scan_extensions 的文件应跳过（iter-71）。"""
         f = tmp_path / "a.txt"
         f.write_text("password", encoding="utf-8")
         rule = Rule(
             name="conf-only",
             severity=Severity.WARNING,
             match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="password"),
-            file_extensions=("conf",),
         )
         rs = _build_ruleset(rule)
-        scanner = IncrementalScanner(rs)
+        scanner = IncrementalScanner(rs, scan_extensions=("conf",))
         report = scanner.scan_paths([f])
         assert report.stats.scanned_files == 0
 
@@ -362,16 +361,16 @@ class TestIncrementalScanner:
         assert report.stats.errors == 1
 
     def test_file_extensions_filter(self, tmp_path: Path) -> None:
+        """全局 scan_extensions 过滤：只扫描指定后缀的文件（iter-71）。"""
         (tmp_path / "a.conf").write_text("password", encoding="utf-8")
         (tmp_path / "a.txt").write_text("password", encoding="utf-8")
         rule = Rule(
             name="conf-only",
             severity=Severity.WARNING,
             match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="password"),
-            file_extensions=("conf",),
         )
         rs = _build_ruleset(rule)
-        scanner = IncrementalScanner(rs)
+        scanner = IncrementalScanner(rs, scan_extensions=("conf",))
         report = scanner.scan(tmp_path)
         assert report.stats.scanned_files == 1
         assert report.stats.matched_files == 1

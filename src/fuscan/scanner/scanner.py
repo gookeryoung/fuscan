@@ -1,7 +1,10 @@
 """扫描器：协调遍历器与匹配引擎，输出扫描报告。
 
-支持多线程并发扫描以提升 I/O 密集型场景的吞吐量：
-``max_workers`` 控制线程池大小，``None`` 或 ``<=1`` 时退化为单线程。
+两阶段扫描架构（iter-71）：
+
+1. 单线程遍历目录树收集待扫描文件清单（按全局 ``scan_extensions`` 过滤）
+2. ``max_workers > 1`` 时用 ThreadPoolExecutor 并发扫描清单，否则顺序扫描
+
 压缩包扫描在 ``max_workers > 1`` 时按 archive 文件级别并行：不同 archive
 用线程池并发扫描，单个 archive 内条目顺序执行（避免 reader 共享竞争）。
 """
@@ -129,7 +132,8 @@ class Scanner:
     - 构造时一次性编译规则集为 Matcher 列表，避免重复编译
     - 默认使用提取器注册表（extractors）提取文件内容，支持多格式
     - 支持自定义内容提供器覆盖默认提取逻辑
-    - ``max_workers > 1`` 时用线程池并发扫描，提升 I/O 密集型场景吞吐量
+    - 两阶段架构（iter-71）：先单线程遍历收集文件清单（按全局 ``scan_extensions``
+      过滤），再 ``max_workers > 1`` 时用线程池并发扫描清单
     - ``on_progress`` 回调在扫描过程中按时间节流（默认 150ms）反馈进度
     """
 
@@ -149,25 +153,32 @@ class Scanner:
         cache: CacheStore | None = None,
         source_files: Mapping[Path, str] | None = None,
         max_file_size: int | None = None,
+        scan_extensions: tuple[str, ...] | None = None,
     ) -> None:
         self.ruleset = ruleset
         self._content_provider: ContentProvider = content_provider or default_extract_content
         # 大文件跳过阈值：None 或 0 表示不限制，否则超过此大小的文件不读取内容
         self._max_file_size: int = self._normalize_max_file_size(max_file_size)
         self._compiled: list[tuple[Rule, Matcher]] = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
-        # 预计算规则集扩展名并集，避免 _should_scan 对每个文件重算
-        self._has_unrestricted_rule: bool = any(not rule.file_extensions for rule in ruleset.rules)
-        self._all_extensions: frozenset[str] = frozenset(ext for rule in ruleset.rules for ext in rule.file_extensions)
+        # 全局后缀过滤（iter-71）：None 或空表示扫描所有文件；
+        # 非空 frozenset 表示只扫描指定后缀。替代原规则级 file_extensions 并集。
+        self._scan_extensions: frozenset[str] | None = (
+            frozenset(e.lower().lstrip(".") for e in scan_extensions) if scan_extensions else None
+        )
         self._skipped_dirs: deque[str] = deque(maxlen=_PROGRESS_LIST_MAX)
         self._matched_files: deque[tuple[str, str]] = deque(maxlen=_PROGRESS_LIST_MAX)
         # scan_archives=True 时从 ignore_extensions 中剔除已注册的 archive 扩展名
         # （zip/rar/7z）：默认 ignore_extensions 含这些扩展名会阻止压缩包进入扫描队列，
         # 导致 ArchiveScanner 永远收不到压缩包（需求 req-13 R3 修复）
+        # 同时保存 archive_exts 供 _should_scan 使用：scan_extensions 过滤时
+        # archive 文件即使不在 scan_extensions 中也应收集（iter-71）
         effective_ignore_extensions = ignore_extensions
+        self._archive_extensions: frozenset[str] = frozenset()
         if scan_archives:
             from fuscan.archive import default_factory as _archive_factory
 
             archive_exts = _archive_factory.registered_extensions
+            self._archive_extensions = archive_exts
             effective_ignore_extensions = tuple(
                 e for e in ignore_extensions if e.lower().lstrip(".") not in archive_exts
             )
@@ -280,8 +291,16 @@ class Scanner:
     def scan(self, root: Path) -> ScanReport:
         """扫描根目录，返回完整报告。
 
-        ``max_workers > 1`` 时用流水线线程池扫描（walk 与 scan 并行），
-        压缩包内条目始终顺序扫描。``on_progress`` 回调在遍历和扫描阶段按时间节流反馈进度。
+        两阶段扫描架构（iter-71）：
+
+        1. **阶段 1 - 收集**：单线程遍历目录树，按全局 ``scan_extensions`` 过滤
+           生成待扫描文件清单。遍历为 I/O 轻量操作，单线程已足够。
+        2. **阶段 2 - 扫描**：``max_workers > 1`` 时用 ThreadPoolExecutor 并发扫描
+           文件清单，否则顺序扫描。先收集再扫描避免了 walk 与 scan 争抢磁盘 I/O
+           导致的吞吐下降，且可对清单做全局后缀过滤减少无效提交。
+        3. **阶段 3 - 压缩包**：顺序扫描压缩包内条目（避免 ArchiveScanner 线程安全问题）。
+
+        ``on_progress`` 回调在遍历和扫描阶段按时间节流反馈进度。
         """
         self._progress_start = time.perf_counter()
         # 重置暂停状态（取消状态在 finally 中清除，保留"scan() 前取消"语义）
@@ -304,11 +323,8 @@ class Scanner:
 
         try:
             if not cancelled:
-                if self._max_workers and self._max_workers > 1:
-                    # 流水线模式：walk 与 scan 并行
-                    total, skipped, scanned, matched, errors, matches, entries = self._scan_pipelined(root, results)
-                else:
-                    # 阶段 1：遍历收集待扫描 entry（单线程，I/O 轻量）
+                # 阶段 1：单线程遍历收集待扫描 entry（I/O 轻量，按全局后缀过滤）
+                with self._perf.measure("walk"):
                     for entry in self._walker.walk(root):
                         if self._check_control():
                             break
@@ -319,9 +335,12 @@ class Scanner:
                         entries.append(entry)
                         if total % 200 == 0:
                             self._emit_progress(str(entry.path), 0, 0, 0)
-                    self._progress_total = total
-                    self._progress_skipped = skipped
-                    # 阶段 2：顺序扫描
+                self._progress_total = total
+                self._progress_skipped = skipped
+                # 阶段 2：并发扫描（max_workers > 1）或顺序扫描
+                if self._max_workers and self._max_workers > 1:
+                    scanned, matched, errors, matches = self._scan_concurrent(entries, results)
+                else:
                     scanned, matched, errors, matches = self._scan_sequential(entries, results)
 
             # 阶段 3：顺序扫描压缩包内条目（避免 ArchiveScanner 线程安全问题）
@@ -435,135 +454,66 @@ class Scanner:
             self._emit_progress(str(entry.path), scanned, matched, errors, matches)
         return scanned, matched, errors, matches
 
-    def _scan_pipelined(
+    def _scan_concurrent(
         self,
-        root: Path,
+        entries: list[FileEntry],
         results: list[ScanResult],
-    ) -> tuple[int, int, int, int, int, int, list[FileEntry]]:
-        """流水线扫描：walk 与 scan 并行。
+    ) -> tuple[int, int, int, int]:
+        """并发扫描文件清单，返回 ``(scanned, matched, errors, matches)``。
 
-        walk 线程遍历目录时即时 ``pool.submit``，使文件遍历 I/O 与内容读取 I/O 重叠。
-        每 500 个在途 future 执行一次非阻塞 drain，控制 ``future_to_entry`` 字典增长；
-        walk 结束后用 :func:`as_completed` 阻塞等待全部剩余 future。
+        iter-71 两阶段架构：阶段 1 已单线程收集 ``entries``，本方法将所有
+        entry 提交到 ``ThreadPoolExecutor`` 并用 :func:`as_completed` 收集结果。
+        相比原流水线模式，先收集再扫描避免了 walk 线程与 worker 线程争抢
+        磁盘 I/O，且可对完整清单做全局后缀过滤后再提交，减少无效 future。
 
-        取消加速（需求 req-13）：walk 循环或 as_completed 循环检测到取消时，
-        立即对全部未启动 future 调 ``f.cancel()`` 并 ``break`` 跳出，**不进入**
-        ``as_completed`` 阻塞等待。``ThreadPoolExecutor`` 上下文退出时仍会等待
-        已运行 future（最多 ``max_workers`` 个）完成，配合 ``max_file_size``
-        大文件跳过可将单 worker 阻塞上限控制在百毫秒级。
+        取消加速（需求 req-13）：提交或收集阶段检测到取消时，立即对全部未启动
+        future 调 ``f.cancel()`` 并 ``break`` 跳出 ``as_completed`` 阻塞等待。
+        ``ThreadPoolExecutor`` 上下文退出时仍会等待已运行 future（最多
+        ``max_workers`` 个）完成，配合 ``max_file_size`` 大文件跳过可将单 worker
+        阻塞上限控制在百毫秒级。
 
-        ``entries`` 列表同步收集，供后续 :meth:`_scan_archive_phase` 使用。
-
-        :return: ``(total, skipped, scanned, matched, errors, matches, entries)``
+        命中结果同步收集到 ``_matched_files`` 供进度回调上报。
         """
-        total = 0
-        skipped = 0
         scanned = 0
         matched = 0
         errors = 0
         matches = 0
-        entries: list[FileEntry] = []
         future_to_entry: dict[Future[ScanResult], FileEntry] = {}
         with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
-            cancelled_in_walk = False
-            for entry in self._walker.walk(root):
+            cancelled_in_submit = False
+            # 一次性提交所有 entries：阶段 1 已完成遍历，entries 内存可见且可索引
+            for entry in entries:
                 if self._check_control():
-                    cancelled_in_walk = True
+                    cancelled_in_submit = True
                     break
-                total += 1
-                if not self._should_scan(entry):
-                    skipped += 1
-                    continue
-                entries.append(entry)
                 future = pool.submit(self._scan_entry, entry)
                 future_to_entry[future] = entry
-                if len(future_to_entry) >= 500:
-                    d_scanned, d_matched, d_errors, d_matches = self._drain_futures(future_to_entry, results)
-                    scanned += d_scanned
-                    matched += d_matched
-                    errors += d_errors
-                    matches += d_matches
-                if total % 200 == 0:
-                    self._emit_progress(str(entry.path), scanned, matched, errors, matches)
-            self._progress_total = total
-            self._progress_skipped = skipped
-            if cancelled_in_walk:
+            if cancelled_in_submit:
                 # 取消全部未启动 future，避免 with 退出时阻塞等待它们；
                 # 已运行 future（最多 max_workers 个）由 with 退出时统一等待
                 _cancel_all_futures(future_to_entry)
-                return total, skipped, scanned, matched, errors, matches, entries
-            # 阻塞收集剩余 future
-            d_scanned, d_matched, d_errors, d_matches = self._collect_scan_futures(future_to_entry, results)
-            scanned += d_scanned
-            matched += d_matched
-            errors += d_errors
-            matches += d_matches
-        return total, skipped, scanned, matched, errors, matches, entries
-
-    def _collect_scan_futures(
-        self,
-        future_to_entry: dict[Future[ScanResult], FileEntry],
-        results: list[ScanResult],
-    ) -> tuple[int, int, int, int]:
-        """阻塞收集文件扫描 future 结果，返回 ``(scanned, matched, errors, matches)`` 增量。
-
-        取消时对剩余未启动 future 调 ``cancel()`` 并 ``break``，避免 ``as_completed``
-        阻塞等待。命中结果同步收集到 ``_matched_files`` 供进度回调上报。
-        """
-        scanned = matched = errors = matches = 0
-        for future in as_completed(future_to_entry):
-            if self._check_control():
-                _cancel_all_futures(future_to_entry)
-                break
-            entry = future_to_entry[future]
-            scanned += 1
-            try:
-                result = future.result()
-                if result.has_hit:
-                    matched += 1
-                    matches += result.total_match_count
-                    if self._on_progress is not None:
-                        for hit in result.hits:
-                            self._matched_files.append((str(entry.path), hit.rule_name))
-                errors += result.errors
-                results.append(result)
-            except Exception:
-                errors += 1
-                logger.warning("扫描文件失败 %s", entry.path, exc_info=True)
-            self._emit_progress(str(entry.path), scanned, matched, errors, matches)
-        return scanned, matched, errors, matches
-
-    def _drain_futures(
-        self,
-        future_to_entry: dict[Future[ScanResult], FileEntry],
-        results: list[ScanResult],
-    ) -> tuple[int, int, int, int]:
-        """非阻塞收集已完成 future，返回 ``(scanned, matched, errors, matches)`` 增量。
-
-        遍历 ``future_to_entry`` 中已 :meth:`Future.done` 的项，pop 并收集结果，
-        不阻塞调用方。仅在 walk 线程调用，与 worker 线程无共享可变状态竞争。
-        """
-        scanned = 0
-        matched = 0
-        errors = 0
-        matches = 0
-        done = [f for f in future_to_entry if f.done()]
-        for future in done:
-            entry = future_to_entry.pop(future)
-            scanned += 1
-            try:
-                result = future.result()
-                if result.has_hit:
-                    matched += 1
-                    matches += result.total_match_count
-                    if self._on_progress is not None:
-                        for hit in result.hits:
-                            self._matched_files.append((str(entry.path), hit.rule_name))
-                errors += result.errors
-                results.append(result)
-            except Exception:
-                errors += 1
-                logger.warning("扫描文件失败 %s", entry.path, exc_info=True)
+                return scanned, matched, errors, matches
+            # 阻塞收集 future 结果（按完成顺序）
+            for future in as_completed(future_to_entry):
+                if self._check_control():
+                    _cancel_all_futures(future_to_entry)
+                    break
+                entry = future_to_entry[future]
+                scanned += 1
+                try:
+                    result = future.result()
+                    if result.has_hit:
+                        matched += 1
+                        matches += result.total_match_count
+                        if self._on_progress is not None:
+                            for hit in result.hits:
+                                self._matched_files.append((str(entry.path), hit.rule_name))
+                    errors += result.errors
+                    results.append(result)
+                except Exception:
+                    errors += 1
+                    logger.warning("扫描文件失败 %s", entry.path, exc_info=True)
+                self._emit_progress(str(entry.path), scanned, matched, errors, matches)
         return scanned, matched, errors, matches
 
     def _accumulate_archive_results(
@@ -727,16 +677,23 @@ class Scanner:
         return self._archive_scanner.scan_archive(path)
 
     def _should_scan(self, entry: FileEntry) -> bool:
-        """根据规则集的 file_extensions 限制决定是否扫描该文件。
+        """根据全局 scan_extensions 过滤决定是否扫描该文件。
 
-        若任一规则未限定扩展名，则扫描所有文件；
-        否则只扫描规则限定扩展名的并集。
+        ``scan_extensions`` 为 None 或空表示扫描所有文件；
+        非空表示只扫描指定后缀（已规范化为小写、无点）。
+
+        特例：``scan_archives=True`` 时，archive 文件（zip/rar/7z）即使不在
+        ``scan_extensions`` 中也收集——压缩包内条目不再按 ``scan_extensions``
+        二次过滤，由 ArchiveScanner 统一扫描全部条目（iter-71）。
         """
         if entry.is_dir:
             return False
-        if self._has_unrestricted_rule:
+        if not self._scan_extensions:
             return True
-        return entry.extension in self._all_extensions
+        if entry.extension in self._scan_extensions:
+            return True
+        # scan_archives=True 时 archive 文件即使不在 scan_extensions 中也收集
+        return bool(self._archive_extensions) and entry.extension in self._archive_extensions
 
     def _scan_entry(self, entry: FileEntry) -> ScanResult:
         """对单个文件应用所有规则，返回扫描结果。
@@ -764,9 +721,9 @@ class Scanner:
         hits: list[RuleHit] = []
         rule_errors = 0
 
+        # iter-71：全局 scan_extensions 已在 _should_scan 阶段统一过滤，
+        # 此处无需再按 rule.file_extensions 二次过滤
         for rule, matcher in self._compiled:
-            if rule.file_extensions and entry.extension not in rule.file_extensions:
-                continue
             try:
                 with self._perf.measure("match"):
                     result = matcher.matches(context)
@@ -854,21 +811,15 @@ class Scanner:
            传给 :class:`MatchContext`，避免改 MatchContext 接口
         """
         assert self._cache is not None  # 仅类型收窄，调用方已保证非 None
-        # 检查是否有内容规则适用此扩展名
-        has_content_rule = any(
-            rule.name in self._content_rule_names
-            for rule, _, _ in self._compiled_with_hash
-            if not rule.file_extensions or entry.extension in rule.file_extensions
-        )
+        # iter-71：全局 scan_extensions 已在 _should_scan 阶段统一过滤，
+        # 此处无需再按 rule.file_extensions 二次过滤——所有规则对进入扫描队列的
+        # 文件均适用
+        has_content_rule = any(rule.name in self._content_rule_names for rule, _, _ in self._compiled_with_hash)
         if not has_content_rule:
             # 无内容规则：跳过文件 I/O，直接走匹配器（filename/path 不需读文件）
             return self._scan_entry_uncached(entry)
 
-        applicable: list[tuple[Rule, Matcher, str]] = [
-            (rule, matcher, rule_hash)
-            for rule, matcher, rule_hash in self._compiled_with_hash
-            if not rule.file_extensions or entry.extension in rule.file_extensions
-        ]
+        applicable: list[tuple[Rule, Matcher, str]] = list(self._compiled_with_hash)
         rule_hashes = [rh for _, _, rh in applicable]
 
         # mtime 预筛：若 (path, mtime, size) 已登记且所有规则都已缓存，

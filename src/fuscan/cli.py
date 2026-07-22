@@ -300,8 +300,7 @@ def _cmd_rules(args: argparse.Namespace) -> int:
     print(f"  忽略路径: {', '.join(ruleset.ignore_paths) or '(无)'}")
     print("  规则列表:")
     for i, rule in enumerate(ruleset.rules, 1):
-        exts = f" [扩展名: {', '.join(rule.file_extensions)}]" if rule.file_extensions else ""
-        print(f"    {i}. [{rule.severity.value}] {rule.name}{exts}")
+        print(f"    {i}. [{rule.severity.value}] {rule.name}")
         if rule.description:
             print(f"       {rule.description}")
     return 0

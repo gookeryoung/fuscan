@@ -142,9 +142,9 @@ class ArchiveScanner:
         hits: list[RuleHit] = []
         rule_errors = 0
 
+        # iter-71：全局 scan_extensions 已在 Scanner._should_scan 阶段统一过滤，
+        # 压缩包内条目不再按 rule.file_extensions 二次过滤——所有规则对全部条目均适用
         for rule, matcher in self._compiled:
-            if rule.file_extensions and entry.extension not in rule.file_extensions:
-                continue
             try:
                 result = matcher.matches(context)
             except Exception:
@@ -210,11 +210,9 @@ class ArchiveScanner:
 
         context = MatchContext(file_entry, content_provider=content_provider)
 
-        applicable: list[tuple[Rule, Matcher, str]] = [
-            (rule, matcher, rule_hash)
-            for rule, matcher, rule_hash in self._compiled_with_hash
-            if not rule.file_extensions or entry.extension in rule.file_extensions
-        ]
+        # iter-71：全局 scan_extensions 已在 Scanner._should_scan 阶段统一过滤，
+        # 压缩包内条目不再按 rule.file_extensions 二次过滤
+        applicable: list[tuple[Rule, Matcher, str]] = list(self._compiled_with_hash)
         rule_hashes = [rh for _, _, rh in applicable]
         cached: dict[str, RuleHit | None] = self._cache.get_cached_hits(file_hash, rule_hashes) if rule_hashes else {}
 

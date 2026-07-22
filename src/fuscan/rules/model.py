@@ -123,6 +123,8 @@ class Rule:
     match: MatchSpec
     description: str = ""
     severity: Severity = Severity.INFO
+    # 已废弃（iter-71）：改由全局 Config.scan_extensions 统一过滤。
+    # 字段保留以向后兼容旧规则文件解析，Scanner 不再读取此字段。
     file_extensions: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:

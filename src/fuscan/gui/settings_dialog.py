@@ -49,6 +49,10 @@ class SettingsDialog(QDialog, Ui_SettingsDialog):  # pyrefly: ignore [invalid-in
         self.use_builtin_check.setChecked(self.config.use_builtin)
         self.ignore_dirs_edit.setPlainText("\n".join(self.config.ignore_dirs))
         self.ignore_extensions_edit.setPlainText("\n".join(self.config.ignore_extensions))
+        # iter-71：全局扫描后缀过滤，None 或空列表显示为空文本
+        self.scan_extensions_edit.setPlainText(
+            "\n".join(self.config.scan_extensions) if self.config.scan_extensions else ""
+        )
         self.cache_enabled_check.setChecked(self.config.cache_enabled)
         self.cache_path_edit.setText(self.config.cache_path or "")
 
@@ -69,6 +73,13 @@ class SettingsDialog(QDialog, Ui_SettingsDialog):  # pyrefly: ignore [invalid-in
         self.config.ignore_extensions = [
             line.strip() for line in self.ignore_extensions_edit.toPlainText().splitlines() if line.strip()
         ]
+        # iter-71：全局扫描后缀过滤，空文本保存为 None（表示扫描所有文件）
+        exts = [
+            line.strip().lower().lstrip(".")
+            for line in self.scan_extensions_edit.toPlainText().splitlines()
+            if line.strip()
+        ]
+        self.config.scan_extensions = exts if exts else None
         self.config.cache_enabled = self.cache_enabled_check.isChecked()
         path_text = self.cache_path_edit.text().strip()
         self.config.cache_path = path_text or None

@@ -43,6 +43,7 @@ class IncrementalScanner:
         ignore_dirs: tuple[str, ...] = (),
         ignore_extensions: tuple[str, ...] = (),
         cache: CacheStore | None = None,
+        scan_extensions: tuple[str, ...] | None = None,
     ) -> None:
         self._cache: CacheStore | None = cache
         self._scanner = Scanner(
@@ -52,6 +53,7 @@ class IncrementalScanner:
             ignore_dirs=ignore_dirs,
             ignore_extensions=ignore_extensions,
             cache=cache,
+            scan_extensions=scan_extensions,
         )
 
     @property

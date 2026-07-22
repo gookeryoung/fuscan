@@ -105,16 +105,16 @@ class TestScannerRules:
         assert report.hits[0].path.name == "a.txt"
 
     def test_file_extensions_filter(self, tmp_path: Path) -> None:
+        """全局 scan_extensions 过滤：只扫描指定后缀的文件（iter-71 起替代规则级 file_extensions）。"""
         (tmp_path / "a.conf").write_text("password", encoding="utf-8")
         (tmp_path / "a.txt").write_text("password", encoding="utf-8")
         rule = Rule(
             name="conf-only",
             severity=Severity.WARNING,
             match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="password"),
-            file_extensions=("conf",),
         )
         rs = _build_ruleset(rule)
-        scanner = Scanner(rs)
+        scanner = Scanner(rs, scan_extensions=("conf",))
         report = scanner.scan(tmp_path)
         # 总计 2 文件，但只扫描 .conf
         assert report.stats.total_files == 2
@@ -908,19 +908,18 @@ class TestScannerConcurrency:
         assert report.stats.matched_files == 8
 
     def test_concurrent_with_file_extensions_filter(self, tmp_path: Path) -> None:
-        """多线程模式下 file_extensions 过滤应正常工作。"""
+        """多线程模式下全局 scan_extensions 过滤应正常工作（iter-71 两阶段架构）。"""
         rule = Rule(
             name="conf-only",
             severity=Severity.WARNING,
             match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="password"),
-            file_extensions=("conf",),
         )
         rs = _build_ruleset(rule)
         for i in range(10):
             (tmp_path / f"a_{i}.conf").write_text("password", encoding="utf-8")
             (tmp_path / f"b_{i}.txt").write_text("password", encoding="utf-8")
 
-        scanner = Scanner(rs, max_workers=4)
+        scanner = Scanner(rs, max_workers=4, scan_extensions=("conf",))
         report = scanner.scan(tmp_path)
         assert report.stats.total_files == 20
         assert report.stats.scanned_files == 10  # 只扫描 .conf
@@ -934,11 +933,11 @@ class TestScannerConcurrency:
         assert report.stats.total_files == 0
         assert report.stats.matched_files == 0
 
-    def test_pipelined_large_fileset_triggers_drain(self, tmp_path: Path) -> None:
-        """流水线扫描文件数超过 drain 阈值（500）时应正确收集全部结果。
+    def test_concurrent_large_fileset_two_phase(self, tmp_path: Path) -> None:
+        """两阶段架构（iter-71）：600 文件先收集再并发扫描，结果与单线程一致。
 
-        验证 _drain_futures 在 walk 过程中非阻塞收集已完成 future 后，
-        最终统计与单线程一致。
+        替代原流水线 drain 测试：先收集再扫描模式下，所有 entry 一次性提交到
+        ThreadPoolExecutor，由 as_completed 按完成顺序收集，最终统计与单线程一致。
         """
         for i in range(600):
             (tmp_path / f"secret_{i}.txt").write_text(f"password_{i}", encoding="utf-8")
@@ -962,11 +961,11 @@ class TestScannerConcurrency:
         con_paths = sorted(str(r.path) for r in con_report.hits)
         assert seq_paths == con_paths
 
-    def test_pipelined_drain_error_handling(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """流水线 drain 阶段 _scan_entry 抛异常应计 error 并继续。
+    def test_concurrent_scan_entry_error_handling(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """两阶段架构并发扫描阶段 _scan_entry 抛异常应计 error 并继续（iter-71）。
 
-        600 文件触发 drain 阈值，首个 future 抛异常后由 drain 非阻塞收集，
-        ``future.result()`` 重抛被 ``except Exception`` 捕获。
+        替代原流水线 drain 错误处理测试：并发收集阶段 future.result() 重抛
+        被除 Exception 捕获，记为 error 不中断后续 future。
         """
         for i in range(600):
             (tmp_path / f"f{i}.txt").write_text("x", encoding="utf-8")
@@ -979,7 +978,7 @@ class TestScannerConcurrency:
         def fake_scan_entry(entry):  # type: ignore[no-untyped-def]
             call_count["n"] += 1
             if call_count["n"] == 1:
-                raise RuntimeError("模拟 drain 阶段失败")
+                raise RuntimeError("模拟并发扫描阶段失败")
             return original_scan_entry(entry)
 
         monkeypatch.setattr(scanner, "_scan_entry", fake_scan_entry)

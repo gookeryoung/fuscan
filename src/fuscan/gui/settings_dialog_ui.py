@@ -169,6 +169,25 @@ class Ui_SettingsDialog(object):
 
         self.scan_page_layout.addWidget(self.options_group)
 
+        self.scan_extensions_group = QGroupBox(self.scan_page)
+        self.scan_extensions_group.setObjectName(u"scan_extensions_group")
+        self.scan_extensions_layout = QFormLayout(self.scan_extensions_group)
+        self.scan_extensions_layout.setObjectName(u"scan_extensions_layout")
+        self.scan_extensions_layout.setHorizontalSpacing(8)
+        self.scan_extensions_layout.setVerticalSpacing(8)
+        self.scan_extensions_label = QLabel(self.scan_extensions_group)
+        self.scan_extensions_label.setObjectName(u"scan_extensions_label")
+
+        self.scan_extensions_layout.setWidget(0, QFormLayout.LabelRole, self.scan_extensions_label)
+
+        self.scan_extensions_edit = QPlainTextEdit(self.scan_extensions_group)
+        self.scan_extensions_edit.setObjectName(u"scan_extensions_edit")
+
+        self.scan_extensions_layout.setWidget(0, QFormLayout.FieldRole, self.scan_extensions_edit)
+
+
+        self.scan_page_layout.addWidget(self.scan_extensions_group)
+
         self.ignore_group = QGroupBox(self.scan_page)
         self.ignore_group.setObjectName(u"ignore_group")
         self.ignore_layout = QFormLayout(self.ignore_group)
@@ -266,6 +285,15 @@ class Ui_SettingsDialog(object):
         self.scan_archives_check.setToolTip(QCoreApplication.translate("SettingsDialog", u"\u626b\u63cf\u538b\u7f29\u6587\u4ef6\u5185\u7684\u6587\u4ef6\u5185\u5bb9\uff08\u5f00\u542f\u540e\u81ea\u52a8\u653e\u884c\u5df2\u5ffd\u7565\u7684\u538b\u7f29\u5305\u6269\u5c55\u540d\uff09", None))
 #endif // QT_CONFIG(tooltip)
         self.scan_archives_check.setText(QCoreApplication.translate("SettingsDialog", u"\u626b\u63cf\u538b\u7f29\u5305\uff08ZIP/RAR/7Z\uff09", None))
+        self.scan_extensions_group.setTitle(QCoreApplication.translate("SettingsDialog", u"\u540e\u7f00\u8fc7\u6ee4", None))
+        self.scan_extensions_label.setText(QCoreApplication.translate("SettingsDialog", u"\u626b\u63cf\u540e\u7f00:", None))
+#if QT_CONFIG(tooltip)
+        self.scan_extensions_edit.setToolTip(QCoreApplication.translate("SettingsDialog", u"\u53ea\u626b\u63cf\u6307\u5b9a\u540e\u7f00\u7684\u6587\u4ef6\uff1b\u7559\u7a7a\u8868\u793a\u626b\u63cf\u6240\u6709\u6587\u4ef6\u3002\u4e00\u884c\u4e00\u4e2a\u6269\u5c55\u540d\uff08\u4e0d\u542b\u70b9\uff09", None))
+#endif // QT_CONFIG(tooltip)
+        self.scan_extensions_edit.setPlaceholderText(QCoreApplication.translate("SettingsDialog", u"\u7559\u7a7a\u626b\u63cf\u6240\u6709\u6587\u4ef6\n"
+"\u5982\uff1atxt\n"
+"    conf\n"
+"    py", None))
         self.ignore_group.setTitle(QCoreApplication.translate("SettingsDialog", u"\u5ffd\u7565\u9879", None))
         self.ignore_dirs_label.setText(QCoreApplication.translate("SettingsDialog", u"\u5ffd\u7565\u76ee\u5f55:", None))
         self.ignore_dirs_edit.setPlaceholderText(QCoreApplication.translate("SettingsDialog", u"\u4e00\u884c\u4e00\u4e2a\u76ee\u5f55\u540d\uff08\u5927\u5c0f\u5199\u4e0d\u654f\u611f\uff09\n"

@@ -155,15 +155,14 @@ class TestMultiFormatContentScan:
         assert report.stats.matched_files == 8
 
     def test_content_regex_python_specific(self, multi_format_root: Path) -> None:
-        """file_extensions 过滤仅扫描 .py 文件。"""
+        """全局 scan_extensions 过滤仅扫描 .py 文件（iter-71）。"""
         rule = _leaf(
             MatchTarget.CONTENT,
             MatchMode.REGEX,
             r"AKIA[A-Z0-9]{16}",
             name="py_only",
-            exts=("py",),
         )
-        scanner = Scanner(_rs(rule))
+        scanner = Scanner(_rs(rule), scan_extensions=("py",))
         report = scanner.scan(multi_format_root)
         hit_files = {h.path.name for h in report.hits}
         assert hit_files == {"settings.py"}
@@ -372,14 +371,13 @@ class TestCompositeRules:
         assert hit_files == {"secret_readme.md", "secret_notes.txt"}
 
     def test_extension_filter_with_content_regex(self, composite_root: Path) -> None:
-        """file_extensions 过滤 + content regex。"""
+        """全局 scan_extensions 过滤 + content regex（iter-71）。"""
         rule = Rule(
             name="ext_regex",
             severity=Severity.WARNING,
             match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"AKIA\d+"),
-            file_extensions=("json", "md"),
         )
-        scanner = Scanner(_rs(rule))
+        scanner = Scanner(_rs(rule), scan_extensions=("json", "md"))
         report = scanner.scan(composite_root)
         hit_files = {h.path.name for h in report.hits}
         # 仅扫描 .json 和 .md 文件

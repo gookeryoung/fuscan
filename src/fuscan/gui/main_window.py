@@ -1042,6 +1042,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
             ignore_extensions=tuple(self._config.ignore_extensions),
             cache=cache,
             source_files=source_files,
+            scan_extensions=tuple(self._config.scan_extensions) if self._config.scan_extensions else None,
         )
         self._worker.progress_info.connect(self._on_scan_progress)  # pyrefly: ignore [missing-attribute]
         self._worker.finished_report.connect(self._on_scan_finished)  # pyrefly: ignore [missing-attribute]
@@ -1486,7 +1487,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
                 [
                     rule.name,
                     "",
-                    ", ".join(rule.file_extensions) if rule.file_extensions else "(全部)",
+                    # iter-71：file_extensions 已废弃，所有规则对全局过滤后的文件均适用
+                    "(全局)",
                 ]
             )
             _apply_severity_to_tree_item(item, 1, rule.severity)

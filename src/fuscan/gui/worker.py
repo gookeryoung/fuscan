@@ -60,6 +60,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         cache: CacheStore | None = None,
         source_files: Mapping[Path, str] | None = None,
         progress_interval: float = 0.3,
+        scan_extensions: tuple[str, ...] | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -74,6 +75,9 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         self._cache: CacheStore | None = cache
         self._source_files: Mapping[Path, str] | None = source_files
         self._progress_interval: float = progress_interval
+        # 全局后缀过滤（iter-71）：None 或空表示扫描所有文件，非空表示只扫描指定后缀。
+        # 替代原规则级 Rule.file_extensions 并集，由 Config.scan_extensions 注入。
+        self._scan_extensions: tuple[str, ...] | None = scan_extensions
         self._scanner: Scanner | None = None
         self._cancel_requested: bool = False
         # 多根路径累计性能统计（iter-66）：每次 scan() 后合并 perf_summary
@@ -138,6 +142,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
                 cache=self._cache,
                 source_files=self._source_files,
                 progress_interval=self._progress_interval,
+                scan_extensions=self._scan_extensions,
             )
             if self._cancel_requested:
                 self._scanner.cancel()

@@ -66,6 +66,9 @@ class Config:
     cache_enabled: bool = True
     # 是否启用性能详细日志（PerfTimer，iter-69 起持久化）
     perf_log_enabled: bool = False
+    # 全局扫描后缀过滤（iter-71）：None 或空列表表示扫描所有文件，
+    # 非空列表表示只扫描指定后缀的文件。替代原规则级 file_extensions。
+    scan_extensions: list[str] | None = None
     # 缓存数据库路径（None 表示默认 ~/.fuscan/cache.db）
     cache_path: str | None = None
     # 忽略目录名（按目录名匹配任意层级，大小写不敏感）

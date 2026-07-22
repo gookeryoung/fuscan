@@ -684,23 +684,26 @@ class TestArchiveScanner:
         assert len(hits) == 1
         assert "keep.txt" in str(hits[0].path)
 
-    def test_scan_archive_file_extensions_filter(self, tmp_path: Path) -> None:
+    def test_scan_archive_scans_all_entries(self, tmp_path: Path) -> None:
+        """ArchiveScanner 扫描压缩包内全部条目（iter-71：不再按 rule.file_extensions 过滤）。"""
         zip_path = _make_zip(
             tmp_path / "a.zip",
             {"a.conf": "password", "a.txt": "password"},
         )
         rule = Rule(
-            name="conf-only",
+            name="all-files",
             severity=Severity.WARNING,
             match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="password"),
-            file_extensions=("conf",),
         )
         rs = _build_ruleset(rule)
         scanner = ArchiveScanner(rs)
         results = scanner.scan_archive(zip_path)
         hits = [r for r in results if r.has_hit]
-        assert len(hits) == 1
-        assert "a.conf" in str(hits[0].path)
+        # 两个条目都命中（不再按 file_extensions 过滤）
+        assert len(hits) == 2
+        hit_names = {str(h.path) for h in hits}
+        assert any("a.conf" in n for n in hit_names)
+        assert any("a.txt" in n for n in hit_names)
 
     def test_scan_archive_oversize_entry_skipped(self, tmp_path: Path) -> None:
         """超过 max_entry_size 的条目内容返回空字符串。"""

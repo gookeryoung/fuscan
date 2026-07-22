@@ -1484,6 +1484,155 @@ class TestLookupFileHash:
             assert store.lookup_file_hash(p2, st2.st_mtime, st2.st_size) == file_hash
 
 
+class TestLookupFileHashLruCache:
+    """路径预筛 LRU 缓存（iter-73）。"""
+
+    def test_lookup_fills_path_cache_on_sqlite_hit(self, tmp_path: Path) -> None:
+        """首次 SQLite 查询命中后回填 _path_cache，第二次命中内存。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            file_hash = hash_bytes(b"content")
+            path = tmp_path / "f.txt"
+            path.write_bytes(b"content")
+            st = path.stat()
+            store.register_file(file_hash, st.st_size)
+            store.register_path(file_hash, path, st.st_mtime)
+
+            # 首次查询走 SQLite，回填 LRU
+            assert store.path_cache_size() == 0
+            assert store.lookup_file_hash(path, st.st_mtime, st.st_size) == file_hash
+            assert store.path_cache_size() == 1
+
+            # 第二次查询应命中 LRU（无法直接断言走内存，但 path_cache_size 不变）
+            assert store.lookup_file_hash(path, st.st_mtime, st.st_size) == file_hash
+            assert store.path_cache_size() == 1
+
+    def test_lookup_does_not_cache_none_result(self, tmp_path: Path) -> None:
+        """未登记路径返回 None，不写入 LRU（避免污染缓存）。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            assert store.lookup_file_hash(tmp_path / "unknown", 0.0, 0) is None
+            assert store.path_cache_size() == 0
+
+    def test_batch_put_results_fills_path_cache(self, tmp_path: Path) -> None:
+        """batch_put_results 写入后主动填充 _path_cache。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            rule_hash = _register_rule(store)
+            file_hash = hash_bytes(b"doc")
+            store.batch_put_results(
+                [
+                    BatchWriteItem(
+                        file_hash=file_hash,
+                        size=100,
+                        path=tmp_path / "a.txt",
+                        mtime=1.0,
+                        hits=((rule_hash, _make_hit()),),
+                    ),
+                ]
+            )
+            # _path_cache 应被主动填充
+            assert store.path_cache_size() == 1
+            # lookup_file_hash 应命中 LRU（不查 SQLite）
+            assert store.lookup_file_hash(tmp_path / "a.txt", 1.0, 100) == file_hash
+
+    def test_batch_put_results_fills_hit_cache_when_hits_non_empty(self, tmp_path: Path) -> None:
+        """batch_put_results 写入非空 hits 时主动填充 _hit_cache。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            rule_hash = _register_rule(store)
+            file_hash = hash_bytes(b"doc")
+            hit = _make_hit(detail="命中")
+            store.batch_put_results(
+                [
+                    BatchWriteItem(
+                        file_hash=file_hash,
+                        size=100,
+                        path=tmp_path / "a.txt",
+                        mtime=1.0,
+                        hits=((rule_hash, hit),),
+                    ),
+                ]
+            )
+            # _hit_cache 应被主动填充，get_cached_hits 命中内存
+            assert store.hit_cache_size() == 1
+            cached = store.get_cached_hits(file_hash, [rule_hash])
+            assert rule_hash in cached
+            assert cached[rule_hash] is not None
+            assert cached[rule_hash].detail == "命中"  # pyrefly: ignore [missing-attribute]
+
+    def test_batch_put_results_preserves_hit_cache_when_hits_empty(self, tmp_path: Path) -> None:
+        """batch_put_results 写入空 hits（预筛命中）时不 invalidate _hit_cache。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            rule_hash = _register_rule(store)
+            file_hash = hash_bytes(b"doc")
+            # 首次写入：填充 _hit_cache
+            store.batch_put_results(
+                [
+                    BatchWriteItem(
+                        file_hash=file_hash,
+                        size=100,
+                        path=tmp_path / "a.txt",
+                        mtime=1.0,
+                        hits=((rule_hash, None),),
+                    ),
+                ]
+            )
+            assert store.hit_cache_size() == 1
+
+            # 第二次写入：空 hits（预筛命中场景），应保留 _hit_cache
+            store.batch_put_results(
+                [
+                    BatchWriteItem(
+                        file_hash=file_hash,
+                        size=100,
+                        path=tmp_path / "a.txt",
+                        mtime=1.0,
+                        hits=(),
+                    ),
+                ]
+            )
+            assert store.hit_cache_size() == 1
+            # get_cached_hits 仍命中内存
+            cached = store.get_cached_hits(file_hash, [rule_hash])
+            assert cached == {rule_hash: None}
+
+    def test_prune_orphan_rules_clears_path_cache(self, tmp_path: Path) -> None:
+        """prune_orphan_rules 删除规则后清空 _path_cache。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            rule_hash = _register_rule(store)
+            store.batch_put_results(
+                [
+                    BatchWriteItem(
+                        file_hash=hash_bytes(b"doc"),
+                        size=10,
+                        path=tmp_path / "a.txt",
+                        mtime=1.0,
+                        hits=((rule_hash, None),),
+                    ),
+                ]
+            )
+            assert store.path_cache_size() == 1
+            # 传入空 active_rule_hashes，删除所有规则（孤立规则）
+            store.prune_orphan_rules(set())
+            assert store.path_cache_size() == 0
+
+    def test_path_cache_mtime_change_misses(self, tmp_path: Path) -> None:
+        """文件 mtime 变化后 LRU 键不同，自动失效。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            file_hash = hash_bytes(b"content")
+            path = tmp_path / "f.txt"
+            path.write_bytes(b"content")
+            st = path.stat()
+            store.register_file(file_hash, st.st_size)
+            store.register_path(file_hash, path, st.st_mtime)
+
+            # 首次查询填充 LRU
+            assert store.lookup_file_hash(path, st.st_mtime, st.st_size) == file_hash
+            assert store.path_cache_size() == 1
+
+            # mtime 变化：LRU 键不同，未命中，走 SQLite 返回 None（未登记新 mtime）
+            assert store.lookup_file_hash(path, st.st_mtime + 100, st.st_size) is None
+            # None 不写入 LRU，path_cache_size 不变
+            assert store.path_cache_size() == 1
+
+
 class TestExtractedContent:
     """提取器结果缓存：get/put_extracted_content（iter-39）。"""
 

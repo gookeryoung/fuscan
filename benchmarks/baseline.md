@@ -63,6 +63,26 @@
 
 ## 性能优化记录
 
+### iter-73 热缓存 LRU 缓存优化
+
+新增 `_path_cache` 内存 LRU 缓存与 `batch_put_results` 主动填充 `_hit_cache`，S5 热缓存吞吐量提升 342%：
+
+| 场景 | iter-39 基线 | iter-72（优化前） | iter-73（优化后） |
+|------|----------:|----------------:|----------------:|
+| S1 单线程无缓存 | 106.0 | 98.2 | 99.2 |
+| S2 4线程无缓存 | 171.2 | 154.7 | 158.0 |
+| S3 24线程无缓存 | 170.7 | 147.8 | 150.1 |
+| S4 4线程+缓存冷 | 163.9 | 148.9 | 150.0 |
+| S5 4线程+缓存热 | 6369.8 | 4248.5 | 18782.1 |
+
+优化要点：
+
+1. **`lookup_file_hash` 加内存 LRU**：新增 `_path_cache: OrderedDict[(path, mtime, size), file_hash]`，
+   先查内存命中跳过 SQLite。`batch_put_results` 写入后主动填充，使热缓存二次扫描 100% 命中内存
+2. **`batch_put_results` 主动填充 `_hit_cache`**：从 `item.hits` 构造 result dict 写入 LRU，
+   替代原 invalidate 行为。`item.hits` 为空（预筛命中）时保留 LRU 条目（`scan_results` 未变）
+3. **S5 `cache_lookup` 从 295ms 降到 2.49ms**（-99.2%），全部命中内存
+
 ### iter-39 性能优化策略执行
 
 四项策略执行，S1 单线程无缓存提升 24%，无回退：

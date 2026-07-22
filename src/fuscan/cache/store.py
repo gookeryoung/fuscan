@@ -15,8 +15,10 @@
 - **进程内 LRU 命中缓存**：``get_cached_hits`` 结果在内存中再缓存一份，
   热点文件（如 node_modules 中重复依赖）查询次数大幅降低；``put_result``
   / ``register_file`` 等写入操作自动 invalidate 对应 ``file_hash`` 条目
-- **路径预筛**：``lookup_file_hash`` 按 ``(path, mtime, size)`` 查询
-  ``file_paths`` 索引，未修改文件可跳过 ``read_bytes`` 与哈希计算
+- **路径预筛 LRU 缓存**（iter-73）：``lookup_file_hash`` 按 ``(path, mtime, size)``
+  查询 ``file_paths`` 索引，结果在内存中再缓存一份；``register_path`` /
+  ``batch_put_results`` 写入后主动填充对应条目，使热缓存二次扫描完全命中内存，
+  消除 SQLite 查询开销。文件 ``mtime`` 变化时 LRU 键自然不同，自动失效
 """
 
 from __future__ import annotations
@@ -123,6 +125,10 @@ class CacheStore:
         # 进程内 LRU 命中缓存：file_hash -> (rule_hashes_tuple, result_dict)
         # 用 OrderedDict 实现 LRU 语义：访问时 move_to_end，超容量时 popitem(last=False)
         self._hit_cache: OrderedDict[str, tuple[tuple[str, ...], dict[str, RuleHit | None]]] = OrderedDict()
+        # 路径预筛 LRU 缓存（iter-73）：(path_str, mtime, size) -> file_hash
+        # lookup_file_hash 命中时跳过 SQLite 查询；register_path / batch_put_results
+        # 写入后主动填充，使热缓存二次扫描完全命中内存。文件 mtime 变化时键不同，自动失效
+        self._path_cache: OrderedDict[tuple[str, float, int], str] = OrderedDict()
         # 线程本地只读连接：每线程一个，WAL 模式下读完全并行
         self._read_local: threading.local = threading.local()
         # 已创建的读连接列表（close 时统一关闭，用 _lru_lock 保护追加）
@@ -236,10 +242,37 @@ class CacheStore:
         """
         self._hit_cache.pop(file_hash, None)
 
+    def _path_cache_get(self, path: str, mtime: float, size: int) -> str | None:
+        """查询路径预筛 LRU 缓存（已持 ``_lru_lock``）。
+
+        命中时移动到队尾（LRU 语义），返回 ``file_hash``；未命中返回 None。
+        """
+        key = (path, mtime, size)
+        file_hash = self._path_cache.get(key)
+        if file_hash is not None:
+            self._path_cache.move_to_end(key)
+        return file_hash
+
+    def _path_cache_put(self, path: str, mtime: float, size: int, file_hash: str) -> None:
+        """写入路径预筛 LRU 缓存（已持 ``_lru_lock``）。
+
+        超容量时弹出最旧条目。
+        """
+        key = (path, mtime, size)
+        self._path_cache[key] = file_hash
+        self._path_cache.move_to_end(key)
+        while len(self._path_cache) > _HIT_CACHE_MAX:
+            self._path_cache.popitem(last=False)
+
     def hit_cache_size(self) -> int:
         """返回进程内 LRU 命中缓存当前条目数（诊断用）。"""
         with self._lru_lock:
             return len(self._hit_cache)
+
+    def path_cache_size(self) -> int:
+        """返回路径预筛 LRU 缓存当前条目数（诊断用，iter-73）。"""
+        with self._lru_lock:
+            return len(self._path_cache)
 
     # ------------------------------------------------------------------ 规则登记
 
@@ -604,10 +637,22 @@ class CacheStore:
                     # ROLLBACK 失败不应掩盖原始异常，仅记录警告
                     logger.warning("ROLLBACK 失败", exc_info=True)
                 raise
-            # 仅 COMMIT 成功后失效 LRU
+            # 仅 COMMIT 成功后更新内存缓存
             with self._lru_lock:
                 for item in items:
-                    self._hit_cache_invalidate(item.file_hash)
+                    # 主动填充 _hit_cache（iter-73）：从 item.hits 构造 result dict，
+                    # 使下次 get_cached_hits 命中内存跳过 SQLite。item.hits 完整时
+                    # （如冷缓存首次扫描所有规则）LRU 命中；不完整时（混合路径部分
+                    # 规则已缓存）_hit_cache_get 检测 rule_hashes 集合不匹配，走
+                    # SQLite 回填，安全降级
+                    if item.hits:
+                        rule_hashes = [rh for rh, _ in item.hits]
+                        result_dict: dict[str, RuleHit | None] = dict(item.hits)
+                        self._hit_cache_put(item.file_hash, rule_hashes, result_dict)
+                    # item.hits 为空（预筛命中，仅刷新元数据）：scan_results 未变，
+                    # 保留 LRU 中已有条目，避免下次查询走 SQLite
+                    # 主动填充路径预筛 LRU：使下次 lookup_file_hash 命中内存
+                    self._path_cache_put(str(item.path), item.mtime, item.size, item.file_hash)
 
     def lookup_file_hash(
         self,
@@ -622,6 +667,9 @@ class CacheStore:
 
         线程安全：使用线程本地只读连接，无锁并行（iter-68）。
         查询优化：JOIN 替代 IN 子查询 + 复合索引（iter-70），消除全表扫描。
+        内存缓存（iter-73）：先查进程内 LRU，命中跳过 SQLite 查询；
+        ``register_path`` / ``batch_put_results`` 写入后主动填充 LRU，
+        使热缓存二次扫描完全命中内存。
 
         安全性说明：mtime 可被人为修改，本方法仅作为性能优化；
         对安全性敏感场景，调用方可关闭此预筛（始终走哈希校验）。
@@ -631,6 +679,12 @@ class CacheStore:
         :param size: 当前文件大小（字节）
         :return: 命中时返回 ``file_hash``（64 字符 hex）；未命中返回 None
         """
+        path_str = str(path)
+        # 先查进程内 LRU（iter-73）：热缓存二次扫描时 100% 命中，跳过 SQLite
+        with self._lru_lock:
+            cached = self._path_cache_get(path_str, mtime, size)
+        if cached is not None:
+            return cached
         # JOIN 形式：先用 idx_paths_path_mtime 按 (path, mtime) 定位，
         # 再用 scanned_files 主键 (file_hash) JOIN 验证 size，全程索引扫描
         row = (
@@ -639,11 +693,18 @@ class CacheStore:
                 "SELECT fp.file_hash FROM file_paths fp "
                 "JOIN scanned_files sf ON fp.file_hash = sf.file_hash "
                 "WHERE fp.path = ? AND fp.mtime = ? AND sf.size = ?",
-                (str(path), mtime, size),
+                (path_str, mtime, size),
             )
             .fetchone()
         )
-        return row["file_hash"] if row else None
+        if row is None:
+            # 未登记路径不缓存（None 不写入 LRU），避免污染缓存
+            return None
+        file_hash = row["file_hash"]
+        # 命中 SQLite 后回填 LRU，下次同一 (path, mtime, size) 直接命中内存
+        with self._lru_lock:
+            self._path_cache_put(path_str, mtime, size, file_hash)
+        return file_hash
 
     # ------------------------------------------------------------------ 提取内容缓存
 
@@ -727,6 +788,7 @@ class CacheStore:
                 # 规则集合变化：全部 LRU 条目可能引用了已删除规则，整体失效
                 with self._lru_lock:
                     self._hit_cache.clear()
+                    self._path_cache.clear()
             return deleted
 
     def prune_stale_files(self, max_age_days: int = 30) -> int:
@@ -753,6 +815,7 @@ class CacheStore:
                 logger.info("清理过期文件缓存: %d 条（>=%d 天）", deleted, max_age_days)
                 with self._lru_lock:
                     self._hit_cache.clear()
+                    self._path_cache.clear()
             return deleted
 
     def stats(self) -> CacheStats:
@@ -798,6 +861,7 @@ class CacheStore:
             self._closed = True
             with self._lru_lock:
                 self._hit_cache.clear()
+                self._path_cache.clear()
                 read_conns = list(self._read_conns)
                 self._read_conns.clear()
             # 关闭所有读连接

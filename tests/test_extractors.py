@@ -28,8 +28,10 @@ from fuscan.extractors import (
     WpsExtractor,
     XlsExtractor,
     XlsxExtractor,
+    clear_content_cache,
     default_registry,
     extract_content,
+    extract_content_cached,
     extract_content_from_bytes,
     extract_content_with_fallback,
     get_extractor,
@@ -2108,3 +2110,108 @@ class TestScannerWithNewFormats:
         scanner = Scanner(rs)
         result = scanner.scan_file(eml_file)
         assert result.has_hit
+
+
+class TestContentCache:
+    """内容提取缓存测试（需求2：避免重复提取导致卡滞）。"""
+
+    def setup_method(self) -> None:
+        """每个测试前清空缓存，确保隔离。"""
+        clear_content_cache()
+
+    def test_cached_returns_same_content(self, tmp_path: Path) -> None:
+        """缓存提取应返回与直接提取相同的内容。"""
+        path = tmp_path / "test.txt"
+        path.write_text("hello world\npassword=secret\n", encoding="utf-8")
+
+        direct = extract_content_with_fallback(path)
+        cached = extract_content_cached(path)
+        assert cached == direct
+        assert "password=secret" in cached
+
+    def test_second_call_uses_cache(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """第二次调用相同文件不应重复提取。"""
+        path = tmp_path / "test.txt"
+        path.write_text("content v1\n", encoding="utf-8")
+
+        call_count = {"n": 0}
+        original = extract_content_with_fallback
+
+        def counting_fallback(p: Path) -> str:
+            call_count["n"] += 1
+            return original(p)
+
+        # 模拟 extract_content_cached 内部调用的 extract_content_with_fallback
+        monkeypatch.setattr("fuscan.extractors.cache.extract_content_with_fallback", counting_fallback)
+
+        extract_content_cached(path)
+        assert call_count["n"] == 1
+        # 第二次调用应命中缓存，不触发提取
+        extract_content_cached(path)
+        assert call_count["n"] == 1
+
+    def test_file_modified_invalidates_cache(self, tmp_path: Path) -> None:
+        """文件修改后（mtime/size 变化）缓存应失效。"""
+        path = tmp_path / "test.txt"
+        path.write_text("v1\n", encoding="utf-8")
+
+        content1 = extract_content_cached(path)
+        assert content1 == "v1\n"
+
+        # 修改文件内容（mtime 和 size 都会变化）
+        path.write_text("v2 longer content\n", encoding="utf-8")
+
+        content2 = extract_content_cached(path)
+        assert content2 == "v2 longer content\n"
+
+    def test_clear_cache_empties_entries(self, tmp_path: Path) -> None:
+        """clear_content_cache 应清空所有缓存项。"""
+        path = tmp_path / "test.txt"
+        path.write_text("cached\n", encoding="utf-8")
+        extract_content_cached(path)
+
+        from fuscan.extractors.cache import _CONTENT_CACHE
+
+        assert len(_CONTENT_CACHE) > 0
+        clear_content_cache()
+        assert len(_CONTENT_CACHE) == 0
+
+    def test_different_files_cached_separately(self, tmp_path: Path) -> None:
+        """不同文件应分别缓存。"""
+        p1 = tmp_path / "a.txt"
+        p1.write_text("aaa\n", encoding="utf-8")
+        p2 = tmp_path / "b.txt"
+        p2.write_text("bbb\n", encoding="utf-8")
+
+        assert extract_content_cached(p1) == "aaa\n"
+        assert extract_content_cached(p2) == "bbb\n"
+        # 再次提取应命中各自缓存
+        assert extract_content_cached(p1) == "aaa\n"
+        assert extract_content_cached(p2) == "bbb\n"
+
+    def test_stat_failure_falls_back_to_uncached(self, tmp_path: Path) -> None:
+        """stat 失败时应回退到无缓存提取。"""
+        path = tmp_path / "test.txt"
+        path.write_text("fallback\n", encoding="utf-8")
+
+        # 正常提取一次填充缓存
+        extract_content_cached(path)
+
+        # 删除文件后再次提取，stat 失败应回退到 extract_content_with_fallback
+        # extract_content_with_fallback 内部会 try extract_content 失败后 read_text
+        # 文件不存在时 read_text 抛 OSError
+        path.unlink()
+        with pytest.raises(OSError):
+            extract_content_cached(path)
+
+    def test_lru_eviction_when_exceeding_max(self, tmp_path: Path) -> None:
+        """超过最大缓存数时淘汰最久未使用的项。"""
+        from fuscan.extractors.cache import _CONTENT_CACHE, _CONTENT_CACHE_MAX
+
+        for i in range(_CONTENT_CACHE_MAX + 2):
+            p = tmp_path / f"f{i}.txt"
+            p.write_text(f"content{i}\n", encoding="utf-8")
+            extract_content_cached(p)
+
+        # 缓存数不应超过上限
+        assert len(_CONTENT_CACHE) <= _CONTENT_CACHE_MAX

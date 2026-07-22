@@ -69,6 +69,11 @@ def _isolate_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from fuscan.config import load_config as _load_impl
     from fuscan.config import save_config as _save_impl
 
+    # 清空内容提取缓存，避免测试间相互影响（需求2）
+    from fuscan.extractors import clear_content_cache
+
+    clear_content_cache()
+
     config_path = tmp_path / "config.yaml"
     monkeypatch.setattr(
         "fuscan.gui.main_window.load_config",
@@ -387,10 +392,14 @@ class TestMultiRulesList:
     """多规则文件列表与排序测试。"""
 
     def test_rules_file_list_initially_empty(self, qapp: QApplication) -> None:
-        """启动时（仅内置规则）规则文件列表应为空。"""
+        """启动时（仅内置规则）规则文件列表应仅含内置规则条目（row 0）。"""
         window = MainWindow()
         assert window._rules_paths == []
-        assert window.rules_file_list.count() == 0
+        # row 0 为内置规则条目（需求1），用户规则列表为空
+        assert window.rules_file_list.count() == 1
+        item = window.rules_file_list.item(0)
+        assert item is not None
+        assert item.checkState() == Qt.Checked
         window.close()
 
     def test_load_multiple_rules_via_dialog(
@@ -423,7 +432,8 @@ class TestMultiRulesList:
         assert len(window._rules_paths) == 2
         assert window._rules_paths[0] == r1
         assert window._rules_paths[1] == r2
-        assert window.rules_file_list.count() == 2
+        # row 0=内置规则条目 + row 1/2=用户规则（需求1）
+        assert window.rules_file_list.count() == 3
         # 合并后规则树应有 2 条规则
         assert window.rules_tree.topLevelItemCount() == 2
         window.close()
@@ -478,8 +488,8 @@ class TestMultiRulesList:
         rule = window._ruleset.rules[0]  # pyrefly: ignore [missing-attribute]
         assert rule.match.pattern == "second"
 
-        # 选中第二行并上移
-        window.rules_file_list.setCurrentRow(1)  # pyrefly: ignore [missing-argument]
+        # 选中 r2（row 2）并上移
+        window.rules_file_list.setCurrentRow(2)  # pyrefly: ignore [missing-argument]
         window._on_move_rule_up()
 
         # 顺序变为 [r2, r1]，r1 覆盖 r2，pattern 应为 first
@@ -507,8 +517,8 @@ class TestMultiRulesList:
         window._reload_ruleset()
         window._refresh_rules_file_list()
 
-        # 选中第一行并下移
-        window.rules_file_list.setCurrentRow(0)  # pyrefly: ignore [missing-argument]
+        # 选中 r1（row 1）并下移
+        window.rules_file_list.setCurrentRow(1)  # pyrefly: ignore [missing-argument]
         window._on_move_rule_down()
 
         # 顺序变为 [r2, r1]，r1 覆盖 r2
@@ -518,7 +528,7 @@ class TestMultiRulesList:
         window.close()
 
     def test_move_rule_up_at_top_noop(self, qapp: QApplication, tmp_path: Path) -> None:
-        """首行上移不应改变顺序。"""
+        """首行用户规则上移不应改变顺序。"""
         r1 = tmp_path / "r1.yaml"
         r1.write_text(
             'version: "1.0"\nrules: []\n',
@@ -535,7 +545,8 @@ class TestMultiRulesList:
         window._rules_paths = [r1, r2]
         window._refresh_rules_file_list()
 
-        window.rules_file_list.setCurrentRow(0)  # pyrefly: ignore [missing-argument]
+        # row 1 为首个用户规则（row 0 为内置规则条目），上移应 noop
+        window.rules_file_list.setCurrentRow(1)  # pyrefly: ignore [missing-argument]
         window._on_move_rule_up()
 
         assert window._rules_paths == [r1, r2]
@@ -559,7 +570,8 @@ class TestMultiRulesList:
         window._rules_paths = [r1, r2]
         window._refresh_rules_file_list()
 
-        window.rules_file_list.setCurrentRow(1)  # pyrefly: ignore [missing-argument]
+        # row 2 为末位用户规则，下移应 noop
+        window.rules_file_list.setCurrentRow(2)  # pyrefly: ignore [missing-argument]
         window._on_move_rule_down()
 
         assert window._rules_paths == [r1, r2]
@@ -586,13 +598,14 @@ class TestMultiRulesList:
         window._refresh_rules_tree()
         assert window.rules_tree.topLevelItemCount() == 2
 
-        # 选中第一行并移除
-        window.rules_file_list.setCurrentRow(0)  # pyrefly: ignore [missing-argument]
+        # 选中 r1（row 1）并移除
+        window.rules_file_list.setCurrentRow(1)  # pyrefly: ignore [missing-argument]
         window._on_remove_rule()
 
         assert len(window._rules_paths) == 1
         assert window._rules_paths[0] == r2
-        assert window.rules_file_list.count() == 1
+        # row 0=内置规则条目 + row 1=剩余用户规则
+        assert window.rules_file_list.count() == 2
         assert window.rules_tree.topLevelItemCount() == 1
         window.close()
 
@@ -611,7 +624,8 @@ class TestMultiRulesList:
         window._refresh_rules_file_list()
         assert window._ruleset is not None
 
-        window.rules_file_list.setCurrentRow(0)  # pyrefly: ignore [missing-argument]
+        # row 1 为 r1（row 0 为内置规则条目）
+        window.rules_file_list.setCurrentRow(1)  # pyrefly: ignore [missing-argument]
         window._on_remove_rule()
 
         assert len(window._rules_paths) == 0
@@ -644,6 +658,77 @@ class TestMultiRulesList:
         window._rules_paths = [r2, r1]
         window._reload_ruleset()
         assert window._ruleset.rules[0].match.pattern == "from_r1"  # pyrefly: ignore [missing-attribute]
+        window.close()
+
+    def test_builtin_item_check_state_reflects_use_builtin(self, qapp: QApplication) -> None:
+        """内置规则条目（row 0）勾选状态应反映 _use_builtin。"""
+        window = MainWindow()
+        assert window._use_builtin is True
+        item = window.rules_file_list.item(0)
+        assert item is not None
+        assert item.checkState() == Qt.Checked
+
+        # 切换 _use_builtin=False 后刷新列表，勾选状态应变为 Unchecked
+        window._set_use_builtin(False)
+        window._refresh_rules_file_list()
+        assert window.rules_file_list.item(0).checkState() == Qt.Unchecked
+        window.close()
+
+    def test_uncheck_builtin_item_persists_to_config(self, qapp: QApplication, tmp_path: Path) -> None:
+        """取消勾选内置规则条目后 _use_builtin 应为 False 并持久化到配置。"""
+        window = MainWindow()
+        assert window._use_builtin is True
+
+        # 模拟用户取消勾选 row 0
+        item = window.rules_file_list.item(0)
+        assert item is not None
+        item.setCheckState(Qt.Unchecked)
+        # itemChanged 信号触发回写
+        from fuscan.config import load_config as _load_impl
+
+        assert window._use_builtin is False
+        config = _load_impl(tmp_path / "config.yaml")
+        assert config.use_builtin is False
+        window.close()
+
+    def test_recheck_builtin_item_persists_to_config(self, qapp: QApplication, tmp_path: Path) -> None:
+        """重新勾选内置规则条目后 _use_builtin 应为 True 并持久化到配置。"""
+        window = MainWindow()
+        window._set_use_builtin(False)
+        window._refresh_rules_file_list()
+
+        item = window.rules_file_list.item(0)
+        assert item is not None
+        assert item.checkState() == Qt.Unchecked
+
+        # 模拟用户重新勾选
+        item.setCheckState(Qt.Checked)
+        from fuscan.config import load_config as _load_impl
+
+        assert window._use_builtin is True
+        config = _load_impl(tmp_path / "config.yaml")
+        assert config.use_builtin is True
+        window.close()
+
+    def test_builtin_item_not_removable(self, qapp: QApplication) -> None:
+        """内置规则条目（row 0）不可移除。"""
+        window = MainWindow()
+        # 选中 row 0 后调用 _on_remove_rule，不应删除任何项
+        window.rules_file_list.setCurrentRow(0)  # pyrefly: ignore [missing-argument]
+        window._on_remove_rule()
+        # 内置规则条目仍在
+        assert window.rules_file_list.count() == 1
+        assert window.rules_file_list.item(0).text().startswith("内置通用规则")
+        window.close()
+
+    def test_builtin_item_not_movable(self, qapp: QApplication) -> None:
+        """内置规则条目（row 0）不可上移/下移。"""
+        window = MainWindow()
+        window.rules_file_list.setCurrentRow(0)  # pyrefly: ignore [missing-argument]
+        window._on_move_rule_up()
+        window._on_move_rule_down()
+        # 内置规则条目仍在 row 0
+        assert window.rules_file_list.item(0).text().startswith("内置通用规则")
         window.close()
 
 
@@ -4463,7 +4548,8 @@ class TestDetailArea:
         window = MainWindow()
         window._rules_paths = [r1]
         window._refresh_rules_file_list()
-        window.rules_file_list.setCurrentRow(0)  # pyrefly: ignore [missing-argument]
+        # row 1 为 r1（row 0 为内置规则条目，菜单操作应禁用）
+        window.rules_file_list.setCurrentRow(1)  # pyrefly: ignore [missing-argument]
 
         captured: list[Any] = []
         from fuscan.gui import main_window as mw_module
@@ -5732,9 +5818,11 @@ class TestRulesManagement:
         window._set_use_builtin(False)
         window._rules_paths = [r1]
         window._refresh_rules_file_list()
-        assert window.rules_file_list.count() == 1
+        # row 0=内置规则条目 + row 1=r1
+        assert window.rules_file_list.count() == 2
 
-        window.rules_file_list.setCurrentRow(0)  # pyrefly: ignore [missing-argument]
+        # 选中 r1（row 1）删除
+        window.rules_file_list.setCurrentRow(1)  # pyrefly: ignore [missing-argument]
         window._on_remove_rule()
         assert len(window._rules_paths) == 0
         window.close()

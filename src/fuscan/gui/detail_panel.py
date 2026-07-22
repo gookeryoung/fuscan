@@ -51,7 +51,7 @@ except ImportError:  # pragma: no cover
         QTextEdit,
     )
 
-from fuscan.extractors import extract_content_with_fallback
+from fuscan.extractors import extract_content_cached
 from fuscan.gui.preview_utils import (
     PREVIEW_MAX_CHARS,
     SEVERITY_BACKGROUNDS,
@@ -281,8 +281,9 @@ class DetailPanel(QObject):  # pyrefly: ignore [invalid-inheritance]
         truncated = False
 
         # 优先使用提取器（支持 PDF/DOCX 等格式），失败回退到纯文本
+        # 使用带缓存的版本：同一文件多次打开对话框/面板时不重复提取（需求2）
         try:
-            content = extract_content_with_fallback(path)
+            content = extract_content_cached(path)
         except OSError as exc:
             logger.warning("读取内容预览失败 %s", path, exc_info=True)
             self._c.preview.setPlainText(f"无法读取文件内容: {exc}")

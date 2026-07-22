@@ -8,6 +8,8 @@ ODS、ODT、WPS、RTF、EML、MSG、XLS、DOC、PPT 等格式。
 
 - :class:`Extractor`, :class:`ExtractorRegistry`, :class:`ExtractorError`
 - :func:`get_extractor`, :func:`extract_content`
+- :func:`extract_content_cached`（带 LRU 缓存的提取，GUI 预览用）
+- :func:`clear_content_cache`（清空缓存，测试/扫描完成后调用）
 - :data:`default_registry`
 - 各格式提取器类
 """
@@ -24,6 +26,7 @@ from fuscan.extractors.base import (
     extract_content_with_fallback,
     get_extractor,
 )
+from fuscan.extractors.cache import clear_content_cache, extract_content_cached
 from fuscan.extractors.email import EmlExtractor, MsgExtractor
 from fuscan.extractors.legacy_office import DocExtractor, PptExtractor, XlsExtractor
 from fuscan.extractors.odf import OdtExtractor
@@ -57,8 +60,10 @@ __all__ = [
     "WpsExtractor",
     "XlsExtractor",
     "XlsxExtractor",
+    "clear_content_cache",
     "default_registry",
     "extract_content",
+    "extract_content_cached",
     "extract_content_from_bytes",
     "extract_content_with_fallback",
     "get_extractor",

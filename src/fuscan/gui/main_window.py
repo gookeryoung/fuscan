@@ -567,6 +567,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         """为规则文件列表配置右键菜单策略（结果树右键由 ResultTreeView 信号路由）。"""
         self.rules_file_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.rules_file_list.customContextMenuRequested.connect(self._on_rules_file_list_context_menu)
+        # 内置规则条目勾选状态变化：触发 _use_builtin 持久化（需求1）
+        self.rules_file_list.itemChanged.connect(self._on_rules_file_item_changed)
 
     def _on_result_tree_context_menu(self, pos: QPoint) -> None:  # type: ignore[unknown-name]
         """结果树右键菜单：复制路径 / 在新窗口打开 / 打开文件位置。"""
@@ -585,13 +587,22 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         menu.exec_(self.result_tree.viewport().mapToGlobal(pos))  # pyrefly: ignore [missing-argument]
 
     def _on_rules_file_list_context_menu(self, pos: QPoint) -> None:  # type: ignore[unknown-name]
-        """规则文件列表右键菜单：上移 / 下移 / 移除。"""
-        if self.rules_file_list.currentRow() < 0:
+        """规则文件列表右键菜单：上移 / 下移 / 移除。
+
+        内置规则条目（row 0）固定不可移动、不可移除，菜单禁用所有操作。
+        """
+        row = self.rules_file_list.currentRow()
+        if row < 0:
             return
         menu = QMenu(self.rules_file_list)
         action_up = QAction("上移", menu)
         action_down = QAction("下移", menu)
         action_remove = QAction("移除", menu)
+        # row 0 为内置规则条目，所有操作禁用
+        is_builtin_row = row == 0
+        action_up.setEnabled(not is_builtin_row and row > 1)
+        action_down.setEnabled(not is_builtin_row and row < len(self._rules_paths))
+        action_remove.setEnabled(not is_builtin_row)
         action_up.triggered.connect(self._on_move_rule_up)
         action_down.triggered.connect(self._on_move_rule_down)
         action_remove.triggered.connect(self._on_remove_rule)
@@ -1350,47 +1361,90 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
             self.rules_tree.addTopLevelItem(item)
 
     def _refresh_rules_file_list(self) -> None:
-        """刷新规则文件列表展示。"""
-        self.rules_file_list.clear()
-        for path in self._rules_paths:
-            item = QListWidgetItem(str(path))
-            item.setToolTip(str(path))
-            self.rules_file_list.addItem(item)  # pyrefly: ignore [missing-argument]
+        """刷新规则文件列表展示。
+
+        顶部固定显示内置通用规则条目（带复选框，反映 ``_use_builtin`` 状态），
+        其后依次显示用户规则文件路径。用户取消勾选内置规则后，下次启动不再
+        自动加载（通过 ``_on_rules_file_item_changed`` 持久化到配置）。
+        """
+        # 阻塞 itemChanged 信号，避免 clear/addItem 触发勾选状态回写
+        self.rules_file_list.blockSignals(True)
+        try:
+            self.rules_file_list.clear()
+            # 内置规则条目（row 0）：固定不可移动、不可移除
+            builtin_item = QListWidgetItem("内置通用规则（随软件分发）")
+            builtin_item.setToolTip("勾选时随软件启动自动加载；取消勾选后下次不再自动加载")
+            builtin_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
+            builtin_item.setCheckState(Qt.Checked if self._use_builtin else Qt.Unchecked)
+            self.rules_file_list.addItem(builtin_item)  # pyrefly: ignore [missing-argument]
+            # 用户规则条目（row 1+）
+            for path in self._rules_paths:
+                item = QListWidgetItem(str(path))
+                item.setToolTip(str(path))
+                self.rules_file_list.addItem(item)  # pyrefly: ignore [missing-argument]
+        finally:
+            self.rules_file_list.blockSignals(False)
 
     def _on_move_rule_up(self) -> None:
-        """将选中的规则文件上移一位。"""
+        """将选中的规则文件上移一位。
+
+        列表 row 0 为内置规则条目（固定不可移动），用户规则实际索引 = row - 1。
+        """
         row = self.rules_file_list.currentRow()
-        if row <= 0:
+        if row <= 1:  # row 0=内置规则不可移动；row 1=首个用户规则已居顶
             return
-        self._rules_paths[row - 1], self._rules_paths[row] = (
-            self._rules_paths[row],
-            self._rules_paths[row - 1],
+        idx = row - 1
+        self._rules_paths[idx - 1], self._rules_paths[idx] = (
+            self._rules_paths[idx],
+            self._rules_paths[idx - 1],
         )
         self._refresh_rules_file_list()
         self.rules_file_list.setCurrentRow(row - 1)  # pyrefly: ignore [missing-argument]
         self._reload_and_refresh()
 
     def _on_move_rule_down(self) -> None:
-        """将选中的规则文件下移一位。"""
+        """将选中的规则文件下移一位。
+
+        列表 row 0 为内置规则条目（固定不可移动），用户规则实际索引 = row - 1。
+        """
         row = self.rules_file_list.currentRow()
-        if row < 0 or row >= len(self._rules_paths) - 1:
+        if row <= 0 or row >= len(self._rules_paths):  # row 0=内置规则不可移动
             return
-        self._rules_paths[row + 1], self._rules_paths[row] = (
-            self._rules_paths[row],
-            self._rules_paths[row + 1],
+        idx = row - 1
+        self._rules_paths[idx + 1], self._rules_paths[idx] = (
+            self._rules_paths[idx],
+            self._rules_paths[idx + 1],
         )
         self._refresh_rules_file_list()
         self.rules_file_list.setCurrentRow(row + 1)  # pyrefly: ignore [missing-argument]
         self._reload_and_refresh()
 
     def _on_remove_rule(self) -> None:
-        """移除选中的规则文件。"""
+        """移除选中的规则文件。
+
+        列表 row 0 为内置规则条目（固定不可移除），用户规则实际索引 = row - 1。
+        """
         row = self.rules_file_list.currentRow()
-        if row < 0:
+        if row <= 0:  # row 0=内置规则不可移除
             return
-        del self._rules_paths[row]
+        idx = row - 1
+        del self._rules_paths[idx]
         self._refresh_rules_file_list()
         self._reload_and_refresh()
+
+    def _on_rules_file_item_changed(self, item: QListWidgetItem) -> None:  # type: ignore[unknown-name]
+        """规则文件列表项变化处理：仅内置规则条目（row 0）的勾选状态变化触发持久化。
+
+        用户勾选/取消勾选内置规则后，立即更新 ``_use_builtin`` 开关、重新加载规则集
+        并保存配置，确保下次启动时按用户选择决定是否自动加载内置规则。
+        """
+        if self.rules_file_list.row(item) != 0:
+            return
+        enabled = item.checkState() == Qt.Checked
+        if enabled == self._use_builtin:
+            return
+        self._set_use_builtin(enabled)
+        self._save_config()
 
     def _on_edit_rules(self) -> None:
         """打开规则编辑器对话框。"""

@@ -58,8 +58,8 @@ test = [
 ]
 
 [project.scripts]
-fuscan = "fuscan.cli:main"
-fuscan-gui = "fuscan.gui.app:launch"
+fuscanc = "fuscan.cli:main"
+fuscan = "fuscan.gui.app:launch"
 
 [build-system]
 build-backend = "hatchling.build"

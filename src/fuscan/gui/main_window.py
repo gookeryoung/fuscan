@@ -35,7 +35,6 @@ try:
         QAction,
         QApplication,
         QButtonGroup,
-        QCheckBox,
         QDialog,
         QFileDialog,
         QInputDialog,
@@ -63,7 +62,6 @@ except ImportError:  # pragma: no cover
         QAbstractButton,
         QApplication,
         QButtonGroup,
-        QCheckBox,
         QDialog,
         QFileDialog,
         QInputDialog,
@@ -86,6 +84,7 @@ from fuscan.extractors.base import default_registry
 from fuscan.gui import resources_rc  # noqa: F401 注册 .qrc 资源（:/ 前缀图标）
 from fuscan.gui.detail_panel import DetailControls, DetailPanel
 from fuscan.gui.explorer import open_path_in_explorer
+from fuscan.gui.extractor_model import ExtractorListModel
 from fuscan.gui.icons import (
     ICON_ABOUT as _ICON_ABOUT,
 )
@@ -523,49 +522,40 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self.sidebar.blockSignals(False)
 
     def _setup_file_types(self) -> None:
-        """从提取器注册表动态生成文件类型勾选区。
+        """构造文件类型勾选区模型与视图（Model/View 架构）。
 
-        每个提取器对应一个 QCheckBox（显示名称 + 扩展名提示），默认全部勾选。
-        勾选状态变化时更新 ``Config.disabled_extractors`` 并即时保存。
-        用 2 列 GridLayout 布局，避免 14 个复选框垂直排列过高。
+        从 :func:`default_registry.list_extractors` 加载提取器元数据到
+        :class:`ExtractorListModel`，绑定到 ``file_types_view`` QListView
+        （IconMode + 网格大小，按视图宽度自动多列布局）。
+
+        模型勾选状态变化通过 ``extractors_changed`` 信号路由到
+        :meth:`_on_extractor_toggled`，由主窗口持久化到配置文件。
         """
-        self._extractor_checkboxes: dict[str, QCheckBox] = {}
-        extractors = default_registry.list_extractors()
-        columns = 2
-        for i, (class_name, display_name, exts) in enumerate(extractors):
-            row = i // columns
-            col = i % columns
-            ext_hint = ", ".join(exts[:5]) + ("..." if len(exts) > 5 else "")
-            checkbox = QCheckBox(f"{display_name} ({ext_hint})")
-            checkbox.setObjectName(f"extractor_{class_name}")
-            checkbox.setChecked(True)
-            checkbox.setToolTip(f"扩展名: {', '.join(exts)}")
-            checkbox.stateChanged.connect(self._on_extractor_toggled)
-            self.file_types_grid.addWidget(checkbox, row, col)  # pyrefly: ignore [bad-argument-count]
-            self._extractor_checkboxes[class_name] = checkbox
+        self._extractor_model = ExtractorListModel(default_registry, parent=self)
+        self.file_types_view.setModel(self._extractor_model)
+        # IconMode 网格布局：每项固定宽度，按视图宽度自动换行多列展示，
+        # 与原 2 列 GridLayout 视觉一致且支持窗口宽度自适应重排
+        grid_w = 260
+        grid_h = 28
+        self.file_types_view.setGridSize(QSize(grid_w, grid_h))
+        self.file_types_view.setUniformItemSizes(True)
+        self.file_types_view.setSpacing(4)
+        # IconMode 默认 flow=LeftToRight + wrapping=True，无需显式设置
+        self._extractor_model.extractors_changed.connect(self._on_extractor_toggled)  # pyrefly: ignore [missing-attribute]
 
     @Slot()  # pyrefly: ignore [not-callable]
     def _on_extractor_toggled(self) -> None:
-        """提取器勾选状态变化：更新 disabled_extractors 并即时保存配置。"""
-        disabled = [name for name, cb in self._extractor_checkboxes.items() if not cb.isChecked()]
-        self._config.disabled_extractors = disabled
+        """提取器勾选状态变化：从模型读取 disabled_extractors 并即时保存配置。"""
+        self._config.disabled_extractors = self._extractor_model.disabled_extractors()
         save_config(self._config)
 
     def _compute_scan_extensions(self) -> tuple[str, ...] | None:
-        """根据勾选状态计算启用的文件扩展名列表。
+        """根据模型勾选状态计算启用的文件扩展名列表。
 
-        全部勾选时返回 None（表示扫描所有文件，Scanner 走原快速路径）；
+        全部勾选时模型返回 None（表示扫描所有文件，Scanner 走原快速路径）；
         部分取消时返回启用扩展名的并集，传给 Scanner 做全局后缀过滤。
         """
-        disabled = self._config.disabled_extractors
-        if not disabled:
-            return None
-        all_extractors = default_registry.list_extractors()
-        enabled_exts: set[str] = set()
-        for class_name, _display_name, exts in all_extractors:
-            if class_name not in disabled:
-                enabled_exts.update(exts)
-        return tuple(sorted(enabled_exts))
+        return self._extractor_model.enabled_extensions()
 
     def _connect_signals(self) -> None:
         """连接所有信号槽（按钮、actions、worker、头部栏与侧边栏）。"""
@@ -837,12 +827,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self.perf_log_action.blockSignals(False)
         set_perf_enabled(self._config.perf_log_enabled)
 
-        # 恢复文件类型勾选状态（blockSignals 避免 stateChanged 触发 _save_config 循环）
-        disabled_set = set(self._config.disabled_extractors)
-        for name, cb in self._extractor_checkboxes.items():
-            cb.blockSignals(True)
-            cb.setChecked(name not in disabled_set)
-            cb.blockSignals(False)
+        # 恢复文件类型勾选状态（blockSignals 避免 extractors_changed 触发 _save_config 循环）
+        self._extractor_model.blockSignals(True)
+        self._extractor_model.set_disabled_extractors(self._config.disabled_extractors)
+        self._extractor_model.blockSignals(False)
 
     def _restore_window_geometry(self) -> None:
         """从配置恢复窗口几何（含屏幕边界夹紧算法）。

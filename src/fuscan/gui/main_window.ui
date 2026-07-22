@@ -381,34 +381,25 @@
                  <number>4</number>
                 </property>
                 <item>
-                 <widget class="QLabel" name="file_types_hint_label">
-                  <property name="text">
+                 <widget class="QListView" name="file_types_view">
+                  <property name="toolTip">
                    <string>勾选要扫描的文件类型，取消可提高扫描速度</string>
                   </property>
-                 </widget>
-                </item>
-                <item>
-                 <widget class="QFrame" name="file_types_container">
-                  <property name="frameShape">
-                   <enum>QFrame::NoFrame</enum>
+                  <property name="editTriggers">
+                   <set>QAbstractItemView::NoEditTriggers</set>
                   </property>
-                  <layout class="QGridLayout" name="file_types_grid">
-                   <property name="leftMargin">
-                    <number>0</number>
-                   </property>
-                   <property name="topMargin">
-                    <number>0</number>
-                   </property>
-                   <property name="rightMargin">
-                    <number>0</number>
-                   </property>
-                   <property name="bottomMargin">
-                    <number>0</number>
-                   </property>
-                   <property name="spacing">
-                    <number>8</number>
-                   </property>
-                  </layout>
+                  <property name="movement">
+                   <enum>QListView::Static</enum>
+                  </property>
+                  <property name="resizeMode">
+                   <enum>QListView::Adjust</enum>
+                  </property>
+                  <property name="viewMode">
+                   <enum>QListView::IconMode</enum>
+                  </property>
+                  <property name="wordWrap">
+                   <bool>true</bool>
+                  </property>
                  </widget>
                 </item>
                </layout>

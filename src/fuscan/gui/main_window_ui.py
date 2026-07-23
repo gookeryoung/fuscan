@@ -322,9 +322,9 @@ class Ui_MainWindow(object):
         self.setup_btn_row.setSpacing(8)
         self.setup_btn_row.setObjectName(u"setup_btn_row")
         self.setup_btn_row.setContentsMargins(0, 12, 0, 0)
-        self.setup_btn_leading_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
 
-        self.setup_btn_row.addItem(self.setup_btn_leading_spacer)
+        self.setup_btn_row.addItem(self.spacer)
 
         self.view_results_btn = QPushButton(self.setup_action_bar)
         self.view_results_btn.setObjectName(u"view_results_btn")
@@ -812,7 +812,7 @@ class Ui_MainWindow(object):
         self.retranslateUi(MainWindow)
 
         self.tab_stack.setCurrentIndex(0)
-        self.main_stack.setCurrentIndex(0)
+        self.main_stack.setCurrentIndex(1)
         self.target_stack.setCurrentIndex(2)
         self.content_tab_widget.setCurrentIndex(0)
         self.tabWidget.setCurrentIndex(0)

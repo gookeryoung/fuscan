@@ -134,8 +134,9 @@ class RuleSet:
     """规则集合：版本、忽略路径、规则列表。
 
     ``ignore_paths`` 按相对路径 glob 通配符匹配（如 ``*/vendor/*``），
-    可跳过目录及其子目录。``ignore_dirs`` 和 ``ignore_extensions`` 已迁移至
-    全局 :class:`~fuscan.config.Config`，规则文件中这两个字段被静默忽略。
+    可跳过目录及其子目录。``ignore_dirs`` 已迁移至全局
+    :class:`~fuscan.config.Config`，``ignore_extensions`` 已由全局文件类型
+    白名单（``Config.scan_extensions``）替代，规则文件中这两个字段被静默忽略。
     """
 
     version: str

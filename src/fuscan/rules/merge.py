@@ -6,8 +6,8 @@
 - ``ignore_paths``：取并集（去重保序）
 - ``version``：采用最后一个规则集的版本号
 
-``ignore_dirs`` 和 ``ignore_extensions`` 已迁移至全局 :class:`~fuscan.config.Config`，
-不再在规则集合并中处理。
+``ignore_dirs`` 已迁移至全局 :class:`~fuscan.config.Config`，``ignore_extensions``
+已由全局文件类型白名单（``Config.scan_extensions``）替代，均不在规则集合并中处理。
 """
 
 from __future__ import annotations

@@ -221,12 +221,12 @@ GUI 默认 `max_workers=8`，CLI 保持单线程（兼容性优先）。
 
 内置规则文件放在 `src/fuscan/builtin/rules.yaml`，通过 `pyproject.toml`
 的 `package-data` 打包，确保安装后即可使用。`load_with_builtin()` 合并内置与
-用户规则（按名称覆盖，ignore 列表取并集）。
+用户规则（按名称覆盖，`ignore_paths` 取并集）。
 
 ### 10. 规则合并链式覆盖
 
 `merge_multiple_rulesets(*rulesets)` 按顺序链式合并，后者覆盖前者同名规则。
-`ignore_dirs`/`ignore_extensions`/`ignore_paths` 取并集，去重保序（base 优先）。
+`ignore_paths` 取并集，去重保序（base 优先）。
 
 ## 踩坑总结（iter-06～10 补充）
 
@@ -255,7 +255,7 @@ pypdf 的 `MediaBox` 等重复定义会输出 WARNING 日志。
 
 ### 7. 规则合并策略：按名称合并，ignore 取并集
 
-用户规则中同名规则覆盖内置规则；`ignore_dirs`/`ignore_extensions`/`ignore_paths`
+用户规则中同名规则覆盖内置规则；`ignore_paths`
 取并集。降低使用门槛的同时保留用户覆盖能力。
 
 ### 8. GUI 默认加载内置规则

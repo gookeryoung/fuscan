@@ -154,13 +154,14 @@ def parse_ruleset(data: Any) -> RuleSet:
 
     version = str(data.get("version", "1.0"))
 
-    # ignore_dirs / ignore_extensions 已迁移至全局 Config，规则文件中这两个字段被静默忽略
+    # ignore_dirs 已迁移至全局 Config.ignore_dirs；ignore_extensions 已由全局
+    # 文件类型白名单（Config.scan_extensions）替代。规则文件中这两个字段被静默忽略。
     ignore_dirs_raw = data.get("ignore_dirs", [])
     if ignore_dirs_raw:
         logger.debug("规则文件中 ignore_dirs 已弃用，请改用全局配置")
     ignore_ext_raw = data.get("ignore_extensions", [])
     if ignore_ext_raw:
-        logger.debug("规则文件中 ignore_extensions 已弃用，请改用全局配置")
+        logger.debug("规则文件中 ignore_extensions 已弃用，请改用全局文件类型勾选")
 
     ignore_paths_raw = data.get("ignore_paths", [])
     ignore_paths = _as_str_tuple(ignore_paths_raw, field="ignore_paths")

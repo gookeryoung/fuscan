@@ -23,6 +23,7 @@ import yaml
 __all__ = [
     "CONFIG_DIR",
     "CONFIG_PATH",
+    "MANUAL_PDF",
     "Config",
     "detect_default_staging_dir",
     "load_config",
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 CONFIG_DIR = Path.home() / ".fuscan"
 CONFIG_PATH = CONFIG_DIR / "config.yaml"
+MANUAL_PDF = Path(__file__).parent / "assets" / "docs" / "fuscan-用户手册.pdf"
 
 # 历史记录最大保留条数
 MAX_HISTORY = 15

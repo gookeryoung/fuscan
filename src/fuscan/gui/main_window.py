@@ -28,6 +28,7 @@ try:
     from PySide2.QtCore import QPoint, QUrl, Slot
     from PySide2.QtGui import (
         QDesktopServices,
+        QIcon,
         QKeySequence,
     )
     from PySide2.QtWidgets import (
@@ -53,6 +54,7 @@ except ImportError:  # pragma: no cover
     from PySide6.QtCore import QPoint, QUrl, Slot  # pyrefly: ignore [missing-import]
     from PySide6.QtGui import (  # pyrefly: ignore [missing-import]
         QAction,
+        QIcon,
         QKeySequence,
         QShortcut,
     )
@@ -73,73 +75,14 @@ except ImportError:  # pragma: no cover
         QWidget,
     )
 
-from fuscan import __author__, __description__, __license__, __version__, theme
+from fuscan import __author__, __description__, __license__, __version__
 from fuscan.builtin import load_with_builtin
+from fuscan.config import MANUAL_PDF as _MANUAL_PDF
 from fuscan.config import Config, detect_default_staging_dir, load_config, save_config
 from fuscan.gui.content_panel import ContentTabPanel
 from fuscan.gui.detail_panel import DetailControls, DetailPanel
 from fuscan.gui.explorer import open_path_in_explorer
 from fuscan.gui.export_controller import ExportController
-from fuscan.gui.icons import (
-    ICON_ABOUT as _ICON_ABOUT,
-)
-from fuscan.gui.icons import (
-    ICON_ALL_DISK as _ICON_ALL_DISK,
-)
-from fuscan.gui.icons import (
-    ICON_DISK as _ICON_DISK,
-)
-from fuscan.gui.icons import (
-    ICON_EDIT as _ICON_EDIT,
-)
-from fuscan.gui.icons import (
-    ICON_EXPORT as _ICON_EXPORT,
-)
-from fuscan.gui.icons import (
-    ICON_EXPORT_CSV as _ICON_EXPORT_CSV,
-)
-from fuscan.gui.icons import (
-    ICON_EXPORT_JSON as _ICON_EXPORT_JSON,
-)
-from fuscan.gui.icons import (
-    ICON_FOLDER as _ICON_FOLDER,
-)
-from fuscan.gui.icons import (
-    ICON_HARD_DISK as _ICON_HARD_DISK,
-)
-from fuscan.gui.icons import (
-    ICON_HISTORY as _ICON_HISTORY,
-)
-from fuscan.gui.icons import (
-    ICON_LOAD_LIST as _ICON_LOAD_LIST,
-)
-from fuscan.gui.icons import (
-    ICON_MANUAL as _ICON_MANUAL,
-)
-from fuscan.gui.icons import (
-    ICON_PAUSE as _ICON_PAUSE,
-)
-from fuscan.gui.icons import (
-    ICON_RESCAN as _ICON_RESCAN,
-)
-from fuscan.gui.icons import (
-    ICON_SCAN as _ICON_SCAN,
-)
-from fuscan.gui.icons import (
-    ICON_SEARCH as _ICON_SEARCH,
-)
-from fuscan.gui.icons import (
-    ICON_SETTINGS as _ICON_SETTINGS,
-)
-from fuscan.gui.icons import (
-    ICON_STOP as _ICON_STOP,
-)
-from fuscan.gui.icons import (
-    MANUAL_PDF as _MANUAL_PDF,
-)
-from fuscan.gui.icons import (
-    load_themed_icon as _load_themed_icon,
-)
 from fuscan.gui.main_window_ui import Ui_MainWindow
 from fuscan.gui.preview_utils import SEVERITY_BACKGROUNDS, severity_text
 from fuscan.gui.result_filter_panel import ResultFilterPanel
@@ -157,8 +100,6 @@ from fuscan.skip_store import SkipStore
 from fuscan.workers import FileStatsWorker, ScanWorker
 
 if TYPE_CHECKING:
-    from PySide2.QtGui import QIcon
-
     from fuscan.cache import CacheStore
 
 __all__ = ["MainWindow", "ScanState", "WorkflowStage"]
@@ -175,39 +116,6 @@ def _apply_severity_to_tree_item(item: QTreeWidgetItem, column: int, severity: S
     item.setText(column, severity_text(severity))
     item.setBackground(column, SEVERITY_BACKGROUNDS[severity])
 
-
-# 主色变体图标 → 控件属性名映射（同一路径在缓存中只加载一次，可绑定多个控件）
-_PRIMARY_ICON_TARGETS: tuple[tuple[str, str], ...] = (
-    (_ICON_SCAN, "scan_btn"),
-    (_ICON_PAUSE, "pause_resume_btn"),
-    (_ICON_RESCAN, "rescan_btn"),
-    (_ICON_LOAD_LIST, "load_rules_btn"),
-    (_ICON_LOAD_LIST, "load_rules_action"),
-    (_ICON_SCAN, "scan_action"),
-    (_ICON_EDIT, "edit_rule_btn"),
-    (_ICON_EDIT, "edit_rules_action"),
-    (_ICON_EXPORT, "export_btn"),
-    (_ICON_EXPORT_CSV, "export_csv_action"),
-    (_ICON_EXPORT_JSON, "export_json_action"),
-    (_ICON_SETTINGS, "settings_action"),
-    (_ICON_MANUAL, "manual_action"),
-    (_ICON_SEARCH, "select_path_action"),
-    (_ICON_SEARCH, "regex_tester_action"),
-    (_ICON_ABOUT, "about_action"),
-    (_ICON_STOP, "cancel_btn"),
-)
-
-# scan_mode_combo 下拉项图标（按 index 顺序：全盘 / 盘符 / 文件夹）
-_COMBO_ITEM_ICONS: tuple[str, ...] = (_ICON_ALL_DISK, _ICON_DISK, _ICON_FOLDER)
-
-# 深色背景白色变体图标 → 控件属性名映射（头部 Tab 按钮）
-_ON_PRIMARY_ICON_TARGETS: tuple[tuple[str, str], ...] = (
-    (_ICON_SCAN, "tab_scan_btn"),
-    (_ICON_LOAD_LIST, "tab_rules_btn"),
-    (_ICON_HISTORY, "tab_history_btn"),
-    (_ICON_SETTINGS, "settings_btn"),
-    (_ICON_ABOUT, "about_btn"),
-)
 
 # 导出格式定义与查找表已移到 ExportController（iter-79 续解耦）
 
@@ -313,7 +221,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self._setup_splitters()
         self._setup_layouts()
         self._setup_scan_stats_panel()
-        self._setup_icons()
         self._setup_button_groups()
         self._setup_scan_mode_panel()
         self._setup_stage_controller()
@@ -449,47 +356,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
             f'<span style="color: #DC3545; font-weight: bold;">错误 {errors}</span>'
         )
 
-    def _setup_icons(self) -> None:
-        """加载主题图标并设置到各按钮、菜单 actions 与下拉项。
-
-        采用表驱动模式：``_PRIMARY_ICON_TARGETS`` / ``_ON_PRIMARY_ICON_TARGETS``
-        描述 ``(图标路径, 控件属性名)`` 映射，按需加载并缓存到局部 dict，
-        避免相同路径重复调用 ``_load_themed_icon``（如 ``_ICON_SCAN`` 同时绑定
-        ``scan_btn`` 与 ``scan_action``，``_ICON_LOAD_LIST`` 同时绑定 ``load_rules_btn``
-        与 ``load_rules_action``）。
-        """
-        # 主色变体图标缓存：key=SVG 路径，value=已着色 QIcon
-        primary_cache: dict[str, QIcon] = {}
-        for icon_path, attr_name in _PRIMARY_ICON_TARGETS:
-            if icon_path not in primary_cache:
-                primary_cache[icon_path] = _load_themed_icon(icon_path, theme.COLOR_PRIMARY)
-            getattr(self, attr_name).setIcon(primary_cache[icon_path])
-
-        # scan_mode_combo 下拉项图标（index 顺序对应 _COMBO_ITEM_ICONS）
-        for index, icon_path in enumerate(_COMBO_ITEM_ICONS):
-            if icon_path not in primary_cache:
-                primary_cache[icon_path] = _load_themed_icon(icon_path, theme.COLOR_PRIMARY)
-            self.scan_mode_combo.setItemIcon(index, primary_cache[icon_path])
-
-        # 盘符按钮复用主色 hard_disk 变体（ScanModePanel 构造时按需读取）
-        if _ICON_HARD_DISK not in primary_cache:
-            primary_cache[_ICON_HARD_DISK] = _load_themed_icon(_ICON_HARD_DISK, theme.COLOR_PRIMARY)
-        self._icon_hard_disk = primary_cache[_ICON_HARD_DISK]
-
-        # 深色背景白色变体图标缓存
-        on_primary_cache: dict[str, QIcon] = {}
-        for icon_path, attr_name in _ON_PRIMARY_ICON_TARGETS:
-            if icon_path not in on_primary_cache:
-                on_primary_cache[icon_path] = _load_themed_icon(icon_path, theme.COLOR_TEXT_ON_PRIMARY)
-            getattr(self, attr_name).setIcon(on_primary_cache[icon_path])
-
-        # 侧边栏阶段项复用白色变体（_setup_sidebar 时按需读取，避免重复加载）
-        if _ICON_FOLDER not in on_primary_cache:
-            on_primary_cache[_ICON_FOLDER] = _load_themed_icon(_ICON_FOLDER, theme.COLOR_TEXT_ON_PRIMARY)
-        self._icon_folder_on_primary = on_primary_cache[_ICON_FOLDER]
-        self._icon_scan_on_primary = on_primary_cache[_ICON_SCAN]
-        self._icon_history_on_primary = on_primary_cache[_ICON_HISTORY]
-
     def _setup_button_groups(self) -> None:
         """初始化头部 Tab 按钮互斥组（盘符按钮组已移到 ScanModePanel）。"""
         # 头部 Tab 按钮互斥组（id 0=扫描 / 1=规则 / 2=历史）
@@ -500,12 +366,15 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self._header_button_group.addButton(self.tab_history_btn, 2)
 
     def _setup_sidebar(self) -> None:
-        """填充侧边栏阶段项（深色背景用白色变体；配置 / 扫描中 / 结果）。"""
+        """填充侧边栏阶段项（配置 / 扫描中 / 结果）。
+
+        图标直接引用 ``.qrc`` 资源路径，与 ``.ui`` 中静态控件的图标引用方式一致。
+        """
         self.sidebar.blockSignals(True)
         self.sidebar.clear()
-        self.sidebar.addItem(QListWidgetItem(self._icon_folder_on_primary, "配置"))  # pyrefly: ignore [missing-argument]
-        self.sidebar.addItem(QListWidgetItem(self._icon_scan_on_primary, "扫描中"))  # pyrefly: ignore [missing-argument]
-        self.sidebar.addItem(QListWidgetItem(self._icon_history_on_primary, "结果"))  # pyrefly: ignore [missing-argument]
+        self.sidebar.addItem(QListWidgetItem(QIcon(":/icons/folder.svg"), "配置"))  # pyrefly: ignore [missing-argument]
+        self.sidebar.addItem(QListWidgetItem(QIcon(":/icons/scan.svg"), "扫描中"))  # pyrefly: ignore [missing-argument]
+        self.sidebar.addItem(QListWidgetItem(QIcon(":/icons/history.svg"), "结果"))  # pyrefly: ignore [missing-argument]
         self.sidebar.setCurrentRow(0)  # pyrefly: ignore [missing-argument]
         self.sidebar.blockSignals(False)
 
@@ -522,7 +391,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
             combo=self.scan_mode_combo,
             target_stack=self.target_stack,
             drive_buttons_layout=self.drive_buttons_layout,
-            hard_disk_icon=self._icon_hard_disk,
+            hard_disk_icon=QIcon(":/icons/hard_disk.svg"),
             config=self._config,
             parent=self,
         )

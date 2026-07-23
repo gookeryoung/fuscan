@@ -5663,7 +5663,7 @@ def _wait_export_worker(window: MainWindow, qapp: QApplication) -> None:
     :param window: 主窗口实例（含 ``_export_worker`` 属性）
     :param qapp: QApplication 实例，用于 ``processEvents`` 让信号槽分发
     """
-    worker = getattr(window, "_export_worker", None)
+    worker = getattr(window._export_controller, "_export_worker", None)
     if worker is None:
         return
     worker.wait(5000)
@@ -5678,10 +5678,10 @@ class TestExportAndMenu:
         window = MainWindow()
         informed = {"called": False}
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QMessageBox.information",
+            "fuscan.gui.export_controller.QMessageBox.information",
             lambda *args, **kwargs: informed.update(called=True),
         )
-        window._on_export_menu()
+        window._export_controller.show_menu()
         assert informed["called"]
         window.close()
 
@@ -5690,10 +5690,10 @@ class TestExportAndMenu:
         window = MainWindow()
         informed = {"called": False}
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QMessageBox.information",
+            "fuscan.gui.export_controller.QMessageBox.information",
             lambda *args, **kwargs: informed.update(called=True),
         )
-        window._on_export("csv")
+        window._export_controller.export("csv")
         assert informed["called"]
         window.close()
 
@@ -5710,14 +5710,14 @@ class TestExportAndMenu:
         window = MainWindow()
         window._last_report = report
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QFileDialog.getSaveFileName",
+            "fuscan.gui.export_controller.QFileDialog.getSaveFileName",
             lambda *args, **kwargs: (str(out_path), ""),
         )
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QMessageBox.information",
+            "fuscan.gui.export_controller.QMessageBox.information",
             lambda *args, **kwargs: None,
         )
-        window._on_export("csv")
+        window._export_controller.export("csv")
         _wait_export_worker(window, qapp)
         assert out_path.exists()
         assert "secret.txt" in out_path.read_text(encoding="utf-8")
@@ -5736,10 +5736,10 @@ class TestExportAndMenu:
         window = MainWindow()
         window._last_report = report
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QFileDialog.getSaveFileName",
+            "fuscan.gui.export_controller.QFileDialog.getSaveFileName",
             lambda *args, **kwargs: ("", ""),
         )
-        window._on_export("csv")
+        window._export_controller.export("csv")
         assert not out_path.exists()
         window.close()
 
@@ -5757,18 +5757,18 @@ class TestExportAndMenu:
         window = MainWindow()
         window._last_report = report
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QInputDialog.getItem",
+            "fuscan.gui.export_controller.QInputDialog.getItem",
             lambda *args, **kwargs: ("CSV 文件 (*.csv)", True),
         )
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QFileDialog.getSaveFileName",
+            "fuscan.gui.export_controller.QFileDialog.getSaveFileName",
             lambda *args, **kwargs: (str(out_path), ""),
         )
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QMessageBox.information",
+            "fuscan.gui.export_controller.QMessageBox.information",
             lambda *args, **kwargs: None,
         )
-        window._on_export_menu()
+        window._export_controller.show_menu()
         _wait_export_worker(window, qapp)
         assert out_path.exists()
         window.close()
@@ -5787,10 +5787,10 @@ class TestExportAndMenu:
         window = MainWindow()
         window._last_report = report
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QInputDialog.getItem",
+            "fuscan.gui.export_controller.QInputDialog.getItem",
             lambda *args, **kwargs: ("CSV 文件 (*.csv)", False),
         )
-        window._on_export_menu()
+        window._export_controller.show_menu()
         assert not out_path.exists()
         window.close()
 
@@ -5806,14 +5806,14 @@ class TestExportAndMenu:
         window = MainWindow()
         window._last_report = report
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QFileDialog.getSaveFileName",
+            "fuscan.gui.export_controller.QFileDialog.getSaveFileName",
             lambda *args, **kwargs: (str(out_path), ""),
         )
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QMessageBox.information",
+            "fuscan.gui.export_controller.QMessageBox.information",
             lambda *args, **kwargs: None,
         )
-        window._on_export("pdf")
+        window._export_controller.export("pdf")
         _wait_export_worker(window, qapp)
         assert out_path.exists()
         assert out_path.read_bytes()[:5] == b"%PDF-"
@@ -5831,14 +5831,14 @@ class TestExportAndMenu:
         window = MainWindow()
         window._last_report = report
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QFileDialog.getSaveFileName",
+            "fuscan.gui.export_controller.QFileDialog.getSaveFileName",
             lambda *args, **kwargs: (str(out_path), ""),
         )
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QMessageBox.information",
+            "fuscan.gui.export_controller.QMessageBox.information",
             lambda *args, **kwargs: None,
         )
-        window._on_export("excel")
+        window._export_controller.export("excel")
         _wait_export_worker(window, qapp)
         assert out_path.exists()
         assert out_path.read_bytes()[:2] == b"PK"
@@ -5856,18 +5856,18 @@ class TestExportAndMenu:
         window = MainWindow()
         window._last_report = report
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QInputDialog.getItem",
+            "fuscan.gui.export_controller.QInputDialog.getItem",
             lambda *args, **kwargs: ("PDF 文件 (*.pdf)", True),
         )
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QFileDialog.getSaveFileName",
+            "fuscan.gui.export_controller.QFileDialog.getSaveFileName",
             lambda *args, **kwargs: (str(out_path), ""),
         )
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QMessageBox.information",
+            "fuscan.gui.export_controller.QMessageBox.information",
             lambda *args, **kwargs: None,
         )
-        window._on_export_menu()
+        window._export_controller.show_menu()
         _wait_export_worker(window, qapp)
         assert out_path.exists()
         assert out_path.read_bytes()[:5] == b"%PDF-"
@@ -5887,18 +5887,18 @@ class TestExportAndMenu:
         window = MainWindow()
         window._last_report = report
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QInputDialog.getItem",
+            "fuscan.gui.export_controller.QInputDialog.getItem",
             lambda *args, **kwargs: ("Excel 文件 (*.xlsx)", True),
         )
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QFileDialog.getSaveFileName",
+            "fuscan.gui.export_controller.QFileDialog.getSaveFileName",
             lambda *args, **kwargs: (str(out_path), ""),
         )
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QMessageBox.information",
+            "fuscan.gui.export_controller.QMessageBox.information",
             lambda *args, **kwargs: None,
         )
-        window._on_export_menu()
+        window._export_controller.show_menu()
         _wait_export_worker(window, qapp)
         assert out_path.exists()
         assert out_path.read_bytes()[:2] == b"PK"

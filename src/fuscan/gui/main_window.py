@@ -36,7 +36,6 @@ try:
         QButtonGroup,
         QDialog,
         QFileDialog,
-        QInputDialog,
         QLabel,
         QListWidgetItem,
         QMainWindow,
@@ -62,7 +61,6 @@ except ImportError:  # pragma: no cover
         QButtonGroup,
         QDialog,
         QFileDialog,
-        QInputDialog,
         QLabel,
         QListWidgetItem,
         QMainWindow,
@@ -82,6 +80,7 @@ from fuscan.gui import resources_rc  # noqa: F401 注册 .qrc 资源（:/ 前缀
 from fuscan.gui.content_panel import ContentTabPanel
 from fuscan.gui.detail_panel import DetailControls, DetailPanel
 from fuscan.gui.explorer import open_path_in_explorer
+from fuscan.gui.export_controller import ExportController
 from fuscan.gui.icons import (
     ICON_ABOUT as _ICON_ABOUT,
 )
@@ -208,18 +207,7 @@ _ON_PRIMARY_ICON_TARGETS: tuple[tuple[str, str], ...] = (
     (_ICON_ABOUT, "about_btn"),
 )
 
-# 导出格式定义：(显示标签, 格式标识, 文件扩展名)。顺序即菜单显示顺序。
-# 同一标识可能与扩展名不同（如 excel → xlsx），通过元组显式表达映射关系，
-# 避免 _on_export 内 ``ext = "xlsx" if fmt == "excel" else fmt`` 的特判分支。
-_EXPORT_FORMATS: tuple[tuple[str, str, str], ...] = (
-    ("CSV 文件 (*.csv)", "csv", "csv"),
-    ("JSON 文件 (*.json)", "json", "json"),
-    ("PDF 文件 (*.pdf)", "pdf", "pdf"),
-    ("Excel 文件 (*.xlsx)", "excel", "xlsx"),
-)
-# 从 _EXPORT_FORMATS 派生的查找表（模块级常量避免每次调用重建 dict）
-_EXPORT_LABEL_TO_FMT: dict[str, str] = {label: fmt for label, fmt, _ in _EXPORT_FORMATS}
-_EXPORT_FMT_TO_EXT: dict[str, str] = {fmt: ext for _, fmt, ext in _EXPORT_FORMATS}
+# 导出格式定义与查找表已移到 ExportController（iter-79 续解耦）
 
 # 扫描模式 ↔ combo index 双向映射已移到 ScanModePanel（iter-79 续解耦）
 
@@ -337,6 +325,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self._setup_icons()
         self._setup_button_groups()
         self._setup_scan_mode_panel()
+        self._setup_export_controller()
         self._setup_sidebar()
         self._setup_file_types()
         self._connect_signals()
@@ -545,6 +534,25 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
             parent=self,
         )
 
+    def _setup_export_controller(self) -> None:
+        """构造扫描结果导出控制器（格式选择 + 文件保存 + 后台导出）。
+
+        委托 :class:`ExportController` 封装导出流程（格式选择对话框 → 文件
+        保存对话框 → 启动 ExportWorker → 完成/失败回调），主窗口通过公共
+        API（``show_menu`` / ``export`` / ``cleanup``）驱动（iter-79 续内聚重构）。
+        导出期间禁用 ``export_btn``，完成/失败后通过
+        ``button_restore_requested`` 信号通知主窗口调 ``_update_stage_actions``
+        重新计算按钮状态。非导出期间按钮状态由 ``_update_stage_actions`` 统一管理。
+        """
+        self._export_controller = ExportController(
+            export_btn=self.export_btn,
+            stats_label=self.stats_label,
+            report_getter=lambda: self._last_report,
+            parent_widget=self,
+            parent=self,
+        )
+        self._export_controller.button_restore_requested.connect(self._update_stage_actions)  # pyrefly: ignore [missing-attribute]
+
     def _setup_file_types(self) -> None:
         """构造内容 TAB 面板控制器（文件类型树 + 忽略目录 + 忽略扩展名）。
 
@@ -584,8 +592,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         # 已由 ResultFilterPanel 内部连接（节流 timer + 立即刷新）
         # 历史
         self.history_list.itemDoubleClicked.connect(self._on_history_item_double_clicked)
-        # 详情区
-        self.export_btn.clicked.connect(self._on_export_menu)
+        # 详情区（导出按钮 → ExportController.show_menu）
+        self.export_btn.clicked.connect(self._export_controller.show_menu)
         # 详情面板信号路由：复制路径/打开位置/移动至暂存区/切换跳过由 DetailPanel 发信号，主窗口响应
         self._detail_panel.path_copy_requested.connect(self._on_path_copy_requested)  # pyrefly: ignore [missing-attribute]
         self._detail_panel.open_location_requested.connect(self._on_open_location_requested)  # pyrefly: ignore [missing-attribute]
@@ -601,8 +609,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         # actions
         self.load_rules_action.triggered.connect(self._on_load_rules)
         self.edit_rules_action.triggered.connect(self._on_edit_rules)
-        self.export_csv_action.triggered.connect(lambda: self._on_export("csv"))
-        self.export_json_action.triggered.connect(lambda: self._on_export("json"))
+        self.export_csv_action.triggered.connect(lambda: self._export_controller.export("csv"))
+        self.export_json_action.triggered.connect(lambda: self._export_controller.export("json"))
         self.quit_action.triggered.connect(self.close)
         self.select_path_action.triggered.connect(self._on_select_path)
         self.scan_action.triggered.connect(self._on_scan)
@@ -1205,84 +1213,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self._switch_stage(WorkflowStage.SETUP)
         QMessageBox.critical(self, "扫描失败", error)
 
-    def _on_export_menu(self) -> None:
-        """导出按钮：弹出格式选择对话框。
-
-        支持 CSV/JSON/PDF/Excel 四种格式，PDF 与 Excel 为二进制格式，
-        通过 :func:`fuscan.scanner.export.save_report` 统一写入（按扩展名自动选择序列化方式）。
-        """
-        if self._last_report is None:
-            QMessageBox.information(self, "提示", "无可导出的扫描结果")
-            return
-        labels = [label for label, _, _ in _EXPORT_FORMATS]
-        choice, ok = QInputDialog.getItem(self, "导出扫描结果", "选择导出格式:", labels, 0, False)
-        if not ok:
-            return
-        self._on_export(_EXPORT_LABEL_TO_FMT[choice])
-
-    def _on_export(self, fmt: str) -> None:
-        """导出扫描结果到文件（异步：通过 ExportWorker 在后台执行）。
-
-        :param fmt: 格式标识，``csv``/``json``/``pdf``/``excel``。
-            文本格式（csv/json）按 UTF-8 写入；二进制格式（pdf/excel）写 bytes。
-            统一委托给 :func:`fuscan.scanner.export.save_report`，由其按扩展名自动选择序列化方式。
-
-        iter-59 改为异步：PDF/Excel 渲染可能耗时数秒，同步执行会让 UI 完全
-        无响应。导出期间禁用导出按钮，导出完成/失败后通过信号槽回到主线程
-        处理结果对话框与状态栏提示。
-        """
-        if self._last_report is None:
-            QMessageBox.information(self, "提示", "无可导出的扫描结果")
-            return
-
-        ext = _EXPORT_FMT_TO_EXT.get(fmt, fmt)
-        filter_str = f"{fmt.upper()} 文件 (*.{ext})"
-        default_name = f"fuscan_report.{ext}"
-        path_str, _ = QFileDialog.getSaveFileName(
-            self,
-            "导出扫描结果",
-            default_name,
-            filter_str,
-        )
-        if not path_str:
-            return
-        path = Path(path_str)
-        # 禁用导出按钮防止重复触发；启用后由 _on_export_finished/_on_export_failed 恢复
-        self.export_btn.setEnabled(False)
-        self.stats_label.setText(f"正在导出 {path.name}...")
-        # 延迟加载 ExportWorker，避免 main_window 顶部依赖 reportlab/openpyxl 触发导入
-        from fuscan.gui.export_worker import ExportWorker
-
-        self._export_worker = ExportWorker(self._last_report, path, parent=self)
-        self._export_worker.finished_ok.connect(self._on_export_finished)  # pyrefly: ignore [missing-attribute]
-        self._export_worker.failed.connect(self._on_export_failed)  # pyrefly: ignore [missing-attribute]
-        self._export_worker.start()
-
-    @Slot(object)  # pyrefly: ignore [not-callable]
-    def _on_export_finished(self, path: Path) -> None:
-        """导出完成回调：恢复按钮状态并提示用户。"""
-        self._cleanup_export_worker()
-        self.export_btn.setEnabled(self._last_report is not None and len(self._last_report.hits) > 0)
-        self.stats_label.setText(f"已导出: {path}")
-        QMessageBox.information(self, "导出成功", f"已导出到:\n{path}")
-
-    @Slot(str)  # pyrefly: ignore [not-callable]
-    def _on_export_failed(self, error: str) -> None:
-        """导出失败回调：恢复按钮状态并提示错误。"""
-        self._cleanup_export_worker()
-        self.export_btn.setEnabled(self._last_report is not None and len(self._last_report.hits) > 0)
-        self.stats_label.setText("导出失败")
-        QMessageBox.warning(self, "导出失败", error)
-
-    def _cleanup_export_worker(self) -> None:
-        """清理后台导出线程：等待退出后释放引用。"""
-        worker = getattr(self, "_export_worker", None)
-        if worker is None:
-            return
-        worker.wait(2000)
-        worker.deleteLater()
-        self._export_worker = None
-
     def _on_about(self) -> None:
         """关于对话框。"""
         QMessageBox.about(
@@ -1753,6 +1683,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
             self._worker.wait(3000)
+        self._export_controller.cleanup()
         if self._cache is not None:
             try:
                 self._cache.close()

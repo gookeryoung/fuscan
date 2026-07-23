@@ -2,8 +2,12 @@
 
 将文件类型勾选区的数据与状态从 ``main_window.py`` 拆分到独立的
 ``ExtractorTreeModel``，遵循 rule-12「大数据量优先用 QAbstractItemModel」
-约束。树形结构按父类别（文档/表格/演示/邮件）分组，支持父子勾选联动：
+约束。树形结构按父类别（文档/表格/演示/邮件/纯文本/源代码/配置文件/
+标记与数据/样式表/压缩包）分组，支持父子勾选联动：
 父节点勾选时全选/全取消子项，子项变化时父节点自动更新为全选/部分/全不选。
+
+iter-88 起将原"纯文本"分类（57 个扩展名）拆分为 5 个独立分类：
+纯文本/源代码/配置文件/标记与数据/样式表，各自对应一个子提取器。
 
 公共 API：
 
@@ -31,25 +35,46 @@ if TYPE_CHECKING:
 __all__ = ["ExtractorItem", "ExtractorTreeModel"]
 
 # 提取器类名 → 父类别名映射（iter-78：树形分组）
+# iter-88：原 TextExtractor（57 扩展名）拆分为 5 个子提取器，各自独立分类
 _EXTRACTOR_CATEGORIES: dict[str, str] = {
-    "TextExtractor": "文档",
+    # 文档
     "PdfExtractor": "文档",
     "DocxExtractor": "文档",
     "DocExtractor": "文档",
     "OdtExtractor": "文档",
     "RtfExtractor": "文档",
     "WpsExtractor": "文档",
+    # 表格
     "XlsxExtractor": "表格",
     "XlsExtractor": "表格",
     "OdsExtractor": "表格",
+    # 演示
     "PptxExtractor": "演示",
     "PptExtractor": "演示",
+    # 邮件
     "EmlExtractor": "邮件",
     "MsgExtractor": "邮件",
+    # 纯文本子提取器（iter-88 拆分）
+    "PlainTextExtractor": "纯文本",
+    "SourceCodeExtractor": "源代码",
+    "ConfigFileExtractor": "配置文件",
+    "MarkupDataExtractor": "标记与数据",
+    "StylesheetExtractor": "样式表",
 }
 
-# 父类别显示顺序（iter-79：新增"压缩包"分类，独立于提取器体系）
-_CATEGORY_ORDER: tuple[str, ...] = ("文档", "表格", "演示", "邮件", "压缩包")
+# 父类别显示顺序（iter-79：新增"压缩包"分类；iter-88：新增 5 个文本子分类）
+_CATEGORY_ORDER: tuple[str, ...] = (
+    "文档",
+    "表格",
+    "演示",
+    "邮件",
+    "纯文本",
+    "源代码",
+    "配置文件",
+    "标记与数据",
+    "样式表",
+    "压缩包",
+)
 
 # 压缩包分类常量：虚拟项 class_name，用于在 disabled_extractors 中标识
 _ARCHIVE_CLASS_NAME = "ArchiveFiles"
@@ -96,7 +121,7 @@ class ExtractorTreeModel(QAbstractItemModel):  # pyrefly: ignore [invalid-inheri
 
     树形结构：
 
-    - 顶层节点：父类别（文档/表格/演示/邮件）
+    - 顶层节点：父类别（文档/表格/演示/邮件/纯文本/源代码/配置文件/标记与数据/样式表/压缩包）
     - 子节点：提取器条目
 
     父子勾选联动：

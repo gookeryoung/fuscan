@@ -93,6 +93,73 @@ class TestScannerBasic:
         assert report.stats.total_files == 1  # pyc 被忽略
         assert report.stats.matched_files == 1
 
+    def test_scan_respects_skip_paths(self, tmp_path: Path) -> None:
+        """skip_paths 标记的文件不计入扫描队列，单独统计为 user_skipped（iter-77）。"""
+        skip_file = tmp_path / "secret.txt"
+        skip_file.write_text("password", encoding="utf-8")
+        (tmp_path / "password.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, skip_paths=frozenset({str(skip_file)}))
+        report = scanner.scan(tmp_path)
+        # 两个文件都被发现（total），但 secret.txt 被用户标记跳过
+        assert report.stats.total_files == 2
+        assert report.stats.user_skipped == 1
+        assert report.stats.scanned_files == 1
+        assert report.stats.matched_files == 1  # 只有 password.txt 命中
+        # secret.txt 不在结果中
+        assert all(r.path != skip_file for r in report.results)
+
+    def test_scan_skip_paths_takes_precedence_over_extension_match(self, tmp_path: Path) -> None:
+        """skip_paths 优先于 _should_scan：即使扩展名匹配也被跳过（iter-77）。"""
+        skip_file = tmp_path / "skip.conf"
+        skip_file.write_text("password", encoding="utf-8")
+        (tmp_path / "scan.conf").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(
+            rs,
+            scan_extensions=("conf",),
+            skip_paths=frozenset({str(skip_file)}),
+        )
+        report = scanner.scan(tmp_path)
+        # 两个文件都被发现
+        assert report.stats.total_files == 2
+        # skip.conf 被用户标记跳过
+        assert report.stats.user_skipped == 1
+        # 仅 scan.conf 进入扫描队列
+        assert report.stats.scanned_files == 1
+        assert report.stats.matched_files == 1
+
+    def test_scan_skip_paths_empty_behaves_like_default(self, tmp_path: Path) -> None:
+        """空 skip_paths 应与默认行为一致（iter-77 回归测试）。"""
+        (tmp_path / "a.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, skip_paths=frozenset())
+        report = scanner.scan(tmp_path)
+        assert report.stats.user_skipped == 0
+        assert report.stats.scanned_files == 1
+
+    def test_scan_skip_paths_progress_info_reports_user_skipped(self, tmp_path: Path) -> None:
+        """ProgressInfo 应上报 user_skipped 计数（iter-77）。"""
+        skip_file = tmp_path / "skip.txt"
+        skip_file.write_text("x", encoding="utf-8")
+        (tmp_path / "scan.txt").write_text("y", encoding="utf-8")
+        rs = _build_ruleset(_filename_rule("r", "x"))
+        captured: list[ProgressInfo] = []
+
+        def on_progress(info: ProgressInfo) -> None:
+            captured.append(info)
+
+        scanner = Scanner(
+            rs,
+            on_progress=on_progress,
+            progress_interval=0.0,
+            skip_paths=frozenset({str(skip_file)}),
+        )
+        scanner.scan(tmp_path)
+        # 最终进度应反映 user_skipped=1
+        last = captured[-1]
+        assert last.user_skipped == 1
+
 
 class TestScannerRules:
     def test_content_rule_triggers(self, tmp_path: Path) -> None:
@@ -332,6 +399,23 @@ class TestScanResult:
         result = ScanResult(path=Path("/x"), size=0, hits=())
         assert result.summary() == "0 条规则 / 0 处匹配"
 
+    def test_summary_user_skipped_prefix(self) -> None:
+        """user_skipped=True 时 summary 附加「已标记跳过」前缀（iter-77）。"""
+        from fuscan.scanner.result import RuleHit
+
+        result = ScanResult(
+            path=Path("/x"),
+            size=0,
+            hits=(RuleHit("r1", Severity.INFO, "d1", match_count=2),),
+            user_skipped=True,
+        )
+        assert result.summary() == "已标记跳过 | 1 条规则 / 2 处匹配"
+
+    def test_user_skipped_default_false(self) -> None:
+        """ScanResult.user_skipped 默认为 False。"""
+        result = ScanResult(path=Path("/x"), size=0, hits=())
+        assert result.user_skipped is False
+
 
 class TestScanStats:
     def test_summary_default_complete(self) -> None:
@@ -355,6 +439,20 @@ class TestScanStats:
         assert "条数 5" in s
         assert "错误 1" in s
         assert "耗时 1.50s" in s
+
+    def test_summary_includes_user_skipped(self) -> None:
+        """summary 应包含「用户跳过 N」类别，与「跳过 N」区分（iter-77）。"""
+        stats = ScanStats(
+            total_files=10,
+            scanned_files=5,
+            skipped_files=2,
+            user_skipped=3,
+            matched_files=1,
+            duration_seconds=1.0,
+        )
+        s = stats.summary()
+        assert "用户跳过 3" in s
+        assert "跳过 2" in s
 
     def test_summary_cancelled_prefix(self) -> None:
         """cancelled=True 时前缀为"已取消"。"""

@@ -61,6 +61,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         source_files: Mapping[Path, str] | None = None,
         progress_interval: float = 0.3,
         scan_extensions: tuple[str, ...] | None = None,
+        skip_paths: frozenset[str] | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -78,6 +79,8 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         # 全局后缀过滤（iter-71）：None 或空表示扫描所有文件，非空表示只扫描指定后缀。
         # 替代原规则级 Rule.file_extensions 并集，由 Config.scan_extensions 注入。
         self._scan_extensions: tuple[str, ...] | None = scan_extensions
+        # 用户标记跳过的路径集合（iter-77）：传给 Scanner 在 walk 阶段跳过
+        self._skip_paths: frozenset[str] = skip_paths or frozenset()
         self._scanner: Scanner | None = None
         self._cancel_requested: bool = False
         # 多根路径累计性能统计（iter-66）：每次 scan() 后合并 perf_summary
@@ -89,6 +92,8 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         self._cum_matched = 0
         self._cum_errors = 0
         self._cum_matches = 0
+        # 多根路径累计用户跳过数（iter-77）
+        self._cum_user_skipped = 0
         self._start_time: float = 0.0
 
     def pause(self) -> None:
@@ -123,6 +128,8 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
                 # skipped_dirs/matched_files 不累计，仅反映最近一次 scan() 的快照
                 skipped_dirs=info.skipped_dirs,
                 matched_files=info.matched_files,
+                phase=info.phase,
+                user_skipped=info.user_skipped + self._cum_user_skipped,
             )
         )
 
@@ -143,6 +150,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
                 source_files=self._source_files,
                 progress_interval=self._progress_interval,
                 scan_extensions=self._scan_extensions,
+                skip_paths=self._skip_paths,
             )
             if self._cancel_requested:
                 self._scanner.cancel()
@@ -153,6 +161,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
             total_skipped = 0
             total_errors = 0
             total_matches = 0
+            total_user_skipped = 0
             # 基于 report.cancelled 判断取消状态：C1 修复后 scan() 在 finally 中
             # 清除 _cancel_event，scan() 返回后 self._scanner.is_cancelled 恒为 False，
             # 必须用 report.cancelled 累积取消标志，否则取消的扫描会被误判为正常完成
@@ -169,6 +178,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
                 total_skipped += report.stats.skipped_files
                 total_errors += report.stats.errors
                 total_matches += report.stats.total_matches
+                total_user_skipped += report.stats.user_skipped
                 # 累计各根路径的性能统计（iter-66）
                 if report.stats.perf_summary:
                     self._perf.merge_dict(report.stats.perf_summary)
@@ -179,6 +189,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
                 self._cum_matched = total_matched
                 self._cum_errors = total_errors
                 self._cum_matches = total_matches
+                self._cum_user_skipped = total_user_skipped
                 if report.cancelled:
                     was_cancelled = True
             elapsed = time.monotonic() - self._start_time
@@ -193,6 +204,8 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
                     errors=total_errors,
                     duration_seconds=elapsed,
                     total_matches=total_matches,
+                    # 多根路径累计的用户跳过数（iter-77）
+                    user_skipped=total_user_skipped,
                     # 多根路径累计的性能统计（iter-66）
                     perf_summary=self._perf.to_dict(),
                 ),

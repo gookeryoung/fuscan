@@ -13,9 +13,9 @@ UI 装配委托给 ``Ui_SettingsDialog``（对应 ``settings_dialog.ui``），
 from __future__ import annotations
 
 try:
-    from PySide2.QtWidgets import QDialog, QWidget
+    from PySide2.QtWidgets import QDialog, QFileDialog, QWidget
 except ImportError:  # pragma: no cover
-    from PySide6.QtWidgets import QDialog, QWidget  # pyrefly: ignore [missing-import]
+    from PySide6.QtWidgets import QDialog, QFileDialog, QWidget  # pyrefly: ignore [missing-import]
 
 from fuscan.config import Config
 from fuscan.gui.settings_dialog_ui import Ui_SettingsDialog
@@ -42,6 +42,8 @@ class SettingsDialog(QDialog, Ui_SettingsDialog):  # pyrefly: ignore [invalid-in
         # 使两个编辑器在「忽略项」Tab 中按宽度 2:1 分配可用空间。
         self.ignore_page_layout.setStretch(0, 2)
         self.ignore_page_layout.setStretch(1, 1)
+        # iter-77：暂存区路径选择按钮
+        self.staging_dir_browse_btn.clicked.connect(self._on_browse_staging_dir)
 
     def _load_config(self) -> None:
         """加载当前配置到控件。"""
@@ -56,6 +58,7 @@ class SettingsDialog(QDialog, Ui_SettingsDialog):  # pyrefly: ignore [invalid-in
         self.ignore_extensions_edit.setPlainText("\n".join(self.config.ignore_extensions))
         self.cache_enabled_check.setChecked(self.config.cache_enabled)
         self.cache_path_edit.setText(self.config.cache_path or "")
+        self.staging_dir_edit.setText(self.config.staging_dir or "")
 
     def _save_config(self) -> None:
         """将控件值保存到配置。"""
@@ -77,6 +80,20 @@ class SettingsDialog(QDialog, Ui_SettingsDialog):  # pyrefly: ignore [invalid-in
         self.config.cache_enabled = self.cache_enabled_check.isChecked()
         path_text = self.cache_path_edit.text().strip()
         self.config.cache_path = path_text or None
+        staging_text = self.staging_dir_edit.text().strip()
+        self.config.staging_dir = staging_text or None
+
+    def _on_browse_staging_dir(self) -> None:
+        """打开目录选择对话框，将所选路径填入暂存区路径编辑框（iter-77）。
+
+        起始目录优先使用当前编辑框中的路径，否则回退到用户主目录。
+        取消选择时保持编辑框内容不变。
+        """
+        current = self.staging_dir_edit.text().strip()
+        start_dir = current if current else ""
+        chosen = QFileDialog.getExistingDirectory(self, "选择暂存区目录", start_dir)
+        if chosen:
+            self.staging_dir_edit.setText(chosen)
 
     def on_accept(self) -> None:
         """确定按钮：保存配置并关闭对话框。"""

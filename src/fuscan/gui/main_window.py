@@ -79,7 +79,7 @@ except ImportError:  # pragma: no cover
 
 from fuscan import __author__, __description__, __license__, __version__, theme
 from fuscan.builtin import load_with_builtin
-from fuscan.config import Config, load_config, save_config
+from fuscan.config import Config, detect_default_staging_dir, load_config, save_config
 from fuscan.extractors.base import default_registry
 from fuscan.gui import resources_rc  # noqa: F401 注册 .qrc 资源（:/ 前缀图标）
 from fuscan.gui.detail_panel import DetailControls, DetailPanel
@@ -158,6 +158,7 @@ from fuscan.rules import RuleError, load_ruleset, merge_multiple_rulesets
 from fuscan.rules.model import RuleSet, Severity
 from fuscan.scanner import ScanReport, list_drives
 from fuscan.scanner.result import ScanResult
+from fuscan.skip_store import SkipStore
 
 if TYPE_CHECKING:
     from PySide2.QtGui import QIcon
@@ -300,6 +301,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
             self._selected_drive: str | None = None
             # 扫描结果缓存（启用时惰性创建，关闭窗口时释放）
             self._cache: CacheStore | None = None
+            # 用户跳过路径持久化存储（iter-77）：详情区「标记为跳过」按钮写入，
+            # 下次扫描时通过 skip_paths 参数传入 Scanner 在 walk 阶段跳过
+            self._skip_store: SkipStore = SkipStore()
             # 扫描中列表增量更新器：封装跳过目录与命中文件列表的 0.5 秒节流 + 增量
             # append 算法，避免每次进度回调全量 clear+重添导致主线程阻塞（点击设置卡滞根因）
             self._list_updater: ScanListUpdater = ScanListUpdater(self.skipped_dirs_list, self.matched_files_list)
@@ -323,8 +327,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
 
         详情区 UI 控件由 ``setupUi`` 创建，本方法构造 :class:`DetailControls` 引用集合
         并传入 :class:`DetailPanel`，后续主窗口通过 ``self._detail_panel`` 公共 API 驱动详情区。
-        信号路由：``path_copy_requested`` / ``open_location_requested`` 连接到主窗口槽，
-        由主窗口更新状态栏或在文件管理器中定位文件。
+        信号路由：``path_copy_requested`` / ``open_location_requested`` /
+        ``move_to_staging_requested`` / ``toggle_skip_requested`` 连接到主窗口槽，
+        由主窗口更新状态栏、定位文件、移动至暂存区或切换跳过标记（iter-77）。
         """
         controls = DetailControls(
             action_stack=self.detail_action_stack,
@@ -336,7 +341,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
             info_label=self.detail_info_label,
             hits_table=self.detail_hits_table,
             preview=self.detail_preview,
-            note_edit=self.note_edit,
+            move_to_staging_btn=self.move_to_staging_btn,
+            toggle_skip_btn=self.toggle_skip_btn,
         )
         return DetailPanel(controls, parent=self)
 
@@ -435,24 +441,26 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
 
         ``scan_stats_label`` 已在 ``main_window.ui`` 中声明（位于 ``lists_splitter``
         与 ``scanning_btn_row`` 之间），本方法仅设置初始文本。面板用 HTML 富文本
-        显示四类计数与颜色标识：
+        显示五类计数与颜色标识：
 
         - 绿色：已通过（已扫描且未命中且未错误的文件）
         - 红色：命中
-        - 黄色：跳过
+        - 黄色：跳过（按扩展名/目录过滤）
+        - 紫色：用户跳过（iter-77，用户标记跳过的文件）
         - 红色：错误
 
         颜色标识使用 ``<span style="color: ...">`` 内联样式，避免引入 QSS 样式表。
         """
-        self._update_scan_stats(0, 0, 0, 0)
+        self._update_scan_stats(0, 0, 0, 0, 0)
 
-    def _update_scan_stats(self, passed: int, matched: int, skipped: int, errors: int) -> None:
+    def _update_scan_stats(self, passed: int, matched: int, skipped: int, errors: int, user_skipped: int = 0) -> None:
         """更新扫描中页的分类统计面板。
 
         :param passed: 已通过文件数（已扫描且未命中且未错误）
         :param matched: 命中文件数
-        :param skipped: 跳过文件数
+        :param skipped: 跳过文件数（按扩展名/目录过滤）
         :param errors: 错误文件数
+        :param user_skipped: 用户标记跳过的文件数（iter-77）
         """
         self.scan_stats_label.setText(
             f'<span style="color: #28A745; font-weight: bold;">已通过 {passed}</span>'
@@ -460,6 +468,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
             f'<span style="color: #DC3545; font-weight: bold;">命中 {matched}</span>'
             f" &nbsp;|&nbsp; "
             f'<span style="color: #FFC107; font-weight: bold;">跳过 {skipped}</span>'
+            f" &nbsp;|&nbsp; "
+            f'<span style="color: #6F42C1; font-weight: bold;">用户跳过 {user_skipped}</span>'
             f" &nbsp;|&nbsp; "
             f'<span style="color: #DC3545; font-weight: bold;">错误 {errors}</span>'
         )
@@ -595,9 +605,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self.history_list.itemDoubleClicked.connect(self._on_history_item_double_clicked)
         # 详情区
         self.export_btn.clicked.connect(self._on_export_menu)
-        # 详情面板信号路由：复制路径/打开位置由 DetailPanel 发信号，主窗口响应
+        # 详情面板信号路由：复制路径/打开位置/移动至暂存区/切换跳过由 DetailPanel 发信号，主窗口响应
         self._detail_panel.path_copy_requested.connect(self._on_path_copy_requested)  # pyrefly: ignore [missing-attribute]
         self._detail_panel.open_location_requested.connect(self._on_open_location_requested)  # pyrefly: ignore [missing-attribute]
+        self._detail_panel.move_to_staging_requested.connect(self._on_move_to_staging)  # pyrefly: ignore [missing-attribute]
+        self._detail_panel.toggle_skip_requested.connect(self._on_toggle_skip)  # pyrefly: ignore [missing-attribute]
         # 扫描中页命中文件列表双击：弹出简化详情与定位按钮（需求5）
         self.matched_files_list.itemDoubleClicked.connect(self._on_matched_file_double_clicked)
         # 头部栏与侧边栏（rule-12 HeaderBar + Sidebar）
@@ -1083,7 +1095,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         # 重置扫描中页列表与增量更新状态：避免上次扫描数据残留、快照干扰本次增量对比
         self._list_updater.reset()
         # 重置扫描中页的分类统计面板（需求6/7）
-        self._update_scan_stats(0, 0, 0, 0)
+        self._update_scan_stats(0, 0, 0, 0, 0)
         self._switch_stage(WorkflowStage.SCANNING)
 
         cache, source_files = self._build_cache_context()
@@ -1099,6 +1111,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
             cache=cache,
             source_files=source_files,
             scan_extensions=self._compute_scan_extensions(),
+            skip_paths=self._skip_store.paths(),
         )
         self._worker.progress_info.connect(self._on_scan_progress)  # pyrefly: ignore [missing-attribute]
         self._worker.finished_report.connect(self._on_scan_finished)  # pyrefly: ignore [missing-attribute]
@@ -1208,7 +1221,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         # 仅在本次实际刷新列表时同步刷新分类统计面板（需求6/7），被节流跳过时不重复计算。
         if self._list_updater.try_update(info.skipped_dirs, info.matched_files):
             passed = max(info.scanned - info.matched - info.errors, 0)
-            self._update_scan_stats(passed, info.matched, info.skipped, info.errors)
+            self._update_scan_stats(passed, info.matched, info.skipped, info.errors, info.user_skipped)
 
     @Slot(object)  # pyrefly: ignore [not-callable]
     def _on_scan_finished(self, report: ScanReport) -> None:
@@ -1486,6 +1499,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         assert isinstance(result, ScanResult)
         logger.debug("选中结果项: %s, 命中数=%d", result.path, len(result.hits))
         self._detail_panel.show_result(result)
+        # iter-77：根据 SkipStore 持久化状态同步「标记为跳过」按钮勾选与文案
+        self._detail_panel.set_skip_state(self._skip_store.contains(str(result.path)))
 
     def _on_path_copy_requested(self, _path_str: str) -> None:
         """响应 DetailPanel 复制路径信号：更新状态栏提示。
@@ -1501,6 +1516,101 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         """
         assert isinstance(path, Path)
         self._open_path_in_explorer(path)
+
+    def _resolve_staging_dir(self) -> Path:
+        """解析暂存区目录路径：优先使用用户配置，否则探测剩余空间最大的盘符。
+
+        :return: 暂存区目录路径（已确保存在，调用方可直接写入）
+        """
+        configured = self._config.staging_dir
+        if configured:
+            staging = Path(configured)
+        else:
+            staging = detect_default_staging_dir()
+        staging.mkdir(parents=True, exist_ok=True)
+        return staging
+
+    def _on_move_to_staging(self, result: object) -> None:
+        """响应 DetailPanel 移动至暂存区信号：将文件移动到暂存区目录（iter-77）。
+
+        移动策略：保留原文件名，若目标已存在同名文件则追加 ``.1``/``.2`` 序号避免覆盖。
+        移动成功后从结果树移除该项并刷新详情区。
+
+        :param result: 待移动的扫描结果（:class:`ScanResult`）
+        """
+        assert isinstance(result, ScanResult)
+        src = result.path
+        if not src.exists():
+            QMessageBox.warning(self, "提示", f"源文件不存在:\n{src}")
+            return
+        try:
+            staging = self._resolve_staging_dir()
+        except OSError as exc:
+            logger.error("创建暂存区目录失败", exc_info=True)
+            QMessageBox.warning(self, "提示", f"创建暂存区目录失败:\n{exc}")
+            return
+        # 目标路径：保留原文件名，冲突时追加序号
+        dest = staging / src.name
+        if dest.exists():
+            for i in range(1, 10000):
+                candidate = staging / f"{src.stem}.{i}{src.suffix}"
+                if not candidate.exists():
+                    dest = candidate
+                    break
+        try:
+            src.replace(dest)
+        except OSError as exc:
+            logger.warning("移动文件至暂存区失败: %s -> %s", src, dest, exc_info=True)
+            QMessageBox.warning(self, "提示", f"移动文件失败:\n{exc}")
+            return
+        logger.info("已移动文件至暂存区: %s -> %s", src, dest)
+        self.stats_label.setText(f"已移动至暂存区: {dest}")
+        # 从最近一次扫描报告中移除该结果并刷新结果树
+        self._remove_result_from_report(src)
+
+    def _on_toggle_skip(self, result: object) -> None:
+        """响应 DetailPanel 切换跳过标记信号：在 SkipStore 中添加/移除路径（iter-77）。
+
+        按钮的 checked 状态不作为判断依据——以 SkipStore 当前持久化状态为准取反，
+        避免按钮状态与持久化存储不一致。处理完成后通过 :meth:`set_skip_state`
+        同步按钮文案。
+
+        :param result: 待切换跳过标记的扫描结果（:class:`ScanResult`）
+        """
+        assert isinstance(result, ScanResult)
+        path_str = str(result.path)
+        if self._skip_store.contains(path_str):
+            self._skip_store.remove(path_str)
+            self._detail_panel.set_skip_state(False)
+            self.stats_label.setText(f"已取消跳过: {result.path.name}")
+            logger.info("取消跳过标记: %s", path_str)
+        else:
+            self._skip_store.add(path_str)
+            self._detail_panel.set_skip_state(True)
+            self.stats_label.setText(f"已标记跳过: {result.path.name}")
+            logger.info("标记跳过: %s", path_str)
+
+    def _remove_result_from_report(self, path: Path) -> None:
+        """从最近一次扫描报告中移除指定路径的结果并刷新结果树（iter-77）。
+
+        移动至暂存区或标记跳过后调用，使结果树与实际文件状态保持一致。
+
+        :param path: 待移除的文件路径
+        """
+        if self._last_report is None:
+            return
+        new_results = tuple(r for r in self._last_report.results if r.path != path)
+        if len(new_results) == len(self._last_report.results):
+            return  # 未找到对应结果，无需刷新
+        self._last_report = ScanReport(
+            root=self._last_report.root,
+            results=new_results,
+            stats=self._last_report.stats,
+            cancelled=self._last_report.cancelled,
+        )
+        self._refresh_result_tree()
+        # 移除后详情区清空（已无对应文件可展示）
+        self._detail_panel.clear()
 
     def _open_path_in_explorer(self, path: Path) -> None:
         """在文件管理器中打开指定文件所在目录并选中该文件。

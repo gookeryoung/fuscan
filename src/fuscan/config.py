@@ -13,13 +13,21 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-__all__ = ["CONFIG_DIR", "CONFIG_PATH", "Config", "load_config", "save_config"]
+__all__ = [
+    "CONFIG_DIR",
+    "CONFIG_PATH",
+    "Config",
+    "detect_default_staging_dir",
+    "load_config",
+    "save_config",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +80,9 @@ class Config:
     disabled_extractors: list[str] = field(default_factory=list)
     # 缓存数据库路径（None 表示默认 ~/.fuscan/cache.db）
     cache_path: str | None = None
+    # 暂存区目录（iter-77）：用户点击「移动至暂存区」后文件被移动到此目录。
+    # None 表示自动探测剩余空间最大的盘符下 ``.fuscan-cache``（见 detect_default_staging_dir）。
+    staging_dir: str | None = None
     # 忽略目录名（按目录名匹配任意层级，大小写不敏感）。
     # 含版本控制元数据、语言工具链缓存、构建输出、IDE 配置、临时/日志目录，
     # 以及 Windows 系统目录（含大量二进制/系统文件，扫描无意义且拖慢速度）。
@@ -145,6 +156,8 @@ class Config:
             "ProgramData",
             "System Volume Information",
             "$Recycle.Bin",
+            # fuscan 暂存区目录（iter-77）：避免扫描被移动到暂存区的文件
+            ".fuscan-cache",
         ]
     )
     # 忽略扩展名（不含点，大小写不敏感）
@@ -183,6 +196,41 @@ class Config:
             "bz2",
         ]
     )
+
+
+def detect_default_staging_dir() -> Path:
+    """探测默认暂存区目录：剩余空间最大的盘符下 ``.fuscan-cache``。
+
+    遍历本机所有本地盘符（不含网络映射盘），选择 ``shutil.disk_usage().free``
+    最大的盘符，返回 ``<drive>/.fuscan-cache``。盘符枚举失败或无可用盘符时
+    回退到用户主目录下的 ``~/.fuscan-cache``。
+
+    :return: 默认暂存区目录路径（路径可能尚不存在，调用方按需 ``mkdir``）
+    """
+    # 延迟导入避免顶层依赖：walker 依赖 scanner.context，与 config 无循环依赖，
+    # 但保留惰性导入使 config 模块在无 scanner 包时仍可独立用于配置读写测试。
+    from fuscan.scanner.walker import list_drives
+
+    fallback = Path.home() / ".fuscan-cache"
+    try:
+        drives = list_drives(include_network=False)
+    except OSError:
+        logger.warning("盘符枚举失败，暂存区回退到主目录", exc_info=True)
+        return fallback
+    if not drives:
+        return fallback
+
+    best_drive = drives[0]
+    best_free = -1
+    for drive in drives:
+        try:
+            free = shutil.disk_usage(drive).free
+        except OSError:
+            continue
+        if free > best_free:
+            best_free = free
+            best_drive = drive
+    return best_drive / ".fuscan-cache"
 
 
 def load_config(path: Path | None = None) -> Config:

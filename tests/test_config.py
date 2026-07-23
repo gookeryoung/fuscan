@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from fuscan.config import Config, load_config, save_config
+from fuscan.config import Config, detect_default_staging_dir, load_config, save_config
 
 
 class TestConfig:
@@ -63,6 +63,16 @@ class TestConfig:
         config = Config()
         assert config.cache_enabled is True
         assert config.cache_path is None
+
+    def test_default_staging_dir(self) -> None:
+        """默认 staging_dir 为 None，由调用方按需探测（iter-77）。"""
+        config = Config()
+        assert config.staging_dir is None
+
+    def test_fuscan_cache_in_ignore_dirs(self) -> None:
+        """``.fuscan-cache`` 应在默认忽略列表中，避免扫描被移动到暂存区的文件（iter-77）。"""
+        config = Config()
+        assert ".fuscan-cache" in config.ignore_dirs
 
     def test_default_perf_log_enabled(self) -> None:
         """默认不启用性能详细日志（iter-69）。"""
@@ -226,6 +236,14 @@ class TestSaveConfig:
         assert loaded.cache_enabled is False
         assert loaded.cache_path == "/tmp/test_cache.db"
 
+    def test_save_and_load_staging_dir(self, tmp_path: Path) -> None:
+        """暂存区目录持久化（iter-77）。"""
+        config_file = tmp_path / "config.yaml"
+        original = Config(staging_dir="D:/custom-staging")
+        save_config(original, config_file)
+        loaded = load_config(config_file)
+        assert loaded.staging_dir == "D:/custom-staging"
+
     def test_save_and_load_perf_log_enabled(self, tmp_path: Path) -> None:
         """性能日志开关持久化（iter-69）。"""
         config_file = tmp_path / "config.yaml"
@@ -271,3 +289,77 @@ class TestSaveConfig:
 
         monkeypatch.setattr(Path, "open", mock_open)
         save_config(Config(), config_file)  # 不应抛异常
+
+
+class TestDetectDefaultStagingDir:
+    """默认暂存区目录探测（iter-77）。"""
+
+    def test_returns_path_under_drive_with_most_free_space(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """应返回剩余空间最大盘符下的 ``.fuscan-cache``。"""
+        fake_drives = [Path("C:\\"), Path("D:\\")]
+
+        def fake_list_drives(include_network: bool = False) -> list[Path]:
+            return list(fake_drives)
+
+        def fake_disk_usage(path: Path) -> object:
+            class _Usage:
+                def __init__(self, free: int) -> None:
+                    self.free = free
+
+            if str(path) == "C:\\":
+                return _Usage(free=10 * 1024 * 1024)
+            return _Usage(free=500 * 1024 * 1024)
+
+        # 延迟导入路径与 config.detect_default_staging_dir 内一致
+        import fuscan.config as config_mod
+
+        monkeypatch.setattr("fuscan.scanner.walker.list_drives", fake_list_drives, raising=False)
+        monkeypatch.setattr(config_mod.shutil, "disk_usage", fake_disk_usage)
+
+        result = detect_default_staging_dir()
+        assert result == Path("D:\\") / ".fuscan-cache"
+
+    def test_fallback_to_home_when_no_drives(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """无可用盘符时回退到 ``~/.fuscan-cache``。"""
+
+        def fake_list_drives(include_network: bool = False) -> list[Path]:
+            return []
+
+        monkeypatch.setattr("fuscan.scanner.walker.list_drives", fake_list_drives, raising=False)
+
+        result = detect_default_staging_dir()
+        assert result == Path.home() / ".fuscan-cache"
+
+    def test_fallback_on_oserror(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """盘符枚举抛 OSError 时回退到 ``~/.fuscan-cache``。"""
+
+        def fake_list_drives(include_network: bool = False) -> list[Path]:
+            raise OSError("模拟枚举失败")
+
+        monkeypatch.setattr("fuscan.scanner.walker.list_drives", fake_list_drives, raising=False)
+
+        result = detect_default_staging_dir()
+        assert result == Path.home() / ".fuscan-cache"
+
+    def test_skips_drives_with_disk_usage_oserror(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """某盘符 disk_usage 抛 OSError 时跳过该盘符，选择剩余可用的。"""
+
+        def fake_list_drives(include_network: bool = False) -> list[Path]:
+            return [Path("C:\\"), Path("D:\\")]
+
+        def fake_disk_usage(path: Path) -> object:
+            class _Usage:
+                def __init__(self, free: int) -> None:
+                    self.free = free
+
+            if str(path) == "C:\\":
+                raise OSError("C: 不可访问")
+            return _Usage(free=500 * 1024 * 1024)
+
+        import fuscan.config as config_mod
+
+        monkeypatch.setattr("fuscan.scanner.walker.list_drives", fake_list_drives, raising=False)
+        monkeypatch.setattr(config_mod.shutil, "disk_usage", fake_disk_usage)
+
+        result = detect_default_staging_dir()
+        assert result == Path("D:\\") / ".fuscan-cache"

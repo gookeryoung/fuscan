@@ -28,7 +28,6 @@ try:
         QApplication,
         QHeaderView,
         QLabel,
-        QPlainTextEdit,
         QPushButton,
         QStackedWidget,
         QTableWidget,
@@ -42,7 +41,6 @@ except ImportError:  # pragma: no cover
         QApplication,
         QHeaderView,
         QLabel,
-        QPlainTextEdit,
         QPushButton,
         QStackedWidget,
         QTableWidget,
@@ -100,7 +98,9 @@ class DetailControls:
     info_label: QLabel
     hits_table: QTableWidget
     preview: QTextEdit
-    note_edit: QPlainTextEdit
+    # iter-77：原 note_edit（备注/批注/导出说明）替换为操作按钮行
+    move_to_staging_btn: QPushButton
+    toggle_skip_btn: QPushButton
 
 
 class DetailPanel(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -108,16 +108,20 @@ class DetailPanel(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     封装详情区的状态管理（当前结果、命中位置列表、当前命中索引）、内容填充
     （文件信息、命中表、内容预览）、命中导航（上一条/下一条/行点击跳转）与
-    文件操作（复制路径、打开位置）。
+    文件操作（复制路径、打开位置、移动至暂存区、标记为跳过）。
 
     主窗口通过 :meth:`show_result` / :meth:`clear` 驱动详情区，通过 :attr:`current_result`
-    读取当前选中结果，通过两个信号响应用户操作（复制路径/打开位置）。
+    读取当前选中结果，通过四个信号响应用户操作（复制路径/打开位置/移动至暂存区/切换跳过）。
     """
 
     # 复制路径后通知主窗口更新状态栏（携带路径字符串）
     path_copy_requested = Signal(str)
     # 请求主窗口在文件管理器中定位文件（携带 Path）
     open_location_requested = Signal(object)
+    # 请求主窗口将当前文件移动到暂存区（携带 ScanResult，iter-77）
+    move_to_staging_requested = Signal(object)
+    # 请求主窗口切换当前文件的跳过标记（携带 ScanResult，iter-77）
+    toggle_skip_requested = Signal(object)
 
     def __init__(self, controls: DetailControls, parent: QObject | None = None) -> None:
         """初始化详情面板：存储控件引用、初始化状态、配置命中表与信号连接。
@@ -170,6 +174,8 @@ class DetailPanel(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._c.preview.clear()
         self._c.hits_table.setRowCount(0)
         self._c.info_label.setText("")
+        # iter-77：重置跳过按钮状态（空态下不可见，但保持一致避免下次显示残留）
+        self.set_skip_state(False)
 
     def prev_hit(self) -> None:
         """跳转到上一个命中位置（循环）。"""
@@ -211,6 +217,40 @@ class DetailPanel(QObject):  # pyrefly: ignore [invalid-inheritance]
             return
         self.open_location_requested.emit(self._current_result.path)  # pyrefly: ignore [missing-attribute]
 
+    def set_skip_state(self, skipped: bool) -> None:
+        """更新「标记为跳过」按钮的勾选状态与文案（iter-77）。
+
+        :param skipped: True 表示当前文件已被用户标记跳过，按钮显示「取消跳过」；
+            False 表示未标记，按钮显示「标记为跳过」
+        """
+        # blockSignals 避免setChecked 触发 toggled -> _on_toggle_skip_clicked -> emit
+        # 造成主窗口 set_skip_state 调用与按钮状态同步的循环
+        btn = self._c.toggle_skip_btn
+        btn.blockSignals(True)
+        btn.setChecked(skipped)
+        btn.setText("取消跳过" if skipped else "标记为跳过")
+        btn.blockSignals(False)
+
+    def move_to_staging(self) -> None:
+        """请求主窗口将当前结果文件移动到暂存区（iter-77）。
+
+        无当前结果时直接返回，不发信号。
+        """
+        if self._current_result is None:
+            return
+        self.move_to_staging_requested.emit(self._current_result)  # pyrefly: ignore [missing-attribute]
+
+    def toggle_skip(self) -> None:
+        """请求主窗口切换当前结果文件的跳过标记（iter-77）。
+
+        按钮的 checked 状态由主窗口在处理完成后通过 :meth:`set_skip_state` 同步，
+        本方法仅发出信号，不在此处更新按钮状态——避免在主窗口处理失败时按钮状态
+        与持久化存储不一致。无当前结果时直接返回，不发信号。
+        """
+        if self._current_result is None:
+            return
+        self.toggle_skip_requested.emit(self._current_result)  # pyrefly: ignore [missing-attribute]
+
     # ----------------------------- 内部实现 -----------------------------
 
     def _setup_table(self) -> None:
@@ -223,6 +263,12 @@ class DetailPanel(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._c.next_btn.clicked.connect(self.next_hit)
         self._c.hits_table.cellClicked.connect(self._on_hits_row_clicked)
         self._c.open_location_btn.clicked.connect(self.open_location)
+        # iter-77：操作按钮行
+        self._c.move_to_staging_btn.clicked.connect(self.move_to_staging)
+        # toggled 信号在 setChecked 时触发（包括 blockSignals(False) 后的用户点击），
+        # 用 clicked 避免与 set_skip_state 内的 setChecked 冲突；clicked 携带 checked 状态
+        # 但我们以当前持久化状态为准，故连接到 toggle_skip 由主窗口决定下一步
+        self._c.toggle_skip_btn.clicked.connect(self.toggle_skip)
 
     def _populate_file_info(self, result: ScanResult) -> None:
         """填充详情区文件元信息。"""

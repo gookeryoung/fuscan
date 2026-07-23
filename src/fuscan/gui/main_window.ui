@@ -1106,11 +1106,47 @@
                       </widget>
                      </item>
                      <item>
-                      <widget class="QPlainTextEdit" name="note_edit">
-                       <property name="placeholderText">
-                        <string>备注/批注/导出说明...</string>
+                      <layout class="QHBoxLayout" name="detail_actions_layout">
+                       <property name="spacing">
+                        <number>8</number>
                        </property>
-                      </widget>
+                       <item>
+                        <widget class="QPushButton" name="move_to_staging_btn">
+                         <property name="toolTip">
+                          <string>将当前文件移动到暂存区目录（可在设置中配置）</string>
+                         </property>
+                         <property name="text">
+                          <string>移动至暂存区</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item>
+                        <widget class="QPushButton" name="toggle_skip_btn">
+                         <property name="toolTip">
+                          <string>标记后后续扫描将直接跳过此文件</string>
+                         </property>
+                         <property name="text">
+                          <string>标记为跳过</string>
+                         </property>
+                         <property name="checkable">
+                          <bool>true</bool>
+                         </property>
+                        </widget>
+                       </item>
+                       <item>
+                        <spacer name="detail_actions_spacer">
+                         <property name="orientation">
+                          <enum>Qt::Horizontal</enum>
+                         </property>
+                         <property name="sizeHint" stdset="0">
+                          <size>
+                           <width>40</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                        </spacer>
+                       </item>
+                      </layout>
                      </item>
                     </layout>
                    </widget>

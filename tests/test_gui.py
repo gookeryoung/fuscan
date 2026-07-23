@@ -2785,6 +2785,123 @@ class TestScanWorkerDirect:
         assert cancelled_reports[0].cancelled is True
 
 
+class TestScanWorkerSkipPaths:
+    """ScanWorker skip_paths 集成测试（iter-77）。"""
+
+    def test_run_skip_paths_excludes_marked_files(self, qapp: QApplication, tmp_path: Path) -> None:
+        """run() 应将 skip_paths 传入 Scanner，被标记文件计入 user_skipped 不进入结果。"""
+        skip_file = tmp_path / "skip.txt"
+        skip_file.write_text("secret", encoding="utf-8")
+        (tmp_path / "scan.txt").write_text("secret", encoding="utf-8")
+
+        rs = _build_ruleset()
+        worker = ScanWorker(
+            ruleset=rs,
+            roots=[tmp_path],
+            skip_paths=frozenset({str(skip_file)}),
+        )
+
+        reports: list[Any] = []
+        worker.finished_report.connect(reports.append)  # pyrefly: ignore [missing-attribute]
+        worker.run()
+
+        assert len(reports) == 1
+        report = reports[0]
+        # 两个文件都被发现，但 skip.txt 被用户标记跳过
+        assert report.stats.total_files == 2
+        assert report.stats.user_skipped == 1
+        assert report.stats.scanned_files == 1
+        # skip.txt 不在结果中
+        assert all(r.path != skip_file for r in report.results)
+
+    def test_run_skip_paths_accumulates_across_roots(self, qapp: QApplication, tmp_path: Path) -> None:
+        """多根路径扫描时 user_skipped 应累计（iter-77）。"""
+        dir_a = tmp_path / "dir_a"
+        dir_a.mkdir()
+        skip_a = dir_a / "skip.txt"
+        skip_a.write_text("x", encoding="utf-8")
+        (dir_a / "scan.txt").write_text("y", encoding="utf-8")
+
+        dir_b = tmp_path / "dir_b"
+        dir_b.mkdir()
+        skip_b = dir_b / "skip.txt"
+        skip_b.write_text("x", encoding="utf-8")
+        (dir_b / "scan.txt").write_text("y", encoding="utf-8")
+
+        rs = _build_ruleset()
+        worker = ScanWorker(
+            ruleset=rs,
+            roots=[dir_a, dir_b],
+            skip_paths=frozenset({str(skip_a), str(skip_b)}),
+        )
+
+        reports: list[Any] = []
+        worker.finished_report.connect(reports.append)  # pyrefly: ignore [missing-attribute]
+        worker.run()
+
+        assert len(reports) == 1
+        report = reports[0]
+        # 两个根路径各跳过 1 个，累计 2
+        assert report.stats.user_skipped == 2
+        assert report.stats.scanned_files == 2
+
+    def test_on_progress_forwards_user_skipped_cumulative(self, qapp: QApplication) -> None:
+        """_on_progress 应累加 _cum_user_skipped 后 emit（iter-77）。"""
+        from fuscan.scanner.result import ProgressInfo
+
+        rs = _build_ruleset()
+        worker = ScanWorker(ruleset=rs, roots=[Path("/tmp")])
+        worker._start_time = time.monotonic()
+        # 模拟前序根路径已累计跳过 4 个
+        worker._cum_user_skipped = 4
+
+        emitted: list[Any] = []
+        worker.progress_info.connect(emitted.append)  # pyrefly: ignore [missing-attribute]
+
+        info = ProgressInfo(
+            current_file="x.txt",
+            scanned=2,
+            total=3,
+            skipped=0,
+            matched=1,
+            errors=0,
+            elapsed=0.5,
+            user_skipped=2,
+        )
+        worker._on_progress(info)
+
+        assert len(emitted) == 1
+        result = emitted[0]
+        # 当前根 2 + 前序累计 4 = 6
+        assert result.user_skipped == 6
+
+    def test_on_progress_forwards_phase(self, qapp: QApplication) -> None:
+        """_on_progress 应透传 phase 字段（iter-77 顺带修复 iter-75 遗留丢失问题）。"""
+        from fuscan.scanner.result import ProgressInfo
+
+        rs = _build_ruleset()
+        worker = ScanWorker(ruleset=rs, roots=[Path("/tmp")])
+        worker._start_time = time.monotonic()
+
+        emitted: list[Any] = []
+        worker.progress_info.connect(emitted.append)  # pyrefly: ignore [missing-attribute]
+
+        info = ProgressInfo(
+            current_file="x.txt",
+            scanned=0,
+            total=10,
+            skipped=0,
+            matched=0,
+            errors=0,
+            elapsed=0.5,
+            phase="walk",
+        )
+        worker._on_progress(info)
+
+        assert len(emitted) == 1
+        assert emitted[0].phase == "walk"
+
+
 class TestScanMode:
     """扫描模式 UI 测试。"""
 
@@ -6069,6 +6186,85 @@ class TestSettingsDialog:
         dialog._save_config()
 
         assert config.cache_path is None
+        dialog.close()
+
+    def test_settings_dialog_loads_staging_dir(self, qapp: QApplication) -> None:
+        """iter-77：_load_config 应将 staging_dir 恢复到控件。"""
+        from fuscan.config import Config
+        from fuscan.gui.settings_dialog import SettingsDialog
+
+        config = Config()
+        config.staging_dir = "/tmp/staging"
+
+        dialog = SettingsDialog(config)
+        assert dialog.staging_dir_edit.text() == "/tmp/staging"
+        dialog.close()
+
+    def test_settings_dialog_saves_staging_dir(self, qapp: QApplication) -> None:
+        """iter-77：_save_config 应将暂存区控件值保存到配置。"""
+        from fuscan.config import Config
+        from fuscan.gui.settings_dialog import SettingsDialog
+
+        config = Config()
+        config.staging_dir = None
+
+        dialog = SettingsDialog(config)
+        dialog.staging_dir_edit.setText("/tmp/new_staging")
+        dialog._save_config()
+
+        assert config.staging_dir == "/tmp/new_staging"
+        dialog.close()
+
+    def test_settings_dialog_staging_dir_empty_becomes_none(self, qapp: QApplication) -> None:
+        """iter-77：暂存区路径为空时保存为 None（自动探测盘符）。"""
+        from fuscan.config import Config
+        from fuscan.gui.settings_dialog import SettingsDialog
+
+        config = Config()
+        config.staging_dir = "/tmp/old_staging"
+
+        dialog = SettingsDialog(config)
+        dialog.staging_dir_edit.setText("   ")
+        dialog._save_config()
+
+        assert config.staging_dir is None
+        dialog.close()
+
+    def test_settings_dialog_browse_staging_dir_updates_edit(
+        self, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """iter-77：选择目录按钮应将所选路径填入编辑框。"""
+        from fuscan.config import Config
+        from fuscan.gui import settings_dialog as sd_module
+        from fuscan.gui.settings_dialog import SettingsDialog
+
+        chosen_path = "/tmp/chosen_staging"
+
+        def fake_get_existing_directory(parent, title, start_dir):  # type: ignore[no-untyped-def]
+            assert title == "选择暂存区目录"
+            return chosen_path
+
+        monkeypatch.setattr(sd_module.QFileDialog, "getExistingDirectory", fake_get_existing_directory)
+
+        dialog = SettingsDialog(Config())
+        dialog._on_browse_staging_dir()
+        assert dialog.staging_dir_edit.text() == chosen_path
+        dialog.close()
+
+    def test_settings_dialog_browse_staging_dir_cancelled_keeps_edit(
+        self, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """iter-77：取消选择时保持编辑框内容不变。"""
+        from fuscan.config import Config
+        from fuscan.gui import settings_dialog as sd_module
+        from fuscan.gui.settings_dialog import SettingsDialog
+
+        monkeypatch.setattr(sd_module.QFileDialog, "getExistingDirectory", lambda *a, **k: "")
+
+        dialog = SettingsDialog(Config())
+        dialog.staging_dir_edit.setText("/tmp/predefined")
+        dialog._on_browse_staging_dir()
+        assert dialog.staging_dir_edit.text() == "/tmp/predefined"
         dialog.close()
 
 

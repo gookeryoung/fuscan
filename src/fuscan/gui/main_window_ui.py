@@ -557,10 +557,26 @@ class Ui_MainWindow(object):
 
         self.detail_nonempty_main_layout.addWidget(self.detail_preview)
 
-        self.note_edit = QPlainTextEdit(self.detail_nonempty_main)
-        self.note_edit.setObjectName(u"note_edit")
+        self.detail_actions_layout = QHBoxLayout()
+        self.detail_actions_layout.setSpacing(8)
+        self.detail_actions_layout.setObjectName(u"detail_actions_layout")
+        self.move_to_staging_btn = QPushButton(self.detail_nonempty_main)
+        self.move_to_staging_btn.setObjectName(u"move_to_staging_btn")
 
-        self.detail_nonempty_main_layout.addWidget(self.note_edit)
+        self.detail_actions_layout.addWidget(self.move_to_staging_btn)
+
+        self.toggle_skip_btn = QPushButton(self.detail_nonempty_main)
+        self.toggle_skip_btn.setObjectName(u"toggle_skip_btn")
+        self.toggle_skip_btn.setCheckable(True)
+
+        self.detail_actions_layout.addWidget(self.toggle_skip_btn)
+
+        self.detail_actions_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        self.detail_actions_layout.addItem(self.detail_actions_spacer)
+
+
+        self.detail_nonempty_main_layout.addLayout(self.detail_actions_layout)
 
         self.detail_main_stack.addWidget(self.detail_nonempty_main)
 
@@ -814,7 +830,14 @@ class Ui_MainWindow(object):
         ___qtablewidgetitem5 = self.detail_hits_table.horizontalHeaderItem(5)
         ___qtablewidgetitem5.setText(QCoreApplication.translate("MainWindow", u"\u63cf\u8ff0", None));
         self.detail_preview_title_label.setText(QCoreApplication.translate("MainWindow", u"\u5185\u5bb9\u9884\u89c8 (\u5173\u952e\u8bcd\u9ad8\u4eae):", None))
-        self.note_edit.setPlaceholderText(QCoreApplication.translate("MainWindow", u"\u5907\u6ce8/\u6279\u6ce8/\u5bfc\u51fa\u8bf4\u660e...", None))
+#if QT_CONFIG(tooltip)
+        self.move_to_staging_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u5c06\u5f53\u524d\u6587\u4ef6\u79fb\u52a8\u5230\u6682\u5b58\u533a\u76ee\u5f55\uff08\u53ef\u5728\u8bbe\u7f6e\u4e2d\u914d\u7f6e\uff09", None))
+#endif // QT_CONFIG(tooltip)
+        self.move_to_staging_btn.setText(QCoreApplication.translate("MainWindow", u"\u79fb\u52a8\u81f3\u6682\u5b58\u533a", None))
+#if QT_CONFIG(tooltip)
+        self.toggle_skip_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u6807\u8bb0\u540e\u540e\u7eed\u626b\u63cf\u5c06\u76f4\u63a5\u8df3\u8fc7\u6b64\u6587\u4ef6", None))
+#endif // QT_CONFIG(tooltip)
+        self.toggle_skip_btn.setText(QCoreApplication.translate("MainWindow", u"\u6807\u8bb0\u4e3a\u8df3\u8fc7", None))
         self.rules_group.setTitle(QCoreApplication.translate("MainWindow", u"\u89c4\u5219\u914d\u7f6e", None))
         self.load_rules_btn.setText(QCoreApplication.translate("MainWindow", u"\u52a0\u8f7d\u89c4\u5219...", None))
 #if QT_CONFIG(tooltip)

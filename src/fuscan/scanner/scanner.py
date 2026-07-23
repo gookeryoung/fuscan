@@ -154,6 +154,7 @@ class Scanner:
         source_files: Mapping[Path, str] | None = None,
         max_file_size: int | None = None,
         scan_extensions: tuple[str, ...] | None = None,
+        skip_paths: frozenset[str] | None = None,
     ) -> None:
         self.ruleset = ruleset
         self._content_provider: ContentProvider = content_provider or default_extract_content
@@ -165,6 +166,9 @@ class Scanner:
         self._scan_extensions: frozenset[str] | None = (
             frozenset(e.lower().lstrip(".") for e in scan_extensions) if scan_extensions else None
         )
+        # 用户标记跳过的路径集合（iter-77）：walk 阶段命中即跳过并计入 user_skipped，
+        # 与按扩展名/目录过滤的 skipped 区分。键为 str(Path)，与 SkipStore 存储格式一致。
+        self._skip_paths: frozenset[str] = skip_paths or frozenset()
         self._skipped_dirs: deque[str] = deque(maxlen=_PROGRESS_LIST_MAX)
         self._matched_files: deque[tuple[str, str]] = deque(maxlen=_PROGRESS_LIST_MAX)
         # scan_archives=True 时从 ignore_extensions 中剔除已注册的 archive 扩展名
@@ -228,6 +232,8 @@ class Scanner:
         self._progress_start: float = 0.0
         self._progress_total: int = 0
         self._progress_skipped: int = 0
+        # walk 阶段累计的用户跳过数（iter-77），scan/archive 阶段复用此值上报
+        self._progress_user_skipped: int = 0
         self._base_scanned: int = 0
         self._base_matched: int = 0
         self._base_errors: int = 0
@@ -315,6 +321,7 @@ class Scanner:
         entries: list[FileEntry] = []
         total = 0
         skipped = 0
+        user_skipped = 0
         scanned = 0
         matched = 0
         errors = 0
@@ -329,6 +336,11 @@ class Scanner:
                         if self._check_control():
                             break
                         total += 1
+                        # iter-77：用户标记跳过的文件计入 user_skipped（区别于
+                        # 按扩展名/目录过滤的 skipped），不进入扫描队列
+                        if str(entry.path) in self._skip_paths:
+                            user_skipped += 1
+                            continue
                         if not self._should_scan(entry):
                             skipped += 1
                             continue
@@ -337,6 +349,7 @@ class Scanner:
                             self._emit_progress(str(entry.path), 0, 0, 0, phase="walk")
                 self._progress_total = total
                 self._progress_skipped = skipped
+                self._progress_user_skipped = user_skipped
                 # 阶段 2：并发扫描（max_workers > 1）或顺序扫描
                 if self._max_workers and self._max_workers > 1:
                     scanned, matched, errors, matches = self._scan_concurrent(entries, results)
@@ -380,6 +393,8 @@ class Scanner:
             errors=errors,
             duration_seconds=duration,
             total_matches=matches,
+            # iter-77：用户标记跳过的文件数，与 skipped_files 区分
+            user_skipped=user_skipped,
             # iter-66：PerfStats 始终启用，导出各阶段统计供 GUI/CLI 展示与持久化
             perf_summary=self._perf.to_dict(),
         )
@@ -424,6 +439,7 @@ class Scanner:
                 skipped_dirs=recent_skipped,
                 matched_files=recent_matched,
                 phase=phase,
+                user_skipped=self._progress_user_skipped,
             )
         )
 

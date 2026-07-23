@@ -147,6 +147,52 @@
         </widget>
        </item>
        <item>
+        <widget class="QGroupBox" name="staging_group">
+         <property name="title">
+          <string>暂存区</string>
+         </property>
+         <layout class="QFormLayout" name="staging_layout">
+          <property name="horizontalSpacing">
+           <number>8</number>
+          </property>
+          <property name="verticalSpacing">
+           <number>8</number>
+          </property>
+          <item row="0" column="0">
+           <widget class="QLabel" name="staging_dir_label">
+            <property name="text">
+             <string>暂存区路径:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <layout class="QHBoxLayout" name="staging_dir_row_layout">
+            <property name="spacing">
+             <number>4</number>
+            </property>
+            <item>
+             <widget class="QLineEdit" name="staging_dir_edit">
+              <property name="toolTip">
+               <string>「移动至暂存区」按钮将文件移动到此目录；留空自动探测剩余空间最大的盘符下 .fuscan-cache</string>
+              </property>
+              <property name="placeholderText">
+               <string>留空自动探测剩余空间最大的盘符下 .fuscan-cache</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="staging_dir_browse_btn">
+              <property name="text">
+               <string>选择...</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <spacer name="general_page_spacer">
          <property name="orientation">
           <enum>Qt::Vertical</enum>

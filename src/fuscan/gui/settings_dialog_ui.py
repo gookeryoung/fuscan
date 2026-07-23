@@ -81,6 +81,36 @@ class Ui_SettingsDialog(object):
 
         self.general_page_layout.addWidget(self.cache_group)
 
+        self.staging_group = QGroupBox(self.general_page)
+        self.staging_group.setObjectName(u"staging_group")
+        self.staging_layout = QFormLayout(self.staging_group)
+        self.staging_layout.setObjectName(u"staging_layout")
+        self.staging_layout.setHorizontalSpacing(8)
+        self.staging_layout.setVerticalSpacing(8)
+        self.staging_dir_label = QLabel(self.staging_group)
+        self.staging_dir_label.setObjectName(u"staging_dir_label")
+
+        self.staging_layout.setWidget(0, QFormLayout.LabelRole, self.staging_dir_label)
+
+        self.staging_dir_row_layout = QHBoxLayout()
+        self.staging_dir_row_layout.setSpacing(4)
+        self.staging_dir_row_layout.setObjectName(u"staging_dir_row_layout")
+        self.staging_dir_edit = QLineEdit(self.staging_group)
+        self.staging_dir_edit.setObjectName(u"staging_dir_edit")
+
+        self.staging_dir_row_layout.addWidget(self.staging_dir_edit)
+
+        self.staging_dir_browse_btn = QPushButton(self.staging_group)
+        self.staging_dir_browse_btn.setObjectName(u"staging_dir_browse_btn")
+
+        self.staging_dir_row_layout.addWidget(self.staging_dir_browse_btn)
+
+
+        self.staging_layout.setLayout(0, QFormLayout.FieldRole, self.staging_dir_row_layout)
+
+
+        self.general_page_layout.addWidget(self.staging_group)
+
         self.general_page_spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
 
         self.general_page_layout.addItem(self.general_page_spacer)
@@ -261,6 +291,13 @@ class Ui_SettingsDialog(object):
         self.cache_path_edit.setToolTip(QCoreApplication.translate("SettingsDialog", u"\u81ea\u5b9a\u4e49\u7f13\u5b58\u6570\u636e\u5e93\u8def\u5f84", None))
 #endif // QT_CONFIG(tooltip)
         self.cache_path_edit.setPlaceholderText(QCoreApplication.translate("SettingsDialog", u"\u7559\u7a7a\u4f7f\u7528\u9ed8\u8ba4\u8def\u5f84 ~/.fuscan/cache.db", None))
+        self.staging_group.setTitle(QCoreApplication.translate("SettingsDialog", u"\u6682\u5b58\u533a", None))
+        self.staging_dir_label.setText(QCoreApplication.translate("SettingsDialog", u"\u6682\u5b58\u533a\u8def\u5f84:", None))
+#if QT_CONFIG(tooltip)
+        self.staging_dir_edit.setToolTip(QCoreApplication.translate("SettingsDialog", u"\u300c\u79fb\u52a8\u81f3\u6682\u5b58\u533a\u300d\u6309\u94ae\u5c06\u6587\u4ef6\u79fb\u52a8\u5230\u6b64\u76ee\u5f55\uff1b\u7559\u7a7a\u81ea\u52a8\u63a2\u6d4b\u5269\u4f59\u7a7a\u95f4\u6700\u5927\u7684\u76d8\u7b26\u4e0b .fuscan-cache", None))
+#endif // QT_CONFIG(tooltip)
+        self.staging_dir_edit.setPlaceholderText(QCoreApplication.translate("SettingsDialog", u"\u7559\u7a7a\u81ea\u52a8\u63a2\u6d4b\u5269\u4f59\u7a7a\u95f4\u6700\u5927\u7684\u76d8\u7b26\u4e0b .fuscan-cache", None))
+        self.staging_dir_browse_btn.setText(QCoreApplication.translate("SettingsDialog", u"\u9009\u62e9...", None))
         self.settings_tab_widget.setTabText(self.settings_tab_widget.indexOf(self.general_page), QCoreApplication.translate("SettingsDialog", u"\u901a\u7528\u8bbe\u7f6e", None))
         self.workers_group.setTitle(QCoreApplication.translate("SettingsDialog", u"\u626b\u63cf\u7ebf\u7a0b", None))
         self.max_workers_label.setText(QCoreApplication.translate("SettingsDialog", u"\u6700\u5927\u5de5\u4f5c\u7ebf\u7a0b\u6570:", None))

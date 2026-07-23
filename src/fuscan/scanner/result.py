@@ -99,6 +99,9 @@ class ProgressInfo:
     matched_files: tuple[tuple[str, str], ...] = ()
     # 当前扫描阶段（iter-75）：walk/scan/archive
     phase: str = "scan"
+    # 用户标记跳过的文件数（iter-77）：区别于按扩展名/目录过滤的 skipped，
+    # 此为用户在结果详情区主动「标记为跳过」后在本次扫描中跳过的文件数
+    user_skipped: int = 0
 
     def summary(self) -> str:
         """返回实时进度状态栏文本（含速度计算）。
@@ -109,7 +112,10 @@ class ProgressInfo:
         前缀，仅展示当前已扫描的实时指标，供 GUI 进度回调直接调用。
         """
         if self.phase == "walk":
-            return f"正在分析目录结构 | 已发现 {self.total} 个文件 | 跳过 {self.skipped} | 已用 {self.elapsed:.1f}s"
+            return (
+                f"正在分析目录结构 | 已发现 {self.total} 个文件 | 跳过 {self.skipped} | "
+                f"用户跳过 {self.user_skipped} | 已用 {self.elapsed:.1f}s"
+            )
         if self.phase == "archive":
             return (
                 f"正在扫描压缩包 | 已扫描 {self.scanned} | 命中 {self.matched} | "
@@ -117,7 +123,7 @@ class ProgressInfo:
             )
         speed = self.scanned / self.elapsed if self.elapsed > 0 else 0.0
         return (
-            f"已扫描 {self.scanned} | 跳过 {self.skipped} | "
+            f"已扫描 {self.scanned} | 跳过 {self.skipped} | 用户跳过 {self.user_skipped} | "
             f"命中 {self.matched} | 条数 {self.matches} | 错误 {self.errors} | "
             f"已用 {self.elapsed:.1f}s | 速度 {speed:.0f} 文件/s"
         )
@@ -152,12 +158,19 @@ class RuleHit:
 
 @dataclass(frozen=True)
 class ScanResult:
-    """单个文件的扫描结果。"""
+    """单个文件的扫描结果。
+
+    ``user_skipped`` 标识该文件是否被用户在结果详情区「标记为跳过」（iter-77）。
+    标记后本次扫描结果中仍保留该条目（带跳过标记），下一次扫描起扫描器在遍历
+    阶段直接跳过该路径并计入 ``ScanStats.user_skipped`` 统计。
+    """
 
     path: Path
     size: int
     hits: tuple[RuleHit, ...] = field(default_factory=tuple)
     errors: int = 0
+    # 用户标记跳过标识（iter-77）：True 表示用户已对该文件标记跳过
+    user_skipped: bool = False
 
     @property
     def has_hit(self) -> bool:
@@ -192,8 +205,11 @@ class ScanResult:
         return tuple(names)
 
     def summary(self) -> str:
-        """返回简洁摘要：``N 条规则 / M 处匹配``。"""
-        return f"{len(self.hits)} 条规则 / {self.total_match_count} 处匹配"
+        """返回简洁摘要：``N 条规则 / M 处匹配``，已标记跳过时附加前缀。"""
+        base = f"{len(self.hits)} 条规则 / {self.total_match_count} 处匹配"
+        if self.user_skipped:
+            return f"已标记跳过 | {base}"
+        return base
 
     def file_info_html(self, extra: str = "") -> str:
         """返回文件元信息 HTML 片段（供 GUI 详情区/对话框共用）。
@@ -233,6 +249,9 @@ class ScanStats:
     duration_seconds: float = 0.0
     # 所有命中规则的匹配文本条数总和（区别于 matched_files 的命中文件数）
     total_matches: int = 0
+    # 用户标记跳过的文件数（iter-77）：扫描器在遍历阶段跳过用户已标记的路径，
+    # 单独统计以区别于按扩展名/目录过滤的 skipped_files
+    user_skipped: int = 0
     # 各阶段性能统计（iter-66 起 PerfStats 始终启用）：
     # {stage_name: {"total_ms": float, "count": int, "max_ms": float}}
     # None 表示未采集（如测试构造的 ScanStats）；空 dict 表示扫描无数据
@@ -251,9 +270,9 @@ class ScanStats:
         prefix = "已取消" if cancelled else "完成"
         return (
             f"{prefix}: 总计 {self.total_files} | 扫描 {self.scanned_files} | "
-            f"跳过 {self.skipped_files} | 命中 {self.matched_files} | "
-            f"条数 {self.total_matches} | 错误 {self.errors} | "
-            f"耗时 {self.duration_seconds:.2f}s"
+            f"跳过 {self.skipped_files} | 用户跳过 {self.user_skipped} | "
+            f"命中 {self.matched_files} | 条数 {self.total_matches} | "
+            f"错误 {self.errors} | 耗时 {self.duration_seconds:.2f}s"
         )
 
 
@@ -332,7 +351,15 @@ class ScanReport:
                 matching_hits = tuple(h for h in sr.hits if h.rule_name == rule_name)
                 if not matching_hits:
                     continue
-                filtered.append(ScanResult(path=sr.path, size=sr.size, hits=matching_hits, errors=sr.errors))
+                filtered.append(
+                    ScanResult(
+                        path=sr.path,
+                        size=sr.size,
+                        hits=matching_hits,
+                        errors=sr.errors,
+                        user_skipped=sr.user_skipped,
+                    )
+                )
             else:
                 filtered.append(sr)
         return ScanReport(
@@ -373,6 +400,7 @@ class ScanReport:
                     "size": r.size,
                     "max_severity": r.max_severity.value,
                     "match_count": r.total_match_count,
+                    "user_skipped": r.user_skipped,
                     "rules": [asdict(h) for h in r.hits],
                 }
                 for r in self.hits

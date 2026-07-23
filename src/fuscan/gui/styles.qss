@@ -707,19 +707,6 @@ QHeaderView::section:last {
 
 /* ========== 文本编辑 ========== */
 
-QPlainTextEdit#note_edit {
-    background: ${COLOR_BG_CARD};
-    border: 1px solid ${COLOR_BORDER};
-    border-radius: ${RADIUS_MD};
-    font-size: ${FONT_SIZE_BODY};
-    padding: 4px;
-    max-height: 60px;
-}
-
-QPlainTextEdit#note_edit:focus {
-    border-color: ${COLOR_PRIMARY};
-}
-
 QTextEdit#detail_preview {
     background: ${COLOR_BG_CARD};
     border: 1px solid ${COLOR_BORDER};

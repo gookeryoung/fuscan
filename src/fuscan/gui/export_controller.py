@@ -145,7 +145,7 @@ class ExportController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._export_btn.setEnabled(False)
         self._stats_label.setText(f"正在导出 {path.name}...")
         # 延迟加载 ExportWorker，避免 main_window 顶部依赖 reportlab/openpyxl 触发导入
-        from fuscan.gui.export_worker import ExportWorker
+        from fuscan.workers import ExportWorker
 
         self._export_worker = ExportWorker(report, path, parent=self._parent_widget)
         self._export_worker.finished_ok.connect(self._on_export_finished)  # pyrefly: ignore [missing-attribute]

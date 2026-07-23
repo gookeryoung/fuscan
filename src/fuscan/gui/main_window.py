@@ -149,13 +149,13 @@ from fuscan.gui.scan_mode_panel import ScanModePanel
 from fuscan.gui.scan_path_history import ScanPathHistory
 from fuscan.gui.scan_progress_lists import ScanListUpdater
 from fuscan.gui.stage_controller import StageController, StageControls, WorkflowStage
-from fuscan.gui.worker import ScanWorker
 from fuscan.perf import PerfTimer, set_perf_enabled
 from fuscan.rules import RuleError, load_ruleset, merge_multiple_rulesets
 from fuscan.rules.model import RuleSet, Severity
 from fuscan.scanner import ScanReport
 from fuscan.scanner.result import ScanResult
 from fuscan.skip_store import SkipStore
+from fuscan.workers import ScanWorker
 
 if TYPE_CHECKING:
     from PySide2.QtGui import QIcon

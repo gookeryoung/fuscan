@@ -385,9 +385,9 @@ class TestTrayAppFullScan:
             def start(self) -> None:
                 pass
 
-        import fuscan.gui.worker as worker_mod
+        import fuscan.workers as workers_mod
 
-        monkeypatch.setattr(worker_mod, "ScanWorker", FakeWorker)
+        monkeypatch.setattr(workers_mod, "ScanWorker", FakeWorker)
 
         app._full_scan()
         assert app._scan_worker is not None

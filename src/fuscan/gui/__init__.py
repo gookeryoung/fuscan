@@ -4,15 +4,13 @@
 
 - :class:`MainWindow`：主窗口
 - :func:`launch`：启动 GUI 应用
-- :class:`ScanWorker`：后台扫描线程
 """
 
 from __future__ import annotations
 
 from fuscan.gui.main_window import MainWindow
-from fuscan.gui.worker import ScanWorker
 
-__all__ = ["MainWindow", "ScanWorker", "launch"]
+__all__ = ["MainWindow", "launch"]
 
 
 def __getattr__(name: str):  # type: ignore[no-untyped-def]

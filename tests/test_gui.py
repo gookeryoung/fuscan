@@ -41,7 +41,6 @@ try:
     )
     from fuscan.gui.main_window import MainWindow, ScanState, WorkflowStage
     from fuscan.gui.preview_utils import build_preview_html, extract_keywords, format_size, severity_text
-    from fuscan.gui.worker import ScanWorker
     from fuscan.rules import load_ruleset
     from fuscan.rules.model import (
         LeafMatch,
@@ -52,6 +51,7 @@ try:
         Severity,
     )
     from fuscan.scanner import ScanReport
+    from fuscan.workers import ScanWorker
 
     PYSIDE_AVAILABLE = True
 except ImportError:
@@ -5824,8 +5824,8 @@ class TestScanCallbacks:
 
     def test_pause_resume_scan(self, qapp: QApplication, tmp_path: Path) -> None:
         """暂停/恢复扫描应更新状态和按钮文字。"""
-        from fuscan.gui.worker import ScanWorker
         from fuscan.scanner import Scanner
+        from fuscan.workers import ScanWorker
 
         (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
         rs = _build_ruleset()
@@ -6108,8 +6108,8 @@ class TestExportAndMenu:
         捕获（与 ScanWorker 一致），故通过直接调用 ``run()`` 在主线程同步执行
         以覆盖成功路径，验证信号携带导出路径。
         """
-        from fuscan.gui.export_worker import ExportWorker
         from fuscan.scanner import Scanner
+        from fuscan.workers import ExportWorker
 
         (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
         rs = _build_ruleset()
@@ -6134,9 +6134,9 @@ class TestExportAndMenu:
         self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """ExportWorker.run() 在 save_report 抛 OSError 时应 emit failed 信号。"""
-        from fuscan.gui import export_worker as export_worker_mod
-        from fuscan.gui.export_worker import ExportWorker
         from fuscan.scanner import Scanner
+        from fuscan.workers import ExportWorker
+        from fuscan.workers import export_worker as export_worker_mod
 
         (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
         rs = _build_ruleset()

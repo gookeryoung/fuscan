@@ -40,7 +40,7 @@ from fuscan.watcher.monitor import FileEvent, FileEventType, FileMonitor, Monito
 if TYPE_CHECKING:
     from fuscan.cache import CacheStore
     from fuscan.gui.main_window import MainWindow
-    from fuscan.gui.worker import ScanWorker
+    from fuscan.workers import ScanWorker
 
 __all__ = ["TrayApp"]
 
@@ -239,7 +239,7 @@ class TrayApp(QObject):  # pyrefly: ignore [invalid-inheritance]
             return
         logger.info("启动全量扫描")
         # 全量扫描在后台线程执行，避免阻塞 UI
-        from fuscan.gui.worker import ScanWorker
+        from fuscan.workers import ScanWorker
 
         self._scan_worker = ScanWorker(
             ruleset=self._ruleset,

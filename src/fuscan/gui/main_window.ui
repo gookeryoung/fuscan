@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1246</width>
-    <height>758</height>
+    <width>1059</width>
+    <height>690</height>
    </rect>
   </property>
   <property name="minimumSize">
@@ -358,11 +358,11 @@
              </item>
              <item>
               <widget class="QGroupBox" name="file_types_group">
-               <property name="title">
-                <string>文件类型与忽略项</string>
-               </property>
                <property name="toolTip">
                 <string>通过 TAB 切换文件类型、忽略目录与忽略扩展名</string>
+               </property>
+               <property name="title">
+                <string>文件类型与忽略项</string>
                </property>
                <layout class="QVBoxLayout" name="file_types_layout">
                 <property name="spacing">
@@ -417,26 +417,26 @@
                     </item>
                     <item>
                      <widget class="QTreeView" name="file_types_view">
+                      <property name="sizePolicy">
+                       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+                        <horstretch>0</horstretch>
+                        <verstretch>1</verstretch>
+                       </sizepolicy>
+                      </property>
                       <property name="toolTip">
                        <string>勾选要扫描的文件类型，取消可提高扫描速度；点击父类别批量勾选</string>
                       </property>
                       <property name="editTriggers">
                        <set>QAbstractItemView::NoEditTriggers</set>
                       </property>
+                      <property name="uniformRowHeights">
+                       <bool>true</bool>
+                      </property>
                       <property name="headerHidden">
                        <bool>true</bool>
                       </property>
                       <property name="expandsOnDoubleClick">
                        <bool>false</bool>
-                      </property>
-                      <property name="uniformRowHeights">
-                       <bool>true</bool>
-                      </property>
-                      <property name="sizePolicy">
-                       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-                        <horstretch>0</horstretch>
-                        <verstretch>1</verstretch>
-                       </sizepolicy>
                       </property>
                      </widget>
                     </item>
@@ -635,36 +635,27 @@
               <number>12</number>
              </property>
              <item>
-              <widget class="QSplitter" name="lists_splitter">
-               <property name="sizePolicy">
-                <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-                 <horstretch>0</horstretch>
-                 <verstretch>0</verstretch>
-                </sizepolicy>
+              <widget class="QTabWidget" name="tabWidget">
+               <property name="currentIndex">
+                <number>0</number>
                </property>
-               <property name="orientation">
-                <enum>Qt::Horizontal</enum>
-               </property>
-               <property name="handleWidth">
-                <number>6</number>
-               </property>
-               <widget class="QGroupBox" name="skipped_dirs_group">
-                <property name="title">
-                 <string>跳过的文件夹</string>
-                </property>
-                <layout class="QVBoxLayout" name="skipped_dirs_layout">
+               <widget class="QWidget" name="tab_matched_files_list">
+                <attribute name="title">
+                 <string>命中文件</string>
+                </attribute>
+                <layout class="QHBoxLayout" name="horizontalLayout">
                  <item>
-                  <widget class="QListWidget" name="skipped_dirs_list"/>
+                  <widget class="QListWidget" name="matched_files_list"/>
                  </item>
                 </layout>
                </widget>
-               <widget class="QGroupBox" name="matched_files_group">
-                <property name="title">
-                 <string>命中的文件</string>
-                </property>
-                <layout class="QVBoxLayout" name="matched_files_layout">
+               <widget class="QWidget" name="tab_skipped_dirs_list">
+                <attribute name="title">
+                 <string>跳过目录</string>
+                </attribute>
+                <layout class="QHBoxLayout" name="horizontalLayout_2">
                  <item>
-                  <widget class="QListWidget" name="matched_files_list"/>
+                  <widget class="QListWidget" name="skipped_dirs_list"/>
                  </item>
                 </layout>
                </widget>
@@ -672,14 +663,14 @@
              </item>
              <item>
               <widget class="QLabel" name="scan_stats_label">
-               <property name="alignment">
-                <set>Qt::AlignCenter</set>
+               <property name="text">
+                <string/>
                </property>
                <property name="textFormat">
                 <enum>Qt::RichText</enum>
                </property>
-               <property name="text">
-                <string/>
+               <property name="alignment">
+                <set>Qt::AlignCenter</set>
                </property>
               </widget>
              </item>
@@ -1471,8 +1462,8 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1246</width>
-     <height>26</height>
+     <width>1059</width>
+     <height>27</height>
     </rect>
    </property>
    <widget class="QMenu" name="file_menu">
@@ -1605,11 +1596,11 @@
    </property>
   </action>
   <action name="perf_log_action">
-   <property name="text">
-    <string>启用性能日志</string>
-   </property>
    <property name="checkable">
     <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>启用性能日志</string>
    </property>
   </action>
  </widget>

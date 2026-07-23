@@ -202,10 +202,10 @@ class Ui_MainWindow(object):
 
         self.file_types_group = QGroupBox(self.setup_page)
         self.file_types_group.setObjectName(u"file_types_group")
-        self.file_types_layout = QVBoxLayout(self.file_types_group)
-        self.file_types_layout.setSpacing(4)
-        self.file_types_layout.setObjectName(u"file_types_layout")
-        self.file_types_layout.setContentsMargins(0, 4, 0, 4)
+        self.horizontalLayout_3 = QHBoxLayout(self.file_types_group)
+        self.horizontalLayout_3.setSpacing(8)
+        self.horizontalLayout_3.setObjectName(u"horizontalLayout_3")
+        self.horizontalLayout_3.setContentsMargins(12, 16, 12, 12)
         self.content_tab_widget = QTabWidget(self.file_types_group)
         self.content_tab_widget.setObjectName(u"content_tab_widget")
         self.file_types_tab = QWidget()
@@ -271,7 +271,7 @@ class Ui_MainWindow(object):
 
         self.content_tab_widget.addTab(self.ignore_extensions_tab, "")
 
-        self.file_types_layout.addWidget(self.content_tab_widget)
+        self.horizontalLayout_3.addWidget(self.content_tab_widget)
 
 
         self.setup_layout.addWidget(self.file_types_group)

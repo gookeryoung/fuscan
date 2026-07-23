@@ -364,21 +364,21 @@
                <property name="title">
                 <string>文件类型与忽略项</string>
                </property>
-               <layout class="QVBoxLayout" name="file_types_layout">
+               <layout class="QHBoxLayout" name="horizontalLayout_3">
                 <property name="spacing">
-                 <number>4</number>
+                 <number>8</number>
                 </property>
                 <property name="leftMargin">
-                 <number>0</number>
+                 <number>12</number>
                 </property>
                 <property name="topMargin">
-                 <number>4</number>
+                 <number>16</number>
                 </property>
                 <property name="rightMargin">
-                 <number>0</number>
+                 <number>12</number>
                 </property>
                 <property name="bottomMargin">
-                 <number>4</number>
+                 <number>12</number>
                 </property>
                 <item>
                  <widget class="QTabWidget" name="content_tab_widget">

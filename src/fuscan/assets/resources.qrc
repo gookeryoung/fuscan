@@ -17,6 +17,7 @@
     <file>icons/scan.svg</file>
     <file>icons/search.svg</file>
     <file>icons/settings.svg</file>
+    <file>icons/stats.svg</file>
     <file>icons/stop.svg</file>
     <file>icons/target.svg</file>
   </qresource>

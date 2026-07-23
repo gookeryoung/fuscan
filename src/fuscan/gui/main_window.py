@@ -76,7 +76,6 @@ except ImportError:  # pragma: no cover
 from fuscan import __author__, __description__, __license__, __version__, theme
 from fuscan.builtin import load_with_builtin
 from fuscan.config import Config, detect_default_staging_dir, load_config, save_config
-from fuscan.gui import resources_rc  # noqa: F401 注册 .qrc 资源（:/ 前缀图标）
 from fuscan.gui.content_panel import ContentTabPanel
 from fuscan.gui.detail_panel import DetailControls, DetailPanel
 from fuscan.gui.explorer import open_path_in_explorer

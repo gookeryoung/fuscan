@@ -14,6 +14,7 @@ from PySide2.QtWidgets import *
 
 from fuscan.gui.result_tree import ResultTreeView
 
+import resources_rc
 
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
@@ -23,28 +24,59 @@ class Ui_MainWindow(object):
         MainWindow.setMinimumSize(QSize(800, 600))
         self.load_rules_action = QAction(MainWindow)
         self.load_rules_action.setObjectName(u"load_rules_action")
+        icon = QIcon()
+        icon.addFile(u":/icons/load_list.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.load_rules_action.setIcon(icon)
         self.edit_rules_action = QAction(MainWindow)
         self.edit_rules_action.setObjectName(u"edit_rules_action")
+        icon1 = QIcon()
+        icon1.addFile(u":/icons/edit.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.edit_rules_action.setIcon(icon1)
         self.export_csv_action = QAction(MainWindow)
         self.export_csv_action.setObjectName(u"export_csv_action")
+        icon2 = QIcon()
+        icon2.addFile(u":/icons/export_csv.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.export_csv_action.setIcon(icon2)
         self.export_json_action = QAction(MainWindow)
         self.export_json_action.setObjectName(u"export_json_action")
+        icon3 = QIcon()
+        icon3.addFile(u":/icons/export_json.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.export_json_action.setIcon(icon3)
         self.quit_action = QAction(MainWindow)
         self.quit_action.setObjectName(u"quit_action")
         self.select_path_action = QAction(MainWindow)
         self.select_path_action.setObjectName(u"select_path_action")
+        icon4 = QIcon()
+        icon4.addFile(u":/icons/search.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.select_path_action.setIcon(icon4)
         self.scan_action = QAction(MainWindow)
         self.scan_action.setObjectName(u"scan_action")
+        icon5 = QIcon()
+        icon5.addFile(u":/icons/scan.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.scan_action.setIcon(icon5)
         self.manual_action = QAction(MainWindow)
         self.manual_action.setObjectName(u"manual_action")
+        icon6 = QIcon()
+        icon6.addFile(u":/icons/manual.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.manual_action.setIcon(icon6)
         self.about_action = QAction(MainWindow)
         self.about_action.setObjectName(u"about_action")
+        icon7 = QIcon()
+        icon7.addFile(u":/icons/about.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.about_action.setIcon(icon7)
         self.regex_tester_action = QAction(MainWindow)
         self.regex_tester_action.setObjectName(u"regex_tester_action")
+        self.regex_tester_action.setIcon(icon4)
         self.settings_action = QAction(MainWindow)
         self.settings_action.setObjectName(u"settings_action")
+        icon8 = QIcon()
+        icon8.addFile(u":/icons/settings.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.settings_action.setIcon(icon8)
         self.perf_stats_action = QAction(MainWindow)
         self.perf_stats_action.setObjectName(u"perf_stats_action")
+        icon9 = QIcon()
+        icon9.addFile(u":/icons/stats.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.perf_stats_action.setIcon(icon9)
         self.perf_log_action = QAction(MainWindow)
         self.perf_log_action.setObjectName(u"perf_log_action")
         self.perf_log_action.setCheckable(True)
@@ -63,6 +95,7 @@ class Ui_MainWindow(object):
         self.header_layout.setContentsMargins(8, 4, 8, 4)
         self.tab_scan_btn = QPushButton(self.header_bar)
         self.tab_scan_btn.setObjectName(u"tab_scan_btn")
+        self.tab_scan_btn.setIcon(icon5)
         self.tab_scan_btn.setCheckable(True)
         self.tab_scan_btn.setChecked(True)
 
@@ -70,12 +103,16 @@ class Ui_MainWindow(object):
 
         self.tab_rules_btn = QPushButton(self.header_bar)
         self.tab_rules_btn.setObjectName(u"tab_rules_btn")
+        self.tab_rules_btn.setIcon(icon)
         self.tab_rules_btn.setCheckable(True)
 
         self.header_layout.addWidget(self.tab_rules_btn)
 
         self.tab_history_btn = QPushButton(self.header_bar)
         self.tab_history_btn.setObjectName(u"tab_history_btn")
+        icon10 = QIcon()
+        icon10.addFile(u":/icons/history.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.tab_history_btn.setIcon(icon10)
         self.tab_history_btn.setCheckable(True)
 
         self.header_layout.addWidget(self.tab_history_btn)
@@ -86,11 +123,13 @@ class Ui_MainWindow(object):
 
         self.settings_btn = QPushButton(self.header_bar)
         self.settings_btn.setObjectName(u"settings_btn")
+        self.settings_btn.setIcon(icon8)
 
         self.header_layout.addWidget(self.settings_btn)
 
         self.about_btn = QPushButton(self.header_bar)
         self.about_btn.setObjectName(u"about_btn")
+        self.about_btn.setIcon(icon7)
 
         self.header_layout.addWidget(self.about_btn)
 
@@ -300,6 +339,7 @@ class Ui_MainWindow(object):
         self.scan_btn.setEnabled(False)
         self.scan_btn.setMinimumSize(QSize(180, 40))
         self.scan_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.scan_btn.setIcon(icon5)
 
         self.setup_btn_row.addWidget(self.scan_btn)
 
@@ -355,12 +395,18 @@ class Ui_MainWindow(object):
         self.pause_resume_btn = QPushButton(self.scanning_page)
         self.pause_resume_btn.setObjectName(u"pause_resume_btn")
         self.pause_resume_btn.setMinimumSize(QSize(140, 44))
+        icon11 = QIcon()
+        icon11.addFile(u":/icons/pause.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.pause_resume_btn.setIcon(icon11)
 
         self.scanning_btn_row.addWidget(self.pause_resume_btn)
 
         self.cancel_btn = QPushButton(self.scanning_page)
         self.cancel_btn.setObjectName(u"cancel_btn")
         self.cancel_btn.setMinimumSize(QSize(140, 44))
+        icon12 = QIcon()
+        icon12.addFile(u":/icons/stop.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.cancel_btn.setIcon(icon12)
 
         self.scanning_btn_row.addWidget(self.cancel_btn)
 
@@ -396,6 +442,9 @@ class Ui_MainWindow(object):
         self.rescan_btn = QPushButton(self.results_top_bar)
         self.rescan_btn.setObjectName(u"rescan_btn")
         self.rescan_btn.setMinimumSize(QSize(160, 50))
+        icon13 = QIcon()
+        icon13.addFile(u":/icons/rescan.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.rescan_btn.setIcon(icon13)
 
         self.results_top_layout.addWidget(self.rescan_btn)
 
@@ -403,6 +452,9 @@ class Ui_MainWindow(object):
         self.export_btn.setObjectName(u"export_btn")
         self.export_btn.setEnabled(False)
         self.export_btn.setMinimumSize(QSize(160, 50))
+        icon14 = QIcon()
+        icon14.addFile(u":/icons/export.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.export_btn.setIcon(icon14)
 
         self.results_top_layout.addWidget(self.export_btn)
 
@@ -662,12 +714,14 @@ class Ui_MainWindow(object):
         self.load_rules_btn = QPushButton(self.rules_group)
         self.load_rules_btn.setObjectName(u"load_rules_btn")
         self.load_rules_btn.setMinimumSize(QSize(150, 40))
+        self.load_rules_btn.setIcon(icon)
 
         self.rules_btn_row.addWidget(self.load_rules_btn)
 
         self.edit_rule_btn = QPushButton(self.rules_group)
         self.edit_rule_btn.setObjectName(u"edit_rule_btn")
         self.edit_rule_btn.setMinimumSize(QSize(0, 40))
+        self.edit_rule_btn.setIcon(icon1)
 
         self.rules_btn_row.addWidget(self.edit_rule_btn)
 

@@ -62,6 +62,10 @@
          <property name="text">
           <string>扫描</string>
          </property>
+         <property name="icon">
+          <iconset resource="../assets/resources.qrc">
+           <normaloff>:/icons/scan.svg</normaloff>:/icons/scan.svg</iconset>
+         </property>
          <property name="checkable">
           <bool>true</bool>
          </property>
@@ -75,6 +79,10 @@
          <property name="text">
           <string>规则管理</string>
          </property>
+         <property name="icon">
+          <iconset resource="../assets/resources.qrc">
+           <normaloff>:/icons/load_list.svg</normaloff>:/icons/load_list.svg</iconset>
+         </property>
          <property name="checkable">
           <bool>true</bool>
          </property>
@@ -84,6 +92,10 @@
         <widget class="QPushButton" name="tab_history_btn">
          <property name="text">
           <string>扫描历史</string>
+         </property>
+         <property name="icon">
+          <iconset resource="../assets/resources.qrc">
+           <normaloff>:/icons/history.svg</normaloff>:/icons/history.svg</iconset>
          </property>
          <property name="checkable">
           <bool>true</bool>
@@ -108,12 +120,20 @@
          <property name="text">
           <string>设置</string>
          </property>
+         <property name="icon">
+          <iconset resource="../assets/resources.qrc">
+           <normaloff>:/icons/settings.svg</normaloff>:/icons/settings.svg</iconset>
+         </property>
         </widget>
        </item>
        <item>
         <widget class="QPushButton" name="about_btn">
          <property name="text">
           <string>关于</string>
+         </property>
+         <property name="icon">
+          <iconset resource="../assets/resources.qrc">
+           <normaloff>:/icons/about.svg</normaloff>:/icons/about.svg</iconset>
          </property>
         </widget>
        </item>
@@ -610,6 +630,10 @@
                   <property name="text">
                    <string>开始扫描</string>
                   </property>
+                  <property name="icon">
+                   <iconset resource="../assets/resources.qrc">
+                    <normaloff>:/icons/scan.svg</normaloff>:/icons/scan.svg</iconset>
+                  </property>
                  </widget>
                 </item>
                </layout>
@@ -703,6 +727,10 @@
                  <property name="text">
                   <string>暂停扫描</string>
                  </property>
+                 <property name="icon">
+                  <iconset resource="../assets/resources.qrc">
+                   <normaloff>:/icons/pause.svg</normaloff>:/icons/pause.svg</iconset>
+                 </property>
                 </widget>
                </item>
                <item>
@@ -715,6 +743,10 @@
                  </property>
                  <property name="text">
                   <string>取消扫描</string>
+                 </property>
+                 <property name="icon">
+                  <iconset resource="../assets/resources.qrc">
+                   <normaloff>:/icons/stop.svg</normaloff>:/icons/stop.svg</iconset>
                  </property>
                 </widget>
                </item>
@@ -803,6 +835,10 @@
                   <property name="text">
                    <string>重新扫描</string>
                   </property>
+                  <property name="icon">
+                   <iconset resource="../assets/resources.qrc">
+                    <normaloff>:/icons/rescan.svg</normaloff>:/icons/rescan.svg</iconset>
+                  </property>
                  </widget>
                 </item>
                 <item>
@@ -821,6 +857,10 @@
                   </property>
                   <property name="text">
                    <string>导出结果</string>
+                  </property>
+                  <property name="icon">
+                   <iconset resource="../assets/resources.qrc">
+                    <normaloff>:/icons/export.svg</normaloff>:/icons/export.svg</iconset>
                   </property>
                  </widget>
                 </item>
@@ -1340,6 +1380,10 @@
                <property name="text">
                 <string>加载规则...</string>
                </property>
+               <property name="icon">
+                <iconset resource="../assets/resources.qrc">
+                 <normaloff>:/icons/load_list.svg</normaloff>:/icons/load_list.svg</iconset>
+               </property>
               </widget>
              </item>
              <item>
@@ -1355,6 +1399,10 @@
                </property>
                <property name="text">
                 <string>编辑</string>
+               </property>
+               <property name="icon">
+                <iconset resource="../assets/resources.qrc">
+                 <normaloff>:/icons/edit.svg</normaloff>:/icons/edit.svg</iconset>
                </property>
               </widget>
              </item>
@@ -1509,6 +1557,10 @@
    <addaction name="help_menu"/>
   </widget>
   <action name="load_rules_action">
+   <property name="icon">
+    <iconset resource="../assets/resources.qrc">
+     <normaloff>:/icons/load_list.svg</normaloff>:/icons/load_list.svg</iconset>
+   </property>
    <property name="text">
     <string>加载规则...</string>
    </property>
@@ -1517,6 +1569,10 @@
    </property>
   </action>
   <action name="edit_rules_action">
+   <property name="icon">
+    <iconset resource="../assets/resources.qrc">
+     <normaloff>:/icons/edit.svg</normaloff>:/icons/edit.svg</iconset>
+   </property>
    <property name="text">
     <string>编辑规则...</string>
    </property>
@@ -1525,6 +1581,10 @@
    </property>
   </action>
   <action name="export_csv_action">
+   <property name="icon">
+    <iconset resource="../assets/resources.qrc">
+     <normaloff>:/icons/export_csv.svg</normaloff>:/icons/export_csv.svg</iconset>
+   </property>
    <property name="text">
     <string>导出 CSV...</string>
    </property>
@@ -1533,6 +1593,10 @@
    </property>
   </action>
   <action name="export_json_action">
+   <property name="icon">
+    <iconset resource="../assets/resources.qrc">
+     <normaloff>:/icons/export_json.svg</normaloff>:/icons/export_json.svg</iconset>
+   </property>
    <property name="text">
     <string>导出 JSON...</string>
    </property>
@@ -1549,11 +1613,19 @@
    </property>
   </action>
   <action name="select_path_action">
+   <property name="icon">
+    <iconset resource="../assets/resources.qrc">
+     <normaloff>:/icons/search.svg</normaloff>:/icons/search.svg</iconset>
+   </property>
    <property name="text">
     <string>选择扫描路径...</string>
    </property>
   </action>
   <action name="scan_action">
+   <property name="icon">
+    <iconset resource="../assets/resources.qrc">
+     <normaloff>:/icons/scan.svg</normaloff>:/icons/scan.svg</iconset>
+   </property>
    <property name="text">
     <string>开始扫描</string>
    </property>
@@ -1562,6 +1634,10 @@
    </property>
   </action>
   <action name="manual_action">
+   <property name="icon">
+    <iconset resource="../assets/resources.qrc">
+     <normaloff>:/icons/manual.svg</normaloff>:/icons/manual.svg</iconset>
+   </property>
    <property name="text">
     <string>用户手册</string>
    </property>
@@ -1570,11 +1646,19 @@
    </property>
   </action>
   <action name="about_action">
+   <property name="icon">
+    <iconset resource="../assets/resources.qrc">
+     <normaloff>:/icons/about.svg</normaloff>:/icons/about.svg</iconset>
+   </property>
    <property name="text">
     <string>关于</string>
    </property>
   </action>
   <action name="regex_tester_action">
+   <property name="icon">
+    <iconset resource="../assets/resources.qrc">
+     <normaloff>:/icons/search.svg</normaloff>:/icons/search.svg</iconset>
+   </property>
    <property name="text">
     <string>正则表达式测试工具...</string>
    </property>
@@ -1583,6 +1667,10 @@
    </property>
   </action>
   <action name="settings_action">
+   <property name="icon">
+    <iconset resource="../assets/resources.qrc">
+     <normaloff>:/icons/settings.svg</normaloff>:/icons/settings.svg</iconset>
+   </property>
    <property name="text">
     <string>设置...</string>
    </property>
@@ -1591,6 +1679,10 @@
    </property>
   </action>
   <action name="perf_stats_action">
+   <property name="icon">
+    <iconset resource="../assets/resources.qrc">
+     <normaloff>:/icons/stats.svg</normaloff>:/icons/stats.svg</iconset>
+   </property>
    <property name="text">
     <string>性能统计...</string>
    </property>
@@ -1611,6 +1703,8 @@
    <header>fuscan.gui.result_tree</header>
   </customwidget>
  </customwidgets>
- <resources/>
+ <resources>
+  <include location="../assets/resources.qrc"/>
+ </resources>
  <connections/>
 </ui>

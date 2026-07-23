@@ -12,6 +12,7 @@ from PySide2.QtCore import *
 from PySide2.QtGui import *
 from PySide2.QtWidgets import *
 
+import resources_rc
 
 class Ui_SettingsDialog(object):
     def setupUi(self, SettingsDialog):
@@ -19,6 +20,9 @@ class Ui_SettingsDialog(object):
             SettingsDialog.setObjectName(u"SettingsDialog")
         SettingsDialog.resize(640, 620)
         SettingsDialog.setMinimumSize(QSize(640, 620))
+        icon = QIcon()
+        icon.addFile(u":/icons/settings.svg", QSize(), QIcon.Normal, QIcon.Off)
+        SettingsDialog.setWindowIcon(icon)
         self.main_layout = QVBoxLayout(SettingsDialog)
         self.main_layout.setSpacing(12)
         self.main_layout.setObjectName(u"main_layout")

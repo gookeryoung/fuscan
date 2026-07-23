@@ -14,6 +14,8 @@ UI 装配委托给 ``Ui_SettingsDialog``（对应 ``settings_dialog.ui``），
 
 from __future__ import annotations
 
+from PySide2.QtCore import Slot
+
 try:
     from PySide2.QtWidgets import QDialog, QFileDialog, QWidget
 except ImportError:  # pragma: no cover
@@ -40,7 +42,7 @@ class SettingsDialog(QDialog, Ui_SettingsDialog):  # pyrefly: ignore [invalid-in
         """配置 .ui 无法静态表达的信号槽连接。"""
         self.button_box.accepted.connect(self.on_accept)
         self.button_box.rejected.connect(self.reject)
-        # iter-77：暂存区路径选择按钮
+
         self.staging_dir_browse_btn.clicked.connect(self._on_browse_staging_dir)
 
     def _load_config(self) -> None:
@@ -73,6 +75,7 @@ class SettingsDialog(QDialog, Ui_SettingsDialog):  # pyrefly: ignore [invalid-in
         staging_text = self.staging_dir_edit.text().strip()
         self.config.staging_dir = staging_text or None
 
+    @Slot()
     def _on_browse_staging_dir(self) -> None:
         """打开目录选择对话框，将所选路径填入暂存区路径编辑框（iter-77）。
 

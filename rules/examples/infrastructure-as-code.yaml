@@ -8,8 +8,6 @@ rules:
   - name: S3 存储桶公开访问
     description: 检测 Terraform 中 S3 bucket 设置为公开访问
     severity: critical
-    file_extensions:
-      - tf
     match:
       type: content
       mode: regex
@@ -20,8 +18,6 @@ rules:
   - name: 安全组开放所有端口
     description: 检测 Terraform 中安全组 ingress 规则开放 0.0.0.0/0 到所有端口
     severity: critical
-    file_extensions:
-      - tf
     match:
       type: and
       children:
@@ -38,8 +34,6 @@ rules:
   - name: Terraform 资源缺少标签
     description: 检测 Terraform resource 块未设置 tags（成本归属与治理缺失）
     severity: info
-    file_extensions:
-      - tf
     match:
       type: and
       children:
@@ -58,8 +52,6 @@ rules:
   - name: Terraform 明文密钥
     description: 检测 Terraform 配置中硬编码密钥（应使用变量或 secrets manager）
     severity: critical
-    file_extensions:
-      - tf
     match:
       type: content
       mode: regex
@@ -70,9 +62,6 @@ rules:
   - name: K8s Secret 明文数据
     description: 检测 K8s Secret 使用 stringData 明文存储（应使用 data + base64）
     severity: warning
-    file_extensions:
-      - yaml
-      - yml
     match:
       type: and
       children:
@@ -89,9 +78,6 @@ rules:
   - name: K8s 镜像使用 latest
     description: 检测 K8s 部署清单中镜像使用 latest 标签
     severity: warning
-    file_extensions:
-      - yaml
-      - yml
     match:
       type: content
       mode: regex
@@ -102,9 +88,6 @@ rules:
   - name: K8s 特权容器
     description: 检测 K8s 部署中启用 privileged=true（容器逃逸风险）
     severity: critical
-    file_extensions:
-      - yaml
-      - yml
     match:
       type: content
       mode: regex
@@ -115,9 +98,6 @@ rules:
   - name: K8s hostPath 挂载
     description: 检测 K8s 使用 hostPath 挂载宿主机路径（容器逃逸风险）
     severity: warning
-    file_extensions:
-      - yaml
-      - yml
     match:
       type: content
       mode: regex
@@ -128,9 +108,6 @@ rules:
   - name: Ansible 明文密码
     description: 检测 Ansible playbook 中的明文密码字段
     severity: critical
-    file_extensions:
-      - yaml
-      - yml
     match:
       type: and
       children:
@@ -149,10 +126,6 @@ rules:
   - name: AWS 资源未启用加密
     description: 检测 CloudFormation 中 S3/RDS 未启用加密
     severity: warning
-    file_extensions:
-      - json
-      - yaml
-      - yml
     match:
       type: and
       children:

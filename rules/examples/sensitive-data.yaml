@@ -48,10 +48,6 @@ rules:
   - name: 日志文件中的手机号
     description: 仅在日志/CSV/文本文件中检测手机号，降低误报率
     severity: warning
-    file_extensions:
-      - log
-      - csv
-      - txt
     match:
       type: and
       children:

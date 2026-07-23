@@ -156,7 +156,6 @@ def serialize_rule(rule: Rule) -> str:
         "match": serialize_match(rule.match),
         "description": rule.description,
         "severity": rule.severity.value,
-        "file_extensions": sorted(rule.file_extensions),
     }
     return json.dumps(data, sort_keys=True, ensure_ascii=False)
 

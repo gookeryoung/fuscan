@@ -199,32 +199,6 @@ class TestSerializeMatch:
         )
         assert compute_rule_hash(rule_no_desc) != compute_rule_hash(rule_with_desc)
 
-    def test_serialize_with_extensions(self) -> None:
-        rule = Rule(
-            name="ext",
-            match=LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.EQUALS, pattern="x"),
-            file_extensions=("txt", "md"),
-        )
-        data = json.loads(serialize_rule(rule))
-        # file_extensions 排序后序列化，保证顺序无关
-        assert data["file_extensions"] == ["md", "txt"]
-        # 整体键排序
-        assert list(data.keys()) == sorted(data.keys())
-
-    def test_serialize_extensions_order_independent(self) -> None:
-        """扩展名顺序不同但内容相同 → 哈希相同。"""
-        r1 = Rule(
-            name="r",
-            match=LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.EQUALS, pattern="x"),
-            file_extensions=("txt", "md"),
-        )
-        r2 = Rule(
-            name="r",
-            match=LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.EQUALS, pattern="x"),
-            file_extensions=("md", "txt"),
-        )
-        assert compute_rule_hash(r1) == compute_rule_hash(r2)
-
 
 class TestRuleHashCompute:
     def test_same_rule_same_hash(self) -> None:
@@ -1290,7 +1264,6 @@ class TestHitCache:
                 pattern="x",
                 case_sensitive=False,
             ),
-            file_extensions=(),
         )
         rs = RuleSet(version="1.0", rules=(rule,))
         store = CacheStore(tmp_path / "c.db")
@@ -1381,7 +1354,6 @@ class TestHitCache:
                     pattern="x",
                     case_sensitive=False,
                 ),
-                file_extensions=(),
             )
             for i in (1, 2)
         ]

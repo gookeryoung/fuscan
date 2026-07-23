@@ -20,17 +20,6 @@ rules:
       type: content
       mode: regex
       pattern: 'AKIA[0-9A-Z]{16}'
-    file_extensions:
-      - txt
-      - conf
-      - cfg
-      - ini
-      - yaml
-      - yml
-      - json
-      - env
-      - properties
-      - sh
 
   - name: 私钥文件头
     description: 检测 PEM 格式私钥文件头
@@ -47,14 +36,6 @@ rules:
       type: content
       mode: regex
       pattern: '(?i)(password|passwd|pwd)\s*[=:]\s*\S+'
-    file_extensions:
-      - conf
-      - cfg
-      - ini
-      - env
-      - properties
-      - yaml
-      - yml
 
   - name: 通用API密钥赋值
     description: 检测配置文件中的 API Key 赋值语句
@@ -63,15 +44,6 @@ rules:
       type: content
       mode: regex
       pattern: '(?i)(api[_-]?key|apikey|secret[_-]?key)\s*[=:]\s*\S+'
-    file_extensions:
-      - conf
-      - cfg
-      - ini
-      - env
-      - properties
-      - yaml
-      - yml
-      - json
 
   - name: 数据库连接串
     description: 检测包含凭证的数据库连接字符串

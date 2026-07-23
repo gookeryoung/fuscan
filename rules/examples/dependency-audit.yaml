@@ -8,8 +8,6 @@ rules:
   - name: Python 风险依赖包
     description: 检测 requirements.txt 中已知有漏洞的包名
     severity: critical
-    file_extensions:
-      - txt
     match:
       type: and
       children:
@@ -26,8 +24,6 @@ rules:
   - name: setup.py 不安全写法
     description: 检测 setup.py 中的不安全写法
     severity: warning
-    file_extensions:
-      - py
     match:
       type: and
       children:
@@ -44,8 +40,6 @@ rules:
   - name: package.json 不安全仓库 URL
     description: 检测 package.json 中使用 http:// 的仓库地址（应使用 https://）
     severity: warning
-    file_extensions:
-      - json
     match:
       type: and
       children:
@@ -88,8 +82,6 @@ rules:
   - name: Maven SNAPSHOT 依赖
     description: 检测 pom.xml 中的 SNAPSHOT 版本（生产环境不应使用）
     severity: warning
-    file_extensions:
-      - xml
     match:
       type: and
       children:
@@ -106,8 +98,6 @@ rules:
   - name: Python 依赖未锁定版本
     description: 检测 requirements.txt 中未指定版本的包（应使用 == 锁定）
     severity: info
-    file_extensions:
-      - txt
     match:
       type: and
       children:

@@ -8,8 +8,6 @@ rules:
   - name: Python 危险函数 eval
     description: 检测 Python 代码中的 eval() 调用
     severity: critical
-    file_extensions:
-      - py
     match:
       type: content
       mode: regex
@@ -19,8 +17,6 @@ rules:
   - name: Python 危险函数 exec
     description: 检测 Python 代码中的 exec() 调用
     severity: critical
-    file_extensions:
-      - py
     match:
       type: content
       mode: regex
@@ -31,8 +27,6 @@ rules:
   - name: subprocess shell=True
     description: 检测 subprocess 调用中使用 shell=True（命令注入风险）
     severity: warning
-    file_extensions:
-      - py
     match:
       type: content
       mode: contains
@@ -43,12 +37,6 @@ rules:
   - name: JavaScript eval 调用
     description: 检测 JS 代码中的 eval() 调用
     severity: warning
-    file_extensions:
-      - js
-      - ts
-      - jsx
-      - tsx
-      - vue
     match:
       type: content
       mode: regex
@@ -59,8 +47,6 @@ rules:
   - name: SQL 字符串拼接
     description: 检测 Python 代码中通过字符串拼接构造 SQL
     severity: warning
-    file_extensions:
-      - py
     match:
       type: content
       mode: regex
@@ -71,8 +57,6 @@ rules:
   - name: 生产代码 print 调试残留
     description: 检测 src 目录下的 print 调试语句
     severity: info
-    file_extensions:
-      - py
     match:
       type: and
       children:
@@ -89,14 +73,6 @@ rules:
   - name: TODO 标记
     description: 检测代码中的 TODO 标记
     severity: info
-    file_extensions:
-      - py
-      - js
-      - ts
-      - java
-      - go
-      - c
-      - cpp
     match:
       type: content
       mode: regex
@@ -117,8 +93,6 @@ rules:
   - name: 生产代码 assert 残留
     description: 检测非测试目录中的 assert 语句（生产代码应用 raise）
     severity: info
-    file_extensions:
-      - py
     match:
       type: and
       children:

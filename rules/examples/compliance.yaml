@@ -8,13 +8,6 @@ rules:
   - name: 配置文件明文密码
     description: 检测 .conf/.ini/.env/.yaml 中的明文密码字段
     severity: critical
-    file_extensions:
-      - conf
-      - ini
-      - env
-      - yaml
-      - yml
-      - properties
     match:
       type: content
       mode: regex
@@ -25,9 +18,6 @@ rules:
   - name: 日志未脱敏卡号
     description: 检测日志中出现未脱敏的银行卡号（连续 13+ 位数字）
     severity: critical
-    file_extensions:
-      - log
-      - txt
     match:
       type: content
       mode: regex
@@ -38,9 +28,6 @@ rules:
   - name: 日志未脱敏身份证
     description: 检测日志中的身份证号
     severity: critical
-    file_extensions:
-      - log
-      - txt
     match:
       type: content
       mode: regex

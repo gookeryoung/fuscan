@@ -44,13 +44,11 @@ def _leaf(
     pattern: str,
     name: str = "r",
     severity: Severity = Severity.WARNING,
-    exts: tuple[str, ...] = (),
 ) -> Rule:
     return Rule(
         name=name,
         severity=severity,
         match=LeafMatch(target=target, mode=mode, pattern=pattern),
-        file_extensions=exts,
     )
 
 

@@ -195,16 +195,6 @@ class TestParseRule:
         assert rule.name == "r1"
         assert rule.severity == Severity.INFO
 
-    def test_parse_rule_with_extensions(self) -> None:
-        rule = parse_rule(
-            {
-                "name": "r1",
-                "match": {"type": "filename", "mode": "contains", "pattern": "x"},
-                "file_extensions": [".conf", "ini", "YAML"],
-            }
-        )
-        assert rule.file_extensions == ("conf", "ini", "yaml")
-
     def test_parse_rule_unknown_severity_raises(self) -> None:
         with pytest.raises(RuleParseError, match="严重等级"):
             parse_rule(
@@ -227,15 +217,17 @@ class TestParseRule:
         with pytest.raises(RuleParseError, match="字典"):
             parse_rule(["r1"])  # type: ignore[arg-type]
 
-    def test_parse_rule_extensions_wrong_type_raises(self) -> None:
-        with pytest.raises(RuleParseError, match="file_extensions"):
-            parse_rule(
-                {
-                    "name": "r1",
-                    "match": {"type": "filename", "mode": "contains", "pattern": "x"},
-                    "file_extensions": "conf",
-                }
-            )
+    def test_parse_rule_legacy_file_extensions_ignored(self) -> None:
+        """旧规则文件中保留的 file_extensions 字段应被静默忽略（iter-86 起字段已移除）。"""
+        rule = parse_rule(
+            {
+                "name": "r1",
+                "match": {"type": "filename", "mode": "contains", "pattern": "x"},
+                "file_extensions": [".conf", "ini", "YAML"],
+            }
+        )
+        assert rule.name == "r1"
+        assert not hasattr(rule, "file_extensions")
 
 
 class TestParseRuleset:

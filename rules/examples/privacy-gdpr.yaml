@@ -72,11 +72,6 @@ rules:
   - name: 数据处理缺少目的说明
     description: 检测数据处理代码缺少目的说明（GDPR 第 5 条）
     severity: info
-    file_extensions:
-      - py
-      - js
-      - ts
-      - java
     match:
       type: and
       children:
@@ -111,10 +106,6 @@ rules:
   - name: Cookie 未获同意
     description: 检测前端代码在用户同意前设置非必要 Cookie
     severity: warning
-    file_extensions:
-      - js
-      - ts
-      - html
     match:
       type: and
       children:
@@ -133,10 +124,6 @@ rules:
   - name: 数据保留期缺失
     description: 检测数据存储配置未设置保留期（GDPR 存储限制原则）
     severity: info
-    file_extensions:
-      - py
-      - yaml
-      - yml
     match:
       type: and
       children:
@@ -155,12 +142,6 @@ rules:
   - name: 被遗忘权处理入口
     description: 检测疑似被遗忘权（删除用户数据）处理代码（需确保完整删除）
     severity: info
-    file_extensions:
-      - py
-      - js
-      - ts
-      - java
-      - go
     match:
       type: or
       children:
@@ -177,10 +158,6 @@ rules:
   - name: 日志记录敏感数据
     description: 检测日志中疑似记录个人数据（应脱敏）
     severity: critical
-    file_extensions:
-      - py
-      - js
-      - ts
     match:
       type: content
       mode: regex

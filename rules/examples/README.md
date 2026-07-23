@@ -62,11 +62,11 @@ rules:                   # 规则列表
   - name: 规则名称         # 必填，唯一标识
     description: 描述     # 可选，说明规则意图
     severity: warning    # 可选，默认 info；info/warning/critical
-    file_extensions:     # 可选，限定扫描的扩展名（不设则扫描所有文件）
-      - py
-      - js
     match: {...}         # 必填，匹配条件
 ```
+
+> 注：文件后缀过滤已由全局配置（解析器勾选）统一管理（iter-86 起规则中
+> 不再支持 `file_extensions` 字段，旧规则文件中保留该字段会被静默忽略）。
 
 ### 匹配条件（match）
 
@@ -144,24 +144,7 @@ match:
 
 ## 规则编写最佳实践
 
-### 1. 限定 file_extensions 提升性能
-
-```yaml
-# 好：仅扫描代码文件
-file_extensions: [py, js, ts, java]
-match:
-  type: content
-  mode: regex
-  pattern: '\beval\s*\('
-
-# 差：扫描所有文件（含二进制、媒体文件）
-match:
-  type: content
-  mode: regex
-  pattern: '\beval\s*\('
-```
-
-### 2. 用 NOT 排除测试目录降低误报
+### 1. 用 NOT 排除测试目录降低误报
 
 ```yaml
 match:
@@ -177,7 +160,7 @@ match:
         pattern: '(test|tests|__tests__|spec)/'
 ```
 
-### 3. 正则使用原始字符串避免转义问题
+### 2. 正则使用原始字符串避免转义问题
 
 YAML 中正则用单引号包裹，反斜杠不需额外转义：
 
@@ -189,7 +172,7 @@ pattern: '\.(conf|ini|ya?ml)$'
 pattern: "\\.(conf|ini|ya?ml)$"
 ```
 
-### 4. 标量值含冒号需用引号包裹
+### 3. 标量值含冒号需用引号包裹
 
 YAML 中 `key: value: extra` 会解析失败，需引号：
 
@@ -203,7 +186,7 @@ description: "检测 privileged: true 配置"
 description: 检测 privileged=true 配置
 ```
 
-### 5. 大小写敏感按需设置
+### 4. 大小写敏感按需设置
 
 ```yaml
 # 密钥类规则建议大小写敏感（AWS Key 固定大写）
@@ -221,7 +204,7 @@ match:
   case_sensitive: false  # 同时匹配 Password/PASSWORD
 ```
 
-### 6. 全局忽略项配置
+### 5. 全局忽略项配置
 
 忽略目录名（如 `.git`、`node_modules`）和忽略扩展名（如 `pyc`、`exe`）已迁移至全局配置，
 请在 GUI 的「设置 → 扫描设置 → 忽略项」中维护，或通过 CLI `--ignore-dir` 临时追加。

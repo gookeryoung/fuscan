@@ -8,9 +8,6 @@ rules:
   - name: Dockerfile 使用 latest 标签
     description: 检测 Dockerfile 中 FROM ...:latest（应使用具体版本号）
     severity: warning
-    file_extensions:
-      - ""
-      - dockerfile
     match:
       type: and
       children:
@@ -45,9 +42,6 @@ rules:
   - name: GitHub Actions pull_request_target 风险
     description: 检测 GitHub Actions 使用 pull_request_target 触发器（可能泄露 GITHUB_TOKEN）
     severity: critical
-    file_extensions:
-      - yml
-      - yaml
     match:
       type: and
       children:
@@ -64,9 +58,6 @@ rules:
   - name: CI 配置硬编码密钥
     description: 检测 CI 配置文件中的硬编码 secret/token
     severity: critical
-    file_extensions:
-      - yml
-      - yaml
     match:
       type: content
       mode: regex
@@ -77,9 +68,6 @@ rules:
   - name: 部署脚本 sudo 滥用
     description: 检测 shell 脚本中的 sudo 使用（应通过 systemd 等机制管理权限）
     severity: info
-    file_extensions:
-      - sh
-      - bash
     match:
       type: content
       mode: regex
@@ -90,9 +78,6 @@ rules:
   - name: K8s 缺少资源限制
     description: 检测 K8s 部署清单未设置 resources.limits
     severity: warning
-    file_extensions:
-      - yaml
-      - yml
     match:
       type: and
       children:
@@ -121,9 +106,6 @@ rules:
   - name: docker-compose 无资源限制
     description: 检测 docker-compose 服务定义未设置 deploy.resources.limits
     severity: info
-    file_extensions:
-      - yml
-      - yaml
     match:
       type: and
       children:

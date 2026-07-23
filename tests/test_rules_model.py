@@ -53,7 +53,6 @@ class TestRule:
         assert rule.name == "测试规则"
         assert rule.severity == Severity.WARNING
         assert rule.description == ""
-        assert rule.file_extensions == ()
 
     def test_empty_name_raises(self) -> None:
         match = LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.CONTAINS, pattern="x")

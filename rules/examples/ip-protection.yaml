@@ -8,12 +8,6 @@ rules:
   - name: 源码缺少版权头
     description: 检测 src 目录下的源码文件缺少版权声明
     severity: info
-    file_extensions:
-      - py
-      - java
-      - go
-      - c
-      - cpp
     match:
       type: and
       children:
@@ -140,12 +134,6 @@ rules:
   - name: 内部 API 端点泄露
     description: 检测代码中硬编码的内部 API 端点（外发会暴露架构）
     severity: warning
-    file_extensions:
-      - py
-      - js
-      - ts
-      - java
-      - go
     match:
       type: content
       mode: regex

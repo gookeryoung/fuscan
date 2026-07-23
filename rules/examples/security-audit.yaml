@@ -75,14 +75,6 @@ rules:
   - name: 硬编码密码赋值
     description: 检测代码中直接赋值的 password 变量
     severity: warning
-    file_extensions:
-      - py
-      - js
-      - ts
-      - java
-      - go
-      - rb
-      - php
     match:
       type: content
       mode: regex

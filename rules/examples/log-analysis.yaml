@@ -8,9 +8,6 @@ rules:
   - name: ERROR 级别日志
     description: 检测日志文件中的 ERROR 级别条目
     severity: warning
-    file_extensions:
-      - log
-      - txt
     match:
       type: content
       mode: regex
@@ -21,9 +18,6 @@ rules:
   - name: Java 异常堆栈
     description: 检测日志中的 Java 异常堆栈信息
     severity: warning
-    file_extensions:
-      - log
-      - txt
     match:
       type: content
       mode: regex
@@ -34,9 +28,6 @@ rules:
   - name: Python Traceback
     description: 检测 Python 异常 Traceback
     severity: warning
-    file_extensions:
-      - log
-      - txt
     match:
       type: content
       mode: contains
@@ -47,8 +38,6 @@ rules:
   - name: SQL 慢查询
     description: 检测执行时间超过 1 秒的 SQL 查询
     severity: info
-    file_extensions:
-      - log
     match:
       type: content
       mode: regex
@@ -59,9 +48,6 @@ rules:
   - name: 内存溢出错误
     description: 检测 OutOfMemory 相关错误
     severity: critical
-    file_extensions:
-      - log
-      - txt
     match:
       type: content
       mode: regex
@@ -72,9 +58,6 @@ rules:
   - name: 连接异常
     description: 检测连接超时或被拒绝
     severity: warning
-    file_extensions:
-      - log
-      - txt
     match:
       type: content
       mode: regex
@@ -85,9 +68,6 @@ rules:
   - name: 磁盘空间不足
     description: 检测磁盘空间告警
     severity: critical
-    file_extensions:
-      - log
-      - txt
     match:
       type: content
       mode: regex
@@ -98,8 +78,6 @@ rules:
   - name: 登录失败告警
     description: 检测认证失败记录（可能是暴力破解）
     severity: warning
-    file_extensions:
-      - log
     match:
       type: content
       mode: regex

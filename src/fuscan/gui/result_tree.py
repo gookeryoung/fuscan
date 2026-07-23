@@ -38,9 +38,10 @@ _SEVERITY_RANK: dict[Severity, int] = {
     Severity.CRITICAL: 2,
 }
 
-# 结果树表头（6 列：文件名/规则/严重等级/命中数/条数/详情）
-# iter-85：第 0 列从"路径"改为"文件名"，路径已在右侧详情区显示，避免横向占用过多宽度
-_HEADERS: list[str] = ["文件名", "规则", "严重等级", "命中数", "条数", "详情"]
+# 结果树表头（4 列：文件名/规则/严重等级/详情）
+# iter-86：移除"命中数/条数"列——这两列信息已包含在"详情"列（sr.summary() 返回"N 条规则 / M 处匹配"）
+# 与右侧详情区 file_info_html 中，保留会重复且浪费横向空间
+_HEADERS: list[str] = ["文件名", "规则", "严重等级", "详情"]
 
 
 def _apply_severity_to_standard_item(item: QStandardItem, severity: Severity) -> None:
@@ -61,7 +62,7 @@ def _apply_severity_to_standard_item(item: QStandardItem, severity: Severity) ->
 def _make_result_row(texts: Sequence[str]) -> list[QStandardItem]:
     """根据文本序列构造一行不可编辑的 QStandardItem 列表。
 
-    :param texts: 各列文本（顺序对应表头：路径/规则/严重等级/命中数/条数/详情）
+    :param texts: 各列文本（顺序对应表头：文件名/规则/严重等级/详情）
     :returns: QStandardItem 列表，长度与 ``texts`` 相同，每项已禁用编辑
     """
     row: list[QStandardItem] = []
@@ -102,9 +103,9 @@ class ResultTreeView(QTreeView):  # pyrefly: ignore [invalid-inheritance]
         self.setModel(self._result_model)
         # 当前暂存的扫描报告（populate 设置，clear_results 重置为 None）
         self._last_report: ScanReport | None = None
-        # 列宽 resize 模式（iter-85）：
+        # 列宽 resize 模式（iter-86）：
         #   - 文件名/规则/详情：Interactive（用户可拖动调整，初始宽度见下）
-        #   - 严重等级/命中数/条数：ResizeToContents（按内容自动收缩到最小所需宽度）
+        #   - 严重等级：ResizeToContents（按内容自动收缩到最小所需宽度）
         #   最后一列（详情）由 header 自动 stretch 填充剩余空间
         header = self.header()
         header.setStretchLastSection(True)  # 详情列拉伸填充
@@ -113,13 +114,11 @@ class ResultTreeView(QTreeView):  # pyrefly: ignore [invalid-inheritance]
         header.setSectionResizeMode(1, QHeaderView.Interactive)
         self.setColumnWidth(0, 220)
         self.setColumnWidth(1, 140)
-        # 2 严重等级 / 3 命中数 / 4 条数：ResizeToContents，按内容自动收缩
+        # 2 严重等级：ResizeToContents，按内容自动收缩
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        # 5 详情：Interactive（默认由 stretchLastSection 拉伸填充）
-        header.setSectionResizeMode(5, QHeaderView.Interactive)
-        self.setColumnWidth(5, 200)
+        # 3 详情：Interactive（默认由 stretchLastSection 拉伸填充）
+        header.setSectionResizeMode(3, QHeaderView.Interactive)
+        self.setColumnWidth(3, 200)
         # 连接内部信号到本类的信号转发槽
         selection_model = self.selectionModel()
         if selection_model is not None:
@@ -170,24 +169,19 @@ class ResultTreeView(QTreeView):  # pyrefly: ignore [invalid-inheritance]
     def _populate_flat(self, report: ScanReport) -> None:
         """不分组：文件为顶层项，规则命中为子项。"""
         for sr in report.hits:
-            file_row = _make_result_row(
-                [sr.path.name, "", "", str(len(sr.hits)), str(sr.total_match_count), sr.summary()]
-            )
+            file_row = _make_result_row([sr.path.name, "", "", sr.summary()])
             # ScanResult 存在该行第 0 列 UserRole，双击/选中时通过 sibling(row, 0) 取回
             file_row[0].setData(sr, Qt.UserRole)
             # 第 0 列 tooltip 显示完整路径，鼠标悬停可查看（iter-85：第 0 列仅显示文件名）
             file_row[0].setToolTip(str(sr.path))
             _apply_severity_to_standard_item(file_row[2], sr.max_severity)
-            file_row[3].setTextAlignment(Qt.AlignCenter)
-            file_row[4].setTextAlignment(Qt.AlignCenter)
             # critical 整行背景高亮，区别于仅 severity 列着色
             if sr.max_severity == Severity.CRITICAL:
                 for cell in file_row:
                     cell.setBackground(SEVERITY_BACKGROUNDS[Severity.CRITICAL])
             for hit in sr.hits:
-                child_row = _make_result_row(["", hit.rule_name, "", "", str(hit.match_count), hit.detail])
+                child_row = _make_result_row(["", hit.rule_name, "", hit.detail])
                 _apply_severity_to_standard_item(child_row[2], hit.severity)
-                child_row[4].setTextAlignment(Qt.AlignCenter)
                 # 子行挂载在第 0 列 cell 上（QStandardItem.appendRow 是 cell 方法）
                 file_row[0].appendRow(child_row)  # pyrefly: ignore [missing-argument]
             self._result_model.appendRow(file_row)  # pyrefly: ignore [missing-argument]
@@ -200,17 +194,12 @@ class ResultTreeView(QTreeView):  # pyrefly: ignore [invalid-inheritance]
             entries = rule_map[rule_name]
             hit_count = len(entries)
             match_sum = sum(h.match_count for _, h in entries)
-            top_row = _make_result_row(
-                ["", rule_name, "", str(hit_count), str(match_sum), f"{hit_count} 个文件 / {match_sum} 处匹配"]
-            )
+            top_row = _make_result_row(["", rule_name, "", f"{hit_count} 个文件 / {match_sum} 处匹配"])
             # 分组项不可选中，避免选中后详情区被清空产生"无命中"误解
             _clear_row_selectable(top_row)
-            top_row[3].setTextAlignment(Qt.AlignCenter)
-            top_row[4].setTextAlignment(Qt.AlignCenter)
             for sr, hit in entries:
-                child_row = _make_result_row([sr.path.name, "", "", "", str(hit.match_count), hit.detail])
+                child_row = _make_result_row([sr.path.name, "", "", hit.detail])
                 _apply_severity_to_standard_item(child_row[2], hit.severity)
-                child_row[4].setTextAlignment(Qt.AlignCenter)
                 child_row[0].setData(sr, Qt.UserRole)
                 child_row[0].setToolTip(str(sr.path))
                 top_row[0].appendRow(child_row)  # pyrefly: ignore [missing-argument]
@@ -224,23 +213,15 @@ class ResultTreeView(QTreeView):  # pyrefly: ignore [invalid-inheritance]
             entries = severity_map[severity]
             file_count = len(entries)
             match_sum = sum(sr.total_match_count for sr in entries)
-            top_row = _make_result_row(
-                ["", "", "", str(file_count), str(match_sum), f"{file_count} 个文件 / {match_sum} 处匹配"]
-            )
+            top_row = _make_result_row(["", "", "", f"{file_count} 个文件 / {match_sum} 处匹配"])
             _apply_severity_to_standard_item(top_row[2], severity)
             # 分组项不可选中，避免选中后详情区被清空产生"无命中"误解
             _clear_row_selectable(top_row)
-            top_row[3].setTextAlignment(Qt.AlignCenter)
-            top_row[4].setTextAlignment(Qt.AlignCenter)
             for sr in entries:
-                child_row = _make_result_row(
-                    [sr.path.name, "", "", str(len(sr.hits)), str(sr.total_match_count), sr.summary()]
-                )
+                child_row = _make_result_row([sr.path.name, "", "", sr.summary()])
                 _apply_severity_to_standard_item(child_row[2], sr.max_severity)
                 child_row[0].setData(sr, Qt.UserRole)
                 child_row[0].setToolTip(str(sr.path))
-                child_row[3].setTextAlignment(Qt.AlignCenter)
-                child_row[4].setTextAlignment(Qt.AlignCenter)
                 # critical 整行背景高亮，区别于仅 severity 列着色
                 if sr.max_severity == Severity.CRITICAL:
                     for cell in child_row:

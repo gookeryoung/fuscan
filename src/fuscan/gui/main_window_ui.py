@@ -363,6 +363,11 @@ class Ui_MainWindow(object):
 
         self.scanning_layout.addWidget(self.tabWidget)
 
+        self.scan_file_label = QLabel(self.scanning_page)
+        self.scan_file_label.setObjectName(u"scan_file_label")
+
+        self.scanning_layout.addWidget(self.scan_file_label)
+
         self.scan_stats_label = QLabel(self.scanning_page)
         self.scan_stats_label.setObjectName(u"scan_stats_label")
         self.scan_stats_label.setTextFormat(Qt.RichText)
@@ -895,6 +900,7 @@ class Ui_MainWindow(object):
         self.scan_btn.setText(QCoreApplication.translate("MainWindow", u"\u5f00\u59cb\u626b\u63cf", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_matched_files_list), QCoreApplication.translate("MainWindow", u"\u547d\u4e2d\u6587\u4ef6", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_skipped_dirs_list), QCoreApplication.translate("MainWindow", u"\u8df3\u8fc7\u76ee\u5f55", None))
+        self.scan_file_label.setText("")
         self.scan_stats_label.setText("")
         self.pause_resume_btn.setText(QCoreApplication.translate("MainWindow", u"\u6682\u505c\u626b\u63cf", None))
         self.cancel_btn.setText(QCoreApplication.translate("MainWindow", u"\u53d6\u6d88\u626b\u63cf", None))

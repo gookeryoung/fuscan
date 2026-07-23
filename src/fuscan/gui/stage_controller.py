@@ -174,9 +174,6 @@ class StageController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._controls.pause_resume_btn.setEnabled(is_scanning)
         self._controls.cancel_btn.setEnabled(is_scanning)
 
-        # 侧边栏在扫描中阶段禁用，防止用户切换页面导致扫描状态不一致
-        self._controls.sidebar.setEnabled(not is_scanning)
-
         # 结果页
         self._controls.rescan_btn.setEnabled(is_results)
         if is_results and has_report:

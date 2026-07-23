@@ -1,0 +1,2 @@
+- [x] 移除规则中废弃的 file_extensions 字段（model/parser/cache/规则 yaml/文档/测试全链路清理）
+- [x] 去掉结果 Table 的"命中数"和"条数"列（与"详情"列及右侧详情区信息重复）

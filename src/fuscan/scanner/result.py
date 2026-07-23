@@ -74,7 +74,15 @@ class MatchResult:
 
 @dataclass(frozen=True)
 class ProgressInfo:
-    """扫描进度信息（实时反馈给 UI）。"""
+    """扫描进度信息（实时反馈给 UI）。
+
+    ``phase`` 标识当前扫描阶段，GUI 据此显示不同提示文案，避免用户在
+    walk 阶段（已扫描=0）误以为扫描卡住：
+
+    - ``"walk"``：阶段 1，遍历目录树收集待扫描文件清单
+    - ``"scan"``：阶段 2，并发/顺序解析文件内容
+    - ``"archive"``：阶段 3，扫描压缩包内条目
+    """
 
     current_file: str = ""
     scanned: int = 0
@@ -89,13 +97,24 @@ class ProgressInfo:
     skipped_dirs: tuple[str, ...] = ()
     # 命中的 (文件路径, 规则名) 列表（最近 500 条）
     matched_files: tuple[tuple[str, str], ...] = ()
+    # 当前扫描阶段（iter-75）：walk/scan/archive
+    phase: str = "scan"
 
     def summary(self) -> str:
         """返回实时进度状态栏文本（含速度计算）。
 
+        根据 ``phase`` 返回不同文案：walk 阶段突出"正在分析目录结构"，
+        scan 阶段展示完整扫描指标，archive 阶段突出"正在扫描压缩包"。
         与 ``ScanStats.summary`` 不同，此处不含 ``total_files`` 与 ``cancelled``
         前缀，仅展示当前已扫描的实时指标，供 GUI 进度回调直接调用。
         """
+        if self.phase == "walk":
+            return f"正在分析目录结构 | 已发现 {self.total} 个文件 | 跳过 {self.skipped} | 已用 {self.elapsed:.1f}s"
+        if self.phase == "archive":
+            return (
+                f"正在扫描压缩包 | 已扫描 {self.scanned} | 命中 {self.matched} | "
+                f"错误 {self.errors} | 已用 {self.elapsed:.1f}s"
+            )
         speed = self.scanned / self.elapsed if self.elapsed > 0 else 0.0
         return (
             f"已扫描 {self.scanned} | 跳过 {self.skipped} | "

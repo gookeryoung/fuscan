@@ -757,6 +757,57 @@ class TestProgressInfoSummary:
         s = info.summary()
         assert "速度 0 文件/s" in s
 
+    def test_summary_walk_phase(self) -> None:
+        """walk 阶段 summary 应突出"正在分析目录结构"并展示已发现文件数，避免 scanned=0 被误以为卡住。"""
+        from fuscan.scanner.result import ProgressInfo
+
+        info = ProgressInfo(
+            current_file="/some/dir/sub",
+            total=1234,
+            skipped=8,
+            elapsed=2.5,
+            phase="walk",
+        )
+        s = info.summary()
+        assert "正在分析目录结构" in s
+        assert "已发现 1234 个文件" in s
+        assert "跳过 8" in s
+        assert "已用 2.5s" in s
+        # walk 阶段不展示速度/条数等 scan 阶段指标
+        assert "速度" not in s
+        assert "条数" not in s
+
+    def test_summary_archive_phase(self) -> None:
+        """archive 阶段 summary 应突出"正在扫描压缩包"并展示已扫描/命中/错误数。"""
+        from fuscan.scanner.result import ProgressInfo
+
+        info = ProgressInfo(
+            current_file="/some/a.zip/entry.txt",
+            scanned=42,
+            matched=3,
+            errors=1,
+            elapsed=5.0,
+            phase="archive",
+        )
+        s = info.summary()
+        assert "正在扫描压缩包" in s
+        assert "已扫描 42" in s
+        assert "命中 3" in s
+        assert "错误 1" in s
+        assert "已用 5.0s" in s
+        # archive 阶段不展示速度/条数等 scan 阶段指标
+        assert "速度" not in s
+        assert "条数" not in s
+
+    def test_summary_unknown_phase_falls_back_to_scan(self) -> None:
+        """未知 phase 应回退到 scan 阶段的默认文案（含速度）。"""
+        from fuscan.scanner.result import ProgressInfo
+
+        info = ProgressInfo(scanned=10, elapsed=1.0, phase="unknown")
+        s = info.summary()
+        assert "已扫描 10" in s
+        assert "速度 10 文件/s" in s
+
 
 class TestScanResultFileInfoHtml:
     def test_html_contains_path_size_hits(self, tmp_path: Path) -> None:

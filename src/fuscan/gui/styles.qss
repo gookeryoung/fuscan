@@ -216,8 +216,12 @@ QLabel#full_scan_label {
 }
 
 /* ========== 盘符按钮（图标+字母，checkable） ========== */
+/* Qt QSS 不支持 [attr!=""] 语法（仅支持 [attr]/[attr="x"]/[attr~="x"]/[attr|="x"]）。
+ * 用 [drive] 属性存在选择器等效替代：盘符按钮均 setProperty("drive", str(drive))，
+ * 未设置 drive 属性的按钮不匹配（iter-75 修复 QSS 解析错误）。
+ */
 
-QPushButton[drive!=""] {
+QPushButton[drive] {
     background: ${COLOR_BG_CARD};
     color: ${COLOR_TEXT_PRIMARY};
     border: 1px solid ${COLOR_BORDER};
@@ -229,19 +233,19 @@ QPushButton[drive!=""] {
     min-height: 32px;
 }
 
-QPushButton[drive!=""]:hover {
+QPushButton[drive]:hover {
     background: ${COLOR_BG_HOVER};
     border-color: ${COLOR_PRIMARY};
     color: ${COLOR_PRIMARY};
 }
 
-QPushButton[drive!=""]:checked {
+QPushButton[drive]:checked {
     background: ${COLOR_PRIMARY};
     border-color: ${COLOR_PRIMARY};
     color: ${COLOR_TEXT_ON_PRIMARY};
 }
 
-QPushButton[drive!=""]:checked:hover {
+QPushButton[drive]:checked:hover {
     background: ${COLOR_PRIMARY_DARK};
     border-color: ${COLOR_PRIMARY_DARK};
     color: ${COLOR_TEXT_ON_PRIMARY};

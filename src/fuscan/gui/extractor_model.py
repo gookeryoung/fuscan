@@ -28,30 +28,24 @@ if TYPE_CHECKING:
 
 __all__ = ["ExtractorItem", "ExtractorListModel"]
 
-# 扩展名提示最多展示 5 个，超出用省略号
-_EXT_HINT_LIMIT = 5
-
 
 @dataclass(frozen=True)
 class ExtractorItem:
-    """提取器条目：类名 + 中文显示名 + 支持的扩展名集合。"""
+    """提取器条目：类名 + 中文显示名 + 支持的扩展名集合。
+
+    ``display_name`` 已包含主要扩展名信息（如 "Word（DOCX）"），
+    故 :attr:`display_text` 仅展示 ``display_name`` 保持视觉紧凑；
+    完整扩展名列表通过 :attr:`tooltip_text` 在鼠标悬停时展示。
+    """
 
     class_name: str
     display_name: str
     extensions: tuple[str, ...]
 
     @property
-    def ext_hint(self) -> str:
-        """返回紧凑的扩展名提示文本（最多 5 个，超出省略）。"""
-        head = ", ".join(self.extensions[:_EXT_HINT_LIMIT])
-        if len(self.extensions) > _EXT_HINT_LIMIT:
-            return f"{head}..."
-        return head
-
-    @property
     def display_text(self) -> str:
-        """返回 QListView 中展示的完整文本：``{display_name} ({ext_hint})``。"""
-        return f"{self.display_name} ({self.ext_hint})"
+        """返回 QListView 中展示的文本：仅 ``display_name``（扩展名信息已在 display_name 中体现）。"""
+        return self.display_name
 
     @property
     def tooltip_text(self) -> str:

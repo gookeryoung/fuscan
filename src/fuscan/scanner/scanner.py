@@ -334,7 +334,7 @@ class Scanner:
                             continue
                         entries.append(entry)
                         if total % 200 == 0:
-                            self._emit_progress(str(entry.path), 0, 0, 0)
+                            self._emit_progress(str(entry.path), 0, 0, 0, phase="walk")
                 self._progress_total = total
                 self._progress_skipped = skipped
                 # 阶段 2：并发扫描（max_workers > 1）或顺序扫描
@@ -393,11 +393,14 @@ class Scanner:
         errors: int,
         matches: int = 0,
         force: bool = False,
+        phase: str = "scan",
     ) -> None:
         """时间节流后调用 on_progress 回调。
 
         :param matches: 累计匹配文本条数（区别于 matched 的命中文件数）。
         :param force: 为 True 时跳过节流，强制发送（如最终进度）。
+        :param phase: 当前扫描阶段（iter-75）：``"walk"``/``"scan"``/``"archive"``，
+            GUI 据此显示不同提示文案，避免 walk 阶段 scanned=0 被误以为卡住。
         """
         if self._on_progress is None:
             return
@@ -420,6 +423,7 @@ class Scanner:
                 matches=matches,
                 skipped_dirs=recent_skipped,
                 matched_files=recent_matched,
+                phase=phase,
             )
         )
 
@@ -590,6 +594,7 @@ class Scanner:
                     self._base_matched + matched,
                     self._base_errors + errors,
                     self._base_matches + matches,
+                    phase="archive",
                 )
             return scanned, matched, errors, matches
 
@@ -646,6 +651,7 @@ class Scanner:
                     self._base_matched + matched,
                     self._base_errors + errors,
                     self._base_matches + matches,
+                    phase="archive",
                 )
                 continue
             d_scanned, d_matched, d_errors, d_matches = self._accumulate_archive_results(archive_results, results)
@@ -659,6 +665,7 @@ class Scanner:
                 self._base_matched + matched,
                 self._base_errors + errors,
                 self._base_matches + matches,
+                phase="archive",
             )
         return scanned, matched, errors, matches
 

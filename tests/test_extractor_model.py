@@ -117,25 +117,14 @@ class TestExtractorListModelConstruction:
         assert model.enabled_extensions() is None
 
     def test_display_text_format(self, model: ExtractorListModel) -> None:
-        """data(DisplayRole) 返回 ``{display_name} ({ext_hint})`` 格式。"""
+        """data(DisplayRole) 仅返回 display_name（紧凑展示，扩展名信息已在 display_name 中）。"""
         # 注册表按 display_name 排序：PDF / Word（DOCX） / 纯文本
-        # 扩展名按字母序排序：txt/md/py/log/csv/json → csv, json, log, md, py, txt
         pdf_idx = model.index(0)
         word_idx = model.index(1)
         text_idx = model.index(2)
-        assert model.data(pdf_idx, Qt.DisplayRole) == "PDF (pdf)"
-        assert model.data(word_idx, Qt.DisplayRole) == "Word（DOCX） (docx)"
-        # 6 个扩展名（排序后 csv/json/log/md/py/txt）截断为前 5 个 + ...
-        assert model.data(text_idx, Qt.DisplayRole) == "纯文本 (csv, json, log, md, py...)"
-
-    def test_ext_hint_truncates_when_more_than_five(self) -> None:
-        """超过 5 个扩展名时 ext_hint 显示前 5 个 + 省略号。"""
-        item = ExtractorItem(
-            class_name="X",
-            display_name="X",
-            extensions=("a", "b", "c", "d", "e", "f"),
-        )
-        assert item.ext_hint == "a, b, c, d, e..."
+        assert model.data(pdf_idx, Qt.DisplayRole) == "PDF"
+        assert model.data(word_idx, Qt.DisplayRole) == "Word（DOCX）"
+        assert model.data(text_idx, Qt.DisplayRole) == "纯文本"
 
     def test_tooltip_lists_all_extensions(self, model: ExtractorListModel) -> None:
         """data(ToolTipRole) 返回所有扩展名（含 6 个的纯文本，按字母序排序）。"""

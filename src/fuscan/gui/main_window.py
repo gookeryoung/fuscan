@@ -234,6 +234,14 @@ _EXPORT_FMT_TO_EXT: dict[str, str] = {fmt: ext for _, fmt, ext in _EXPORT_FORMAT
 _SCAN_MODE_TO_INDEX: dict[str, int] = {"full": 0, "drive": 1, "folder": 2}
 _INDEX_TO_SCAN_MODE: dict[int, str] = {v: k for k, v in _SCAN_MODE_TO_INDEX.items()}
 
+# 扫描阶段 ↔ current_file_label 前缀文案映射（iter-75）：
+# ProgressInfo.phase 取值见 fuscan.scanner.result.ProgressInfo；缺省回退到"正在解析"。
+_PHASE_LABELS: dict[str, str] = {
+    "walk": "正在遍历",
+    "scan": "正在解析",
+    "archive": "正在扫描压缩包",
+}
+
 
 class ScanState(enum.Enum):
     """扫描状态。"""
@@ -530,12 +538,16 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
 
         模型勾选状态变化通过 ``extractors_changed`` 信号路由到
         :meth:`_on_extractor_toggled`，由主窗口持久化到配置文件。
+
+        视觉紧凑度：``display_name`` 已含主要扩展名信息（如 "Word（DOCX）"），
+        无需在 item 文本中重复展示完整扩展名；grid_w 取最长 display_name
+        （"PowerPoint（PPTX）" 约 130px）加上 checkbox + padding 后取整 180，
+        14 项可按视图宽度自适应排成 4-5 列，避免文字截断。
         """
         self._extractor_model = ExtractorListModel(default_registry, parent=self)
         self.file_types_view.setModel(self._extractor_model)
-        # IconMode 网格布局：每项固定宽度，按视图宽度自动换行多列展示，
-        # 与原 2 列 GridLayout 视觉一致且支持窗口宽度自适应重排
-        grid_w = 260
+        # IconMode 网格布局：每项固定宽度，按视图宽度自动换行多列展示
+        grid_w = 180
         grid_h = 28
         self.file_types_view.setGridSize(QSize(grid_w, grid_h))
         self.file_types_view.setUniformItemSizes(True)
@@ -1168,22 +1180,28 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
     def _on_scan_progress(self, info) -> None:  # type: ignore[no-untyped-def]
         """扫描实时进度回调：更新进度条、当前文件、状态栏汇总与两个列表。
 
+        根据 ``info.phase`` 显示不同阶段提示文案（iter-75）：walk 阶段
+        突出"正在分析目录结构"，scan 阶段显示"正在解析"，archive 阶段
+        显示"正在扫描压缩包"，避免用户在 walk 阶段（scanned=0）误以为
+        扫描卡住。
+
         列表更新采用增量 append + 独立节流（0.5 秒），避免每次回调全量
         clear+重添 O(N) 阻塞主线程导致点击设置等交互卡滞。
         """
-        # 切换为确定进度模式
+        # 切换为确定进度模式（walk 阶段 total 仍在增长，scan 阶段 total 已固定）
         if info.total > 0 and self.progress.maximum() != info.total:
             self.progress.setRange(0, info.total)
         self.progress.setValue(info.scanned)
 
-        # 当前文件（截断显示，挂载在状态栏右侧）
+        # 当前文件（截断显示，挂载在状态栏右侧）：按 phase 切换前缀文案
         if info.current_file:
             path_text = info.current_file
             if len(path_text) > 100:
                 path_text = "..." + path_text[-97:]
-            self.current_file_label.setText(f"正在解析: {path_text}")
+            prefix = _PHASE_LABELS.get(info.phase, "正在解析")
+            self.current_file_label.setText(f"{prefix}: {path_text}")
 
-        # 状态栏汇总文本（速度计算下沉到 ProgressInfo.summary）
+        # 状态栏汇总文本（按 phase 切换文案，速度计算下沉到 ProgressInfo.summary）
         self.stats_label.setText(info.summary())
 
         # 列表更新下沉到 ScanListUpdater：0.5 秒节流 + 增量 append，避免高频回调阻塞主线程。

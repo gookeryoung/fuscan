@@ -63,8 +63,8 @@
           <string>扫描</string>
          </property>
          <property name="icon">
-          <iconset>
-           <normaloff>:/icons/scan.svg</normaloff>:/icons/scan.svg</iconset>
+          <iconset resource="resources.qrc">
+           <normaloff>:/assets/icons/scan.svg</normaloff>:/assets/icons/scan.svg</iconset>
          </property>
          <property name="checkable">
           <bool>true</bool>
@@ -80,8 +80,8 @@
           <string>规则管理</string>
          </property>
          <property name="icon">
-          <iconset>
-           <normaloff>:/icons/load_list.svg</normaloff>:/icons/load_list.svg</iconset>
+          <iconset resource="resources.qrc">
+           <normaloff>:/assets/icons/edit.svg</normaloff>:/assets/icons/edit.svg</iconset>
          </property>
          <property name="checkable">
           <bool>true</bool>
@@ -94,8 +94,8 @@
           <string>扫描历史</string>
          </property>
          <property name="icon">
-          <iconset>
-           <normaloff>:/icons/history.svg</normaloff>:/icons/history.svg</iconset>
+          <iconset resource="resources.qrc">
+           <normaloff>:/assets/icons/history.svg</normaloff>:/assets/icons/history.svg</iconset>
          </property>
          <property name="checkable">
           <bool>true</bool>

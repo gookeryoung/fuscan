@@ -95,7 +95,9 @@ class Ui_MainWindow(object):
         self.header_layout.setContentsMargins(8, 4, 8, 4)
         self.tab_scan_btn = QPushButton(self.header_bar)
         self.tab_scan_btn.setObjectName(u"tab_scan_btn")
-        self.tab_scan_btn.setIcon(icon5)
+        icon10 = QIcon()
+        icon10.addFile(u":/assets/icons/scan.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.tab_scan_btn.setIcon(icon10)
         self.tab_scan_btn.setCheckable(True)
         self.tab_scan_btn.setChecked(True)
 
@@ -103,16 +105,18 @@ class Ui_MainWindow(object):
 
         self.tab_rules_btn = QPushButton(self.header_bar)
         self.tab_rules_btn.setObjectName(u"tab_rules_btn")
-        self.tab_rules_btn.setIcon(icon)
+        icon11 = QIcon()
+        icon11.addFile(u":/assets/icons/edit.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.tab_rules_btn.setIcon(icon11)
         self.tab_rules_btn.setCheckable(True)
 
         self.header_layout.addWidget(self.tab_rules_btn)
 
         self.tab_history_btn = QPushButton(self.header_bar)
         self.tab_history_btn.setObjectName(u"tab_history_btn")
-        icon10 = QIcon()
-        icon10.addFile(u":/icons/history.svg", QSize(), QIcon.Normal, QIcon.Off)
-        self.tab_history_btn.setIcon(icon10)
+        icon12 = QIcon()
+        icon12.addFile(u":/assets/icons/history.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.tab_history_btn.setIcon(icon12)
         self.tab_history_btn.setCheckable(True)
 
         self.header_layout.addWidget(self.tab_history_btn)
@@ -395,18 +399,18 @@ class Ui_MainWindow(object):
         self.pause_resume_btn = QPushButton(self.scanning_page)
         self.pause_resume_btn.setObjectName(u"pause_resume_btn")
         self.pause_resume_btn.setMinimumSize(QSize(140, 44))
-        icon11 = QIcon()
-        icon11.addFile(u":/icons/pause.svg", QSize(), QIcon.Normal, QIcon.Off)
-        self.pause_resume_btn.setIcon(icon11)
+        icon13 = QIcon()
+        icon13.addFile(u":/icons/pause.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.pause_resume_btn.setIcon(icon13)
 
         self.scanning_btn_row.addWidget(self.pause_resume_btn)
 
         self.cancel_btn = QPushButton(self.scanning_page)
         self.cancel_btn.setObjectName(u"cancel_btn")
         self.cancel_btn.setMinimumSize(QSize(140, 44))
-        icon12 = QIcon()
-        icon12.addFile(u":/icons/stop.svg", QSize(), QIcon.Normal, QIcon.Off)
-        self.cancel_btn.setIcon(icon12)
+        icon14 = QIcon()
+        icon14.addFile(u":/icons/stop.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.cancel_btn.setIcon(icon14)
 
         self.scanning_btn_row.addWidget(self.cancel_btn)
 
@@ -442,9 +446,9 @@ class Ui_MainWindow(object):
         self.rescan_btn = QPushButton(self.results_top_bar)
         self.rescan_btn.setObjectName(u"rescan_btn")
         self.rescan_btn.setMinimumSize(QSize(160, 50))
-        icon13 = QIcon()
-        icon13.addFile(u":/icons/rescan.svg", QSize(), QIcon.Normal, QIcon.Off)
-        self.rescan_btn.setIcon(icon13)
+        icon15 = QIcon()
+        icon15.addFile(u":/icons/rescan.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.rescan_btn.setIcon(icon15)
 
         self.results_top_layout.addWidget(self.rescan_btn)
 
@@ -452,9 +456,9 @@ class Ui_MainWindow(object):
         self.export_btn.setObjectName(u"export_btn")
         self.export_btn.setEnabled(False)
         self.export_btn.setMinimumSize(QSize(160, 50))
-        icon14 = QIcon()
-        icon14.addFile(u":/icons/export.svg", QSize(), QIcon.Normal, QIcon.Off)
-        self.export_btn.setIcon(icon14)
+        icon16 = QIcon()
+        icon16.addFile(u":/icons/export.svg", QSize(), QIcon.Normal, QIcon.Off)
+        self.export_btn.setIcon(icon16)
 
         self.results_top_layout.addWidget(self.export_btn)
 

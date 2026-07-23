@@ -20,8 +20,8 @@
    <string>设置</string>
   </property>
   <property name="windowIcon">
-   <iconset resource="../assets/resources.qrc">
-    <normaloff>:/icons/settings.svg</normaloff>:/icons/settings.svg</iconset>
+   <iconset resource="resources.qrc">
+    <normaloff>:/assets/icons/settings.svg</normaloff>:/assets/icons/settings.svg</iconset>
   </property>
   <layout class="QVBoxLayout" name="main_layout">
    <property name="spacing">
@@ -394,7 +394,7 @@
   </layout>
  </widget>
  <resources>
-  <include location="../assets/resources.qrc"/>
+  <include location="resources.qrc"/>
  </resources>
  <connections/>
 </ui>

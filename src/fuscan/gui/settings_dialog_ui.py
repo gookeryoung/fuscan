@@ -21,7 +21,7 @@ class Ui_SettingsDialog(object):
         SettingsDialog.resize(640, 620)
         SettingsDialog.setMinimumSize(QSize(640, 620))
         icon = QIcon()
-        icon.addFile(u":/icons/settings.svg", QSize(), QIcon.Normal, QIcon.Off)
+        icon.addFile(u":/assets/icons/settings.svg", QSize(), QIcon.Normal, QIcon.Off)
         SettingsDialog.setWindowIcon(icon)
         self.main_layout = QVBoxLayout(SettingsDialog)
         self.main_layout.setSpacing(12)

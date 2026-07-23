@@ -14,7 +14,7 @@ from PySide2.QtWidgets import *
 
 from fuscan.gui.result_tree import ResultTreeView
 
-from  . import resources_rc
+import resources_rc
 
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):

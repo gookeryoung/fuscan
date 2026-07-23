@@ -63,7 +63,7 @@
           <string>扫描</string>
          </property>
          <property name="icon">
-          <iconset resource="../assets/resources.qrc">
+          <iconset>
            <normaloff>:/icons/scan.svg</normaloff>:/icons/scan.svg</iconset>
          </property>
          <property name="checkable">
@@ -80,7 +80,7 @@
           <string>规则管理</string>
          </property>
          <property name="icon">
-          <iconset resource="../assets/resources.qrc">
+          <iconset>
            <normaloff>:/icons/load_list.svg</normaloff>:/icons/load_list.svg</iconset>
          </property>
          <property name="checkable">
@@ -94,7 +94,7 @@
           <string>扫描历史</string>
          </property>
          <property name="icon">
-          <iconset resource="../assets/resources.qrc">
+          <iconset>
            <normaloff>:/icons/history.svg</normaloff>:/icons/history.svg</iconset>
          </property>
          <property name="checkable">
@@ -121,7 +121,7 @@
           <string>设置</string>
          </property>
          <property name="icon">
-          <iconset resource="../assets/resources.qrc">
+          <iconset>
            <normaloff>:/icons/settings.svg</normaloff>:/icons/settings.svg</iconset>
          </property>
         </widget>
@@ -132,7 +132,7 @@
           <string>关于</string>
          </property>
          <property name="icon">
-          <iconset resource="../assets/resources.qrc">
+          <iconset>
            <normaloff>:/icons/about.svg</normaloff>:/icons/about.svg</iconset>
          </property>
         </widget>
@@ -631,7 +631,7 @@
                    <string>开始扫描</string>
                   </property>
                   <property name="icon">
-                   <iconset resource="../assets/resources.qrc">
+                   <iconset>
                     <normaloff>:/icons/scan.svg</normaloff>:/icons/scan.svg</iconset>
                   </property>
                  </widget>
@@ -728,7 +728,7 @@
                   <string>暂停扫描</string>
                  </property>
                  <property name="icon">
-                  <iconset resource="../assets/resources.qrc">
+                  <iconset>
                    <normaloff>:/icons/pause.svg</normaloff>:/icons/pause.svg</iconset>
                  </property>
                 </widget>
@@ -745,7 +745,7 @@
                   <string>取消扫描</string>
                  </property>
                  <property name="icon">
-                  <iconset resource="../assets/resources.qrc">
+                  <iconset>
                    <normaloff>:/icons/stop.svg</normaloff>:/icons/stop.svg</iconset>
                  </property>
                 </widget>
@@ -836,7 +836,7 @@
                    <string>重新扫描</string>
                   </property>
                   <property name="icon">
-                   <iconset resource="../assets/resources.qrc">
+                   <iconset>
                     <normaloff>:/icons/rescan.svg</normaloff>:/icons/rescan.svg</iconset>
                   </property>
                  </widget>
@@ -859,7 +859,7 @@
                    <string>导出结果</string>
                   </property>
                   <property name="icon">
-                   <iconset resource="../assets/resources.qrc">
+                   <iconset>
                     <normaloff>:/icons/export.svg</normaloff>:/icons/export.svg</iconset>
                   </property>
                  </widget>
@@ -1381,7 +1381,7 @@
                 <string>加载规则...</string>
                </property>
                <property name="icon">
-                <iconset resource="../assets/resources.qrc">
+                <iconset>
                  <normaloff>:/icons/load_list.svg</normaloff>:/icons/load_list.svg</iconset>
                </property>
               </widget>
@@ -1401,7 +1401,7 @@
                 <string>编辑</string>
                </property>
                <property name="icon">
-                <iconset resource="../assets/resources.qrc">
+                <iconset>
                  <normaloff>:/icons/edit.svg</normaloff>:/icons/edit.svg</iconset>
                </property>
               </widget>
@@ -1558,7 +1558,7 @@
   </widget>
   <action name="load_rules_action">
    <property name="icon">
-    <iconset resource="../assets/resources.qrc">
+    <iconset>
      <normaloff>:/icons/load_list.svg</normaloff>:/icons/load_list.svg</iconset>
    </property>
    <property name="text">
@@ -1570,7 +1570,7 @@
   </action>
   <action name="edit_rules_action">
    <property name="icon">
-    <iconset resource="../assets/resources.qrc">
+    <iconset>
      <normaloff>:/icons/edit.svg</normaloff>:/icons/edit.svg</iconset>
    </property>
    <property name="text">
@@ -1582,7 +1582,7 @@
   </action>
   <action name="export_csv_action">
    <property name="icon">
-    <iconset resource="../assets/resources.qrc">
+    <iconset>
      <normaloff>:/icons/export_csv.svg</normaloff>:/icons/export_csv.svg</iconset>
    </property>
    <property name="text">
@@ -1594,7 +1594,7 @@
   </action>
   <action name="export_json_action">
    <property name="icon">
-    <iconset resource="../assets/resources.qrc">
+    <iconset>
      <normaloff>:/icons/export_json.svg</normaloff>:/icons/export_json.svg</iconset>
    </property>
    <property name="text">
@@ -1614,7 +1614,7 @@
   </action>
   <action name="select_path_action">
    <property name="icon">
-    <iconset resource="../assets/resources.qrc">
+    <iconset>
      <normaloff>:/icons/search.svg</normaloff>:/icons/search.svg</iconset>
    </property>
    <property name="text">
@@ -1623,7 +1623,7 @@
   </action>
   <action name="scan_action">
    <property name="icon">
-    <iconset resource="../assets/resources.qrc">
+    <iconset>
      <normaloff>:/icons/scan.svg</normaloff>:/icons/scan.svg</iconset>
    </property>
    <property name="text">
@@ -1635,7 +1635,7 @@
   </action>
   <action name="manual_action">
    <property name="icon">
-    <iconset resource="../assets/resources.qrc">
+    <iconset>
      <normaloff>:/icons/manual.svg</normaloff>:/icons/manual.svg</iconset>
    </property>
    <property name="text">
@@ -1647,7 +1647,7 @@
   </action>
   <action name="about_action">
    <property name="icon">
-    <iconset resource="../assets/resources.qrc">
+    <iconset>
      <normaloff>:/icons/about.svg</normaloff>:/icons/about.svg</iconset>
    </property>
    <property name="text">
@@ -1656,7 +1656,7 @@
   </action>
   <action name="regex_tester_action">
    <property name="icon">
-    <iconset resource="../assets/resources.qrc">
+    <iconset>
      <normaloff>:/icons/search.svg</normaloff>:/icons/search.svg</iconset>
    </property>
    <property name="text">
@@ -1668,7 +1668,7 @@
   </action>
   <action name="settings_action">
    <property name="icon">
-    <iconset resource="../assets/resources.qrc">
+    <iconset>
      <normaloff>:/icons/settings.svg</normaloff>:/icons/settings.svg</iconset>
    </property>
    <property name="text">
@@ -1680,7 +1680,7 @@
   </action>
   <action name="perf_stats_action">
    <property name="icon">
-    <iconset resource="../assets/resources.qrc">
+    <iconset>
      <normaloff>:/icons/stats.svg</normaloff>:/icons/stats.svg</iconset>
    </property>
    <property name="text">
@@ -1704,7 +1704,7 @@
   </customwidget>
  </customwidgets>
  <resources>
-  <include location="../assets/resources.qrc"/>
+  <include location="resources.qrc"/>
  </resources>
  <connections/>
 </ui>

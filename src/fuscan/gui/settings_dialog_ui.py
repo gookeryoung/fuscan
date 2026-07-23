@@ -12,7 +12,7 @@ from PySide2.QtCore import *
 from PySide2.QtGui import *
 from PySide2.QtWidgets import *
 
-from  . import resources_rc
+import resources_rc
 
 class Ui_SettingsDialog(object):
     def setupUi(self, SettingsDialog):

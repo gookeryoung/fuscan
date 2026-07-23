@@ -1,0 +1,24 @@
+<RCC>
+  <qresource prefix="/">
+    <file>../assets/icons/about.svg</file>
+    <file>../assets/icons/all_disk.svg</file>
+    <file>../assets/icons/disk.svg</file>
+    <file>../assets/icons/edit.svg</file>
+    <file>../assets/icons/export.svg</file>
+    <file>../assets/icons/export_csv.svg</file>
+    <file>../assets/icons/export_json.svg</file>
+    <file>../assets/icons/folder.svg</file>
+    <file>../assets/icons/hard_disk.svg</file>
+    <file>../assets/icons/history.svg</file>
+    <file>../assets/icons/load_list.svg</file>
+    <file>../assets/icons/manual.svg</file>
+    <file>../assets/icons/pause.svg</file>
+    <file>../assets/icons/rescan.svg</file>
+    <file>../assets/icons/scan.svg</file>
+    <file>../assets/icons/search.svg</file>
+    <file>../assets/icons/settings.svg</file>
+    <file>../assets/icons/stats.svg</file>
+    <file>../assets/icons/stop.svg</file>
+    <file>../assets/icons/target.svg</file>
+  </qresource>
+</RCC>

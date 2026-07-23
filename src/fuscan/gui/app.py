@@ -26,11 +26,6 @@ __all__ = ["launch", "load_stylesheet"]
 
 logger = logging.getLogger(__name__)
 
-DIR_ASSETS = Path(__file__).parent.parent / "assets"
-
-# 确保资产目录在 Python 路径中，以便导入自定义模块
-sys.path.append(str(DIR_ASSETS))
-
 # QSS 样式表路径（与本模块同目录）
 _QSS_PATH = Path(__file__).parent / "styles.qss"
 

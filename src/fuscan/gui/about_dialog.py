@@ -1,7 +1,13 @@
+"""关于对话框：展示 fuscan 版本、描述、作者与许可证。"""
+
+from __future__ import annotations
+
+from typing import Optional
+
 try:
-    from PySide2.QtWidgets import QDialog
-except ImportError:
-    from PySide6.QtWidgets import QDialog
+    from PySide2.QtWidgets import QDialog, QWidget
+except ImportError:  # pragma: no cover
+    from PySide6.QtWidgets import QDialog, QWidget  # pyrefly: ignore [missing-import]
 
 
 from fuscan import __author__, __description__, __license__, __version__
@@ -9,8 +15,10 @@ from fuscan import __author__, __description__, __license__, __version__
 from .about_dialog_ui import Ui_AboutDialog
 
 
-class AboutDialog(QDialog, Ui_AboutDialog):
-    def __init__(self, parent=None):
+class AboutDialog(QDialog, Ui_AboutDialog):  # pyrefly: ignore [invalid-inheritance]
+    """关于 fuscan 对话框。"""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setupUi(self)
 

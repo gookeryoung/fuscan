@@ -25,13 +25,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 try:
-    from PySide2.QtCore import QPoint, QSize, Qt, QTimer, QUrl, Slot
+    from PySide2.QtCore import QPoint, Qt, QTimer, QUrl, Slot
     from PySide2.QtGui import (
         QDesktopServices,
         QKeySequence,
     )
     from PySide2.QtWidgets import (
-        QAbstractButton,
         QAction,
         QApplication,
         QButtonGroup,
@@ -52,14 +51,13 @@ try:
         QWidget,
     )
 except ImportError:  # pragma: no cover
-    from PySide6.QtCore import QPoint, QSize, Qt, QUrl, Slot  # pyrefly: ignore [missing-import]
+    from PySide6.QtCore import QPoint, Qt, QUrl, Slot  # pyrefly: ignore [missing-import]
     from PySide6.QtGui import (  # pyrefly: ignore [missing-import]
         QAction,
         QKeySequence,
         QShortcut,
     )
     from PySide6.QtWidgets import (  # pyrefly: ignore [missing-import]
-        QAbstractButton,
         QApplication,
         QButtonGroup,
         QDialog,
@@ -146,13 +144,14 @@ from fuscan.gui.icons import (
 )
 from fuscan.gui.main_window_ui import Ui_MainWindow
 from fuscan.gui.preview_utils import SEVERITY_BACKGROUNDS, severity_text
+from fuscan.gui.scan_mode_panel import ScanModePanel
 from fuscan.gui.scan_path_history import ScanPathHistory
 from fuscan.gui.scan_progress_lists import ScanListUpdater
 from fuscan.gui.worker import ScanWorker
 from fuscan.perf import PerfTimer, set_perf_enabled
 from fuscan.rules import RuleError, load_ruleset, merge_multiple_rulesets
 from fuscan.rules.model import RuleSet, Severity
-from fuscan.scanner import ScanReport, list_drives
+from fuscan.scanner import ScanReport
 from fuscan.scanner.result import ScanResult
 from fuscan.skip_store import SkipStore
 
@@ -221,10 +220,7 @@ _EXPORT_FORMATS: tuple[tuple[str, str, str], ...] = (
 _EXPORT_LABEL_TO_FMT: dict[str, str] = {label: fmt for label, fmt, _ in _EXPORT_FORMATS}
 _EXPORT_FMT_TO_EXT: dict[str, str] = {fmt: ext for _, fmt, ext in _EXPORT_FORMATS}
 
-# 扫描模式 ↔ combo index 双向映射（避免 _on_scan_mode_changed 与 _update_target_visibility
-# 各自维护一份字面量字典导致漂移）
-_SCAN_MODE_TO_INDEX: dict[str, int] = {"full": 0, "drive": 1, "folder": 2}
-_INDEX_TO_SCAN_MODE: dict[int, str] = {v: k for k, v in _SCAN_MODE_TO_INDEX.items()}
+# 扫描模式 ↔ combo index 双向映射已移到 ScanModePanel（iter-79 续解耦）
 
 # 扫描阶段 ↔ current_file_label 前缀文案映射（iter-79 四阶段）：
 # ProgressInfo.phase 取值见 fuscan.scanner.result.ProgressInfo；缺省回退到"文件解析"。
@@ -273,14 +269,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
             self._config: Config = load_config()
             self._ruleset: RuleSet | None = None
             self._rules_paths: list[Path] = []
-            self._scan_root: Path | None = None
             self._last_report: ScanReport | None = None
             self._worker: ScanWorker | None = None
             self._scan_state: ScanState = ScanState.IDLE
             self._workflow_stage: WorkflowStage = WorkflowStage.SETUP
             self._use_builtin: bool = True
-            # 扫描模式："full"（全盘）、"drive"（盘符）、"folder"（文件夹）
-            self._scan_mode: str = "folder"
             # 取消中标志（iter-79）：用户点击取消后置 True，扫描线程退出前
             # 进度回调 _on_scan_progress 据此跳过 UI 覆盖，保留"取消中..."文案
             # 与不确定进度动画；_reset_scan_ui 中重置为 False
@@ -291,10 +284,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
             # 扫描路径历史：维护去重 + 最近优先 + 限量的路径列表，同步
             # path_combo 与 history_list 两个控件（单一数据源避免内容漂移）
             self._path_history: ScanPathHistory = ScanPathHistory(self.path_combo, self.history_list)
-            # 盘符按钮组（平铺选择，替代下拉）
-            self._drive_button_group: QButtonGroup | None = None
-            self._drive_buttons: list[QPushButton] = []
-            self._selected_drive: str | None = None
             # 扫描结果缓存（启用时惰性创建，关闭窗口时释放）
             self._cache: CacheStore | None = None
             # 用户跳过路径持久化存储（iter-77）：详情区「标记为跳过」按钮写入，
@@ -351,6 +340,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self._setup_scan_stats_panel()
         self._setup_icons()
         self._setup_button_groups()
+        self._setup_scan_mode_panel()
         self._setup_sidebar()
         self._setup_file_types()
         self._connect_signals()
@@ -491,7 +481,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
                 primary_cache[icon_path] = _load_themed_icon(icon_path, theme.COLOR_PRIMARY)
             self.scan_mode_combo.setItemIcon(index, primary_cache[icon_path])
 
-        # 盘符按钮复用主色 hard_disk 变体（_refresh_drive_buttons 在 _apply_config 时按需读取）
+        # 盘符按钮复用主色 hard_disk 变体（ScanModePanel 构造时按需读取）
         if _ICON_HARD_DISK not in primary_cache:
             primary_cache[_ICON_HARD_DISK] = _load_themed_icon(_ICON_HARD_DISK, theme.COLOR_PRIMARY)
         self._icon_hard_disk = primary_cache[_ICON_HARD_DISK]
@@ -511,18 +501,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self._icon_history_on_primary = on_primary_cache[_ICON_HISTORY]
 
     def _setup_button_groups(self) -> None:
-        """初始化头部 Tab 按钮互斥组与盘符按钮组。"""
+        """初始化头部 Tab 按钮互斥组（盘符按钮组已移到 ScanModePanel）。"""
         # 头部 Tab 按钮互斥组（id 0=扫描 / 1=规则 / 2=历史）
         self._header_button_group = QButtonGroup(self)
         self._header_button_group.setExclusive(True)
         self._header_button_group.addButton(self.tab_scan_btn, 0)
         self._header_button_group.addButton(self.tab_rules_btn, 1)
         self._header_button_group.addButton(self.tab_history_btn, 2)
-        # 盘符按钮组（平铺选择，替代下拉）
-        self._drive_button_group = QButtonGroup(self)
-        self._drive_button_group.setExclusive(True)
-        self._drive_button_group.buttonClicked.connect(self._on_drive_selected)
-        self._refresh_drive_buttons()
 
     def _setup_sidebar(self) -> None:
         """填充侧边栏阶段项（深色背景用白色变体；配置 / 扫描中 / 结果）。"""
@@ -533,6 +518,24 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self.sidebar.addItem(QListWidgetItem(self._icon_history_on_primary, "结果"))  # pyrefly: ignore [missing-argument]
         self.sidebar.setCurrentRow(0)  # pyrefly: ignore [missing-argument]
         self.sidebar.blockSignals(False)
+
+    def _setup_scan_mode_panel(self) -> None:
+        """构造扫描模式选择面板控制器（模式 combo + 盘符按钮组 + folder 路径）。
+
+        委托 :class:`ScanModePanel` 封装 ``scan_mode_combo`` 切换、盘符按钮组
+        创建/刷新/选择、folder 路径状态管理（iter-79 续内聚重构）。
+        主窗口通过公共 API（``apply_config`` / ``save_config`` /
+        ``can_start_scan`` / ``build_scan_roots`` / ``set_folder_root`` 等）驱动，
+        不直接操作底层控件。``mode_changed`` 信号触发 ``_update_scan_button``。
+        """
+        self._scan_mode_panel = ScanModePanel(
+            combo=self.scan_mode_combo,
+            target_stack=self.target_stack,
+            drive_buttons_layout=self.drive_buttons_layout,
+            hard_disk_icon=self._icon_hard_disk,
+            config=self._config,
+            parent=self,
+        )
 
     def _setup_file_types(self) -> None:
         """构造内容 TAB 面板控制器（文件类型树 + 忽略目录 + 忽略扩展名）。
@@ -559,8 +562,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self.pause_resume_btn.clicked.connect(self._on_pause_resume)
         self.cancel_btn.clicked.connect(self._on_cancel_scan)
         self.rescan_btn.clicked.connect(self._on_rescan)
-        # 扫描目标
-        self.scan_mode_combo.currentIndexChanged.connect(self._on_scan_mode_changed)
+        # 扫描目标（scan_mode_combo 信号已由 ScanModePanel 内部连接）
+        self._scan_mode_panel.mode_changed.connect(self._update_scan_button)  # pyrefly: ignore [missing-attribute]
         self.path_combo.currentIndexChanged.connect(self._on_path_selected)
         self.select_path_btn.clicked.connect(self._on_select_path)
         # 规则
@@ -761,11 +764,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
             return True
         if self._ruleset is None:
             return False
-        if self._scan_mode == "full":
-            return True
-        if self._scan_mode == "drive":
-            return self._selected_drive is not None
-        return self._scan_root is not None
+        return self._scan_mode_panel.can_start_scan()
 
     def _on_view_results(self) -> None:
         """配置页"查看结果"按钮：切换到结果页。"""
@@ -812,21 +811,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         if self._config.splitter_sizes:
             self.results_splitter.setSizes(self._config.splitter_sizes)
 
-        # 恢复扫描模式
-        self._scan_mode = self._config.scan_mode if self._config.scan_mode in ("full", "drive", "folder") else "folder"
-        self.scan_mode_combo.blockSignals(True)
-        self.scan_mode_combo.setCurrentIndex(_SCAN_MODE_TO_INDEX[self._scan_mode])
-        self.scan_mode_combo.blockSignals(False)
-        self._update_target_visibility()
-
-        # 恢复上次选择的盘符
-        if self._config.last_drive:
-            target = self._config.last_drive
-            for btn in self._drive_buttons:
-                if btn.property("drive") == target:  # pyrefly: ignore [bad-argument-type]
-                    btn.setChecked(True)
-                    self._selected_drive = target
-                    break
+        # 恢复扫描模式与盘符选择（委托 ScanModePanel，内部 blockSignals
+        # 避免 currentIndexChanged 触发 _on_mode_changed 重复 emit mode_changed）
+        self._scan_mode_panel.apply_config(self._config)
 
         self._use_builtin = self._config.use_builtin
 
@@ -835,10 +822,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         # 恢复扫描路径历史（同步 path_combo 与 history_list 两个控件）
         self._path_history.load_from_config(self._config.scan_paths)
 
-        # 恢复首个有效路径作为扫描目标，启用扫描按钮
-        if self._scan_mode == "folder" and self.path_combo.count() > 0:
+        # 恢复首个有效路径作为 folder 模式根路径（委托 ScanModePanel.set_folder_root）
+        if self.path_combo.count() > 0:
             first_path = Path(self.path_combo.itemText(0))
-            self._scan_root = first_path if first_path.exists() else None
+            self._scan_mode_panel.set_folder_root(first_path if first_path.exists() else None)
         self._update_scan_button()
 
         # 恢复性能日志开关（blockSignals 避免 toggled 触发 _save_config 循环）
@@ -886,8 +873,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self._config.window_geometry = [geo.x(), geo.y(), geo.width(), geo.height()]
         self._config.window_state = "maximized" if self.isMaximized() else "normal"
         self._config.splitter_sizes = list(self.results_splitter.sizes())
-        self._config.scan_mode = self._scan_mode
-        self._config.last_drive = self._selected_drive
+        # 扫描模式与盘符选择委托 ScanModePanel 保存
+        self._scan_mode_panel.save_config(self._config)
         self._config.rules_paths = [str(p) for p in self._rules_paths]
         self._config.use_builtin = self._use_builtin
         self._config.scan_paths = self._path_history.get_paths()
@@ -909,8 +896,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         if not path.exists():
             QMessageBox.information(self, "提示", f"路径不存在:\n{path_str}")
             return
-        self.scan_mode_combo.setCurrentIndex(2)
-        self._scan_root = path
+        self._scan_mode_panel.select_folder_mode()
+        self._scan_mode_panel.set_folder_root(path)
         self._add_scan_path_history(path_str)
         self._update_stage_actions()
 
@@ -948,53 +935,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self._refresh_rules_file_list()
         self._update_scan_button()
 
-    # ----------------------------- 扫描模式 -----------------------------
-
-    def _on_scan_mode_changed(self, index: int) -> None:
-        """扫描模式切换：更新目标选择器可见性与扫描按钮状态。"""
-        self._scan_mode = _INDEX_TO_SCAN_MODE.get(index, "folder")
-        self._update_target_visibility()
-        self._update_scan_button()
-
-    def _update_target_visibility(self) -> None:
-        """根据扫描模式切换目标选择区页面（QStackedWidget 保持布局稳定）。"""
-        self.target_stack.setCurrentIndex(_SCAN_MODE_TO_INDEX.get(self._scan_mode, 2))
-
-    def _refresh_drive_buttons(self) -> None:
-        """刷新盘符按钮列表（hard_disk 图标 + 盘符字母，平铺展示）。"""
-        # 清除旧按钮
-        for btn in self._drive_buttons:
-            self._drive_button_group.removeButton(btn)  # pyrefly: ignore [missing-attribute]
-            self.drive_buttons_layout.removeWidget(btn)
-            btn.deleteLater()
-        self._drive_buttons.clear()
-
-        for drive in list_drives(include_network=self._config.include_network_drives):
-            letter = str(drive)[:1]
-            btn = QPushButton(letter, self.target_stack.widget(1))
-            btn.setObjectName(f"drive_btn_{letter}")
-            btn.setCheckable(True)
-            btn.setProperty("drive", str(drive))  # pyrefly: ignore [bad-argument-type]
-            btn.setIcon(self._icon_hard_disk)
-            btn.setIconSize(QSize(14, self._config.drive_icon_size))
-            self.drive_buttons_layout.addWidget(btn)  # pyrefly: ignore [missing-argument]
-            self._drive_button_group.addButton(btn)  # pyrefly: ignore [missing-attribute]
-            self._drive_buttons.append(btn)
-
-    def _on_drive_selected(self, _button: QAbstractButton) -> None:
-        """盘符按钮选择变更。"""
-        checked = self._drive_button_group.checkedButton() if self._drive_button_group else None
-        self._selected_drive = checked.property("drive") if checked is not None else None  # pyrefly: ignore [bad-argument-type]
-        self._update_scan_button()
-
-    def _build_scan_roots(self) -> list[Path]:
-        """根据扫描模式构造根路径列表。"""
-        if self._scan_mode == "full":
-            return list_drives(include_network=self._config.include_network_drives)
-        if self._scan_mode == "drive":
-            return [Path(self._selected_drive)] if self._selected_drive else []
-        # folder 模式
-        return [self._scan_root] if self._scan_root else []
+    # 扫描模式相关方法（_on_scan_mode_changed / _update_target_visibility /
+    # _refresh_drive_buttons / _on_drive_selected / _build_scan_roots）已移到
+    # ScanModePanel（iter-79 续解耦），主窗口通过 self._scan_mode_panel 公共 API 驱动
 
     # ----------------------------- 槽函数 -----------------------------
 
@@ -1043,28 +986,25 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         path_str = QFileDialog.getExistingDirectory(
             self,
             "选择扫描目录",
-            str(self._scan_root or Path.home()),
+            str(self._scan_mode_panel.folder_root or Path.home()),
         )
         if not path_str:
             return
         path = Path(path_str)
-        self._scan_root = path
+        self._scan_mode_panel.set_folder_root(path)
         self._add_scan_path_history(str(path))
-        self._update_scan_button()
 
     def _on_path_selected(self, index: int) -> None:
         """从历史下拉选择扫描路径。"""
         if index < 0:
-            self._scan_root = None
-            self._update_scan_button()
+            self._scan_mode_panel.set_folder_root(None)
             return
         path_str = self.path_combo.itemText(index)
         if not path_str:
-            self._scan_root = None
+            self._scan_mode_panel.set_folder_root(None)
         else:
             path = Path(path_str)
-            self._scan_root = path if path.exists() else None
-        self._update_scan_button()
+            self._scan_mode_panel.set_folder_root(path if path.exists() else None)
 
     def _on_scan(self) -> None:
         """开始扫描（仅配置页可触发，扫描中页的暂停/继续由 _on_pause_resume 处理）。"""
@@ -1076,7 +1016,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         if self._ruleset is None:
             return
 
-        roots = self._build_scan_roots()
+        roots = self._scan_mode_panel.build_scan_roots()
         if not roots:
             QMessageBox.warning(self, "提示", "未选择有效的扫描目标")
             return
@@ -1480,7 +1420,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         if dialog.exec_() == QDialog.Accepted:
             self._save_config()
             self._set_use_builtin(self._config.use_builtin)
-            self._refresh_drive_buttons()
+            self._scan_mode_panel.refresh_drives()
             # 缓存配置变更时释放旧 CacheStore，下次扫描按新配置重建
             cache_changed = not self._config.cache_enabled or self._config.cache_path != prev_cache_path
             if prev_cache_enabled and cache_changed and self._cache is not None:

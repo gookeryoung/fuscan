@@ -275,7 +275,7 @@ rules:
             lambda *args, **kwargs: str(tmp_path),
         )
         window._on_select_path()
-        assert window._scan_root == tmp_path
+        assert window._scan_mode_panel.folder_root == tmp_path
         window.close()
 
     def test_update_scan_button_state(self, qapp: QApplication, tmp_path: Path) -> None:
@@ -289,7 +289,7 @@ rules:
         assert not window.scan_btn.isEnabled()
 
         # 设置路径
-        window._scan_root = tmp_path
+        window._scan_mode_panel._folder_root = tmp_path
         window._update_scan_button()
         assert window.scan_btn.isEnabled()
         window.close()
@@ -387,7 +387,7 @@ class TestBuiltinRulesToggle:
         # 未选路径时按钮禁用
         assert not window.scan_btn.isEnabled()
         # 选择路径后按钮启用
-        window._scan_root = tmp_path
+        window._scan_mode_panel._folder_root = tmp_path
         window._update_scan_button()
         assert window.scan_btn.isEnabled()
         window.close()
@@ -933,7 +933,7 @@ class TestConfigPersistence:
         window = MainWindow()
         window.path_combo.addItem(str(tmp_path / "target"))  # pyrefly: ignore [missing-argument]
         window.path_combo.setCurrentIndex(0)
-        assert window._scan_root == tmp_path / "target"
+        assert window._scan_mode_panel.folder_root == tmp_path / "target"
         window.close()
 
     def test_path_history_dedup(self, qapp: QApplication, tmp_path: Path) -> None:
@@ -1006,7 +1006,7 @@ class TestConfigPersistence:
         _save_impl(config, tmp_path / "config.yaml")
 
         window = MainWindow()
-        assert window._scan_root == scan_dir
+        assert window._scan_mode_panel.folder_root == scan_dir
         assert window.scan_btn.isEnabled()
         window.close()
 
@@ -1019,7 +1019,7 @@ class TestConfigPersistence:
         _save_impl(config, tmp_path / "config.yaml")
 
         window = MainWindow()
-        assert window._scan_root is None
+        assert window._scan_mode_panel.folder_root is None
         assert not window.scan_btn.isEnabled()
         window.close()
 
@@ -1032,7 +1032,7 @@ class TestConfigPersistence:
         _save_impl(config, tmp_path / "config.yaml")
 
         window = MainWindow()
-        assert window._scan_root is None
+        assert window._scan_mode_panel.folder_root is None
         assert not window.scan_btn.isEnabled()
         window.close()
 
@@ -1203,8 +1203,8 @@ class TestScanControlIntegration:
         window.show()
         qapp.processEvents()
         window._ruleset = _build_ruleset()
-        window._scan_root = tmp_path
-        window._scan_mode = "folder"
+        window._scan_mode_panel._folder_root = tmp_path
+        window._scan_mode_panel._scan_mode = "folder"
         window._on_scan()
 
         assert window._scan_state == ScanState.RUNNING
@@ -1232,8 +1232,8 @@ class TestScanControlIntegration:
 
         window = MainWindow()
         window._ruleset = _build_ruleset()
-        window._scan_root = tmp_path
-        window._scan_mode = "folder"
+        window._scan_mode_panel._folder_root = tmp_path
+        window._scan_mode_panel._scan_mode = "folder"
 
         # 模拟扫描中状态
         window._scan_state = ScanState.RUNNING
@@ -1272,8 +1272,8 @@ class TestScanControlIntegration:
         )
         window = MainWindow()
         window._ruleset = _build_ruleset()
-        window._scan_mode = "folder"
-        window._scan_root = None
+        window._scan_mode_panel._scan_mode = "folder"
+        window._scan_mode_panel._folder_root = None
         window._on_scan()
         assert warned["called"]
         assert window._scan_state == ScanState.IDLE
@@ -1295,8 +1295,8 @@ class TestWorkflowStage:
         (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
         window = MainWindow()
         window._ruleset = _build_ruleset()
-        window._scan_root = tmp_path
-        window._scan_mode = "folder"
+        window._scan_mode_panel._folder_root = tmp_path
+        window._scan_mode_panel._scan_mode = "folder"
         window._on_scan()
         assert window._scan_state == ScanState.RUNNING
         assert window.main_stack.currentIndex() == 1
@@ -1400,8 +1400,8 @@ class TestWorkflowStage:
         (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
         window = MainWindow()
         window._ruleset = _build_ruleset()
-        window._scan_root = tmp_path
-        window._scan_mode = "folder"
+        window._scan_mode_panel._folder_root = tmp_path
+        window._scan_mode_panel._scan_mode = "folder"
         window._update_stage_actions()
         assert window.scan_btn.isEnabled()
         window.close()
@@ -2987,7 +2987,7 @@ class TestScanMode:
     def test_default_mode_is_folder(self, qapp: QApplication) -> None:
         """启动时默认扫描模式为 folder。"""
         window = MainWindow()
-        assert window._scan_mode == "folder"
+        assert window._scan_mode_panel._scan_mode == "folder"
         assert window.scan_mode_combo.currentIndex() == 2
         window.close()
 
@@ -3006,7 +3006,7 @@ class TestScanMode:
         window.show()
         qapp.processEvents()
         window.scan_mode_combo.setCurrentIndex(0)
-        assert window._scan_mode == "full"
+        assert window._scan_mode_panel._scan_mode == "full"
         assert window.target_stack.currentIndex() == 0
         window.close()
 
@@ -3016,7 +3016,7 @@ class TestScanMode:
         window.show()
         qapp.processEvents()
         window.scan_mode_combo.setCurrentIndex(1)
-        assert window._scan_mode == "drive"
+        assert window._scan_mode_panel._scan_mode == "drive"
         assert window.target_stack.currentIndex() == 1
         window.close()
 
@@ -3036,22 +3036,22 @@ class TestScanMode:
         window = MainWindow()
         window.scan_mode_combo.setCurrentIndex(1)
         # 盘符按钮在测试环境（Windows）通常有盘符
-        if len(window._drive_buttons) > 0:
-            window._drive_buttons[0].setChecked(True)
-            window._on_drive_selected(window._drive_buttons[0])
+        if len(window._scan_mode_panel._drive_buttons) > 0:
+            window._scan_mode_panel._drive_buttons[0].setChecked(True)
+            window._scan_mode_panel._on_drive_selected(window._scan_mode_panel._drive_buttons[0])
             assert window.scan_btn.isEnabled()
         window.close()
 
     def test_build_scan_roots_full_mode(self, qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
         """full 模式应返回所有盘符。"""
-        from fuscan.gui import main_window as mw_mod
+        from fuscan.gui import scan_mode_panel as smp_mod
 
         fake_drives = [Path("C:\\"), Path("D:\\")]
-        monkeypatch.setattr(mw_mod, "list_drives", lambda include_network=False: fake_drives)
+        monkeypatch.setattr(smp_mod, "list_drives", lambda include_network=False: fake_drives)
 
         window = MainWindow()
         window.scan_mode_combo.setCurrentIndex(0)
-        roots = window._build_scan_roots()
+        roots = window._scan_mode_panel.build_scan_roots()
         assert roots == fake_drives
         window.close()
 
@@ -3059,26 +3059,26 @@ class TestScanMode:
         """drive 模式应返回选中的单个盘符。"""
         window = MainWindow()
         window.scan_mode_combo.setCurrentIndex(1)
-        if len(window._drive_buttons) > 0:
-            window._drive_buttons[0].setChecked(True)
-            window._on_drive_selected(window._drive_buttons[0])
-            roots = window._build_scan_roots()
+        if len(window._scan_mode_panel._drive_buttons) > 0:
+            window._scan_mode_panel._drive_buttons[0].setChecked(True)
+            window._scan_mode_panel._on_drive_selected(window._scan_mode_panel._drive_buttons[0])
+            roots = window._scan_mode_panel.build_scan_roots()
             assert len(roots) == 1
         window.close()
 
     def test_build_scan_roots_folder_mode(self, qapp: QApplication, tmp_path: Path) -> None:
         """folder 模式应返回选中的路径。"""
         window = MainWindow()
-        window._scan_root = tmp_path
-        roots = window._build_scan_roots()
+        window._scan_mode_panel._folder_root = tmp_path
+        roots = window._scan_mode_panel.build_scan_roots()
         assert roots == [tmp_path]
         window.close()
 
     def test_build_scan_roots_folder_mode_empty(self, qapp: QApplication) -> None:
         """folder 模式未选路径时返回空列表。"""
         window = MainWindow()
-        window._scan_root = None
-        roots = window._build_scan_roots()
+        window._scan_mode_panel._folder_root = None
+        roots = window._scan_mode_panel.build_scan_roots()
         assert roots == []
         window.close()
 
@@ -3095,7 +3095,7 @@ class TestScanModePersistence:
         _save_impl(config, tmp_path / "config.yaml")
 
         window = MainWindow()
-        assert window._scan_mode == "full"
+        assert window._scan_mode_panel._scan_mode == "full"
         assert window.scan_mode_combo.currentIndex() == 0
         window.close()
 
@@ -3108,7 +3108,7 @@ class TestScanModePersistence:
         _save_impl(config, tmp_path / "config.yaml")
 
         window = MainWindow()
-        assert window._scan_mode == "drive"
+        assert window._scan_mode_panel._scan_mode == "drive"
         assert window.scan_mode_combo.currentIndex() == 1
         window.close()
 
@@ -3130,18 +3130,18 @@ class TestScanModePersistence:
 
         # 使用存在的盘符
         window = MainWindow()
-        if len(window._drive_buttons) == 0:
+        if len(window._scan_mode_panel._drive_buttons) == 0:
             window.close()
             pytest.skip("无可用盘符")
-        first_drive = window._drive_buttons[0].property("drive")  # pyrefly: ignore [bad-argument-type]
+        first_drive = window._scan_mode_panel._drive_buttons[0].property("drive")  # pyrefly: ignore [bad-argument-type]
         window.close()
 
         config = Config(scan_mode="drive", last_drive=first_drive)
         _save_impl(config, tmp_path / "config.yaml")
 
         window = MainWindow()
-        assert window._scan_mode == "drive"
-        assert window._selected_drive == first_drive
+        assert window._scan_mode_panel._scan_mode == "drive"
+        assert window._scan_mode_panel._selected_drive == first_drive
         window.close()
 
 
@@ -5270,8 +5270,8 @@ class TestScanCallbacks:
 
         window = MainWindow()
         window._ruleset = _build_ruleset()
-        window._scan_root = tmp_path
-        window._scan_mode = "folder"
+        window._scan_mode_panel._folder_root = tmp_path
+        window._scan_mode_panel._scan_mode = "folder"
         # 先填充非零统计
         window._update_scan_stats(passed=80, matched=10, skipped=5, errors=3)
         assert "已通过 80" in window.scan_stats_label.text()
@@ -5635,7 +5635,7 @@ class TestScanCallbacks:
         scanner = Scanner(rs)
 
         window = MainWindow()
-        window._scan_root = tmp_path
+        window._scan_mode_panel._folder_root = tmp_path
         window._ruleset = rs
         # 手动创建 worker 以测试暂停/恢复
         window._worker = ScanWorker(scanner, tmp_path)  # pyrefly: ignore [bad-argument-type]
@@ -5999,7 +5999,7 @@ class TestExportAndMenu:
         window = MainWindow()
         item = QListWidgetItem(str(scan_dir))
         window._on_history_item_double_clicked(item)
-        assert window._scan_root == scan_dir
+        assert window._scan_mode_panel.folder_root == scan_dir
         window.close()
 
     def test_close_event_saves_config(self, qapp: QApplication, tmp_path: Path) -> None:

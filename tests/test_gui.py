@@ -1415,6 +1415,31 @@ class TestWorkflowStage:
         assert window.rescan_btn.isEnabled()
         window.close()
 
+    def test_pause_cancel_btn_disabled_in_setup(self, qapp: QApplication) -> None:
+        """SETUP 阶段（扫描前）暂停与取消按钮应禁用。"""
+        window = MainWindow()
+        window._update_stage_actions()
+        assert not window.pause_resume_btn.isEnabled()
+        assert not window.cancel_btn.isEnabled()
+        window.close()
+
+    def test_pause_cancel_btn_enabled_in_scanning(self, qapp: QApplication) -> None:
+        """SCANNING 阶段暂停与取消按钮应启用。"""
+        window = MainWindow()
+        window._scan_state = ScanState.RUNNING
+        window._switch_stage(WorkflowStage.SCANNING)
+        assert window.pause_resume_btn.isEnabled()
+        assert window.cancel_btn.isEnabled()
+        window.close()
+
+    def test_pause_cancel_btn_disabled_in_results(self, qapp: QApplication) -> None:
+        """RESULTS 阶段（扫描完成后）暂停与取消按钮应禁用。"""
+        window = MainWindow()
+        window._switch_stage(WorkflowStage.RESULTS)
+        assert not window.pause_resume_btn.isEnabled()
+        assert not window.cancel_btn.isEnabled()
+        window.close()
+
     def test_pause_resume_btn_text_in_scanning_running(self, qapp: QApplication) -> None:
         """SCANNING 阶段 RUNNING 状态 pause_resume_btn 文本为"暂停扫描"。"""
         window = MainWindow()

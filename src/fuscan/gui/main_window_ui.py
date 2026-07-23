@@ -204,13 +204,16 @@ class Ui_MainWindow(object):
         self.file_types_layout.setSpacing(4)
         self.file_types_layout.setObjectName(u"file_types_layout")
         self.file_types_layout.setContentsMargins(0, 4, 0, 4)
-        self.file_types_view = QListView(self.file_types_group)
+        self.file_types_count_label = QLabel(self.file_types_group)
+        self.file_types_count_label.setObjectName(u"file_types_count_label")
+
+        self.file_types_layout.addWidget(self.file_types_count_label)
+
+        self.file_types_view = QTreeView(self.file_types_group)
         self.file_types_view.setObjectName(u"file_types_view")
         self.file_types_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.file_types_view.setMovement(QListView.Static)
-        self.file_types_view.setResizeMode(QListView.Adjust)
-        self.file_types_view.setViewMode(QListView.IconMode)
-        self.file_types_view.setWordWrap(True)
+        self.file_types_view.setHeaderHidden(True)
+        self.file_types_view.setExpandsOnDoubleClick(False)
 
         self.file_types_layout.addWidget(self.file_types_view)
 
@@ -771,8 +774,9 @@ class Ui_MainWindow(object):
 #if QT_CONFIG(tooltip)
         self.file_types_group.setToolTip(QCoreApplication.translate("MainWindow", u"\u52fe\u9009\u8981\u626b\u63cf\u7684\u6587\u4ef6\u7c7b\u578b\uff0c\u53d6\u6d88\u53ef\u63d0\u9ad8\u626b\u63cf\u901f\u5ea6", None))
 #endif // QT_CONFIG(tooltip)
+        self.file_types_count_label.setText(QCoreApplication.translate("MainWindow", u"\u5df2\u52fe\u9009 14/14 \u9879", None))
 #if QT_CONFIG(tooltip)
-        self.file_types_view.setToolTip(QCoreApplication.translate("MainWindow", u"\u52fe\u9009\u8981\u626b\u63cf\u7684\u6587\u4ef6\u7c7b\u578b\uff0c\u53d6\u6d88\u53ef\u63d0\u9ad8\u626b\u63cf\u901f\u5ea6", None))
+        self.file_types_view.setToolTip(QCoreApplication.translate("MainWindow", u"\u52fe\u9009\u8981\u626b\u63cf\u7684\u6587\u4ef6\u7c7b\u578b\uff0c\u53d6\u6d88\u53ef\u63d0\u9ad8\u626b\u63cf\u901f\u5ea6\uff1b\u70b9\u51fb\u7236\u7c7b\u522b\u6279\u91cf\u52fe\u9009", None))
 #endif // QT_CONFIG(tooltip)
 #if QT_CONFIG(tooltip)
         self.view_results_btn.setToolTip(QCoreApplication.translate("MainWindow", u"\u67e5\u770b\u4e0a\u6b21\u626b\u63cf\u7ed3\u679c", None))

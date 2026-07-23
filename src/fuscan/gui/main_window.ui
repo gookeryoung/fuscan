@@ -381,24 +381,25 @@
                  <number>4</number>
                 </property>
                 <item>
-                 <widget class="QListView" name="file_types_view">
+                 <widget class="QLabel" name="file_types_count_label">
+                  <property name="text">
+                   <string>已勾选 14/14 项</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QTreeView" name="file_types_view">
                   <property name="toolTip">
-                   <string>勾选要扫描的文件类型，取消可提高扫描速度</string>
+                   <string>勾选要扫描的文件类型，取消可提高扫描速度；点击父类别批量勾选</string>
                   </property>
                   <property name="editTriggers">
                    <set>QAbstractItemView::NoEditTriggers</set>
                   </property>
-                  <property name="movement">
-                   <enum>QListView::Static</enum>
-                  </property>
-                  <property name="resizeMode">
-                   <enum>QListView::Adjust</enum>
-                  </property>
-                  <property name="viewMode">
-                   <enum>QListView::IconMode</enum>
-                  </property>
-                  <property name="wordWrap">
+                  <property name="headerHidden">
                    <bool>true</bool>
+                  </property>
+                  <property name="expandsOnDoubleClick">
+                   <bool>false</bool>
                   </property>
                  </widget>
                 </item>

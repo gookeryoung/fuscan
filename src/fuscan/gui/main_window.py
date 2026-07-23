@@ -84,7 +84,7 @@ from fuscan.extractors.base import default_registry
 from fuscan.gui import resources_rc  # noqa: F401 注册 .qrc 资源（:/ 前缀图标）
 from fuscan.gui.detail_panel import DetailControls, DetailPanel
 from fuscan.gui.explorer import open_path_in_explorer
-from fuscan.gui.extractor_model import ExtractorListModel
+from fuscan.gui.extractor_model import ExtractorTreeModel
 from fuscan.gui.icons import (
     ICON_ABOUT as _ICON_ABOUT,
 )
@@ -532,36 +532,44 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self.sidebar.blockSignals(False)
 
     def _setup_file_types(self) -> None:
-        """构造文件类型勾选区模型与视图（Model/View 架构）。
+        """构造文件类型勾选区树形模型与视图（Model/View 架构）。
 
         从 :func:`default_registry.list_extractors` 加载提取器元数据到
-        :class:`ExtractorListModel`，绑定到 ``file_types_view`` QListView
-        （IconMode + 网格大小，按视图宽度自动多列布局）。
+        :class:`ExtractorTreeModel`，按父类别（文档/表格/演示/邮件）分组，
+        绑定到 ``file_types_view`` QTreeView。子项显示格式为
+        ``{类别}（{扩展名列表}）``（如 ``Word（doc, docx）``），父类别
+        支持批量勾选/全选/全取消，父子勾选状态自动联动（部分勾选时父节点
+        显示 PartiallyChecked）。
 
         模型勾选状态变化通过 ``extractors_changed`` 信号路由到
-        :meth:`_on_extractor_toggled`，由主窗口持久化到配置文件。
-
-        视觉紧凑度：``display_name`` 已含主要扩展名信息（如 "Word（DOCX）"），
-        无需在 item 文本中重复展示完整扩展名；grid_w 取最长 display_name
-        （"PowerPoint（PPTX）" 约 130px）加上 checkbox + padding 后取整 180，
-        14 项可按视图宽度自适应排成 4-5 列，避免文字截断。
+        :meth:`_on_extractor_toggled`，由主窗口持久化到配置文件；
+        :meth:`_update_file_types_count` 同步顶部计数标签
+        （``已勾选 N/M 项``）。
         """
-        self._extractor_model = ExtractorListModel(default_registry, parent=self)
+        self._extractor_model = ExtractorTreeModel(default_registry, parent=self)
         self.file_types_view.setModel(self._extractor_model)
-        # IconMode 网格布局：每项固定宽度，按视图宽度自动换行多列展示
-        grid_w = 180
-        grid_h = 28
-        self.file_types_view.setGridSize(QSize(grid_w, grid_h))
-        self.file_types_view.setUniformItemSizes(True)
-        self.file_types_view.setSpacing(4)
-        # IconMode 默认 flow=LeftToRight + wrapping=True，无需显式设置
+        # 展开所有父类别节点，让子项直接可见（headerHidden 与
+        # expandsOnDoubleClick 已在 .ui 中静态配置）
+        self.file_types_view.expandAll()
         self._extractor_model.extractors_changed.connect(self._on_extractor_toggled)  # pyrefly: ignore [missing-attribute]
+        self._update_file_types_count()
 
     @Slot()  # pyrefly: ignore [not-callable]
     def _on_extractor_toggled(self) -> None:
         """提取器勾选状态变化：从模型读取 disabled_extractors 并即时保存配置。"""
         self._config.disabled_extractors = self._extractor_model.disabled_extractors()
         save_config(self._config)
+        self._update_file_types_count()
+
+    def _update_file_types_count(self) -> None:
+        """同步文件类型勾选计数标签（``已勾选 N/M 项``）。
+
+        N 为当前勾选的提取器数量，M 为提取器总数。批量勾选父类别时 N 即时
+        反映子项勾选总数，让用户直观感知批量操作的覆盖范围。
+        """
+        checked = self._extractor_model.checked_count()
+        total = self._extractor_model.total_count()
+        self.file_types_count_label.setText(f"已勾选 {checked}/{total} 项")
 
     def _compute_scan_extensions(self) -> tuple[str, ...] | None:
         """根据模型勾选状态计算启用的文件扩展名列表。
@@ -751,6 +759,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
             else:
                 self.pause_resume_btn.setText("暂停扫描")
 
+        # 暂停/取消按钮仅在扫描中阶段可用（配置页与结果页均禁用，
+        # 避免用户在未扫描时误触发出无效操作）
+        self.pause_resume_btn.setEnabled(is_scanning)
+        self.cancel_btn.setEnabled(is_scanning)
+
         # 结果页
         self.rescan_btn.setEnabled(is_results)
         if is_results and has_report:
@@ -847,6 +860,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self._extractor_model.blockSignals(True)
         self._extractor_model.set_disabled_extractors(self._config.disabled_extractors)
         self._extractor_model.blockSignals(False)
+        # 恢复后同步计数标签（blockSignals 期间 _on_extractor_toggled 不会触发）
+        self._update_file_types_count()
 
     def _restore_window_geometry(self) -> None:
         """从配置恢复窗口几何（含屏幕边界夹紧算法）。

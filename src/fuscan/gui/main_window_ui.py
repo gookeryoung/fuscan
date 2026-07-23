@@ -322,9 +322,9 @@ class Ui_MainWindow(object):
         self.setup_btn_row.setSpacing(8)
         self.setup_btn_row.setObjectName(u"setup_btn_row")
         self.setup_btn_row.setContentsMargins(0, 12, 0, 0)
-        self.spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.setup_btn_leading_spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
 
-        self.setup_btn_row.addItem(self.spacer)
+        self.setup_btn_row.addItem(self.setup_btn_leading_spacer)
 
         self.view_results_btn = QPushButton(self.setup_action_bar)
         self.view_results_btn.setObjectName(u"view_results_btn")

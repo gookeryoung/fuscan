@@ -579,7 +579,7 @@
                  <number>0</number>
                 </property>
                 <item>
-                 <spacer name="spacer">
+                 <spacer name="setup_btn_leading_spacer">
                   <property name="orientation">
                    <enum>Qt::Horizontal</enum>
                   </property>

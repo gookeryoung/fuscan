@@ -6393,19 +6393,17 @@ class TestExportAndMenu:
     def test_about_dialog(self, qapp: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
         """关于对话框应包含版本、作者、许可证等关键信息。"""
         window = MainWindow()
-        captured: dict[str, object] = {}
-
-        def _capture(*args: object, **kwargs: object) -> None:
-            captured["args"] = args
+        shown: list[bool] = []
 
         monkeypatch.setattr(
-            "fuscan.gui.main_window.QMessageBox.about",
-            _capture,
+            window._about_dialog,
+            "show",
+            lambda: shown.append(True),
         )
         window._on_about()
-        assert captured["args"] is not None
-        title, body = captured["args"][1], captured["args"][2]  # type: ignore[index]
-        assert title == "关于 fuscan"
+        assert shown == [True]
+        # 验证对话框 label 文本包含关键字段
+        body = window._about_dialog.label.text()
         assert __version__ in body
         assert __author__ in body
         assert __license__ in body

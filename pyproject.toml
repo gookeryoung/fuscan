@@ -67,10 +67,6 @@ fuscan = "fuscan.gui.app:launch"
 build-backend = "hatchling.build"
 requires      = ["hatchling"]
 
-[[tool.uv.index]]
-url = "https://mirrors.aliyun.com/pypi/simple/"
-default = true
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/fuscan"]
 

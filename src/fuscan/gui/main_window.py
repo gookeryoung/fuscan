@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 try:
-    from PySide2.QtCore import QPoint, Qt, QUrl, Slot
+    from PySide2.QtCore import QPoint, QUrl, Slot
     from PySide2.QtGui import (
         QDesktopServices,
         QKeySequence,
@@ -50,7 +50,7 @@ try:
         QWidget,
     )
 except ImportError:  # pragma: no cover
-    from PySide6.QtCore import QPoint, Qt, QUrl, Slot  # pyrefly: ignore [missing-import]
+    from PySide6.QtCore import QPoint, QUrl, Slot  # pyrefly: ignore [missing-import]
     from PySide6.QtGui import (  # pyrefly: ignore [missing-import]
         QAction,
         QKeySequence,
@@ -144,6 +144,7 @@ from fuscan.gui.icons import (
 from fuscan.gui.main_window_ui import Ui_MainWindow
 from fuscan.gui.preview_utils import SEVERITY_BACKGROUNDS, severity_text
 from fuscan.gui.result_filter_panel import ResultFilterPanel
+from fuscan.gui.rules_panel import RulesFilePanel
 from fuscan.gui.scan_mode_panel import ScanModePanel
 from fuscan.gui.scan_path_history import ScanPathHistory
 from fuscan.gui.scan_progress_lists import ScanListUpdater
@@ -257,12 +258,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
 
             self._config: Config = load_config()
             self._ruleset: RuleSet | None = None
-            self._rules_paths: list[Path] = []
+            # _rules_paths / _use_builtin 由 RulesFilePanel 持有，通过 property 转发访问
             self._last_report: ScanReport | None = None
             self._worker: ScanWorker | None = None
             self._scan_state: ScanState = ScanState.IDLE
             self._workflow_stage: WorkflowStage = WorkflowStage.SETUP
-            self._use_builtin: bool = True
             # 取消中标志（iter-79）：用户点击取消后置 True，扫描线程退出前
             # 进度回调 _on_scan_progress 据此跳过 UI 覆盖，保留"取消中..."文案
             # 与不确定进度动画；_reset_scan_ui 中重置为 False
@@ -326,6 +326,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self._setup_button_groups()
         self._setup_scan_mode_panel()
         self._setup_export_controller()
+        self._setup_rules_panel()
         self._setup_sidebar()
         self._setup_file_types()
         self._connect_signals()
@@ -553,6 +554,18 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         )
         self._export_controller.button_restore_requested.connect(self._update_stage_actions)  # pyrefly: ignore [missing-attribute]
 
+    def _setup_rules_panel(self) -> None:
+        """构造规则文件列表面板控制器（列表显示 + 顺序操作 + 内置勾选 + 右键菜单）。
+
+        委托 :class:`RulesFilePanel` 封装 ``rules_file_list`` 的列表刷新、上移/
+        下移/移除、内置规则勾选与右键菜单（iter-79 续内聚重构）。主窗口通过
+        ``_use_builtin`` / ``_rules_paths`` property 转发访问 panel 状态，
+        保持向后兼容；``rules_changed`` 信号触发主窗口 ``_on_rules_changed``
+        重新加载规则集并保存配置。
+        """
+        self._rules_panel = RulesFilePanel(self.rules_file_list, parent=self)
+        self._rules_panel.rules_changed.connect(self._on_rules_changed)  # pyrefly: ignore [missing-attribute]
+
     def _setup_file_types(self) -> None:
         """构造内容 TAB 面板控制器（文件类型树 + 忽略目录 + 忽略扩展名）。
 
@@ -621,11 +634,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self.perf_log_action.toggled.connect(self._on_toggle_perf_log)
 
     def _setup_context_menus(self) -> None:
-        """为规则文件列表配置右键菜单策略（结果树右键由 ResultTreeView 信号路由）。"""
-        self.rules_file_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.rules_file_list.customContextMenuRequested.connect(self._on_rules_file_list_context_menu)
-        # 内置规则条目勾选状态变化：触发 _use_builtin 持久化（需求1）
-        self.rules_file_list.itemChanged.connect(self._on_rules_file_item_changed)
+        """配置结果树右键菜单策略（规则文件列表右键已由 RulesFilePanel 内部处理）。"""
+        # 结果树右键由 ResultTreeView 信号路由；规则文件列表的右键菜单与
+        # itemChanged 信号已迁入 RulesFilePanel（iter-79 续解耦）
+        pass
 
     def _on_result_tree_context_menu(self, pos: QPoint) -> None:  # type: ignore[unknown-name]
         """结果树右键菜单：复制路径 / 打开文件位置。"""
@@ -640,32 +652,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         menu.addAction(action_open_location)  # pyrefly: ignore [missing-argument]
         menu.exec_(self.result_tree.viewport().mapToGlobal(pos))  # pyrefly: ignore [missing-argument]
 
-    def _on_rules_file_list_context_menu(self, pos: QPoint) -> None:  # type: ignore[unknown-name]
-        """规则文件列表右键菜单：上移 / 下移 / 移除。
-
-        内置规则条目（row 0）固定不可移动、不可移除，菜单禁用所有操作。
-        """
-        row = self.rules_file_list.currentRow()
-        if row < 0:
-            return
-        menu = QMenu(self.rules_file_list)
-        action_up = QAction("上移", menu)
-        action_down = QAction("下移", menu)
-        action_remove = QAction("移除", menu)
-        # row 0 为内置规则条目，所有操作禁用
-        is_builtin_row = row == 0
-        action_up.setEnabled(not is_builtin_row and row > 1)
-        action_down.setEnabled(not is_builtin_row and row < len(self._rules_paths))
-        action_remove.setEnabled(not is_builtin_row)
-        action_up.triggered.connect(self._on_move_rule_up)
-        action_down.triggered.connect(self._on_move_rule_down)
-        action_remove.triggered.connect(self._on_remove_rule)
-        menu.addAction(action_up)  # pyrefly: ignore [missing-argument]
-        menu.addAction(action_down)  # pyrefly: ignore [missing-argument]
-        menu.addSeparator()
-        menu.addAction(action_remove)  # pyrefly: ignore [missing-argument]
-        menu.exec_(self.rules_file_list.viewport().mapToGlobal(pos))  # pyrefly: ignore [missing-argument]
-
     def _setup_shortcuts(self) -> None:
         """创建全局快捷键：F3 下一条命中、Shift+F3 上一条命中、Delete 移除规则文件。"""
         self._shortcut_next = QShortcut(QKeySequence("F3"), self)
@@ -673,12 +659,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         self._shortcut_prev = QShortcut(QKeySequence("Shift+F3"), self)
         self._shortcut_prev.activated.connect(self._detail_panel.prev_hit)
         self._shortcut_remove_rule = QShortcut(QKeySequence.Delete, self.rules_file_list)
-        self._shortcut_remove_rule.activated.connect(self._on_remove_rule)
+        self._shortcut_remove_rule.activated.connect(self._rules_panel.remove_selected)
 
     def _set_use_builtin(self, enabled: bool) -> None:
         """统一设置通用规则开关并刷新规则集。
 
         替代原 _on_toggle_builtin 的散落逻辑，供 _on_settings 和测试统一调用。
+        通过 ``_use_builtin`` property setter 转发到 RulesFilePanel（仅赋值，
+        不 emit ``rules_changed``），随后调 ``_apply_ruleset_loaded`` 刷新 UI。
         """
         self._use_builtin = enabled
         try:
@@ -689,6 +677,38 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
                 self.stats_label.setText("未加载规则")
         except RuleError as exc:
             QMessageBox.warning(self, "规则错误", f"重新加载规则失败:\n{exc}")
+
+    def _on_rules_changed(self) -> None:
+        """规则文件列表变化槽：重新加载规则集并保存配置。
+
+        由 RulesFilePanel ``rules_changed`` 信号触发（用户勾选内置规则 / 上移 /
+        下移 / 移除操作后）。panel 内部已刷新列表显示，本槽仅处理规则集重载
+        与持久化。
+        """
+        self._reload_and_refresh()
+        self._save_config()
+
+    # ----------------------------- RulesFilePanel 状态转发 -----------------------------
+
+    # _use_builtin / _rules_paths 实际由 RulesFilePanel 持有，此处 property
+    # 转发保持主窗口各方法（_reload_ruleset / _apply_ruleset_loaded /
+    # _on_load_rules / _build_cache_context / _apply_config / _save_config 等）
+    # 与测试用例无需改动（iter-79 续解耦）。
+    @property
+    def _use_builtin(self) -> bool:
+        return self._rules_panel.use_builtin
+
+    @_use_builtin.setter
+    def _use_builtin(self, value: bool) -> None:
+        self._rules_panel.use_builtin = value
+
+    @property
+    def _rules_paths(self) -> list[Path]:
+        return self._rules_panel.rules_paths
+
+    @_rules_paths.setter
+    def _rules_paths(self, value: list[Path]) -> None:
+        self._rules_panel.rules_paths = value
 
     # ----------------------------- 工作流阶段切换 -----------------------------
 
@@ -941,12 +961,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         """重新加载规则集并同步刷新 UI（rules_tree / rules_file_list / scan_button）。
 
         统一封装 4 处重复的 ``_reload_ruleset + _refresh_rules_tree +
-        _refresh_rules_file_list + _update_scan_button`` 调用序列。
+        _rules_panel.refresh + _update_scan_button`` 调用序列。
         ``stats_label`` 文案因调用场景不同（内置/用户加载），由调用方在调用后设置。
         """
         self._reload_ruleset()
         self._refresh_rules_tree()
-        self._refresh_rules_file_list()
+        self._rules_panel.refresh()
         self._update_scan_button()
 
     # 扫描模式相关方法（_on_scan_mode_changed / _update_target_visibility /
@@ -1548,91 +1568,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
             _apply_severity_to_tree_item(item, 1, rule.severity)
             self.rules_tree.addTopLevelItem(item)
 
-    def _refresh_rules_file_list(self) -> None:
-        """刷新规则文件列表展示。
-
-        顶部固定显示内置通用规则条目（带复选框，反映 ``_use_builtin`` 状态），
-        其后依次显示用户规则文件路径。用户取消勾选内置规则后，下次启动不再
-        自动加载（通过 ``_on_rules_file_item_changed`` 持久化到配置）。
-        """
-        # 阻塞 itemChanged 信号，避免 clear/addItem 触发勾选状态回写
-        self.rules_file_list.blockSignals(True)
-        try:
-            self.rules_file_list.clear()
-            # 内置规则条目（row 0）：固定不可移动、不可移除
-            builtin_item = QListWidgetItem("内置通用规则（随软件分发）")
-            builtin_item.setToolTip("勾选时随软件启动自动加载；取消勾选后下次不再自动加载")
-            builtin_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable | Qt.ItemIsSelectable)
-            builtin_item.setCheckState(Qt.Checked if self._use_builtin else Qt.Unchecked)
-            self.rules_file_list.addItem(builtin_item)  # pyrefly: ignore [missing-argument]
-            # 用户规则条目（row 1+）
-            for path in self._rules_paths:
-                item = QListWidgetItem(str(path))
-                item.setToolTip(str(path))
-                self.rules_file_list.addItem(item)  # pyrefly: ignore [missing-argument]
-        finally:
-            self.rules_file_list.blockSignals(False)
-
-    def _on_move_rule_up(self) -> None:
-        """将选中的规则文件上移一位。
-
-        列表 row 0 为内置规则条目（固定不可移动），用户规则实际索引 = row - 1。
-        """
-        row = self.rules_file_list.currentRow()
-        if row <= 1:  # row 0=内置规则不可移动；row 1=首个用户规则已居顶
-            return
-        idx = row - 1
-        self._rules_paths[idx - 1], self._rules_paths[idx] = (
-            self._rules_paths[idx],
-            self._rules_paths[idx - 1],
-        )
-        self._refresh_rules_file_list()
-        self.rules_file_list.setCurrentRow(row - 1)  # pyrefly: ignore [missing-argument]
-        self._reload_and_refresh()
-
-    def _on_move_rule_down(self) -> None:
-        """将选中的规则文件下移一位。
-
-        列表 row 0 为内置规则条目（固定不可移动），用户规则实际索引 = row - 1。
-        """
-        row = self.rules_file_list.currentRow()
-        if row <= 0 or row >= len(self._rules_paths):  # row 0=内置规则不可移动
-            return
-        idx = row - 1
-        self._rules_paths[idx + 1], self._rules_paths[idx] = (
-            self._rules_paths[idx],
-            self._rules_paths[idx + 1],
-        )
-        self._refresh_rules_file_list()
-        self.rules_file_list.setCurrentRow(row + 1)  # pyrefly: ignore [missing-argument]
-        self._reload_and_refresh()
-
-    def _on_remove_rule(self) -> None:
-        """移除选中的规则文件。
-
-        列表 row 0 为内置规则条目（固定不可移除），用户规则实际索引 = row - 1。
-        """
-        row = self.rules_file_list.currentRow()
-        if row <= 0:  # row 0=内置规则不可移除
-            return
-        idx = row - 1
-        del self._rules_paths[idx]
-        self._refresh_rules_file_list()
-        self._reload_and_refresh()
-
-    def _on_rules_file_item_changed(self, item: QListWidgetItem) -> None:  # type: ignore[unknown-name]
-        """规则文件列表项变化处理：仅内置规则条目（row 0）的勾选状态变化触发持久化。
-
-        用户勾选/取消勾选内置规则后，立即更新 ``_use_builtin`` 开关、重新加载规则集
-        并保存配置，确保下次启动时按用户选择决定是否自动加载内置规则。
-        """
-        if self.rules_file_list.row(item) != 0:
-            return
-        enabled = item.checkState() == Qt.Checked
-        if enabled == self._use_builtin:
-            return
-        self._set_use_builtin(enabled)
-        self._save_config()
+    # 规则文件列表相关方法（_refresh_rules_file_list / _on_move_rule_up /
+    # _on_move_rule_down / _on_remove_rule / _on_rules_file_item_changed /
+    # _on_rules_file_list_context_menu）已移到 RulesFilePanel（iter-79 续解耦），
+    # 主窗口通过 self._rules_panel 公共 API 驱动，rules_changed 信号触发
+    # _on_rules_changed 统一处理重载与持久化
 
     def _on_edit_rules(self) -> None:
         """打开规则编辑器对话框。"""

@@ -362,11 +362,11 @@
                 <string>文件类型与忽略项</string>
                </property>
                <property name="toolTip">
-                <string>左侧勾选要扫描的文件类型；右侧通过 TAB 切换忽略目录与忽略扩展名</string>
+                <string>通过 TAB 切换文件类型、忽略目录与忽略扩展名</string>
                </property>
-               <layout class="QHBoxLayout" name="file_types_layout">
+               <layout class="QVBoxLayout" name="file_types_layout">
                 <property name="spacing">
-                 <number>8</number>
+                 <number>4</number>
                 </property>
                 <property name="leftMargin">
                  <number>0</number>
@@ -381,58 +381,67 @@
                  <number>4</number>
                 </property>
                 <item>
-                 <layout class="QVBoxLayout" name="file_types_left_layout">
-                  <property name="spacing">
-                   <number>4</number>
-                  </property>
-                  <item>
-                   <widget class="QLabel" name="file_types_count_label">
-                    <property name="text">
-                     <string>已勾选 15/15 项</string>
-                    </property>
-                   </widget>
-                  </item>
-                  <item>
-                   <widget class="QTreeView" name="file_types_view">
-                    <property name="toolTip">
-                     <string>勾选要扫描的文件类型，取消可提高扫描速度；点击父类别批量勾选</string>
-                    </property>
-                    <property name="editTriggers">
-                     <set>QAbstractItemView::NoEditTriggers</set>
-                    </property>
-                    <property name="headerHidden">
-                     <bool>true</bool>
-                    </property>
-                    <property name="expandsOnDoubleClick">
-                     <bool>false</bool>
-                    </property>
-                    <property name="uniformRowHeights">
-                     <bool>true</bool>
-                    </property>
-                    <property name="sizePolicy">
-                     <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-                      <horstretch>0</horstretch>
-                      <verstretch>1</verstretch>
-                     </sizepolicy>
-                    </property>
-                   </widget>
-                  </item>
-                 </layout>
-                </item>
-                <item>
-                 <widget class="QTabWidget" name="ignore_tab_widget">
+                 <widget class="QTabWidget" name="content_tab_widget">
                   <property name="toolTip">
-                   <string>切换忽略目录与忽略扩展名</string>
-                  </property>
-                  <property name="sizePolicy">
-                   <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-                    <horstretch>1</horstretch>
-                    <verstretch>1</verstretch>
-                   </sizepolicy>
+                   <string>切换文件类型、忽略目录与忽略扩展名</string>
                   </property>
                   <property name="currentIndex">
                    <number>0</number>
                   </property>
+                  <widget class="QWidget" name="file_types_tab">
+                   <attribute name="title">
+                    <string>文件类型</string>
+                   </attribute>
+                   <layout class="QVBoxLayout" name="file_types_tab_layout">
+                    <property name="spacing">
+                     <number>4</number>
+                    </property>
+                    <property name="leftMargin">
+                     <number>4</number>
+                    </property>
+                    <property name="topMargin">
+                     <number>4</number>
+                    </property>
+                    <property name="rightMargin">
+                     <number>4</number>
+                    </property>
+                    <property name="bottomMargin">
+                     <number>4</number>
+                    </property>
+                    <item>
+                     <widget class="QLabel" name="file_types_count_label">
+                      <property name="text">
+                       <string>已勾选 15/15 项</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QTreeView" name="file_types_view">
+                      <property name="toolTip">
+                       <string>勾选要扫描的文件类型，取消可提高扫描速度；点击父类别批量勾选</string>
+                      </property>
+                      <property name="editTriggers">
+                       <set>QAbstractItemView::NoEditTriggers</set>
+                      </property>
+                      <property name="headerHidden">
+                       <bool>true</bool>
+                      </property>
+                      <property name="expandsOnDoubleClick">
+                       <bool>false</bool>
+                      </property>
+                      <property name="uniformRowHeights">
+                       <bool>true</bool>
+                      </property>
+                      <property name="sizePolicy">
+                       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+                        <horstretch>0</horstretch>
+                        <verstretch>1</verstretch>
+                       </sizepolicy>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
                   <widget class="QWidget" name="ignore_dirs_tab">
                    <attribute name="title">
                     <string>忽略目录</string>

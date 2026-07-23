@@ -6305,13 +6305,14 @@ class TestMainWindowIgnore:
         assert "扩展名" in window.ignore_extensions_edit.placeholderText()
         window.close()
 
-    def test_ignore_tab_widget_has_two_tabs(self, qapp: QApplication) -> None:
-        """iter-79：忽略项通过 QTabWidget 切换忽略目录/忽略扩展名两个 Tab。"""
+    def test_content_tab_widget_has_three_tabs(self, qapp: QApplication) -> None:
+        """iter-79：文件类型与忽略项通过 QTabWidget 切换，文件类型为第一个 Tab。"""
         window = MainWindow()
-        assert window.ignore_tab_widget is not None
-        assert window.ignore_tab_widget.count() == 2
-        assert window.ignore_tab_widget.tabText(0) == "忽略目录"
-        assert window.ignore_tab_widget.tabText(1) == "忽略扩展名"
+        assert window.content_tab_widget is not None
+        assert window.content_tab_widget.count() == 3
+        assert window.content_tab_widget.tabText(0) == "文件类型"
+        assert window.content_tab_widget.tabText(1) == "忽略目录"
+        assert window.content_tab_widget.tabText(2) == "忽略扩展名"
         window.close()
 
     def test_default_ignore_dirs_loaded(self, qapp: QApplication) -> None:

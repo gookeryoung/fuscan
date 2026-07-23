@@ -33,6 +33,7 @@ __all__ = [
     "compile_keyword_pattern",
     "extract_keywords",
     "format_size",
+    "severity_text",
 ]
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,15 @@ SEVERITY_BACKGROUNDS: dict[Severity, QColor] = {
     Severity.WARNING: QColor(255, 243, 224),  # 浅橙
     Severity.INFO: QColor(235, 244, 255),  # 浅蓝
 }
+
+
+def severity_text(severity: Severity) -> str:
+    """返回严重等级的中文标签，未知等级回退到枚举原始值。
+
+    供 main_window / detail_panel / result_tree 三处 ``_apply_severity_to_*`` 共用，
+    消除原先三处重复的 ``SEVERITY_LABELS.get(severity, severity.value)`` 内联逻辑。
+    """
+    return SEVERITY_LABELS.get(severity, severity.value)
 
 
 def extract_keywords(hits: Sequence[RuleHit]) -> list[str]:

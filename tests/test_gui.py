@@ -39,8 +39,8 @@ try:
         __license__,
         __version__,
     )
-    from fuscan.gui.main_window import MainWindow, ScanState, WorkflowStage, _severity_text
-    from fuscan.gui.preview_utils import build_preview_html, extract_keywords, format_size
+    from fuscan.gui.main_window import MainWindow, ScanState, WorkflowStage
+    from fuscan.gui.preview_utils import build_preview_html, extract_keywords, format_size, severity_text
     from fuscan.gui.worker import ScanWorker
     from fuscan.rules import load_ruleset
     from fuscan.rules.model import (
@@ -1908,10 +1908,10 @@ class TestSeverityDisplay:
     """严重等级颜色区分测试。"""
 
     def test_severity_text_chinese_labels(self) -> None:
-        """_severity_text 应返回中文标签。"""
-        assert _severity_text(Severity.CRITICAL) == "严重"
-        assert _severity_text(Severity.WARNING) == "警告"
-        assert _severity_text(Severity.INFO) == "一般"
+        """severity_text 应返回中文标签。"""
+        assert severity_text(Severity.CRITICAL) == "严重"
+        assert severity_text(Severity.WARNING) == "警告"
+        assert severity_text(Severity.INFO) == "一般"
 
     def test_result_tree_flat_shows_severity_colors(self, qapp: QApplication, tmp_path: Path) -> None:
         """result_tree 不分组模式下严重等级列应显示中文标签与背景色。

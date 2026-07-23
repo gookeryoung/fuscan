@@ -25,7 +25,7 @@ except ImportError:  # pragma: no cover
     from PySide6.QtGui import QStandardItem, QStandardItemModel  # pyrefly: ignore [missing-import]
     from PySide6.QtWidgets import QTreeView  # pyrefly: ignore [missing-import]
 
-from fuscan.gui.preview_utils import SEVERITY_BACKGROUNDS, SEVERITY_LABELS
+from fuscan.gui.preview_utils import SEVERITY_BACKGROUNDS, severity_text
 from fuscan.rules.model import Severity
 from fuscan.scanner import ScanReport
 
@@ -53,7 +53,7 @@ def _apply_severity_to_standard_item(item: QStandardItem, severity: Severity) ->
     :param item: 结果树中代表"严重等级"列的 QStandardItem
     :param severity: 严重等级枚举值
     """
-    item.setText(SEVERITY_LABELS.get(severity, severity.value))
+    item.setText(severity_text(severity))
     item.setBackground(SEVERITY_BACKGROUNDS[severity])
 
 

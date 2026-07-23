@@ -52,11 +52,11 @@ from fuscan.extractors import extract_content_cached
 from fuscan.gui.preview_utils import (
     PREVIEW_MAX_CHARS,
     SEVERITY_BACKGROUNDS,
-    SEVERITY_LABELS,
     build_keyword_to_rule_map,
     build_preview_html,
     compile_keyword_pattern,
     extract_keywords,
+    severity_text,
 )
 from fuscan.rules.model import Severity
 from fuscan.scanner.result import RuleHit, ScanResult
@@ -66,18 +66,13 @@ __all__ = ["DetailControls", "DetailPanel"]
 logger = logging.getLogger(__name__)
 
 
-def _severity_text(severity: Severity) -> str:
-    """返回严重等级的中文标签。"""
-    return SEVERITY_LABELS.get(severity, severity.value)
-
-
 def _apply_severity_to_table_item(item: QTableWidgetItem, severity: Severity) -> None:
     """为 QTableWidgetItem 设置中文标签与背景色。
 
     仅设置背景色（浅红/浅橙/浅蓝），不设置前景色——避免 ``setForeground``
     覆盖 QSS ``::item:selected`` 的选中态白字（需求1：选中项字体统一白色）。
     """
-    item.setText(_severity_text(severity))
+    item.setText(severity_text(severity))
     item.setBackground(SEVERITY_BACKGROUNDS[severity])
 
 

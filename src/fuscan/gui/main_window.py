@@ -1067,6 +1067,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):  # pyrefly: ignore [invalid-inheri
         """
         self._cleanup_stats_worker()
         cache, source_files = self._build_cache_context()
+        # _on_scan 已在启动 stats worker 前校验 self._ruleset 非 None，
+        # 此处 assert 收窄类型供 pyrefly 识别（stats 完成回调必在 _on_scan 之后触发）
+        assert self._ruleset is not None
         self._worker = ScanWorker(
             ruleset=self._ruleset,
             roots=[wr.root for wr in results],

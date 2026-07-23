@@ -14,11 +14,11 @@ UI 装配委托给 ``Ui_SettingsDialog``（对应 ``settings_dialog.ui``），
 
 from __future__ import annotations
 
-from PySide2.QtCore import Slot
-
 try:
+    from PySide2.QtCore import Slot
     from PySide2.QtWidgets import QDialog, QFileDialog, QWidget
 except ImportError:  # pragma: no cover
+    from PySide6.QtCore import Slot  # pyrefly: ignore [missing-import]
     from PySide6.QtWidgets import QDialog, QFileDialog, QWidget  # pyrefly: ignore [missing-import]
 
 from fuscan.config import Config
@@ -40,7 +40,7 @@ class SettingsDialog(QDialog, Ui_SettingsDialog):  # pyrefly: ignore [invalid-in
 
     def _configure_ui(self) -> None:
         """配置 .ui 无法静态表达的信号槽连接。"""
-        self.button_box.accepted.connect(self.on_accept)
+        self.button_box.accepted.connect(self._on_accept)
         self.button_box.rejected.connect(self.reject)
 
         self.staging_dir_browse_btn.clicked.connect(self._on_browse_staging_dir)
@@ -75,7 +75,7 @@ class SettingsDialog(QDialog, Ui_SettingsDialog):  # pyrefly: ignore [invalid-in
         staging_text = self.staging_dir_edit.text().strip()
         self.config.staging_dir = staging_text or None
 
-    @Slot()
+    @Slot()  # pyrefly: ignore [not-callable]
     def _on_browse_staging_dir(self) -> None:
         """打开目录选择对话框，将所选路径填入暂存区路径编辑框（iter-77）。
 
@@ -88,7 +88,7 @@ class SettingsDialog(QDialog, Ui_SettingsDialog):  # pyrefly: ignore [invalid-in
         if chosen:
             self.staging_dir_edit.setText(chosen)
 
-    def on_accept(self) -> None:
+    def _on_accept(self) -> None:
         """确定按钮：保存配置并关闭对话框。"""
         self._save_config()
         self.accept()

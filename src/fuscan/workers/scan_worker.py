@@ -165,13 +165,6 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
             if self._cancel_requested:
                 self._scanner.cancel()
             all_results: list[ScanResult] = []
-            total_scanned = 0
-            total_files = 0
-            total_matched = 0
-            total_skipped = 0
-            total_errors = 0
-            total_matches = 0
-            total_user_skipped = 0
             # 基于 report.cancelled 判断取消状态：C1 修复后 scan()/scan_entries() 在
             # finally 中清除 _cancel_event，返回后 self._scanner.is_cancelled 恒为 False，
             # 必须用 report.cancelled 累积取消标志，否则取消的扫描会被误判为正常完成
@@ -180,70 +173,30 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
             # precollected 模式：跳过 walk，遍历预收集的 WalkResult 调 scan_entries；
             # 否则遍历 roots 调 scan（walk + scan 串联，向后兼容）
             if self._precollected is not None:
-                for walk_result in self._precollected:
-                    if was_cancelled:
-                        break
-                    report: ScanReport = self._scanner.scan_entries(walk_result.root, walk_result)
-                    all_results.extend(report.results)
-                    total_scanned += report.stats.scanned_files
-                    total_files += report.stats.total_files
-                    total_matched += report.stats.matched_files
-                    total_skipped += report.stats.skipped_files
-                    total_errors += report.stats.errors
-                    total_matches += report.stats.total_matches
-                    total_user_skipped += report.stats.user_skipped
-                    if report.stats.perf_summary:
-                        self._perf.merge_dict(report.stats.perf_summary)
-                    self._cum_scanned = total_scanned
-                    self._cum_total = total_files
-                    self._cum_skipped = total_skipped
-                    self._cum_matched = total_matched
-                    self._cum_errors = total_errors
-                    self._cum_matches = total_matches
-                    self._cum_user_skipped = total_user_skipped
-                    if report.cancelled:
-                        was_cancelled = True
+                reports = (self._scanner.scan_entries(wr.root, wr) for wr in self._precollected)
             else:
-                for root in self._roots:
-                    if was_cancelled:
-                        break
-                    report = self._scanner.scan(root)
-                    all_results.extend(report.results)
-                    total_scanned += report.stats.scanned_files
-                    total_files += report.stats.total_files
-                    total_matched += report.stats.matched_files
-                    total_skipped += report.stats.skipped_files
-                    total_errors += report.stats.errors
-                    total_matches += report.stats.total_matches
-                    total_user_skipped += report.stats.user_skipped
-                    # 累计各根路径的性能统计（iter-66）
-                    if report.stats.perf_summary:
-                        self._perf.merge_dict(report.stats.perf_summary)
-                    # 更新累计值，供下一个根路径的进度回调使用
-                    self._cum_scanned = total_scanned
-                    self._cum_total = total_files
-                    self._cum_skipped = total_skipped
-                    self._cum_matched = total_matched
-                    self._cum_errors = total_errors
-                    self._cum_matches = total_matches
-                    self._cum_user_skipped = total_user_skipped
-                    if report.cancelled:
-                        was_cancelled = True
+                reports = (self._scanner.scan(root) for root in self._roots)
+
+            for report in reports:
+                all_results.extend(report.results)
+                self._accumulate_report(report)
+                if report.cancelled:
+                    was_cancelled = True
+                    break
+
             elapsed = time.monotonic() - self._start_time
             merged = ScanReport(
                 root=self._roots[0] if len(self._roots) == 1 else Path("（多路径）"),
                 results=tuple(all_results),
                 stats=ScanStats(
-                    total_files=total_files,
-                    scanned_files=total_scanned,
-                    matched_files=total_matched,
-                    skipped_files=total_skipped,
-                    errors=total_errors,
+                    total_files=self._cum_total,
+                    scanned_files=self._cum_scanned,
+                    matched_files=self._cum_matched,
+                    skipped_files=self._cum_skipped,
+                    errors=self._cum_errors,
                     duration_seconds=elapsed,
-                    total_matches=total_matches,
-                    # 多根路径累计的用户跳过数（iter-77）
-                    user_skipped=total_user_skipped,
-                    # 多根路径累计的性能统计（iter-66）
+                    total_matches=self._cum_matches,
+                    user_skipped=self._cum_user_skipped,
                     perf_summary=self._perf.to_dict(),
                 ),
                 cancelled=was_cancelled,
@@ -255,3 +208,19 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         except Exception as exc:
             logger.exception("后台扫描失败")
             self.failed.emit(str(exc))  # pyrefly: ignore [missing-attribute]
+
+    def _accumulate_report(self, report: ScanReport) -> None:
+        """累加单个根路径的扫描结果到累计统计字段。
+
+        将 report 的统计合并到 ``self._cum_*`` 与 ``self._perf``，
+        供后续根路径的进度回调与最终 ScanReport 使用。
+        """
+        self._cum_scanned += report.stats.scanned_files
+        self._cum_total += report.stats.total_files
+        self._cum_matched += report.stats.matched_files
+        self._cum_skipped += report.stats.skipped_files
+        self._cum_errors += report.stats.errors
+        self._cum_matches += report.stats.total_matches
+        self._cum_user_skipped += report.stats.user_skipped
+        if report.stats.perf_summary:
+            self._perf.merge_dict(report.stats.perf_summary)

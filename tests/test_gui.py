@@ -4408,7 +4408,7 @@ class TestRuleEditorRegexTesterButton:
         class FakeDialog:
             """模拟 RegexTesterDialog，记录构造参数与 exec_ 调用。"""
 
-            def __init__(self, parent=None, initial_pattern: str = "") -> None:
+            def __init__(self, parent: Any = None, initial_pattern: str = "") -> None:
                 captured["parent"] = parent
                 captured["initial_pattern"] = initial_pattern
 
@@ -4461,7 +4461,7 @@ class TestMainWindowRegexTesterAction:
         class FakeDialog:
             """模拟 RegexTesterDialog，记录构造参数与 exec_ 调用。"""
 
-            def __init__(self, parent=None, initial_pattern: str = "") -> None:
+            def __init__(self, parent: Any = None, initial_pattern: str = "") -> None:
                 captured["parent"] = parent
                 captured["initial_pattern"] = initial_pattern
 

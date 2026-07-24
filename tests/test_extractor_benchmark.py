@@ -329,6 +329,28 @@ class TestTier2Fast:
         content = extractor.extract_from_bytes(data)
         assert "password" in content
 
+    def test_pdf_extractor_tier_with_oxide(self) -> None:
+        """PdfExtractor 在 pdf_oxide 可用时声明为 T2 快速（iter-91）。"""
+        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
+
+        if not _PDF_OXIDE_AVAILABLE:
+            pytest.skip("pdf_oxide 未安装，PDF 走 pypdf 回退路径（T5）")
+        extractor = PdfExtractor()
+        _assert_tier(extractor, SpeedTier.FAST)
+
+    def test_pdf_extraction_speed_with_oxide(self) -> None:
+        """pdf_oxide 后端的 PDF 提取应在 1s 内完成（T2 快速基准，iter-91）。"""
+        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
+
+        if not _PDF_OXIDE_AVAILABLE:
+            pytest.skip("pdf_oxide 未安装，PDF 走 pypdf 回退路径（T5）")
+        extractor = PdfExtractor()
+        data = _make_pdf_sample()
+        elapsed = _measure(extractor.extract_from_bytes, data, iterations=1)
+        _assert_time_within_tier(elapsed, SpeedTier.FAST, "PdfExtractor (pdf_oxide)")
+        content = extractor.extract_from_bytes(data)
+        assert "password" in content
+
 
 # ----------------------------- T3 中速：XML 解析 + 树遍历 -----------------------------
 
@@ -476,17 +498,25 @@ class TestTier4Slow:
 class TestTier5VerySlow:
     """T5 极慢档次基准测试：复杂页面布局分析。"""
 
-    def test_pdf_extractor_tier(self) -> None:
-        """PdfExtractor 声明为 T5 极慢。"""
+    def test_pdf_extractor_tier_pypdf_fallback(self) -> None:
+        """PdfExtractor 在 pypdf 回退模式下声明为 T5 极慢（iter-91）。"""
+        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
+
+        if _PDF_OXIDE_AVAILABLE:
+            pytest.skip("pdf_oxide 已安装，PDF 走 T2 快速路径")
         extractor = PdfExtractor()
         _assert_tier(extractor, SpeedTier.VERY_SLOW)
 
-    def test_pdf_extraction_speed(self) -> None:
-        """典型 PDF 文档（单页 20 行）提取应在 10s 内完成（T5 极慢基准）。"""
+    def test_pdf_extraction_speed_pypdf_fallback(self) -> None:
+        """pypdf 回退后端的 PDF 提取应在 10s 内完成（T5 极慢基准）。"""
+        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
+
+        if _PDF_OXIDE_AVAILABLE:
+            pytest.skip("pdf_oxide 已安装，PDF 走 T2 快速路径")
         extractor = PdfExtractor()
         data = _make_pdf_sample()
         elapsed = _measure(extractor.extract_from_bytes, data, iterations=1)
-        _assert_time_within_tier(elapsed, SpeedTier.VERY_SLOW, "PdfExtractor")
+        _assert_time_within_tier(elapsed, SpeedTier.VERY_SLOW, "PdfExtractor (pypdf)")
         content = extractor.extract_from_bytes(data)
         assert "password" in content
 

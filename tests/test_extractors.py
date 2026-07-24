@@ -36,6 +36,7 @@ from fuscan.extractors import (
     extract_content_with_fallback,
     get_extractor,
 )
+from fuscan.extractors.base import SpeedTier
 from fuscan.extractors.spreadsheet import OdsExtractor
 
 
@@ -640,10 +641,23 @@ class TestWpsExtractorErrorPaths:
 
 # ---------------------------------------------------------------------------
 # PdfExtractor（依赖 pypdf，使用 mock 避免真实 PDF）
+# iter-91：pdf_oxide 可用时优先走 Rust 后端，以下测试强制走 pypdf 回退路径
 # ---------------------------------------------------------------------------
 
 
 class TestPdfExtractor:
+    """PDF 提取器测试。
+
+    iter-91 起 PdfExtractor 优先使用 pdf_oxide（Rust + PyO3），回退到 pypdf。
+    以下 mock 测试通过 ``monkeypatch`` 强制 ``_PDF_OXIDE_AVAILABLE = False``，
+    验证 pypdf 回退路径的正确性。pdf_oxide 后端的正确性由基准测试覆盖。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _force_pypdf_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """强制走 pypdf 回退路径，绕过 pdf_oxide（iter-91）。"""
+        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
+
     def test_supported_extensions(self) -> None:
         assert PdfExtractor().supported_extensions == ("pdf",)
 
@@ -729,6 +743,35 @@ class TestPdfExtractor:
         content = PdfExtractor().extract(path)
         assert "正常页面" in content
 
+    def test_empty_page_text_skipped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """extract_text 返回空字符串的页面应被跳过（不加入 parts）。"""
+        path = tmp_path / "empty_pages.pdf"
+        path.write_bytes(b"empty")
+
+        class EmptyPage:
+            def extract_text(self) -> str:
+                return ""
+
+        class GoodPage:
+            def extract_text(self) -> str:
+                return "有内容 password"
+
+        class FakeReader:
+            def __init__(self) -> None:
+                self.is_encrypted = False
+                self.pages = [EmptyPage(), GoodPage(), EmptyPage()]
+
+        fake_module = type("pypdf", (), {"PdfReader": staticmethod(lambda _: FakeReader())})
+        fake_errors = type("errors", (), {"PdfReadError": Exception})
+        import sys
+
+        monkeypatch.setitem(sys.modules, "pypdf", fake_module)
+        monkeypatch.setitem(sys.modules, "pypdf.errors", fake_errors)
+
+        content = PdfExtractor().extract(path)
+        assert "有内容 password" in content
+        assert content == "有内容 password"
+
     def test_import_error_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """pypdf 未安装时应抛出 ExtractorError。"""
         path = tmp_path / "test.pdf"
@@ -786,6 +829,107 @@ class TestPdfExtractor:
 
         with pytest.raises(ExtractorError, match="PDF 解析失败"):
             PdfExtractor().extract(path)
+
+
+# ---------------------------------------------------------------------------
+# PdfExtractor pdf_oxide 后端测试（iter-91）
+# ---------------------------------------------------------------------------
+
+
+class TestPdfExtractorOxideBackend:
+    """pdf_oxide（Rust + PyO3）后端测试。
+
+    仅在 pdf_oxide 已安装时运行，验证真实 PDF 提取与 speed_tier 动态返回。
+    不使用 mock，生成真实 PDF 样本验证端到端正确性。
+    """
+
+    @pytest.fixture()
+    def pdf_sample(self, tmp_path: Path) -> bytes:
+        """用 reportlab 生成含 password 关键词的 PDF 样本。"""
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import Paragraph, SimpleDocTemplate
+
+        path = tmp_path / "sample.pdf"
+        styles = getSampleStyleSheet()
+        doc = SimpleDocTemplate(str(path), pagesize=letter)
+        doc.build([Paragraph("This document contains a secret password.", styles["Normal"])])
+        return path.read_bytes()
+
+    def test_oxide_speed_tier_is_fast_when_available(self) -> None:
+        """pdf_oxide 可用时 speed_tier 返回 T2 快速。"""
+        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
+
+        if not _PDF_OXIDE_AVAILABLE:
+            pytest.skip("pdf_oxide 未安装")
+        assert PdfExtractor().speed_tier == SpeedTier.FAST
+
+    def test_oxide_extract_real_pdf(self, pdf_sample: bytes) -> None:
+        """pdf_oxide 后端提取真实 PDF 应包含 password 关键词。"""
+        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
+
+        if not _PDF_OXIDE_AVAILABLE:
+            pytest.skip("pdf_oxide 未安装")
+        extractor = PdfExtractor()
+        content = extractor.extract_from_bytes(pdf_sample)
+        assert "password" in content.lower()
+
+    def test_oxide_extract_path_matches_bytes(self, pdf_sample: bytes, tmp_path: Path) -> None:
+        """pdf_oxide 从 path 与从 bytes 提取结果一致。"""
+        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
+
+        if not _PDF_OXIDE_AVAILABLE:
+            pytest.skip("pdf_oxide 未安装")
+        path = tmp_path / "sample.pdf"
+        path.write_bytes(pdf_sample)
+        extractor = PdfExtractor()
+        assert extractor.extract(path) == extractor.extract_from_bytes(pdf_sample)
+
+    def test_oxide_invalid_bytes_raises(self) -> None:
+        """pdf_oxide 后端对无效字节应抛出 ExtractorError。"""
+        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
+
+        if not _PDF_OXIDE_AVAILABLE:
+            pytest.skip("pdf_oxide 未安装")
+        with pytest.raises(ExtractorError, match="PDF 解析失败"):
+            PdfExtractor().extract_from_bytes(b"not a pdf")
+
+    def test_oxide_empty_bytes_raises(self) -> None:
+        """pdf_oxide 后端对空字节应抛出 ExtractorError（非加密异常）。"""
+        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
+
+        if not _PDF_OXIDE_AVAILABLE:
+            pytest.skip("pdf_oxide 未安装")
+        with pytest.raises(ExtractorError):
+            PdfExtractor().extract_from_bytes(b"")
+
+    def test_oxide_extract_missing_file_raises(self, tmp_path: Path) -> None:
+        """pdf_oxide 后端 extract() 读取缺失文件应抛出 ExtractorError。"""
+        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
+
+        if not _PDF_OXIDE_AVAILABLE:
+            pytest.skip("pdf_oxide 未安装")
+        with pytest.raises(ExtractorError, match="文件读取失败"):
+            PdfExtractor().extract(tmp_path / "missing.pdf")
+
+    def test_oxide_returns_empty_for_empty_pdf(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """pdf_oxide 后端 to_plain_text_all 返回空时返回空字符串。"""
+        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
+
+        if not _PDF_OXIDE_AVAILABLE:
+            pytest.skip("pdf_oxide 未安装")
+        extractor = PdfExtractor()
+
+        class FakeDoc:
+            @staticmethod
+            def to_plain_text_all() -> str:
+                return ""
+
+        monkeypatch.setattr(
+            "fuscan.extractors.pdf._PdfOxideDocument.from_bytes",
+            lambda data: FakeDoc(),
+        )
+        assert extractor.extract_from_bytes(b"fake but callable") == ""
 
 
 # ---------------------------------------------------------------------------
@@ -1137,6 +1281,8 @@ class TestExtractFromBytes:
 
     def test_pdf_extract_from_bytes_matches_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """PdfExtractor 从 bytes 提取与从 path 提取结果一致。"""
+        # iter-91：强制走 pypdf 回退路径
+        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
         path = tmp_path / "fake.pdf"
         path.write_bytes(b"fake pdf content")
 

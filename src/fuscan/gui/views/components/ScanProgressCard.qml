@@ -7,6 +7,11 @@ import fuscan.controllers 1.0
 // 扫描进度卡片：扫描中（含暂停态）显示，承载实时进度与控制按钮。
 // HomePage 在 hasActiveScan=true 时用此卡片替换工作区列表，
 // 隐藏其余工作区以聚焦当前扫描任务（用户需求：扫描结束才显示其余工作区）。
+//
+// 注意：ScanController 一律通过 workspaceController.activeScanController.xxx 链式访问，
+// 不绑定到本地 property。PySide2 5.15 中将 @Property(ScanController) 返回的 QObject
+// 绑定到本地 property var/ScanControllerType 时类型推断失败会识别为 null（iter-101），
+// 链式访问每次 binding 求值都重新读取 Property，与 StatsPage 稳定模式一致。
 Rectangle {
     id: card
     property ThemeController theme: Theme
@@ -18,11 +23,6 @@ Rectangle {
     property string modeText: ""
     property string target: ""
 
-    // 便捷别名：当前扫描控制器（已在 WorkspaceController.activeScanController 暴露）
-    // 用 var 而非 ScanControllerType：PySide2 5.15 将 @Property 返回的 QObject 绑定到
-    // 本地 typed property 时类型推断失败会识别为 null（参见 project_memory iter-101）
-    property var scanController: workspaceController.activeScanController
-
     implicitHeight: contentColumn.implicitHeight + 32
     color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
     border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
@@ -31,12 +31,12 @@ Rectangle {
 
     // 状态色：扫描中=warning（黄），已暂停=text secondary
     function statusColor() {
-        if (scanController.isPaused) return theme.colorTextSecondary
+        if (workspaceController.activeScanController.isPaused) return theme.colorTextSecondary
         return theme.colorWarning
     }
 
     function statusText() {
-        if (scanController.isPaused) return "已暂停"
+        if (workspaceController.activeScanController.isPaused) return "已暂停"
         return "扫描中"
     }
 
@@ -125,12 +125,12 @@ Rectangle {
             }
             Label {
                 Layout.fillWidth: true
-                text: scanController.currentFile || "—"
+                text: workspaceController.activeScanController.currentFile || "—"
                 font.pixelSize: 12
                 color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                 elide: Text.ElideMiddle
                 // 暂停态淡化提示
-                opacity: scanController.isPaused ? 0.6 : 1.0
+                opacity: workspaceController.activeScanController.isPaused ? 0.6 : 1.0
             }
         }
 
@@ -148,9 +148,9 @@ Rectangle {
                 }
                 Item { Layout.fillWidth: true }
                 Label {
-                    text: scanController.progressIndeterminate
+                    text: workspaceController.activeScanController.progressIndeterminate
                         ? "统计中..."
-                        : (scanController.progressScanned + " / " + scanController.progressTotal)
+                        : (workspaceController.activeScanController.progressScanned + " / " + workspaceController.activeScanController.progressTotal)
                     font.pixelSize: 11
                     color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                 }
@@ -159,10 +159,10 @@ Rectangle {
                 id: progressBar
                 Layout.fillWidth: true
                 // 不确定模式（统计阶段）走 ProgressBar 默认动画
-                indeterminate: scanController.progressIndeterminate
+                indeterminate: workspaceController.activeScanController.progressIndeterminate
                 from: 0.0
-                to: Math.max(scanController.progressTotal, 1)
-                value: scanController.progressScanned
+                to: Math.max(workspaceController.activeScanController.progressTotal, 1)
+                value: workspaceController.activeScanController.progressScanned
                 background: Rectangle {
                     implicitHeight: 6
                     color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
@@ -188,22 +188,22 @@ Rectangle {
             spacing: 16
 
             Label {
-                text: "<b style='color:#28A745'>通过 " + scanController.passedCount + "</b>"
+                text: "<b style='color:#28A745'>通过 " + workspaceController.activeScanController.passedCount + "</b>"
                 textFormat: Text.RichText
                 font.pixelSize: 12
             }
             Label {
-                text: "<b style='color:#DC3545'>命中 " + scanController.matchedCount + "</b>"
+                text: "<b style='color:#DC3545'>命中 " + workspaceController.activeScanController.matchedCount + "</b>"
                 textFormat: Text.RichText
                 font.pixelSize: 12
             }
             Label {
-                text: "<b style='color:#FFC107'>跳过 " + scanController.skippedCount + "</b>"
+                text: "<b style='color:#FFC107'>跳过 " + workspaceController.activeScanController.skippedCount + "</b>"
                 textFormat: Text.RichText
                 font.pixelSize: 12
             }
             Label {
-                text: "<b style='color:#DC3545'>错误 " + scanController.errorCount + "</b>"
+                text: "<b style='color:#DC3545'>错误 " + workspaceController.activeScanController.errorCount + "</b>"
                 textFormat: Text.RichText
                 font.pixelSize: 12
             }
@@ -217,7 +217,7 @@ Rectangle {
 
             Label {
                 Layout.fillWidth: true
-                text: scanController.statusSummary
+                text: workspaceController.activeScanController.statusSummary
                 font.pixelSize: 11
                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                 elide: Text.ElideRight
@@ -225,8 +225,8 @@ Rectangle {
 
             // 暂停/继续按钮：扫描中显示「暂停」，已暂停显示「继续」
             IconButton {
-                text: scanController.isPaused ? "▶ 继续" : "⏸ 暂停"
-                tooltip: scanController.isPaused ? "继续扫描" : "暂停扫描"
+                text: workspaceController.activeScanController.isPaused ? "▶ 继续" : "⏸ 暂停"
+                tooltip: workspaceController.activeScanController.isPaused ? "继续扫描" : "暂停扫描"
                 accent: "secondary"
                 onClicked: workspaceController.togglePause(card.workspaceId)
             }

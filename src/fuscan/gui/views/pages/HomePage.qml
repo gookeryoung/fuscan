@@ -66,15 +66,18 @@ Item {
             clip: true
             visible: workspaceController.hasActiveScan
 
-            // 进度卡片占满视口宽度，与工作区列表视觉宽度一致
-            ColumnLayout {
-                width: parent.width
-                spacing: 12
-
-                Item { Layout.fillHeight: true; Layout.preferredHeight: 40 }
+            // 用 anchors 而非 ColumnLayout：Rectangle 无 implicitWidth，
+            // Layout.fillWidth 在 ColumnLayout 内可能给 0 宽度；
+            // anchors.left/right 显式占满视口宽度，与工作区列表视觉宽度一致
+            Item {
+                anchors.fill: parent
 
                 ScanProgressCard {
-                    Layout.fillWidth: true
+                    id: scanCard
+                    anchors.top: parent.top
+                    anchors.topMargin: 40
+                    anchors.left: parent.left
+                    anchors.right: parent.right
                     workspaceId: workspaceController.activeScanWorkspaceId
                     taskName: workspaceController.activeScanWorkspaceName
                     modeText: workspaceController.activeScanModeText
@@ -83,13 +86,13 @@ Item {
 
                 // 提示：扫描结束后自动恢复工作区列表
                 Label {
-                    Layout.alignment: Qt.AlignHCenter
+                    anchors.top: scanCard.bottom
+                    anchors.topMargin: 12
+                    anchors.horizontalCenter: parent.horizontalCenter
                     text: "扫描结束后自动恢复工作区列表"
                     font.pixelSize: 11
                     color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                 }
-
-                Item { Layout.fillHeight: true; Layout.preferredHeight: 40 }
             }
         }
 

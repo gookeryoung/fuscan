@@ -193,6 +193,14 @@ Rectangle {
                 }
             }
             IconButton {
+                text:"🔄 更新扫描"
+                tooltip: "对已完成扫描的任务重新扫描"
+                accent: "secondary"
+                // 仅已完成扫描的工作区可用，其余状态禁用
+                enabled: statusText === "已完成"
+                onClicked: workspaceController.startScan(card.workspaceId)
+            }
+            IconButton {
                 text:"📊 查看结果"
                 tooltip: "查看扫描结果"
                 // 扫描完成后高亮（与扫描前的扫描按钮同色），未完成时 disabled 变灰

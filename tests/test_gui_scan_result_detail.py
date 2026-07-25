@@ -340,3 +340,118 @@ class TestDetailPropertiesExtended:
         assert hit["matchCount"] == 1
         assert hit["target"] == "content"
         assert hit["description"] == "敏感密钥检测"
+
+
+class TestMoveSelectedToStaging:
+    """测试 moveSelectedToStaging Slot。"""
+
+    def test_returns_message_when_no_selection(self, controller_with_results: ScanController) -> None:
+        """未选中结果时返回提示。"""
+        msg = controller_with_results.moveSelectedToStaging()
+        assert "未选中" in msg
+
+    def test_returns_message_when_archive_entry(self, controller: ScanController) -> None:
+        """压缩包内部条目返回不可移至暂存提示。"""
+        controller._ruleset = _build_replace_ruleset()
+        result = _make_scan_result(Path("/tmp/archive.zip!inner.txt"), archive_path=Path("/tmp/archive.zip"))
+        controller._result_model.set_results((result,))
+        controller._last_report = _make_scan_report((result,))
+        controller.setSelectedResultIndex(0)
+        msg = controller.moveSelectedToStaging()
+        assert "压缩包" in msg
+
+    def test_move_success_copies_and_marks_skipped(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """成功移至暂存应复制文件到 quarantine 目录并标记跳过。"""
+        controller._ruleset = _build_replace_ruleset()
+
+        # 准备扫描根目录与源文件
+        scan_root = tmp_path / "scan"
+        scan_root.mkdir()
+        src_file = scan_root / "secret.txt"
+        src_file.write_text("this is a secret value", encoding="utf-8")
+
+        result = ScanResult(
+            path=src_file,
+            size=src_file.stat().st_size,
+            hits=(
+                RuleHit(
+                    rule_name="可替换规则",
+                    severity=Severity.CRITICAL,
+                    detail="命中 secret",
+                    match_text="secret",
+                    match_texts=("secret",),
+                    match_count=1,
+                    target="content",
+                ),
+            ),
+        )
+        controller._result_model.set_results((result,))
+        controller._last_report = ScanReport(
+            root=scan_root,
+            results=(result,),
+            stats=ScanStats(total_files=1, scanned_files=1, matched_files=1),
+        )
+        controller.setSelectedResultIndex(0)
+
+        # 暂存区重定向到 tmp_path
+        staging_dir = tmp_path / "staging"
+        monkeypatch.setattr(controller._config, "staging_dir", str(staging_dir))
+
+        msg = controller.moveSelectedToStaging()
+        assert "已移至暂存" in msg
+
+        # 验证文件已复制到 quarantine 目录，保留相对路径
+        dest = staging_dir / "quarantine" / "secret.txt"
+        assert dest.exists()
+        assert dest.read_text(encoding="utf-8") == "this is a secret value"
+
+        # 验证已标记为跳过
+        assert controller._skip_store.contains(str(src_file))
+
+    def test_move_failure_returns_error_message(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """源文件不存在时移至暂存应返回失败消息。"""
+        controller._ruleset = _build_replace_ruleset()
+
+        scan_root = tmp_path / "scan"
+        scan_root.mkdir()
+        # 源文件不存在
+        src_file = scan_root / "nonexistent.txt"
+
+        result = ScanResult(
+            path=src_file,
+            size=100,
+            hits=(
+                RuleHit(
+                    rule_name="可替换规则",
+                    severity=Severity.CRITICAL,
+                    detail="命中 secret",
+                    match_text="secret",
+                    match_texts=("secret",),
+                    match_count=1,
+                    target="content",
+                ),
+            ),
+        )
+        controller._result_model.set_results((result,))
+        controller._last_report = ScanReport(
+            root=scan_root,
+            results=(result,),
+            stats=ScanStats(total_files=1, scanned_files=1, matched_files=1),
+        )
+        controller.setSelectedResultIndex(0)
+
+        staging_dir = tmp_path / "staging"
+        monkeypatch.setattr(controller._config, "staging_dir", str(staging_dir))
+
+        msg = controller.moveSelectedToStaging()
+        assert "失败" in msg

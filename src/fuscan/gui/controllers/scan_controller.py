@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -25,7 +26,7 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
-from fuscan.config import Config, default_backup_dir
+from fuscan.config import Config, default_backup_dir, detect_default_staging_dir
 from fuscan.gui.explorer import open_path_in_explorer
 from fuscan.gui.models.result_model import ResultListModel
 from fuscan.gui.severity_utils import severity_color_hex, severity_text
@@ -428,6 +429,55 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return replace_result.message or f"替换成功（{replace_result.replaced_count} 条）"
         logger.warning("替换失败: %s", replace_result.message)
         return replace_result.message or "替换失败"
+
+    @Slot(result=str)  # pyrefly: ignore [not-callable]
+    def moveSelectedToStaging(self) -> str:
+        """将当前选中结果文件复制到暂存区隔离目录并标记为跳过。
+
+        流程：
+
+        1. 校验选中结果、规则集、非压缩包内部条目
+        2. 计算暂存区隔离目录：``<staging_dir>/quarantine/`` 或
+           ``<默认暂存区>/quarantine/``
+        3. 保留源文件相对扫描根目录的目录结构，复制到隔离目录
+        4. 调用 :class:`SkipStore.add` 标记为跳过，后续扫描自动跳过
+        5. 返回操作消息供 QML 显示
+
+        - 未选中结果 → ``未选中结果``
+        - 压缩包内部条目 → ``压缩包内部条目不支持移至暂存``
+        - 复制成功 → ``已移至暂存: <隔离路径>`` 并标记跳过
+        - 复制失败 → ``移至暂存失败: <错误>``
+        """
+        result = self._get_selected_result()
+        if result is None:
+            return "未选中结果"
+        if result.archive_path is not None:
+            return "压缩包内部条目不支持移至暂存"
+
+        # 计算暂存区隔离目录
+        staging_root = Path(self._config.staging_dir) if self._config.staging_dir else detect_default_staging_dir()
+        quarantine_dir = staging_root / "quarantine"
+        scan_root = self._last_report.root if self._last_report is not None else result.path.parent
+
+        # 保留相对扫描根目录的目录结构
+        try:
+            rel_path = result.path.relative_to(scan_root)
+        except ValueError:
+            # 不在扫描根下（如绝对路径跨盘符），仅保留文件名
+            rel_path = Path(result.path.name)
+
+        dest = quarantine_dir / rel_path
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(result.path, dest)
+        except OSError as exc:
+            logger.warning("移至暂存失败: %s -> %s", result.path, dest, exc_info=True)
+            return f"移至暂存失败: {exc}"
+
+        # 标记为跳过，后续扫描自动跳过该文件
+        self._skip_store.add(str(result.path))
+        logger.info("已移至暂存: %s -> %s（已标记跳过）", result.path, dest)
+        return f"已移至暂存: {dest}（已标记跳过）"
 
     # ----------------------------- QML 调用槽 -----------------------------
 

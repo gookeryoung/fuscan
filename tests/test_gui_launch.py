@@ -24,7 +24,7 @@ import pytest
 # 设置离屏平台，避免无显示器环境报错
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-pytestmark = [pytest.mark.gui, pytest.mark.slow]
+pytestmark = pytest.mark.gui
 
 try:
     from PySide2.QtCore import QTimer

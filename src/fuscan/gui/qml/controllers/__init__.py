@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from fuscan.gui.qml.controllers.about_controller import AboutController
-from fuscan.gui.qml.controllers.app_controller import AppController
+from fuscan.gui.qml.controllers.app_controller import AppController, register_qml_types
 from fuscan.gui.qml.controllers.config_controller import ConfigController
 from fuscan.gui.qml.controllers.rules_controller import RulesController
 from fuscan.gui.qml.controllers.scan_controller import ScanController
@@ -24,4 +24,5 @@ __all__ = [
     "ConfigController",
     "RulesController",
     "ScanController",
+    "register_qml_types",
 ]

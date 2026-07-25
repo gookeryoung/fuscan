@@ -1,14 +1,16 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import fuscan.theme 1.0
 
 Pane {
     id: sidebar
+    property ThemeController theme: Theme
     padding: 0
 
     // 侧栏背景：深色模式深蓝黑，浅色模式纯白
     background: Rectangle {
-        color: Theme.isDark ? Theme.colorSidebarDark : Theme.colorBgCard
+        color: theme.isDark ? theme.colorSidebarDark : theme.colorBgCard
         Behavior on color { ColorAnimation { duration: 200 } }
     }
 
@@ -17,7 +19,7 @@ Pane {
         anchors.right: parent.right
         width: 1
         height: parent.height
-        color: Theme.isDark ? Theme.colorBorderDark : Theme.colorBorder
+        color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
     }
 
     // ========== 当前选中页（供 ContentArea 读取） ==========
@@ -40,11 +42,11 @@ Pane {
                 spacing: 10
                 Rectangle {
                     width: 28; height: 28; radius: 6
-                    color: Theme.colorPrimary
+                    color: theme.colorPrimary
                     Label {
                         anchors.centerIn: parent
                         text: "F"
-                        color: Theme.colorTextOnPrimary
+                        color: theme.colorTextOnPrimary
                         font.pixelSize: 14
                         font.bold: true
                     }
@@ -53,7 +55,7 @@ Pane {
                     text: "fuscan"
                     font.pixelSize: 15
                     font.bold: true
-                    color: Theme.isDark ? Theme.colorTextPrimary : Theme.colorTextPrimary
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                 }
             }
         }
@@ -90,8 +92,8 @@ Pane {
             Layout.bottomMargin: 16
             Layout.preferredHeight: 36
             radius: 8
-            color: Theme.isDark ? Theme.colorBgHover : Theme.colorBgApp
-            border.color: Theme.isDark ? Theme.colorBorderDark : Theme.colorBorder
+            color: theme.isDark ? theme.colorBgHover : theme.colorBgApp
+            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
             border.width: 1
 
             RowLayout {
@@ -105,22 +107,22 @@ Pane {
                 Label {
                     text: "暗色模式"
                     font.pixelSize: 12
-                    color: Theme.isDark ? Theme.colorTextSecondary : Theme.colorTextSecondary
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                     Layout.fillWidth: true
                 }
                 // 自定义开关
                 Rectangle {
                     width: 36; height: 20; radius: 10
-                    color: Theme.isDark ? Theme.colorPrimary : Theme.colorBorder
+                    color: theme.isDark ? theme.colorPrimary : theme.colorBorder
                     Behavior on color { ColorAnimation { duration: 150 } }
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: Theme.setDark(!Theme.isDark)
+                        onClicked: theme.setDark(!theme.isDark)
                     }
                     Rectangle {
                         width: 16; height: 16; radius: 8
                         color: "#FFFFFF"
-                        x: Theme.isDark ? 18 : 2
+                        x: theme.isDark ? 18 : 2
                         anchors.verticalCenter: parent.verticalCenter
                         Behavior on x { NumberAnimation { duration: 150 } }
                     }

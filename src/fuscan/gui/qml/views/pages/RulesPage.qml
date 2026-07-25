@@ -1,9 +1,13 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import fuscan.theme 1.0
+import fuscan.controllers 1.0
 
 Item {
     id: rulesPage
+    property ThemeController theme: Theme
+    property RulesController rulesController: RulesController
 
     ColumnLayout {
         anchors.fill: parent
@@ -16,13 +20,13 @@ Item {
                 text: "规则"
                 font.pixelSize: 22
                 font.bold: true
-                color: Theme.isDark ? Theme.colorTextPrimary : Theme.colorTextPrimary
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
             }
             Item { Layout.fillWidth: true }
             Label {
-                text: "共 " + RulesController.ruleCount + " 条规则"
+                text: "共 " + rulesController.ruleCount + " 条规则"
                 font.pixelSize: 12
-                color: Theme.isDark ? Theme.colorTextSecondary : Theme.colorTextSecondary
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
             }
         }
 
@@ -37,8 +41,8 @@ Item {
                 Layout.fillHeight: true
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
-                color: Theme.isDark ? Theme.colorBgCard : Theme.colorBgCard
-                border.color: Theme.isDark ? Theme.colorBorderDark : Theme.colorBorder
+                color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                 border.width: 1
                 radius: 8
 
@@ -51,7 +55,7 @@ Item {
                         text: "规则文件"
                         font.pixelSize: 14
                         font.bold: true
-                        color: Theme.isDark ? Theme.colorTextPrimary : Theme.colorTextPrimary
+                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                     }
 
                     // 内置规则勾选
@@ -59,8 +63,8 @@ Item {
                         Layout.fillWidth: true
                         CheckBox {
                             text: "内置通用规则"
-                            checked: RulesController.useBuiltin
-                            onCheckedChanged: RulesController.setUseBuiltin(checked)
+                            checked: rulesController.useBuiltin
+                            onCheckedChanged: rulesController.setUseBuiltin(checked)
                         }
                     }
 
@@ -70,7 +74,7 @@ Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
-                        model: RulesController.rulesFileModel
+                        model: rulesController.rulesFileModel
                         delegate: ItemDelegate {
                             width: rulesFileList.width
                             height: 36
@@ -80,7 +84,7 @@ Item {
                                 Label {
                                     text: model.fileName
                                     font.pixelSize: 12
-                                    color: Theme.isDark ? Theme.colorTextPrimary : Theme.colorTextPrimary
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                     elide: Text.ElideMiddle
                                 }
                             }
@@ -92,28 +96,28 @@ Item {
                         Layout.fillWidth: true
                         spacing: 4
                         Button {
-                            Layout.preferredHeight: Theme.btnHeightGhost
+                            Layout.preferredHeight: theme.btnHeightGhost
                             text: "↑"
-                            enabled: RulesController.canMoveUp
-                            onClicked: RulesController.moveUp()
+                            enabled: rulesController.canMoveUp
+                            onClicked: rulesController.moveUp()
                         }
                         Button {
-                            Layout.preferredHeight: Theme.btnHeightGhost
+                            Layout.preferredHeight: theme.btnHeightGhost
                             text: "↓"
-                            enabled: RulesController.canMoveDown
-                            onClicked: RulesController.moveDown()
+                            enabled: rulesController.canMoveDown
+                            onClicked: rulesController.moveDown()
                         }
                         Button {
-                            Layout.preferredHeight: Theme.btnHeightGhost
+                            Layout.preferredHeight: theme.btnHeightGhost
                             text: "−"
-                            enabled: RulesController.canRemove
-                            onClicked: RulesController.removeSelected()
+                            enabled: rulesController.canRemove
+                            onClicked: rulesController.removeSelected()
                         }
                         Item { Layout.fillWidth: true }
                         Button {
-                            Layout.preferredHeight: Theme.btnHeightSecondary
+                            Layout.preferredHeight: theme.btnHeightSecondary
                             text: "加载..."
-                            onClicked: RulesController.loadFile()
+                            onClicked: rulesController.loadFile()
                         }
                     }
                 }
@@ -124,8 +128,8 @@ Item {
                 Layout.fillHeight: true
                 Layout.fillWidth: true
                 Layout.preferredWidth: 2
-                color: Theme.isDark ? Theme.colorBgCard : Theme.colorBgCard
-                border.color: Theme.isDark ? Theme.colorBorderDark : Theme.colorBorder
+                color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                 border.width: 1
                 radius: 8
 
@@ -138,7 +142,7 @@ Item {
                         text: "规则列表"
                         font.pixelSize: 14
                         font.bold: true
-                        color: Theme.isDark ? Theme.colorTextPrimary : Theme.colorTextPrimary
+                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                     }
 
                     ListView {
@@ -146,7 +150,7 @@ Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
-                        model: RulesController.ruleModel
+                        model: rulesController.ruleModel
                         delegate: ItemDelegate {
                             width: ruleListView.width
                             height: 56
@@ -161,7 +165,7 @@ Item {
                                         text: model.name
                                         font.pixelSize: 13
                                         font.bold: true
-                                        color: Theme.isDark ? Theme.colorTextPrimary : Theme.colorTextPrimary
+                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                     }
                                     Item { Layout.fillWidth: true }
                                     Rectangle {
@@ -182,7 +186,7 @@ Item {
                                     Layout.fillWidth: true
                                     text: model.description
                                     font.pixelSize: 11
-                                    color: Theme.isDark ? Theme.colorTextSecondary : Theme.colorTextSecondary
+                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                     elide: Text.ElideRight
                                     visible: model.description.length > 0
                                 }

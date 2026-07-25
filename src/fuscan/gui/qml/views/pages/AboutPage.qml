@@ -1,9 +1,13 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import fuscan.theme 1.0
+import fuscan.controllers 1.0
 
 Item {
     id: aboutPage
+    property ThemeController theme: Theme
+    property AboutController aboutController: AboutController
 
     ScrollView {
         anchors.fill: parent
@@ -17,7 +21,7 @@ Item {
                 text: "关于"
                 font.pixelSize: 22
                 font.bold: true
-                color: Theme.isDark ? Theme.colorTextPrimary : Theme.colorTextPrimary
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
             }
 
             // Logo 区
@@ -26,11 +30,11 @@ Item {
                 width: 80
                 height: 80
                 radius: 16
-                color: Theme.colorPrimary
+                color: theme.colorPrimary
                 Label {
                     anchors.centerIn: parent
                     text: "F"
-                    color: Theme.colorTextOnPrimary
+                    color: theme.colorTextOnPrimary
                     font.pixelSize: 40
                     font.bold: true
                 }
@@ -46,35 +50,35 @@ Item {
                     text: "fuscan"
                     font.pixelSize: 24
                     font.bold: true
-                    color: Theme.isDark ? Theme.colorTextPrimary : Theme.colorTextPrimary
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                 }
                 Label {
                     Layout.alignment: Qt.AlignHCenter
-                    text: "v" + AboutController.version
+                    text: "v" + aboutController.version
                     font.pixelSize: 13
-                    color: Theme.isDark ? Theme.colorTextSecondary : Theme.colorTextSecondary
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                 }
                 Label {
                     Layout.alignment: Qt.AlignHCenter
-                    text: AboutController.description
+                    text: aboutController.description
                     font.pixelSize: 12
-                    color: Theme.isDark ? Theme.colorTextSecondary : Theme.colorTextSecondary
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                 }
                 Label {
                     Layout.alignment: Qt.AlignHCenter
-                    text: "作者: " + AboutController.author + " · " + AboutController.license
+                    text: "作者: " + aboutController.author + " · " + aboutController.license
                     font.pixelSize: 11
-                    color: Theme.isDark ? Theme.colorTextSecondary : Theme.colorTextSecondary
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                 }
             }
 
             // 用户手册入口
             Button {
                 Layout.alignment: Qt.AlignHCenter
-                Layout.preferredHeight: Theme.btnHeightSecondary
+                Layout.preferredHeight: theme.btnHeightSecondary
                 Layout.preferredWidth: 200
                 text: "打开用户手册 PDF"
-                onClicked: AboutController.openManual()
+                onClicked: aboutController.openManual()
             }
 
             // 第三方依赖
@@ -85,11 +89,11 @@ Item {
                     anchors.fill: parent
                     spacing: 4
                     Repeater {
-                        model: AboutController.dependencies
+                        model: aboutController.dependencies
                         Label {
                             text: modelData
                             font.pixelSize: 11
-                            color: Theme.isDark ? Theme.colorTextSecondary : Theme.colorTextSecondary
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                         }
                     }
                 }

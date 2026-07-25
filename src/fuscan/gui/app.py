@@ -27,6 +27,7 @@ except ImportError:  # pragma: no cover
     from PySide6.QtQuickControls2 import QQuickStyle  # pyrefly: ignore [missing-import]
 
 from fuscan.gui.qml import AppController
+from fuscan.gui.qml.controllers import register_qml_types
 
 __all__ = ["launch"]
 
@@ -56,6 +57,10 @@ def launch(argv: Sequence[str] | None = None) -> int:
 
     # 设置 QtQuick Controls 2 风格为 Fusion（跨平台一致）
     QQuickStyle.setStyle("Fusion")
+
+    # 注册 controller/model 类型到 QML 引擎（必须在 QQmlApplicationEngine 构造前）
+    # 使 QML 文件能 import 类型并声明类型化 property，消除 setContextProperty 导致的 TypeError
+    register_qml_types()
 
     # 构造主控制器并注册到 QML context
     controller = AppController()

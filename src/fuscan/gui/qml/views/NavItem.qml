@@ -1,9 +1,11 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import fuscan.theme 1.0
 
 ItemDelegate {
     id: navItem
+    property ThemeController theme: Theme
     property string iconText: ""
     property string label: ""
     property string pageId: ""
@@ -17,7 +19,7 @@ ItemDelegate {
     // 背景
     background: Rectangle {
         color: navItem.selected
-              ? (Theme.isDark ? Theme.colorBgSelected : Theme.colorBgSelected)
+              ? (theme.isDark ? theme.colorBgSelected : theme.colorBgSelected)
               : "transparent"
         Behavior on color { ColorAnimation { duration: 120 } }
     }
@@ -27,7 +29,7 @@ ItemDelegate {
         width: 3
         height: parent.height * 0.55
         anchors.verticalCenter: parent.verticalCenter
-        color: navItem.selected ? Theme.colorPrimary : "transparent"
+        color: navItem.selected ? theme.colorPrimary : "transparent"
         radius: 2
         Behavior on color { ColorAnimation { duration: 120 } }
     }
@@ -49,8 +51,8 @@ ItemDelegate {
             text: navItem.label
             font.pixelSize: 13
             color: navItem.selected
-                  ? (Theme.isDark ? Theme.colorTextPrimary : Theme.colorPrimary)
-                  : (Theme.isDark ? Theme.colorTextSecondary : Theme.colorTextSecondary)
+                  ? (theme.isDark ? theme.colorTextPrimary : theme.colorPrimary)
+                  : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
             Behavior on color { ColorAnimation { duration: 120 } }
         }
     }

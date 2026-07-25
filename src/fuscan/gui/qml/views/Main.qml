@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import fuscan.theme 1.0
 
 ApplicationWindow {
     id: root
@@ -11,9 +12,12 @@ ApplicationWindow {
     minimumHeight: 560
     title: "fuscan"
 
+    // 类型化访问 context property，消除 setContextProperty 导致的 TypeError
+    property ThemeController theme: Theme
+
     // ========== 背景色随主题切换 ==========
     background: Rectangle {
-        color: Theme.isDark ? Theme.colorBgApp : Theme.colorBgApp
+        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
         Behavior on color { ColorAnimation { duration: 200 } }
     }
 

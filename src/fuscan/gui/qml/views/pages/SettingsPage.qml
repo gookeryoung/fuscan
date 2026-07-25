@@ -1,9 +1,13 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import fuscan.theme 1.0
+import fuscan.controllers 1.0
 
 Item {
     id: settingsPage
+    property ThemeController theme: Theme
+    property ConfigController configController: ConfigController
 
     ScrollView {
         anchors.fill: parent
@@ -17,7 +21,7 @@ Item {
                 text: "设置"
                 font.pixelSize: 22
                 font.bold: true
-                color: Theme.isDark ? Theme.colorTextPrimary : Theme.colorTextPrimary
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
             }
 
             // ---------- 扫描设置 ----------
@@ -34,8 +38,8 @@ Item {
                             Layout.fillWidth: true
                         }
                         Switch {
-                            checked: ConfigController.scanArchives
-                            onCheckedChanged: ConfigController.setScanArchives(checked)
+                            checked: configController.scanArchives
+                            onCheckedChanged: configController.setScanArchives(checked)
                         }
                     }
                     RowLayout {
@@ -47,8 +51,8 @@ Item {
                         SpinBox {
                             from: 1
                             to: 16
-                            value: ConfigController.maxWorkers
-                            onValueChanged: ConfigController.setMaxWorkers(value)
+                            value: configController.maxWorkers
+                            onValueChanged: configController.setMaxWorkers(value)
                         }
                     }
                     RowLayout {
@@ -60,8 +64,8 @@ Item {
                         SpinBox {
                             from: 1
                             to: 500
-                            value: ConfigController.maxFileSizeMB
-                            onValueChanged: ConfigController.setMaxFileSizeMB(value)
+                            value: configController.maxFileSizeMB
+                            onValueChanged: configController.setMaxFileSizeMB(value)
                         }
                     }
                     RowLayout {
@@ -73,8 +77,8 @@ Item {
                         SpinBox {
                             from: 0
                             to: 50
-                            value: ConfigController.maxDepth
-                            onValueChanged: ConfigController.setMaxDepth(value)
+                            value: configController.maxDepth
+                            onValueChanged: configController.setMaxDepth(value)
                         }
                     }
                 }
@@ -90,27 +94,27 @@ Item {
                     RowLayout {
                         Layout.fillWidth: true
                         Button {
-                            Layout.preferredHeight: Theme.btnHeightGhost
+                            Layout.preferredHeight: theme.btnHeightGhost
                             text: "全选"
-                            onClicked: ConfigController.selectAllExtractors()
+                            onClicked: configController.selectAllExtractors()
                         }
                         Button {
-                            Layout.preferredHeight: Theme.btnHeightGhost
+                            Layout.preferredHeight: theme.btnHeightGhost
                             text: "全不选"
-                            onClicked: ConfigController.unselectAllExtractors()
+                            onClicked: configController.unselectAllExtractors()
                         }
                         Item { Layout.fillWidth: true }
                         Label {
-                            text: ConfigController.extractorCountText
+                            text: configController.extractorCountText
                             font.pixelSize: 11
-                            color: Theme.isDark ? Theme.colorTextSecondary : Theme.colorTextSecondary
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                         }
                     }
                     ListView {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 200
                         clip: true
-                        model: ConfigController.extractorModel
+                        model: configController.extractorModel
                         delegate: ItemDelegate {
                             width: parent.width
                             height: 32
@@ -119,12 +123,12 @@ Item {
                                 anchors.leftMargin: 8
                                 CheckBox {
                                     checked: model.enabled
-                                    onCheckedChanged: ConfigController.setExtractorEnabled(model.className, checked)
+                                    onCheckedChanged: configController.setExtractorEnabled(model.className, checked)
                                 }
                                 Label {
                                     text: model.displayName
                                     font.pixelSize: 12
-                                    color: Theme.isDark ? Theme.colorTextPrimary : Theme.colorTextPrimary
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                 }
                                 Item { Layout.fillWidth: true }
                                 Label {
@@ -144,12 +148,12 @@ Item {
                 title: "忽略目录（一行一个）"
                 TextArea {
                     anchors.fill: parent
-                    text: ConfigController.ignoreDirsText
-                    onTextChanged: ConfigController.setIgnoreDirsText(text)
+                    text: configController.ignoreDirsText
+                    onTextChanged: configController.setIgnoreDirsText(text)
                     font.pixelSize: 12
                     background: Rectangle {
-                        color: Theme.isDark ? Theme.colorBgApp : Theme.colorBgApp
-                        border.color: Theme.isDark ? Theme.colorBorderDark : Theme.colorBorder
+                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                         border.width: 1
                         radius: 4
                     }
@@ -170,8 +174,8 @@ Item {
                             Layout.fillWidth: true
                         }
                         Switch {
-                            checked: ConfigController.cacheEnabled
-                            onCheckedChanged: ConfigController.setCacheEnabled(checked)
+                            checked: configController.cacheEnabled
+                            onCheckedChanged: configController.setCacheEnabled(checked)
                         }
                     }
                 }
@@ -191,8 +195,8 @@ Item {
                             Layout.fillWidth: true
                         }
                         Switch {
-                            checked: ConfigController.perfLogEnabled
-                            onCheckedChanged: ConfigController.setPerfLogEnabled(checked)
+                            checked: configController.perfLogEnabled
+                            onCheckedChanged: configController.setPerfLogEnabled(checked)
                         }
                     }
                 }
@@ -209,7 +213,7 @@ Item {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 120
                         clip: true
-                        model: ConfigController.scanPaths
+                        model: configController.scanPaths
                         delegate: ItemDelegate {
                             width: parent.width
                             height: 28
@@ -219,15 +223,15 @@ Item {
                                 anchors.leftMargin: 8
                                 text: modelData
                                 font.pixelSize: 12
-                                color: Theme.isDark ? Theme.colorTextSecondary : Theme.colorTextSecondary
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                 elide: Text.ElideMiddle
                             }
                         }
                     }
                     Button {
-                        Layout.preferredHeight: Theme.btnHeightGhost
+                        Layout.preferredHeight: theme.btnHeightGhost
                         text: "清除历史"
-                        onClicked: ConfigController.clearScanPaths()
+                        onClicked: configController.clearScanPaths()
                     }
                 }
             }

@@ -1,4 +1,4 @@
-"""QML 控制层：``QObject`` 子类，通过 ``Property``/``Signal``/``Slot`` 暴露状态与操作给 QML。
+﻿"""QML 控制层：``QObject`` 子类，通过 ``Property``/``Signal``/``Slot`` 暴露状态与操作给 QML。
 
 按 rule-12-pyside-dev.md 三层 MVC 分层，控制器不持有 QML 控件引用，仅通过
 信号槽与 QML 通信。子模块：
@@ -13,12 +13,12 @@
 
 from __future__ import annotations
 
-from fuscan.gui.qml.controllers.about_controller import AboutController
-from fuscan.gui.qml.controllers.app_controller import AppController, register_qml_types
-from fuscan.gui.qml.controllers.config_controller import ConfigController
-from fuscan.gui.qml.controllers.rules_controller import RulesController
-from fuscan.gui.qml.controllers.scan_controller import ScanController
-from fuscan.gui.qml.controllers.workspace_controller import WorkspaceController
+from fuscan.gui.controllers.about_controller import AboutController
+from fuscan.gui.controllers.app_controller import AppController, register_qml_types
+from fuscan.gui.controllers.config_controller import ConfigController
+from fuscan.gui.controllers.rules_controller import RulesController
+from fuscan.gui.controllers.scan_controller import ScanController
+from fuscan.gui.controllers.workspace_controller import WorkspaceController
 
 __all__ = [
     "AboutController",

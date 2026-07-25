@@ -1,4 +1,4 @@
-"""``RulesController`` 单元测试。
+﻿"""``RulesController`` 单元测试。
 
 验证规则文件管理（加载/上移/下移/移除）、内置规则勾选、规则集合并与
 ``rulesetChanged`` 信号触发。使用 ``tmp_path`` 隔离配置与规则文件。
@@ -18,9 +18,9 @@ pytestmark = pytest.mark.gui
 
 try:
     from fuscan.config import Config  # noqa: F401
-    from fuscan.gui.qml.controllers.config_controller import ConfigController
-    from fuscan.gui.qml.controllers.rules_controller import RulesController
-    from fuscan.gui.qml.models.rule_model import RuleListModel
+    from fuscan.gui.controllers.config_controller import ConfigController
+    from fuscan.gui.controllers.rules_controller import RulesController
+    from fuscan.gui.models.rule_model import RuleListModel
 
     PYSIDE_AVAILABLE = True
 except ImportError:

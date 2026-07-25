@@ -1,4 +1,4 @@
-"""QML 模型层：``QAbstractListModel`` 子类，大数据量列表绑定。
+﻿"""QML 模型层：``QAbstractListModel`` 子类，大数据量列表绑定。
 
 按 rule-12-pyside-dev.md，结果/规则/文件类型列表必须用 Model，
 禁止 QML 侧 ``ListModel`` 动态 append 大量元素。子模块：
@@ -11,10 +11,10 @@
 
 from __future__ import annotations
 
-from fuscan.gui.qml.models.extractor_model import ExtractorListModel
-from fuscan.gui.qml.models.result_model import ResultListModel
-from fuscan.gui.qml.models.rule_model import RuleListModel
-from fuscan.gui.qml.models.workspace_model import WorkspaceItem, WorkspaceListModel
+from fuscan.gui.models.extractor_model import ExtractorListModel
+from fuscan.gui.models.result_model import ResultListModel
+from fuscan.gui.models.rule_model import RuleListModel
+from fuscan.gui.models.workspace_model import WorkspaceItem, WorkspaceListModel
 
 __all__ = [
     "ExtractorListModel",

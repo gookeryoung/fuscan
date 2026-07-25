@@ -1,4 +1,4 @@
-"""扫描工作流控制器：QML ↔ ScanWorker/FileStatsWorker 桥接。
+﻿"""扫描工作流控制器：QML ↔ ScanWorker/FileStatsWorker 桥接。
 
 状态机三态：``setup`` → ``scanning`` → ``results``（取消/失败回 ``setup``）。
 所有耗时操作走 ``QThread`` Worker，QML 主线程仅渲染。
@@ -27,8 +27,8 @@ except ImportError:  # pragma: no cover
 
 from fuscan.config import Config
 from fuscan.gui.explorer import open_path_in_explorer
-from fuscan.gui.qml.models.result_model import ResultListModel
-from fuscan.gui.qml.severity_utils import severity_color_hex, severity_text
+from fuscan.gui.models.result_model import ResultListModel
+from fuscan.gui.severity_utils import severity_color_hex, severity_text
 from fuscan.scanner import ScanReport
 from fuscan.scanner.result import ProgressInfo, ScanResult, WalkResult
 from fuscan.skip_store import SkipStore
@@ -36,8 +36,8 @@ from fuscan.workers import FileStatsWorker, ScanWorker
 
 if TYPE_CHECKING:
     from fuscan.cache import CacheStore
-    from fuscan.gui.qml.controllers.config_controller import ConfigController
-    from fuscan.gui.qml.controllers.rules_controller import RulesController
+    from fuscan.gui.controllers.config_controller import ConfigController
+    from fuscan.gui.controllers.rules_controller import RulesController
     from fuscan.rules.model import RuleSet
 
 __all__ = ["ScanController"]

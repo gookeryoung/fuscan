@@ -1,4 +1,4 @@
-"""工作区控制器：管理多个扫描任务（工作区）。
+﻿"""工作区控制器：管理多个扫描任务（工作区）。
 
 工作区是 fuscan GUI 的核心组织单元：每个工作区代表一个独立的扫描任务，
 包含名称、扫描模式、目标、规则配置与最近一次扫描结果摘要。所有工作区
@@ -29,12 +29,12 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
-from fuscan.gui.qml.controllers.scan_controller import ScanController
-from fuscan.gui.qml.models.workspace_model import WorkspaceItem, WorkspaceListModel
+from fuscan.gui.controllers.scan_controller import ScanController
+from fuscan.gui.models.workspace_model import WorkspaceItem, WorkspaceListModel
 
 if TYPE_CHECKING:
-    from fuscan.gui.qml.controllers.config_controller import ConfigController
-    from fuscan.gui.qml.controllers.rules_controller import RulesController
+    from fuscan.gui.controllers.config_controller import ConfigController
+    from fuscan.gui.controllers.rules_controller import RulesController
 
 __all__ = ["WorkspaceController"]
 

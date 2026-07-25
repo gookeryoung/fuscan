@@ -1,4 +1,4 @@
-"""``AboutController`` 单元测试。
+﻿"""``AboutController`` 单元测试。
 
 验证版本号/描述/作者/License/依赖列表等只读 ``@Property``。
 """
@@ -17,7 +17,7 @@ pytestmark = pytest.mark.gui
 
 try:
     from fuscan import __author__, __description__, __license__, __version__
-    from fuscan.gui.qml.controllers.about_controller import AboutController
+    from fuscan.gui.controllers.about_controller import AboutController
 
     PYSIDE_AVAILABLE = True
 except ImportError:
@@ -75,7 +75,7 @@ class TestOpenManual:
         self, about: AboutController, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """PDF 不存在时仅记录 warning，不抛异常。"""
-        from fuscan.gui.qml.controllers import about_controller
+        from fuscan.gui.controllers import about_controller
 
         # 替换 MANUAL_PDF_PATH 为不存在的路径
         non_existent = tmp_path / "non_existent.pdf"
@@ -94,7 +94,7 @@ class TestOpenConfigDir:
         tmp_path: Path,
     ) -> None:
         """配置目录不存在时仅记录 warning，不抛异常。"""
-        from fuscan.gui.qml.controllers import about_controller
+        from fuscan.gui.controllers import about_controller
 
         non_existent = tmp_path / "non_existent_config_dir"
         monkeypatch.setattr(about_controller, "CONFIG_DIR", non_existent)
@@ -108,7 +108,7 @@ class TestOpenConfigDir:
         tmp_path: Path,
     ) -> None:
         """配置目录存在时应调用 QDesktopServices.openUrl。"""
-        from fuscan.gui.qml.controllers import about_controller
+        from fuscan.gui.controllers import about_controller
 
         config_dir = tmp_path / "fuscan_config"
         config_dir.mkdir()

@@ -1,4 +1,4 @@
-"""配置控制器：QML ↔ Config 持久化桥接。
+﻿"""配置控制器：QML ↔ Config 持久化桥接。
 
 暴露 :class:`Config` 字段为 ``@Property``，QML 控件 ``onCheckedChanged``/
 ``onValueChanged`` 直接调用 setter 保存配置。同时管理盘符列表、扫描路径
@@ -23,7 +23,7 @@ except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
 from fuscan.config import Config, load_config, save_config
-from fuscan.gui.qml.models.extractor_model import ExtractorListModel
+from fuscan.gui.models.extractor_model import ExtractorListModel
 from fuscan.perf import set_perf_enabled
 
 if TYPE_CHECKING:

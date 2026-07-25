@@ -1,4 +1,4 @@
-"""``ScanController`` 单元测试。
+﻿"""``ScanController`` 单元测试。
 
 验证扫描状态机（setup/scanning/results）、扫描模式、进度属性、
 结果模型与选中结果管理。耗时操作（真实 ScanWorker）通过 monkeypatch
@@ -20,10 +20,10 @@ pytestmark = pytest.mark.gui
 
 try:
     from fuscan.config import Config  # noqa: F401
-    from fuscan.gui.qml.controllers.config_controller import ConfigController
-    from fuscan.gui.qml.controllers.rules_controller import RulesController
-    from fuscan.gui.qml.controllers.scan_controller import ScanController
-    from fuscan.gui.qml.models.result_model import ResultListModel
+    from fuscan.gui.controllers.config_controller import ConfigController
+    from fuscan.gui.controllers.rules_controller import RulesController
+    from fuscan.gui.controllers.scan_controller import ScanController
+    from fuscan.gui.models.result_model import ResultListModel
     from fuscan.rules.model import (
         LeafMatch,
         MatchMode,
@@ -213,8 +213,8 @@ def fake_workers(monkeypatch: pytest.MonkeyPatch) -> tuple[list[FakeStatsWorker]
     """替换 ScanController 中的 FileStatsWorker 与 ScanWorker 为 Fake。"""
     FakeStatsWorker.instances.clear()
     FakeScanWorker.instances.clear()
-    monkeypatch.setattr("fuscan.gui.qml.controllers.scan_controller.FileStatsWorker", FakeStatsWorker)
-    monkeypatch.setattr("fuscan.gui.qml.controllers.scan_controller.ScanWorker", FakeScanWorker)
+    monkeypatch.setattr("fuscan.gui.controllers.scan_controller.FileStatsWorker", FakeStatsWorker)
+    monkeypatch.setattr("fuscan.gui.controllers.scan_controller.ScanWorker", FakeScanWorker)
     return FakeStatsWorker.instances, FakeScanWorker.instances
 
 
@@ -892,7 +892,7 @@ class TestOpenLocationWithResult:
 
         called: list[Path] = []
         monkeypatch.setattr(
-            "fuscan.gui.qml.controllers.scan_controller.open_path_in_explorer",
+            "fuscan.gui.controllers.scan_controller.open_path_in_explorer",
             called.append,
         )
         controller.openLocation()
@@ -911,7 +911,7 @@ class TestOpenLocationWithResult:
         result = _make_scan_result(Path("/tmp/test.txt"))
         controller._result_model.set_results((result,))
         controller.setSelectedResultIndex(0)
-        monkeypatch.setattr("fuscan.gui.qml.controllers.scan_controller.open_path_in_explorer", _raise)
+        monkeypatch.setattr("fuscan.gui.controllers.scan_controller.open_path_in_explorer", _raise)
         controller.openLocation()  # 不应抛异常
 
     def test_copy_path_sets_clipboard(

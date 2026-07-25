@@ -1,4 +1,4 @@
-"""主控制器工厂：构造并注册所有 controller 到 QML context。
+﻿"""主控制器工厂：构造并注册所有 controller 到 QML context。
 
 单入口构造 :class:`ThemeController`/`ConfigController`/`RulesController`/
 :class:`WorkspaceController`/`AboutController`，供 ``app.py`` 调用
@@ -29,18 +29,18 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import QObject  # pyrefly: ignore [missing-import]
 
-from fuscan.gui.qml.controllers.about_controller import AboutController
-from fuscan.gui.qml.controllers.config_controller import ConfigController
-from fuscan.gui.qml.controllers.rules_controller import RulesController
-from fuscan.gui.qml.controllers.scan_controller import ScanController
-from fuscan.gui.qml.controllers.workspace_controller import WorkspaceController
-from fuscan.gui.qml.models import (
+from fuscan.gui.controllers.about_controller import AboutController
+from fuscan.gui.controllers.config_controller import ConfigController
+from fuscan.gui.controllers.rules_controller import RulesController
+from fuscan.gui.controllers.scan_controller import ScanController
+from fuscan.gui.controllers.workspace_controller import WorkspaceController
+from fuscan.gui.models import (
     ExtractorListModel,
     ResultListModel,
     RuleListModel,
     WorkspaceListModel,
 )
-from fuscan.gui.qml.theme import ThemeController
+from fuscan.gui.theme import ThemeController
 
 __all__ = ["AppController", "register_qml_types"]
 

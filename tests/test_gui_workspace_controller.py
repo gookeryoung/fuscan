@@ -1,4 +1,4 @@
-"""``WorkspaceController`` 与 ``WorkspaceListModel`` 单元测试。
+﻿"""``WorkspaceController`` 与 ``WorkspaceListModel`` 单元测试。
 
 覆盖：
 
@@ -27,11 +27,11 @@ try:
     from PySide2.QtCore import Qt
 
     from fuscan.config import Config  # noqa: F401
-    from fuscan.gui.qml.controllers.config_controller import ConfigController
-    from fuscan.gui.qml.controllers.rules_controller import RulesController
-    from fuscan.gui.qml.controllers.scan_controller import ScanController
-    from fuscan.gui.qml.controllers.workspace_controller import WorkspaceController
-    from fuscan.gui.qml.models.workspace_model import (
+    from fuscan.gui.controllers.config_controller import ConfigController
+    from fuscan.gui.controllers.rules_controller import RulesController
+    from fuscan.gui.controllers.scan_controller import ScanController
+    from fuscan.gui.controllers.workspace_controller import WorkspaceController
+    from fuscan.gui.models.workspace_model import (
         WorkspaceItem,
         WorkspaceListModel,
     )

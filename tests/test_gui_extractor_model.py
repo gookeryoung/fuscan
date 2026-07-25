@@ -1,4 +1,4 @@
-"""``ExtractorListModel`` 单元测试。
+﻿"""``ExtractorListModel`` 单元测试。
 
 覆盖从默认注册表加载、勾选状态管理、扩展名集合计算、批量全选/全不选、
 ``data()``/``roleNames()``/``rowCount()`` 等 ``QAbstractListModel`` 接口。
@@ -22,7 +22,7 @@ try:
         from PySide6.QtCore import QModelIndex, Qt  # pyrefly: ignore [missing-import]
 
     from fuscan.extractors.base import SpeedTier, default_registry  # noqa: F401
-    from fuscan.gui.qml.models.extractor_model import ExtractorListModel
+    from fuscan.gui.models.extractor_model import ExtractorListModel
 
     PYSIDE_AVAILABLE = True
 except ImportError:

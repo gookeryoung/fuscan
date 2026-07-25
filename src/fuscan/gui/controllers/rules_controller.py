@@ -1,4 +1,4 @@
-"""规则控制器：QML ↔ RuleSet/规则文件管理桥接。
+﻿"""规则控制器：QML ↔ RuleSet/规则文件管理桥接。
 
 管理规则文件路径列表、内置规则勾选、规则集加载与合并。规则列表通过
 :class:`RuleListModel` 暴露给 QML ``ListView`` 绑定，规则文件列表通过
@@ -26,7 +26,7 @@ except ImportError:  # pragma: no cover
     from PySide6.QtWidgets import QFileDialog, QMessageBox  # pyrefly: ignore [missing-import]
 
 from fuscan.config import Config
-from fuscan.gui.qml.models.rule_model import RuleListModel
+from fuscan.gui.models.rule_model import RuleListModel
 from fuscan.rules import RuleError, load_ruleset, merge_multiple_rulesets
 from fuscan.rules.model import RuleSet
 

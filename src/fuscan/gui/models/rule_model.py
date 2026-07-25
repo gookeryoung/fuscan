@@ -1,4 +1,4 @@
-"""规则列表模型（QAbstractListModel）。
+﻿"""规则列表模型（QAbstractListModel）。
 
 展示 :class:`RuleSet` 中所有 :class:`Rule` 的名称、严重度、描述。
 供 QML ``ListView`` 直接绑定。
@@ -18,7 +18,7 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt  # pyrefly: ignore [missing-import]
 
-from fuscan.gui.qml.severity_utils import severity_color_hex, severity_text
+from fuscan.gui.severity_utils import severity_color_hex, severity_text
 
 if TYPE_CHECKING:
     from fuscan.rules.model import Rule, RuleSet

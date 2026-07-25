@@ -1,4 +1,4 @@
-"""``RuleListModel`` 单元测试。
+﻿"""``RuleListModel`` 单元测试。
 
 覆盖 ``set_ruleset``/``clear``/``data()``/``roleNames()``/``rowCount()`` 接口。
 """
@@ -20,7 +20,7 @@ try:
     except ImportError:  # pragma: no cover
         from PySide6.QtCore import QModelIndex, Qt  # pyrefly: ignore [missing-import]
 
-    from fuscan.gui.qml.models.rule_model import RuleListModel
+    from fuscan.gui.models.rule_model import RuleListModel
     from fuscan.rules.model import (
         LeafMatch,
         MatchMode,

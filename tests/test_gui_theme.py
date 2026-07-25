@@ -1,4 +1,4 @@
-"""``ThemeController`` 单元测试。
+﻿"""``ThemeController`` 单元测试。
 
 验证主题令牌（色彩/排版/间距/圆角/按钮层级/速度档次色）的默认值与
 暗色模式切换行为。QML 通过 ``@Property`` 直接绑定，本测试确保令牌值
@@ -24,7 +24,7 @@ try:
     except ImportError:  # pragma: no cover
         from PySide6.QtGui import QColor  # pyrefly: ignore [missing-import]
 
-    from fuscan.gui.qml.theme import ThemeController
+    from fuscan.gui.theme import ThemeController
 
     PYSIDE_AVAILABLE = True
 except ImportError:

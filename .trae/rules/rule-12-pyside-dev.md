@@ -12,7 +12,7 @@ fuscan GUI 采用 **PySide2 + QML** 范式（参考 `ref/pyside2_qml_dashboard`�
 - **UI 仅在 `.qml` 文件定义**，禁止 `.py` 内创建/布局 QML 控件或动态构造视觉树。
 - **三层 MVC**：
   - 视图层（`.qml`）：仅负责呈现与交互，不含业务逻辑；格式化逻辑下沉到 Python `@dataclass` 方法或 controller。
-  - 控制层（`src/fuscan/gui/qml/*.py`）：`QObject` 子类，通过 `Property`/`Signal`/`Slot` 暴露状态与操作给 QML；不持有 QML 控件引用。
+  - 控制层（`src/fuscan/gui/controllers/*.py`）：`QObject` 子类，通过 `Property`/`Signal`/`Slot` 暴露状态与操作给 QML；不持有 QML 控件引用。
   - 模型层（`QAbstractListModel`/`QAbstractTableModel`）：大数据量（结果、规则、文件类型）必须用 Model，禁止 QML 侧 `ListModel` 动态 append 大量元素。
 - **跨线程通信**：工作线程（`QThread`）通过信号槽通知 UI 线程，槽加 `@Slot()` 装饰；**禁止工作线程直接访问 QML 控件或 controller 属性**，仅 emit 信号。
 - **信号命名**：信号过去时（`scan_finished`/`progress_changed`），槽用 `on_<signal>` 或 `<subject>Changed`；高频信号在 controller 内节流（`QTimer.singleShot(300ms)`）后再 emit 给 QML。
@@ -24,7 +24,7 @@ fuscan GUI 采用 **PySide2 + QML** 范式（参考 `ref/pyside2_qml_dashboard`�
 
 ## 配置与资源
 
-- **设计令牌**集中定义在 `src/fuscan/theme.py`，QML 通过 `ThemeController` 单例读取：
+- **设计令牌**集中定义在 `src/fuscan/gui/theme.py`，QML 通过 `ThemeController` 单例读取：
   - 色彩（主色/背景/文本/边框/危险/警告/成功/速度档次 T1-T5）、排版（字体族/字号/字重）、间距、圆角、按钮层级。
   - 令牌以 `@Property` 暴露为 `QColor`/`int`/`str`，QML 直接绑定（如 `color: Theme.colorPrimary`）。
   - **禁止在 QML 或 Python 中硬编码色值/字号/圆角**，须引用 `theme.py` 中的对应令牌；新增令牌同步追加到 `__all__` 与 `ThemeController` 的 `@Property`。

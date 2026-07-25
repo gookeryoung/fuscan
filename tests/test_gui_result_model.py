@@ -1,4 +1,4 @@
-"""``ResultListModel`` 单元测试。
+﻿"""``ResultListModel`` 单元测试。
 
 覆盖 ``set_results``/``clear``/``get_result``/``data()``/``roleNames()``/``rowCount()``。
 """
@@ -21,7 +21,7 @@ try:
     except ImportError:  # pragma: no cover
         from PySide6.QtCore import QModelIndex, Qt  # pyrefly: ignore [missing-import]
 
-    from fuscan.gui.qml.models.result_model import ResultListModel
+    from fuscan.gui.models.result_model import ResultListModel
     from fuscan.rules.model import Severity
     from fuscan.scanner.result import RuleHit, ScanResult
 

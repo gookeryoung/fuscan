@@ -1,4 +1,4 @@
-"""``ConfigController`` 单元测试。
+﻿"""``ConfigController`` 单元测试。
 
 验证 ``@Property``/``@Slot`` 桥接的配置读写、提取器勾选管理、扫描路径历史
 与持久化行为。使用 ``tmp_path`` + ``monkeypatch`` 隔离配置文件，避免污染
@@ -19,8 +19,8 @@ pytestmark = pytest.mark.gui
 
 try:
     from fuscan.config import MAX_HISTORY, Config
-    from fuscan.gui.qml.controllers.config_controller import ConfigController
-    from fuscan.gui.qml.models.extractor_model import ExtractorListModel
+    from fuscan.gui.controllers.config_controller import ConfigController
+    from fuscan.gui.models.extractor_model import ExtractorListModel
 
     PYSIDE_AVAILABLE = True
 except ImportError:

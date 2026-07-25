@@ -1,4 +1,4 @@
-"""GUI 应用入口：构造 QGuiApplication 与 QQmlApplicationEngine。
+﻿"""GUI 应用入口：构造 QGuiApplication 与 QQmlApplicationEngine。
 
 提供 :func:`launch` 函数供 CLI ``gui`` 子命令调用，也可作为脚本直接运行。
 按 rule-12-pyside-dev.md 要求，UI 全部在 ``.qml`` 文件定义，Python 侧仅
@@ -26,17 +26,15 @@ except ImportError:  # pragma: no cover
     from PySide6.QtQml import QQmlApplicationEngine  # pyrefly: ignore [missing-import]
     from PySide6.QtQuickControls2 import QQuickStyle  # pyrefly: ignore [missing-import]
 
-from fuscan.gui.qml import AppController
-from fuscan.gui.qml.controllers import register_qml_types
+from fuscan.gui.controllers import AppController, register_qml_types
 
 __all__ = ["launch"]
 
 logger = logging.getLogger(__name__)
 
-# QML 文件目录（src/fuscan/gui/qml/views/）
+# QML 文件目录（src/fuscan/gui/views/）
 # 按rule-12三层MVC分层，.qml视图文件全部在 views/ 子目录
-_QML_DIR = Path(__file__).parent / "qml"
-_VIEWS_DIR = _QML_DIR / "views"
+_VIEWS_DIR = Path(__file__).parent / "views"
 _MAIN_QML = _VIEWS_DIR / "Main.qml"
 
 

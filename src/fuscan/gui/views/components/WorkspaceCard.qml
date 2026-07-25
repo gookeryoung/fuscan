@@ -171,7 +171,7 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 8
 
-            // 左侧：定义规则 + 启动/暂停
+            // 左侧：定义规则 + 启动/暂停扫描 + 查看结果
             IconButton {
                 text:"🔧 定义规则"
                 tooltip: "编辑该任务的规则集"
@@ -179,9 +179,11 @@ Rectangle {
                 onClicked: card.defineRulesRequested(card.workspaceId)
             }
             IconButton {
-                text:statusText === "扫描中" ? "⏸ 暂停" : "▶ 启动扫描"
+                text: statusText === "扫描中" ? "⏸ 暂停" : "▶ 启动扫描"
                 tooltip: statusText === "扫描中" ? "暂停扫描" : "启动扫描"
                 accent: "primary"
+                // 扫描完成后切换为未激活，避免已完成任务仍高亮扫描按钮
+                enabled: statusText !== "已完成"
                 onClicked: {
                     if (statusText === "扫描中" || statusText === "已暂停") {
                         workspaceController.togglePause(card.workspaceId)
@@ -190,17 +192,18 @@ Rectangle {
                     }
                 }
             }
+            IconButton {
+                text:"📊 查看结果"
+                tooltip: "查看扫描结果"
+                accent: "ghost"
+                // 扫描完成前未激活，扫描完成后激活
+                enabled: statusText === "已完成"
+                onClicked: card.viewResultsRequested(card.workspaceId)
+            }
 
             Item { Layout.fillWidth: true }
 
-            // 右侧：查看结果 + 统计 + 展开按钮
-            IconButton {
-                text:"📊 结果"
-                tooltip: "查看扫描结果"
-                accent: "ghost"
-                enabled: matchedCount > 0
-                onClicked: card.viewResultsRequested(card.workspaceId)
-            }
+            // 右侧：统计 + 展开按钮（保留）
             IconButton {
                 text:"📈 统计"
                 tooltip: "查看扫描统计"

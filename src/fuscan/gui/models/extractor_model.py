@@ -1,10 +1,9 @@
 """提取器勾选列表模型（QAbstractListModel）。
 
-扁平化展示所有提取器（按 display_name 排序），每行包含类名、显示名、
-扩展名、速度档次（文本/色值）与勾选状态。供 QML ``ListView`` 直接绑定。
-
-替代旧版 widget 时期的 ``ExtractorTreeModel``（树形分组），扁平化更
-适合 QML 列表渲染且简化父子联动逻辑。
+扁平化展示所有提取器（按 ``(category_order, display_name)`` 排序，同类相邻），
+每行包含类名、显示名、扩展名、速度档次（文本/色值）、格式标签、类别与勾选状态，
+供 QML ``ListView`` 直接绑定；QML 侧通过 ``section.property: "category"``
+实现按类别分组渲染，配合类别头部三态 CheckBox 统一勾选。
 
 公共 API：
 
@@ -15,6 +14,8 @@
 - :meth:`ExtractorListModel.enabled_extensions`：返回勾选提取器的扩展名集合
 - :meth:`ExtractorListModel.set_extractor_enabled`：QML 勾选回调
 - :meth:`ExtractorListModel.select_all` / :meth:`unselect_all`：全选/全不选
+- :attr:`ExtractorListModel.categoryStates`：各类别勾选状态（all/none/partial）
+- :meth:`ExtractorListModel.setCategoryEnabled`：QML 类别头部统一勾选回调
 """
 
 from __future__ import annotations
@@ -92,12 +93,13 @@ def _classify(class_name: str) -> str:
     return _CATEGORY_BY_CLASS.get(class_name, "其他")
 
 
+# 类别 → 排序序号映射（预构建，避免 list.index 的 O(C) 查找与 ValueError 分支）
+_CATEGORY_ORDER_INDEX: dict[str, int] = {cat: i for i, cat in enumerate(_CATEGORY_ORDER)}
+
+
 def _category_sort_key(category: str) -> int:
-    """返回类别在 ``_CATEGORY_ORDER`` 中的序号，未列出类别返回 ``len(_CATEGORY_ORDER)``。"""
-    try:
-        return _CATEGORY_ORDER.index(category)
-    except ValueError:  # pragma: no cover - _classify 仅返回已知类别，防御性兜底
-        return len(_CATEGORY_ORDER)
+    """返回类别在 ``_CATEGORY_ORDER`` 中的序号，未列出类别排在末尾。"""
+    return _CATEGORY_ORDER_INDEX.get(category, len(_CATEGORY_ORDER))
 
 
 def _category_state(enabled: int, total: int) -> str:
@@ -257,6 +259,10 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
             - 空 tuple：全部取消勾选，不扫描任何文件（防御性边界）
             - 非空 tuple：仅扫描扩展名在白名单中的文件（已小写、去点、排序、去重）
         """
+        # 空模型（尚未加载注册表）时 all([]) 为 True，会误判为「全部勾选」；
+        # 此时无任何提取器可用，应返回空 tuple（不扫描任何文件）
+        if not self._rows:
+            return ()
         if all(row.enabled for row in self._rows):
             return None
         exts: list[str] = []
@@ -301,11 +307,10 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
         """每个类别的勾选状态（``"all"`` / ``"none"`` / ``"partial"``）。
 
         QML ``ListView`` 的 ``section.delegate`` 通过 ``categoryStates[section]``
-        绑定类别头部三态 CheckBox 的 ``checkState``，状态变化时由
-        ``categoryStatesChanged`` 信号触发重算。
+        按键查询本类别状态，驱动类别头部三态 CheckBox 的 ``checkState``；
+        状态变化时由 ``categoryStatesChanged`` 信号触发重算。
         """
         states: dict[str, str] = {}
-        # 按 _CATEGORY_ORDER 顺序输出，保证 QML 迭代顺序稳定
         for cat in _CATEGORY_ORDER:
             matching = [row for row in self._rows if row.category == cat]
             if not matching:
@@ -316,16 +321,18 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
 
     @Slot(str, bool)  # pyrefly: ignore [not-callable]
     def setCategoryEnabled(self, category: str, enabled: bool) -> None:
-        """QML 类别头部勾选回调：批量切换该类别下所有提取器的勾选状态。"""
-        changed = False
-        for i, row in enumerate(self._rows):
-            if row.category == category and row.enabled != enabled:
-                row.enabled = enabled
-                idx = self.index(i)
-                self.dataChanged.emit(idx, idx, [Qt.UserRole + 6])
-                changed = True
-        if changed:
-            self.categoryStatesChanged.emit()  # pyrefly: ignore [missing-attribute]
+        """QML 类别头部勾选回调：批量切换该类别下所有提取器的勾选状态。
+
+        行已按类别排序，命中行必为连续区间，一次 ``dataChanged`` 批量发射，
+        避免逐行 emit（rule-12 批量更新原则）。
+        """
+        indices = [i for i, row in enumerate(self._rows) if row.category == category and row.enabled != enabled]
+        if not indices:
+            return
+        for i in indices:
+            self._rows[i].enabled = enabled
+        self.dataChanged.emit(self.index(indices[0]), self.index(indices[-1]), [Qt.UserRole + 6])
+        self.categoryStatesChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     # ----------------------------- 内部方法 -----------------------------
 

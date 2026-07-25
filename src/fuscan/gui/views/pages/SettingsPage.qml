@@ -272,10 +272,14 @@ Item {
                                                 else checkState = Qt.PartiallyChecked
                                             }
 
-                                            // 点击后：当前为 all → 全不选；其他 → 全选
-                                            onToggled: {
+                                            // 用 onClicked 而非 onToggled：toggled 在程序性 updateState()
+                                            // 修改 checkState 时也会发射，会把 updateState 误判为用户点击，
+                                            // 勾满/清空一组时引发 setCategoryEnabled 信号死循环。
+                                            // 点击意图：当前 all → 全不选；其他（none/partial）→ 全选。
+                                            // 经 ConfigController.setCategoryEnabled 持久化配置。
+                                            onClicked: {
                                                 var s = configController.extractorModel.categoryStates[section]
-                                                configController.extractorModel.setCategoryEnabled(section, s !== "all")
+                                                configController.setCategoryEnabled(section, s !== "all")
                                             }
                                         }
 

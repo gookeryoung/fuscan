@@ -228,6 +228,15 @@ class TestDisabledExtractors:
 
 
 class TestEnabledExtensions:
+    def test_empty_model_returns_empty_tuple(self) -> None:
+        """空模型（未加载注册表）时返回空 tuple，而非 None。
+
+        ``all([])`` 为 ``True``，若无防御分支会误判为「全部勾选」返回 ``None``
+        （扫描所有文件），与「无提取器可用」的实际语义矛盾。
+        """
+        m = ExtractorListModel()
+        assert m.enabled_extensions() == ()
+
     def test_all_enabled_returns_none(self, model: ExtractorListModel) -> None:
         """全部勾选时返回 None（表示扫描所有文件，与 Scanner scan_extensions 语义一致）。"""
         assert model.enabled_extensions() is None
@@ -388,3 +397,25 @@ class TestSetCategoryEnabled:
         before = model.disabled_extractors()
         model.setCategoryEnabled("不存在的类别", True)
         assert model.disabled_extractors() == before
+
+    def test_emits_signals_exactly_once(self, model: ExtractorListModel) -> None:
+        """批量切换应只 emit 一次 dataChanged 与一次 categoryStatesChanged。"""
+        data_changed_count: list[int] = []
+        cat_changed_count: list[int] = []
+        model.dataChanged.connect(lambda *_: data_changed_count.append(1))
+        model.categoryStatesChanged.connect(lambda: cat_changed_count.append(1))  # pyrefly: ignore [missing-attribute]
+        first_cat = model.data(model.index(0), Qt.UserRole + 8)
+        assert isinstance(first_cat, str)
+        model.setCategoryEnabled(first_cat, False)
+        assert len(data_changed_count) == 1
+        assert len(cat_changed_count) == 1
+
+    def test_no_change_emits_nothing(self, model: ExtractorListModel) -> None:
+        """类别状态已与目标一致时，不应 emit 任何信号。"""
+        first_cat = model.data(model.index(0), Qt.UserRole + 8)
+        assert isinstance(first_cat, str)
+        model.select_all()  # 该类别已全部勾选
+        emitted: list[int] = []
+        model.categoryStatesChanged.connect(lambda: emitted.append(1))  # pyrefly: ignore [missing-attribute]
+        model.setCategoryEnabled(first_cat, True)
+        assert emitted == []

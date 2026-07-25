@@ -174,6 +174,18 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.extractorCountChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.save()
 
+    @Slot(str, bool)  # pyrefly: ignore [not-callable]
+    def setCategoryEnabled(self, category: str, enabled: bool) -> None:
+        """QML 类别头部勾选回调：批量切换类别勾选状态并保存。
+
+        直接调用 ``ExtractorListModel.setCategoryEnabled`` 会绕过持久化，
+        导致重启后勾选状态丢失、勾选计数文本不刷新，必须经此方法同步配置。
+        """
+        self._extractor_model.setCategoryEnabled(category, enabled)
+        self._config.disabled_extractors = self._extractor_model.disabled_extractors()
+        self.extractorCountChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.save()
+
     @Slot()  # pyrefly: ignore [not-callable]
     def selectAllExtractors(self) -> None:
         """全选提取器。"""

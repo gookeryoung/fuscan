@@ -1,4 +1,4 @@
-﻿"""``ConfigController`` 单元测试。
+"""``ConfigController`` 单元测试。
 
 验证 ``@Property``/``@Slot`` 桥接的配置读写、提取器勾选管理、扫描路径历史
 与持久化行为。使用 ``tmp_path`` + ``monkeypatch`` 隔离配置文件，避免污染
@@ -171,6 +171,58 @@ class TestExtractorSelection:
         """全部勾选时返回 None（扫描所有文件，与 Scanner scan_extensions 语义一致）。"""
         controller.selectAllExtractors()
         assert controller.enabled_extensions() is None
+
+
+class TestCategorySelection:
+    """``ConfigController.setCategoryEnabled`` Slot：类别统一勾选 + 持久化。"""
+
+    def _first_category(self, controller: ConfigController) -> str:
+        cat = controller.extractorModel.data(controller.extractorModel.index(0), 0x0100 + 8)
+        assert isinstance(cat, str)
+        return cat
+
+    def test_disable_category_persists(self, controller: ConfigController) -> None:
+        """禁用类别后，disabled_extractors 应包含该类别全部提取器。"""
+        cat = self._first_category(controller)
+        controller.selectAllExtractors()
+        controller.setCategoryEnabled(cat, False)
+        disabled = controller.config.disabled_extractors
+        assert disabled, "禁用类别后 disabled_extractors 应非空"
+        # 该类别下所有提取器均已禁用
+        model = controller.extractorModel
+        for i in range(model.rowCount()):
+            if model.data(model.index(i), 0x0100 + 8) == cat:
+                class_name = model.data(model.index(i), 0x0100 + 1)
+                assert class_name in disabled
+
+    def test_enable_category_persists(self, controller: ConfigController) -> None:
+        cat = self._first_category(controller)
+        controller.unselectAllExtractors()
+        controller.setCategoryEnabled(cat, True)
+        model = controller.extractorModel
+        for i in range(model.rowCount()):
+            if model.data(model.index(i), 0x0100 + 8) == cat:
+                class_name = model.data(model.index(i), 0x0100 + 1)
+                assert class_name not in controller.config.disabled_extractors
+
+    def test_emits_extractor_count_changed(self, controller: ConfigController) -> None:
+        """类别勾选变化后应刷新勾选计数文本。"""
+        cat = self._first_category(controller)
+        controller.selectAllExtractors()
+        emitted: list[None] = []
+        controller.extractorCountChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
+        controller.setCategoryEnabled(cat, False)
+        assert len(emitted) == 1
+
+    def test_persists_to_disk(self, controller: ConfigController) -> None:
+        """类别勾选应写入配置文件（重启后可恢复）。"""
+        cat = self._first_category(controller)
+        controller.selectAllExtractors()
+        controller.setCategoryEnabled(cat, False)
+        from fuscan.config import load_config
+
+        reloaded = load_config()
+        assert reloaded.disabled_extractors == controller.config.disabled_extractors
 
 
 class TestScanPaths:

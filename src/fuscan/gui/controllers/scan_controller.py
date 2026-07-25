@@ -25,12 +25,13 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
-from fuscan.config import Config
+from fuscan.config import Config, default_backup_dir
 from fuscan.gui.explorer import open_path_in_explorer
 from fuscan.gui.models.result_model import ResultListModel
 from fuscan.gui.severity_utils import severity_color_hex, severity_text
+from fuscan.replacer import ReplaceStatus, replace_in_file
 from fuscan.scanner import ScanReport
-from fuscan.scanner.result import ProgressInfo, ScanResult, WalkResult
+from fuscan.scanner.result import ProgressInfo, ScanResult, WalkResult, format_size
 from fuscan.skip_store import SkipStore
 from fuscan.workers import FileStatsWorker, ScanWorker
 
@@ -312,8 +313,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         return len(result.hits) if result is not None else 0
 
     @Property("QVariantList", notify=selectedResultChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
-    def detailHitsModel(self) -> list[dict[str, str]]:
-        """选中结果的命中详情列表（QML 直接 ListView 绑定）。"""
+    def detailHitsModel(self) -> list[dict[str, object]]:
+        """选中结果的命中详情列表（QML 直接 ListView 绑定）。
+
+        每条命中包含：规则名、严重度文本/色值、上下文（detail）、匹配文本、
+        匹配条数、匹配目标（filename/content/path）、规则描述（供详情面板展示）。
+        """
         result = self._get_selected_result()
         if result is None:
             return []
@@ -323,9 +328,106 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 "severityText": severity_text(hit.severity),
                 "severityColor": severity_color_hex(hit.severity),
                 "context": hit.detail,
+                "matchText": hit.match_text,
+                "matchCount": hit.match_count,
+                "target": hit.target,
+                "description": hit.match_description,
             }
             for hit in result.hits
         ]
+
+    @Property(str, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
+    def detailFileSize(self) -> str:
+        """选中结果文件大小（人类可读，如 ``12.3 KB``）。"""
+        result = self._get_selected_result()
+        if result is None:
+            return ""
+        return format_size(result.size)
+
+    @Property(bool, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
+    def detailIsArchiveEntry(self) -> bool:
+        """选中结果是否为压缩包内部条目（不可替换、不可打开位置）。"""
+        result = self._get_selected_result()
+        return result is not None and result.archive_path is not None
+
+    @Property(bool, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
+    def canSelectNext(self) -> bool:
+        """是否可选中下一条结果。"""
+        count = self._result_model.rowCount()
+        return 0 <= self._selected_result_index < count - 1
+
+    @Property(bool, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
+    def canSelectPrev(self) -> bool:
+        """是否可选中上一条结果。"""
+        return self._selected_result_index > 0
+
+    @Property(bool, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
+    def canReplaceSelected(self) -> bool:
+        """当前选中结果是否可执行替换。
+
+        条件：已选中结果、规则集已加载、非压缩包内部条目、命中规则中存在
+        ``replace=True`` 的规则（否则按钮无意义）。
+        """
+        result = self._get_selected_result()
+        if result is None or self._ruleset is None or result.archive_path is not None:
+            return False
+        rule_map = {r.name: r for r in self._ruleset.rules}
+        return any(rule_map.get(h.rule_name) is not None and rule_map[h.rule_name].replace for h in result.hits)
+
+    @Slot()  # pyrefly: ignore [not-callable]
+    def selectNextResult(self) -> None:
+        """选中下一条结果（越界自动忽略）。"""
+        if 0 <= self._selected_result_index < self._result_model.rowCount() - 1:
+            self.setSelectedResultIndex(self._selected_result_index + 1)
+
+    @Slot()  # pyrefly: ignore [not-callable]
+    def selectPrevResult(self) -> None:
+        """选中上一一条结果（越界自动忽略）。"""
+        if self._selected_result_index > 0:
+            self.setSelectedResultIndex(self._selected_result_index - 1)
+
+    @Slot(result=str)  # pyrefly: ignore [not-callable]
+    def replaceSelectedResult(self) -> str:
+        """替换当前选中结果的命中内容。
+
+        调用 :func:`fuscan.replacer.replace_in_file` 执行备份 + 原子替换。
+        返回操作消息供 QML 显示（成功/失败原因）。
+
+        - 未选中结果 → ``未选中结果``
+        - 规则集未加载 → ``规则集未加载``
+        - 压缩包内部条目 → ``压缩包内部条目不支持替换``
+        - 无 ``replace=True`` 规则 → ``未启用替换的规则``
+        - 其他状态 → ``ReplaceResult.message``
+        """
+        result = self._get_selected_result()
+        if result is None:
+            return "未选中结果"
+        if self._ruleset is None:
+            return "规则集未加载"
+        if result.archive_path is not None:
+            return "压缩包内部条目不支持替换"
+
+        backup_dir = Path(self._config.backup_dir) if self._config.backup_dir else default_backup_dir()
+        scan_root = self._last_report.root if self._last_report is not None else result.path.parent
+
+        replace_result = replace_in_file(
+            src=result.path,
+            hits=result.hits,
+            ruleset=self._ruleset,
+            backup_root=backup_dir,
+            scan_root=scan_root,
+            preserve_relative=self._config.backup_preserve_relative_path,
+        )
+        if replace_result.status == ReplaceStatus.SUCCESS:
+            logger.info(
+                "已替换 %s 中 %d 条规则命中，备份: %s",
+                result.path,
+                replace_result.replaced_count,
+                replace_result.backup_path,
+            )
+            return replace_result.message or f"替换成功（{replace_result.replaced_count} 条）"
+        logger.warning("替换失败: %s", replace_result.message)
+        return replace_result.message or "替换失败"
 
     # ----------------------------- QML 调用槽 -----------------------------
 

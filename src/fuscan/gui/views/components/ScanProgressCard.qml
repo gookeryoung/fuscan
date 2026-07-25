@@ -19,7 +19,9 @@ Rectangle {
     property string target: ""
 
     // 便捷别名：当前扫描控制器（已在 WorkspaceController.activeScanController 暴露）
-    property ScanControllerType scanController: workspaceController.activeScanController
+    // 用 var 而非 ScanControllerType：PySide2 5.15 将 @Property 返回的 QObject 绑定到
+    // 本地 typed property 时类型推断失败会识别为 null（参见 project_memory iter-101）
+    property var scanController: workspaceController.activeScanController
 
     implicitHeight: contentColumn.implicitHeight + 32
     color: theme.isDark ? theme.colorBgCard : theme.colorBgCard

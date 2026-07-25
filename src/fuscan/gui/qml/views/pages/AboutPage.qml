@@ -7,7 +7,7 @@ import fuscan.controllers 1.0
 Item {
     id: aboutPage
     property ThemeController theme: Theme
-    property AboutController aboutController: AboutController
+    property AboutControllerType aboutController: AboutController
 
     ScrollView {
         anchors.fill: parent

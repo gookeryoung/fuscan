@@ -8,8 +8,8 @@ import fuscan.controllers 1.0
 Item {
     id: scanPage
     property ThemeController theme: Theme
-    property ScanController scanController: ScanController
-    property ConfigController configController: ConfigController
+    property ScanControllerType scanController: ScanController
+    property ConfigControllerType configController: ConfigController
 
     ColumnLayout {
         anchors.fill: parent

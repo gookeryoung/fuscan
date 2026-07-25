@@ -58,13 +58,15 @@ def register_qml_types() -> None:
         from PySide6.QtQml import qmlRegisterType  # pyrefly: ignore [missing-import]
 
     # URI=fuscan.theme，QML 用 `import fuscan.theme 1.0` 后用 ThemeController 类型
+    # ThemeController 类型名与 context property 名 "Theme" 不同，无冲突
     # pyrefly stub 将 URI/typeName 参数标注为 bytes，实际运行时接受 str，故忽略类型检查
     qmlRegisterType(ThemeController, "fuscan.theme", 1, 0, "ThemeController")  # pyrefly: ignore [bad-argument-type]
-    # URI=fuscan.controllers，QML 用 `import fuscan.controllers 1.0` 后用各 controller 类型
-    qmlRegisterType(ConfigController, "fuscan.controllers", 1, 0, "ConfigController")  # pyrefly: ignore [bad-argument-type]
-    qmlRegisterType(RulesController, "fuscan.controllers", 1, 0, "RulesController")  # pyrefly: ignore [bad-argument-type]
-    qmlRegisterType(ScanController, "fuscan.controllers", 1, 0, "ScanController")  # pyrefly: ignore [bad-argument-type]
-    qmlRegisterType(AboutController, "fuscan.controllers", 1, 0, "AboutController")  # pyrefly: ignore [bad-argument-type]
+    # URI=fuscan.controllers，类型名加 Type 后缀避免与同名 context property 冲突
+    # （QML 编译器会把 property XxxController x: XxxController 右侧的 XxxController 解析为类型名而非 context property）
+    qmlRegisterType(ConfigController, "fuscan.controllers", 1, 0, "ConfigControllerType")  # pyrefly: ignore [bad-argument-type]
+    qmlRegisterType(RulesController, "fuscan.controllers", 1, 0, "RulesControllerType")  # pyrefly: ignore [bad-argument-type]
+    qmlRegisterType(ScanController, "fuscan.controllers", 1, 0, "ScanControllerType")  # pyrefly: ignore [bad-argument-type]
+    qmlRegisterType(AboutController, "fuscan.controllers", 1, 0, "AboutControllerType")  # pyrefly: ignore [bad-argument-type]
     # URI=fuscan.models，QML 用 `import fuscan.models 1.0` 后用各 model 类型
     qmlRegisterType(ExtractorListModel, "fuscan.models", 1, 0, "ExtractorListModel")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(RuleListModel, "fuscan.models", 1, 0, "RuleListModel")  # pyrefly: ignore [bad-argument-type]

@@ -7,7 +7,7 @@ import fuscan.controllers 1.0
 Item {
     id: settingsPage
     property ThemeController theme: Theme
-    property ConfigController configController: ConfigController
+    property ConfigControllerType configController: ConfigController
 
     ScrollView {
         anchors.fill: parent

@@ -7,7 +7,7 @@ import fuscan.controllers 1.0
 Item {
     id: rulesPage
     property ThemeController theme: Theme
-    property RulesController rulesController: RulesController
+    property RulesControllerType rulesController: RulesController
 
     ColumnLayout {
         anchors.fill: parent

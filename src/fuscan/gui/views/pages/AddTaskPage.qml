@@ -140,27 +140,41 @@ Item {
                 checked: useBuiltin
                 onCheckedChanged: useBuiltin = checked
             }
-            // 规则文件列表
+            // 规则文件列表（带边框列表项）
             Repeater {
                 model: rulesPaths
-                delegate: RowLayout {
+                delegate: Rectangle {
                     Layout.fillWidth: true
-                    spacing: 8
-                    Label {
-                        text: modelData
-                        font.pixelSize: 12
-                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                        Layout.fillWidth: true
-                        elide: Text.ElideMiddle
-                    }
-                    IconButton {
-                        text:"✕"
-                        tooltip: "移除该规则文件"
-                        accent: "ghost"
-                        onClicked: {
-                            var paths = rulesPaths.slice()
-                            paths.splice(index, 1)
-                            rulesPaths = paths
+                    Layout.preferredHeight: 36
+                    color: "transparent"
+                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                    border.width: 1
+                    radius: theme.btnRadiusGhost
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 4
+                        spacing: 8
+                        Label {
+                            text: "📄"
+                            font.pixelSize: 13
+                        }
+                        Label {
+                            text: modelData
+                            font.pixelSize: 12
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                            Layout.fillWidth: true
+                            elide: Text.ElideMiddle
+                        }
+                        IconButton {
+                            text:"✕"
+                            tooltip: "移除该规则文件"
+                            accent: "secondary"
+                            onClicked: {
+                                var paths = rulesPaths.slice()
+                                paths.splice(index, 1)
+                                rulesPaths = paths
+                            }
                         }
                     }
                 }
@@ -180,9 +194,9 @@ Item {
                 spacing: 8
                 Item { Layout.fillWidth: true }
                 IconButton {
-                    text:"✕"
-                    tooltip: "取消"
-                    accent: "ghost"
+                    text:"✕ 取消"
+                    tooltip: "取消并返回首页"
+                    accent: "secondary"
                     onClicked: addTaskPage.cancelRequested()
                 }
                 IconButton {
@@ -222,9 +236,9 @@ Item {
                 Repeater {
                     model: configController.drives
                     delegate: Button {
-                        Layout.preferredWidth: 80
+                        Layout.preferredWidth: 88
                         Layout.preferredHeight: theme.btnHeightSecondary
-                        text: modelData
+                        text: "💽 " + modelData
                         checkable: true
                         checked: selectedDrive === modelData
                         onClicked: selectedDrive = modelData
@@ -315,7 +329,7 @@ Item {
                     IconButton {
                         text: "🗑 清除"
                         tooltip: "清除全部路径历史"
-                        accent: "ghost"
+                        accent: "secondary"
                         onClicked: configController.clearScanPaths()
                     }
                 }

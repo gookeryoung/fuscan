@@ -26,7 +26,7 @@ Item {
             IconButton {
                 text:"← 返回"
                 tooltip: "返回首页"
-                accent: "ghost"
+                accent: "secondary"
                 onClicked: resultsPage.backRequested()
             }
             Label {

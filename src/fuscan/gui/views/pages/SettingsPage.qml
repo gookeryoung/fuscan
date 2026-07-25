@@ -32,7 +32,7 @@ Item {
             IconButton {
                 text:"↺ 重置"
                 tooltip: "重置扫描相关配置为默认值"
-                accent: "ghost"
+                accent: "secondary"
                 onClicked: configController.resetToDefaults()
             }
         }
@@ -54,7 +54,7 @@ Item {
                 }
             }
             Repeater {
-                model: ["扫描", "文件类型", "忽略目录"]
+                model: ["扫描", "忽略目录"]
                 TabButton {
                     id: tabBtn
                     text: modelData
@@ -89,6 +89,7 @@ Item {
             id: settingsStack
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.topMargin: 16
             currentIndex: settingsTabBar.currentIndex
 
             // ===== Tab 1: 扫描 =====
@@ -203,66 +204,71 @@ Item {
                             }
                         }
                     }
+
+                    GroupBox {
+                        Layout.fillWidth: true
+                        title: "文件类型"
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 8
+                            RowLayout {
+                                Layout.fillWidth: true
+                                IconButton {
+                                    text:"☑ 全选"
+                                    tooltip: "全部启用"
+                                    accent: "secondary"
+                                    onClicked: configController.selectAllExtractors()
+                                }
+                                IconButton {
+                                    text:"☐ 全不选"
+                                    tooltip: "全部禁用"
+                                    accent: "secondary"
+                                    onClicked: configController.unselectAllExtractors()
+                                }
+                                Item { Layout.fillWidth: true }
+                                Label {
+                                    text: configController.extractorCountText
+                                    font.pixelSize: 11
+                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                }
+                            }
+                            ListView {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 280
+                                clip: true
+                                interactive: true
+                                model: configController.extractorModel
+                                delegate: ItemDelegate {
+                                    width: ListView.view.width
+                                    height: 32
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 8
+                                        CheckBox {
+                                            checked: model.enabled
+                                            onCheckedChanged: configController.setExtractorEnabled(model.className, checked)
+                                        }
+                                        Label {
+                                            text: model.displayName
+                                            font.pixelSize: 12
+                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                            Layout.fillWidth: true
+                                        }
+                                        Label {
+                                            text: model.speedTierText
+                                            font.pixelSize: 11
+                                            color: model.speedTierColor
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Item { Layout.fillHeight: true }
                 }
             }
 
-            // ===== Tab 2: 文件类型 =====
-            ColumnLayout {
-                spacing: 8
-                RowLayout {
-                    Layout.fillWidth: true
-                    IconButton {
-                        text:"☑ 全选"
-                        tooltip: "全部启用"
-                        accent: "ghost"
-                        onClicked: configController.selectAllExtractors()
-                    }
-                    IconButton {
-                        text:"☐ 全不选"
-                        tooltip: "全部禁用"
-                        accent: "ghost"
-                        onClicked: configController.unselectAllExtractors()
-                    }
-                    Item { Layout.fillWidth: true }
-                    Label {
-                        text: configController.extractorCountText
-                        font.pixelSize: 11
-                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                    }
-                }
-                ListView {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    model: configController.extractorModel
-                    delegate: ItemDelegate {
-                        width: ListView.view.width
-                        height: 32
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 8
-                            CheckBox {
-                                checked: model.enabled
-                                onCheckedChanged: configController.setExtractorEnabled(model.className, checked)
-                            }
-                            Label {
-                                text: model.displayName
-                                font.pixelSize: 12
-                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                Layout.fillWidth: true
-                            }
-                            Label {
-                                text: model.speedTierText
-                                font.pixelSize: 11
-                                color: model.speedTierColor
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ===== Tab 3: 忽略目录 =====
+            // ===== Tab 2: 忽略目录 =====
             ColumnLayout {
                 spacing: 8
                 Label {

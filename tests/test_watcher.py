@@ -56,23 +56,6 @@ class TestIgnoreDirs:
             assert "Program Files" in dirs
 
 
-class TestWatcherLazyImport:
-    def test_trayapp_lazy_import(self) -> None:
-        """TrayApp 通过 __getattr__ 懒加载，避免无 GUI 环境 import 失败。"""
-        import fuscan.watcher as watcher_pkg
-
-        tray_cls = watcher_pkg.TrayApp
-        assert tray_cls is not None
-        assert tray_cls.__name__ == "TrayApp"
-
-    def test_watcher_getattr_unknown_attribute_raises(self) -> None:
-        """访问不存在的属性应抛出 AttributeError。"""
-        import fuscan.watcher as watcher_pkg
-
-        with pytest.raises(AttributeError, match="has no attribute"):
-            _ = watcher_pkg.NonExistent  # type: ignore[attr-defined]
-
-
 # ----------------------------- FileMonitor -----------------------------
 
 

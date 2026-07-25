@@ -8,16 +8,15 @@
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Coverage](https://img.shields.io/badge/coverage-%E2%89%A596%25-brightgreen.svg)
 
-基于 YAML 规则的多格式文件内容扫描工具，支持 CLI、GUI 与系统托盘驻守。可扫描 PDF、Office 文档、压缩包等多种格式，按文件名/内容/路径匹配并支持 AND/OR/NOT 逻辑组合。
+基于 YAML 规则的多格式文件内容扫描工具，支持 CLI 与 GUI（PySide2 + QML）。可扫描 PDF、Office 文档、压缩包等多种格式，按文件名/内容/路径匹配并支持 AND/OR/NOT 逻辑组合。
 
 ## 特性
 
 - **规则引擎**：YAML 配置规则，支持文件名、文件内容、路径三类匹配目标，contains/equals/regex 等多种模式，AND/OR/NOT 逻辑组合
 - **多格式支持**：PDF、DOCX、PPTX、XLSX、ODT/ODS、WPS、纯文本，及 ZIP/RAR 压缩包内扫描
-- **三种使用形态**：
-  - CLI：`scan`/`rules`/`gui`/`tray`/`version` 子命令，支持 text/json/csv 输出
-  - GUI：PySide2 GitHub Desktop 风格界面，实时进度、结果分类、详情预览、关键词高亮
-  - 托盘驻守：watchdog 监控新增文件，增量扫描（mtime 跟踪），命中通知
+- **两种使用形态**：
+  - CLI：`scan`/`rules`/`gui`/`cache`/`version` 子命令，支持 text/json/csv 输出
+  - GUI：PySide2 + QML 极简界面（Sidebar + ContentArea），实时进度、结果分类、详情预览、关键词高亮
 - **内置通用规则**：随包分发 8 条安全规则，用户规则可覆盖
 - **多规则合并**：支持加载多个规则文件，按顺序链式合并，后者覆盖前者同名规则
 
@@ -33,7 +32,7 @@ pip install fuscan
 uv add fuscan
 ```
 
-GUI 与托盘功能需要 PySide2（仅支持 Python 3.8~3.10）。
+GUI 需要 PySide2（仅支持 Python 3.8~3.10）。
 
 ## 快速上手
 
@@ -54,9 +53,6 @@ fuscan rules -r rules/custom.yaml
 
 # 启动 GUI
 fuscan gui
-
-# 启动托盘驻守（监控指定目录的新增文件）
-fuscan tray -w /path/to/watch -r rules/custom.yaml
 ```
 
 ### GUI

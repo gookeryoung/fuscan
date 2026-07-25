@@ -45,9 +45,6 @@ fuscan scan /path/to/project -r rules/examples/security-audit.yaml
 
 # 输出 JSON 报告
 fuscan scan /path/to/project -r rules/examples/sensitive-data.yaml -o json -f report.json
-
-# 托盘驻守模式（监控新增文件）
-fuscan tray -r rules/examples/security-audit.yaml -w /path/to/watch
 ```
 
 ## 规则配置字段详解

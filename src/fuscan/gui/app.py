@@ -1,6 +1,10 @@
-"""GUI 应用入口：构造 QApplication 与主窗口。
+"""GUI 应用入口：构造 QGuiApplication 与 QQmlApplicationEngine。
 
 提供 :func:`launch` 函数供 CLI ``gui`` 子命令调用，也可作为脚本直接运行。
+按 rule-12-pyside-dev.md 要求，UI 全部在 ``.qml`` 文件定义，Python 侧仅
+构造 controller 注册到 QML context。
+
+参考实现：``ref/pyside2_qml_dashboard/main.py``
 """
 
 from __future__ import annotations
@@ -9,77 +13,71 @@ import logging
 import sys
 import warnings
 from pathlib import Path
-from string import Template
 from typing import Sequence
 
 try:
-    from PySide2.QtCore import Qt
-    from PySide2.QtWidgets import QApplication
+    from PySide2.QtCore import QUrl
+    from PySide2.QtGui import QGuiApplication
+    from PySide2.QtQml import QQmlApplicationEngine
+    from PySide2.QtQuickControls2 import QQuickStyle
 except ImportError:  # pragma: no cover
-    from PySide6.QtCore import Qt  # pyrefly: ignore [missing-import]
-    from PySide6.QtWidgets import QApplication  # pyrefly: ignore [missing-import]
+    from PySide6.QtCore import QUrl  # pyrefly: ignore [missing-import]
+    from PySide6.QtGui import QGuiApplication  # pyrefly: ignore [missing-import]
+    from PySide6.QtQml import QQmlApplicationEngine  # pyrefly: ignore [missing-import]
+    from PySide6.QtQuickControls2 import QQuickStyle  # pyrefly: ignore [missing-import]
 
-from fuscan import theme
-from fuscan.gui.main_window import MainWindow
+from fuscan.gui.qml import AppController
 
-__all__ = ["launch", "load_stylesheet"]
+__all__ = ["launch"]
 
 logger = logging.getLogger(__name__)
 
-_QSS_PATH = Path(__file__).parent / "styles.qss"
-
-
-def load_stylesheet() -> str:
-    """加载 QSS 并替换设计令牌占位符。
-
-    :return: 替换令牌后的 QSS 字符串。QSS 缺失或令牌不匹配时返回空串并记录警告，
-             不阻塞应用启动（界面将回退为 Qt 原生样式）。
-    """
-    if not _QSS_PATH.is_file():
-        logger.warning("QSS 文件缺失：%s，使用 Qt 原生样式", _QSS_PATH)
-        return ""
-    try:
-        raw = _QSS_PATH.read_text(encoding="utf-8")
-        return Template(raw).substitute(theme.QSS_TOKENS)
-    except (OSError, ValueError, KeyError) as exc:
-        logger.warning("QSS 加载或令牌替换失败，使用 Qt 原生样式：%s", exc)
-        return ""
-
-
-def _configure_high_dpi() -> None:
-    """配置高 DPI 缩放属性，必须在 QApplication 创建前调用。
-
-    - ``AA_EnableHighDpiScaling``：在高分辨率屏幕上自动缩放界面
-    - ``AA_UseHighDpiPixmaps``：使用高 DPI 位图资源（SVG 矢量图天然支持）
-    """
-    # 仅在尚未创建 QApplication 时设置（属性在实例化后不生效）
-    if QApplication.instance() is not None:
-        return
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+# QML 文件目录（src/fuscan/gui/qml/）
+_QML_DIR = Path(__file__).parent / "qml"
+_MAIN_QML = _QML_DIR / "Main.qml"
 
 
 def launch(argv: Sequence[str] | None = None) -> int:
-    """启动 GUI 应用。
+    """启动 QML GUI 应用。
 
     :param argv: 命令行参数（默认从 sys.argv 读取）
     :return: 退出码
     """
-    # 抑制 cryptography 对 Python 3.8 的弃用警告（依赖链引入，非 fuscan 可控）
+    # 抑制 cryptography 对 Python 3.8 的弃用警告
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="cryptography")
-    _configure_high_dpi()
-    args = list(argv) if argv is not None else sys.argv
-    app = QApplication.instance() or QApplication(args)
-    app.setApplicationName("fuscan")
-    app.setStyleSheet(load_stylesheet())
 
-    window = MainWindow()
-    window.show()
+    args = list(argv) if argv is not None else sys.argv
+    # QML 使用 QGuiApplication（无需 QApplication 的 widgets 依赖）
+    app = QGuiApplication.instance() or QGuiApplication(args)
+    app.setApplicationName("fuscan")
+    app.setOrganizationName("fuscan")
+
+    # 设置 QtQuick Controls 2 风格为 Fusion（跨平台一致）
+    QQuickStyle.setStyle("Fusion")
+
+    # 构造主控制器并注册到 QML context
+    controller = AppController()
+
+    engine = QQmlApplicationEngine()
+    controller.register_to(engine.rootContext())
+
+    # 添加 QML 文件目录到 import path（支持子目录 import）
+    engine.addImportPath(str(_QML_DIR))
+
+    # 加载主 QML
+    engine.load(QUrl.fromLocalFile(str(_MAIN_QML)))  # pyrefly: ignore [missing-argument]
+
+    if not engine.rootObjects():
+        logger.error("QML 加载失败：%s", _MAIN_QML)
+        return -1
+
+    # 窗口关闭时清理 controller 资源
+    app.aboutToQuit.connect(controller.cleanup)
 
     # PySide2 用 exec_，PySide6 推荐 exec
     run = app.exec if hasattr(app, "exec") else app.exec_
-    return run()
+    return run()  # pragma: no cover
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     sys.exit(launch())

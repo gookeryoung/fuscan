@@ -2,7 +2,7 @@
 
 cache 不为 None 时，Scanner 内部使用哈希缓存跳过未变化文件（文件哈希 + 规则哈希
 均未变则直接复用结果）；cache 为 None 时退化为全量扫描。
-状态持久化由 SQLite 缓存处理，``save_state``/``load_state`` 为空操作（保留签名兼容 TrayApp）。
+状态持久化由 SQLite 缓存处理，``save_state``/``load_state`` 为空操作（保留签名兼容历史调用方）。
 """
 
 from __future__ import annotations

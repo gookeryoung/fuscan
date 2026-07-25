@@ -386,7 +386,7 @@ class ScanReport:
         return self.stats.summary(cancelled=self.cancelled)
 
     def notification_message(self) -> str:
-        """返回托盘/通知消息正文。
+        """返回通知消息正文。
 
         形如 ``发现 3 个文件命中规则，共 7 处匹配``；无命中时返回 ``未发现命中``。
         """

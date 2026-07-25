@@ -54,14 +54,13 @@ src/fuscan/
 │   ├── *.ui / *_ui.py      # 对应 .ui 源与 uic 产物
 │   ├── styles.qss          # QSS 样式表（用 ${TOKEN} 引用 theme.py 令牌）
 │   └── resources_rc.py     # pyside2-rcc 编译产物（勿手改）
-├── watcher/        # 托盘驻守与文件监控
+├── watcher/        # 文件监控（功能代码保留，UI 后续单独设计）
 │   ├── monitor.py      # FileMonitor（watchdog）
 │   ├── incremental.py  # IncrementalScanner（mtime 跟踪）
 │   ├── ignore_dirs.py  # 平台默认忽略目录
-│   ├── tray.py         # TrayApp(QSystemTrayIcon)
-│   └── __init__.py     # TrayApp 惰性导入
+│   └── __init__.py     # 导出 FileMonitor/IncrementalScanner/default_ignore_dirs
 ├── config.py        # 配置持久化 + 内置规则加载（load_with_builtin/load_builtin_ruleset）
-└── cli.py          # CLI 入口（scan/rules/gui/tray/version）
+└── cli.py          # CLI 入口（scan/rules/gui/cache/version）
 ```
 
 ## 可复用模式
@@ -82,20 +81,7 @@ class Scanner:
             self._archive_scanner = ArchiveScanner(...)
 ```
 
-### 2. 包级 __getattr__ 惰性导出
-
-watcher/__init__.py 用 `__getattr__` 延迟导入 TrayApp，使无 PySide2 环境也能 import watcher 子包。
-
-```python
-def __getattr__(name):
-    if name == "TrayApp":
-        from fuscan.watcher.tray import TrayApp
-
-        return TrayApp
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-```
-
-### 3. 提取器注册机制
+### 2. 提取器注册机制
 
 ExtractorRegistry 按扩展名注册提取器实例，支持大小写不敏感查询。
 第三方库在 extract() 方法内 try/except ImportError，未安装时抛 ExtractorError。
@@ -106,7 +92,7 @@ WPS 文件通过 ZIP 魔数（PK\x03\x04）判断是否为 OOXML 兼容格式。
 提取时复制到临时文件并改扩展名（.wps→.docx），绕过 python-docx 的扩展名检查。
 临时文件用 _safe_unlink 删除，处理 Windows 文件锁定。
 
-### 5. QThread 信号测试模式
+### 4. QThread 信号测试模式
 
 QThread 信号在无事件循环时无法传递到主线程。
 用 QEventLoop + QTimer.singleShot 超时退出模式等待信号：
@@ -119,16 +105,15 @@ worker.start()
 loop.exec_()
 ```
 
-### 6. 增量扫描的 mtime 比较
+### 5. 增量扫描的 mtime 比较
 
 用 `abs(entry.mtime - stored_mtime) < 0.001` 而非 `==`，
 避免文件系统 mtime 精度差异导致误判。状态以 path_str→mtime 持久化为 JSON。
 
-### 7. 文件监控事件去抖
+### 6. 文件监控事件去抖
 
 watchdog 短时间内可能触发多次事件。FileMonitor 用 Dict[Path, float] 记录
 最后事件时间，dedup_interval 内同路径事件被丢弃。
-TrayApp 用 QTimer singleShot + 2 秒间隔批量处理文件事件。
 
 ## 踩坑总结
 
@@ -149,8 +134,7 @@ Windows 上 `chmod(0o000)` 不阻止文件所有者读取，无法用于测试�
 
 ### 4. QThread 测试崩溃
 
-TrayApp._full_scan 创建真实 ScanWorker(QThread) 在测试中导致
-Windows STATUS_STACK_BUFFER_OVERRUN 崩溃。
+在测试中创建真实 ScanWorker(QThread) 会导致 Windows STATUS_STACK_BUFFER_OVERRUN 崩溃。
 解法：用 monkeypatch 替换 ScanWorker 为 FakeWorker（带 finished_report
 信号的 connect 方法）。
 
@@ -187,45 +171,41 @@ extract() 方法内惰性导入，未安装时优雅降级。
 ### 3. watchdog 文件监控
 
 选择 watchdog 库进行文件系统监控，跨平台支持、API 简洁。
-Observer 异步监控不阻塞主线程，适合托盘驻守场景。
+Observer 异步监控不阻塞主线程，watcher 模块当前仅保留 FileMonitor/IncrementalScanner
+功能代码，UI 集成方案后续单独设计。
 
-### 4. 托盘应用的批量扫描策略
-
-文件监控触发后不立即扫描，而是加入 pending_paths 队列，由 QTimer 2 秒后
-批量扫描。避免解压大量文件时逐个扫描的开销。
-
-### 5. 状态持久化位置
+### 4. 状态持久化位置
 
 IncrementalScanner 的状态文件应保存在扫描目录外，避免被当作新文件扫描。
 测试中用 `tmp_path.parent / f"state_{tmp_path.name}.json"`。
 
-### 6. 多线程扫描用 ThreadPoolExecutor
+### 5. 多线程扫描用 ThreadPoolExecutor
 
 文件扫描为 I/O 密集型任务，`ThreadPoolExecutor` 可有效并发读取文件。
 `_scan_entry` 每个文件创建独立 `MatchContext`，无共享可变状态，线程安全。
 压缩包内条目扫描始终单线程（`ArchiveScanner` 可能持有内部状态）。
-GUI 默认 `max_workers=8`，CLI 保持单线程（兼容性优先）。
+GUI 默认 `max_workers=5`，CLI 保持单线程（兼容性优先）。
 
-### 7. 关键词高亮用单次正则替换
+### 6. 关键词高亮用单次正则替换
 
 `_build_preview_html` 先 `html.escape` 转义内容，再用单次 `re.sub` 插入高亮 span。
 多次 `str.replace` 会破坏已插入的 HTML 标签；按关键词长度降序排列避免短词匹配到长词内部。
 使用 `re.IGNORECASE` 高亮所有大小写变体。
 
-### 8. ignore_paths glob 路径过滤
+### 7. ignore_paths glob 路径过滤
 
 `ignore_paths` 使用 `fnmatch.fnmatch` 进行 glob 模式匹配，大小写不敏感。
 匹配逻辑：检查目录相对路径是否匹配模式，同时检查 `路径 + "/x"` 是否匹配
 （处理 `*/vendor/*` 等描述目录内文件的模式）。
 
-### 9. 内置规则随包分发
+### 8. 内置规则随包分发
 
 内置规则文件放在 `src/fuscan/assets/rules/builtin.yaml`，位于包目录内，
 由 hatchling 默认随包打包（`packages = ["src/fuscan"]` 递归包含非 Python 资源）。
 `load_with_builtin()`（定义在 `config.py`）合并内置与用户规则（按名称覆盖，
 `ignore_paths` 取并集）。
 
-### 10. 规则合并链式覆盖
+### 9. 规则合并链式覆盖
 
 `merge_multiple_rulesets(*rulesets)` 按顺序链式合并，后者覆盖前者同名规则。
 `ignore_paths` 取并集，去重保序（base 优先）。

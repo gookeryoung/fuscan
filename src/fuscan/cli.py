@@ -6,8 +6,6 @@
 - ``rules``：校验规则文件格式
 - ``version``：显示版本信息
 - ``gui``：启动图形界面
-- ``tray``：启动托盘驻守（监控新增文件并增量扫描）
-
 - ``cache``：管理扫描结果缓存（stats/clear/prune）
 
 用法示例：
@@ -100,21 +98,6 @@ def build_parser() -> argparse.ArgumentParser:
     # gui 子命令
     subparsers.add_parser("gui", help="启动图形界面")
 
-    # tray 子命令
-    tray_parser = subparsers.add_parser("tray", help="启动托盘驻守（监控新增文件并增量扫描）")
-    tray_parser.add_argument(
-        "-r",
-        "--rules",
-        type=Path,
-        action="append",
-        default=None,
-        metavar="FILE",
-        help="规则文件路径（YAML，可重复指定多个，后面的覆盖前面的同名规则）",
-    )
-    tray_parser.add_argument("-w", "--watch", action="append", default=[], metavar="DIR", help="监控目录（可重复）")
-    tray_parser.add_argument("--state", type=Path, default=None, help="扫描状态文件路径（用于增量扫描持久化）")
-    tray_parser.add_argument("--no-builtin", action="store_true", help="禁用内置通用规则（需配合 -r 使用）")
-
     # version 子命令
     subparsers.add_parser("version", help="显示版本信息")
 
@@ -151,8 +134,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_rules(args)
         if args.command == "gui":
             return _cmd_gui(args)
-        if args.command == "tray":
-            return _cmd_tray(args)
         if args.command == "cache":
             return _cmd_cache(args)
         if args.command == "version":
@@ -312,50 +293,6 @@ def _cmd_gui(_args: argparse.Namespace) -> int:
         print(f"GUI 启动失败（PySide 未安装）: {exc}", file=sys.stderr)
         return 3
     return launch()
-
-
-def _cmd_tray(args: argparse.Namespace) -> int:
-    """执行 tray 子命令：启动托盘驻守。"""
-    try:
-        try:
-            from PySide2.QtWidgets import QApplication
-        except ImportError:  # pragma: no cover
-            from PySide6.QtWidgets import QApplication  # pyrefly: ignore [missing-import]
-
-        # 仅在 tray 子命令时加载 PySide 与 watchdog
-        from fuscan.watcher.tray import TrayApp
-    except ImportError as exc:
-        print(f"托盘启动失败（PySide 未安装）: {exc}", file=sys.stderr)
-        return 3
-
-    ruleset = _load_ruleset_from_args(args)
-    if ruleset is None:
-        return 1
-
-    config = load_config()
-    watch_paths = [Path(w) for w in args.watch]
-    state_file: Path | None = args.state
-
-    app = QApplication.instance() or QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
-
-    cache = None
-    if config.cache_enabled:
-        # 仅在启用缓存时加载 SQLite 依赖
-        from fuscan.cache import CacheStore
-
-        cache_path = _resolve_cache_path(None, config.cache_path)
-        if cache_path is not None:
-            cache = CacheStore(cache_path)
-
-    tray = TrayApp(
-        ruleset=ruleset,
-        watch_paths=watch_paths,
-        state_file=state_file,
-        ignore_dirs=config.ignore_dirs,
-        cache=cache,
-    )
-    return tray.start(show_window=False)
 
 
 def _merge_ignore_dirs(base_dirs: list[str], extra_dirs: list[str]) -> tuple[str, ...]:

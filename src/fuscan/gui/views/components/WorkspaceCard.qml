@@ -39,11 +39,12 @@ Rectangle {
 
     // 状态色：根据 statusText 决定
     function statusColor() {
-        if (statusText === "扫描中") return theme.colorSuccess
-        if (statusText === "已暂停") return theme.colorWarning
+        if (statusText === "扫描中") return theme.colorWarning
+        if (statusText === "已暂停") return theme.colorTextSecondary
         if (statusText === "已完成") return (matchedCount > 0 ? theme.colorDanger : theme.colorSuccess)
         if (statusText === "失败" || statusText === "已取消") return theme.colorWarning
-        return theme.colorBorder
+        // 就绪：蓝色（非灰色），表示待命可操作
+        return theme.colorPrimary
     }
 
     ColumnLayout {
@@ -206,12 +207,43 @@ Rectangle {
                 accent: "ghost"
                 onClicked: card.viewStatsRequested(card.workspaceId)
             }
-            // 展开按钮（切换更多操作）
-            IconButton {
-                text:card.expanded ? "▲" : "▼"
-                tooltip: card.expanded ? "收起更多操作" : "展开更多操作"
-                accent: "ghost"
+            // 展开按钮：more.svg icon + 「展开/收起」文字
+            Button {
+                id: expandBtn
+                Layout.preferredHeight: theme.btnHeightGhost
+                leftPadding: 10
+                rightPadding: 10
+                topPadding: 0
+                bottomPadding: 0
                 onClicked: card.expanded = !card.expanded
+                ToolTip.visible: hovered
+                ToolTip.text: card.expanded ? "收起更多操作" : "展开更多操作"
+                ToolTip.delay: 400
+                background: Rectangle {
+                    color: expandBtn.down || expandBtn.hovered
+                        ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
+                        : "transparent"
+                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                    border.width: 1
+                    radius: theme.btnRadiusGhost
+                    Behavior on color { ColorAnimation { duration: 120 } }
+                }
+                contentItem: Row {
+                    spacing: 4
+                    Image {
+                        source: "file:///" + theme.iconsDir + "/more.svg"
+                        sourceSize: Qt.size(14, 14)
+                        anchors.verticalCenter: parent.verticalCenter
+                        // SVG 颜色跟随主题（Qt 5.15 ColorOverlay 不可用，用 opacity 区分）
+                        opacity: theme.isDark ? 0.9 : 1.0
+                    }
+                    Label {
+                        text: card.expanded ? "收起" : "展开"
+                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        font.pixelSize: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
             }
         }
 

@@ -20,10 +20,10 @@ from typing import TYPE_CHECKING
 
 try:
     from PySide2.QtCore import Property, QObject, Signal, Slot
-    from PySide2.QtWidgets import QFileDialog, QMessageBox
+    from PySide2.QtWidgets import QFileDialog
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
-    from PySide6.QtWidgets import QFileDialog, QMessageBox  # pyrefly: ignore [missing-import]
+    from PySide6.QtWidgets import QFileDialog  # pyrefly: ignore [missing-import]
 
 from fuscan.config import Config
 from fuscan.gui.models.rule_model import RuleListModel
@@ -144,7 +144,13 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot()  # pyrefly: ignore [not-callable]
     def loadFile(self) -> None:
-        """弹出 QFileDialog 选择规则文件并加载。"""
+        """弹出 QFileDialog 选择规则文件并加载（QWidget 版，QGuiApplication 下不可用）。
+
+        .. deprecated::
+            QML 应使用 :meth:`loadFileFromPath`，由 QML ``FileDialog`` 选定路径后传入。
+            本方法保留供 CLI/测试场景，GUI 中调用会因 ``QGuiApplication`` 不支持
+            ``QWidget`` 而无反应。
+        """
         last_dir = str(Path(self._config.rules_paths[-1]).parent) if self._config.rules_paths else str(Path.home())
         path_str, _ = QFileDialog.getOpenFileName(
             None,
@@ -154,31 +160,36 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         )
         if not path_str:
             return
+        self.loadFileFromPath(path_str)
+
+    @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
+    def loadFileFromPath(self, path_str: str) -> bool:
+        """从路径加载规则文件（QML ``FileDialog`` 选定后调用）。
+
+        :param path_str: 规则文件绝对路径
+        :return: 是否加载成功（重复加载返回 False，加载错误返回 False）
+        """
         path = Path(path_str)
+        if not path.exists():
+            logger.warning("规则文件不存在: %s", path_str)
+            return False
         if str(path) in self._config.rules_paths:
-            # 已加载：询问是否重新加载
-            reply = QMessageBox.question(
-                None,
-                "规则文件已加载",
-                f"该规则文件已在列表中:\n{path.name}\n\n是否重新加载以应用最新内容？",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes,
-            )
-            if reply != QMessageBox.Yes:
-                return
-        else:
-            self._config.rules_paths.append(str(path))
+            logger.info("规则文件已加载，跳过: %s", path_str)
+            return False
+        self._config.rules_paths.append(str(path))
         try:
             self._reload_ruleset()
             self._rule_model.set_ruleset(self._ruleset)
             self._config_controller.save()  # pyrefly: ignore [missing-attribute]
             self.rulesFileListChanged.emit()  # pyrefly: ignore [missing-attribute]
             self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+            return True
         except RuleError as exc:
-            # 加载失败：从列表中移除新加的（如果是新加的）
-            if str(path) in self._config.rules_paths and path not in [Path(p) for p in self._config.rules_paths[:-1]]:
+            # 加载失败：回滚刚加入的路径
+            if str(path) in self._config.rules_paths:
                 self._config.rules_paths.remove(str(path))
-            QMessageBox.warning(None, "规则错误", f"加载规则失败:\n{exc}")
+            logger.warning("加载规则失败: %s", exc)
+            return False
 
     @Slot()  # pyrefly: ignore [not-callable]
     def moveUp(self) -> None:

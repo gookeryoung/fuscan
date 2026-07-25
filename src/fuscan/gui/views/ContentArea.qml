@@ -82,7 +82,9 @@ Pane {
 
     Component {
         id: rulesPage
-        RulesPage {}
+        RulesPage {
+            onBackRequested: contentArea.sidebarRef.currentPage = "home"
+        }
     }
 
     Component {

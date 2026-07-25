@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtQuick.Dialogs 1.3 as Dialogs
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
 import "../components"
@@ -10,18 +11,43 @@ Item {
     property ThemeController theme: Theme
     property RulesControllerType rulesController: RulesController
 
+    // 信号：返回首页/工作区
+    signal backRequested()
+
+    // 规则文件选择对话框（QML FileDialog，替代 QWidget QFileDialog）
+    Dialogs.FileDialog {
+        id: rulesFileDialog
+        title: "选择规则文件"
+        nameFilters: ["YAML 文件 (*.yaml *.yml)", "所有文件 (*.*)"]
+        onAccepted: {
+            var pathStr = rulesFileDialog.fileUrl.toString()
+            // file:/// 前缀转本地路径
+            if (pathStr.startsWith("file:///")) {
+                pathStr = decodeURIComponent(pathStr.substring(8))
+            }
+            rulesController.loadFileFromPath(pathStr)
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 16
 
-        // 顶部标题
+        // 顶部标题 + 返回按钮
         RowLayout {
             Layout.fillWidth: true
+            IconButton {
+                text:"← 返回"
+                tooltip: "返回工作区"
+                accent: "secondary"
+                onClicked: rulesPage.backRequested()
+            }
             Label {
                 text: "规则"
                 font.pixelSize: 22
                 font.bold: true
                 color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                Layout.leftMargin: 8
             }
             Item { Layout.fillWidth: true }
             Label {
@@ -122,7 +148,7 @@ Item {
                             text:"📂 加载"
                             tooltip: "加载规则文件"
                             accent: "secondary"
-                            onClicked: rulesController.loadFile()
+                            onClicked: rulesFileDialog.open()
                         }
                     }
                 }
@@ -194,6 +220,13 @@ Item {
                                     color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                     elide: Text.ElideRight
                                     visible: model.description.length > 0
+                                }
+                                // 底部分隔线（最后一项不显示）
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 1
+                                    color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                    visible: index < ruleListView.count - 1
                                 }
                             }
                         }

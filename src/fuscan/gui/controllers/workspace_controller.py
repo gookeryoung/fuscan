@@ -1,4 +1,4 @@
-﻿"""工作区控制器：管理多个扫描任务（工作区）。
+"""工作区控制器：管理多个扫描任务（工作区）。
 
 工作区是 fuscan GUI 的核心组织单元：每个工作区代表一个独立的扫描任务，
 包含名称、扫描模式、目标、规则配置与最近一次扫描结果摘要。所有工作区
@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 try:
@@ -29,10 +30,13 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
+from fuscan import config as config_module
 from fuscan.gui.controllers.scan_controller import ScanController
 from fuscan.gui.models.workspace_model import WorkspaceItem, WorkspaceListModel
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from fuscan.gui.controllers.config_controller import ConfigController
     from fuscan.gui.controllers.rules_controller import RulesController
 
@@ -42,6 +46,10 @@ logger = logging.getLogger(__name__)
 
 # 扫描模式字符串 ↔ 索引（与 scan_controller._SCAN_MODE_INDEX_TO_STR 一致）
 _MODE_STR_TO_INDEX: dict[str, int] = {"full": 0, "drive": 1, "folder": 2}
+
+# 持久化文件名（路径在 _persist_file property 中运行时计算，跟随 CONFIG_DIR monkeypatch）
+_PERSIST_FILENAME = "workspaces.json"
+_PERSIST_VERSION = 1
 
 
 class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -71,6 +79,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._model = WorkspaceListModel(self)
         self._scan_controllers: dict[str, ScanController] = {}
         self._current_workspace_id: str = ""
+        # 恢复持久化的工作区
+        self._load_persisted()
 
     # ----------------------------- QML 属性 -----------------------------
 
@@ -149,12 +159,30 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if not name:
             name = f"任务 {self._model.rowCount() + 1}"
 
+        self._create_workspace(ws_id, name, mode_str, target, rules_paths, use_builtin)
+        self._persist()
+        self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
+        return ws_id
+
+    def _create_workspace(
+        self,
+        ws_id: str,
+        name: str,
+        mode_str: str,
+        target: str,
+        rules_paths: Sequence[str],
+        use_builtin: bool,
+    ) -> None:
+        """创建工作区内部实现（构造 item + ScanController + 连接信号）。
+
+        供 :meth:`addWorkspace`（新建）与 :meth:`_load_persisted`（恢复）共用。
+        """
         item = WorkspaceItem(
             workspace_id=ws_id,
             name=name,
             mode_str=mode_str,
             target=target,
-            rules_paths=rules_paths,
+            rules_paths=tuple(rules_paths),
             use_builtin=use_builtin,
         )
         self._model.add_workspace(item)
@@ -180,9 +208,6 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         )
         self._scan_controllers[ws_id] = scan_controller
 
-        self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
-        return ws_id
-
     @Slot(str)  # pyrefly: ignore [not-callable]
     def removeWorkspace(self, ws_id: str) -> None:
         """按 ID 移除工作区（同时清理对应 ScanController）。"""
@@ -195,6 +220,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if self._current_workspace_id == ws_id:
             self._current_workspace_id = ""
             self.currentWorkspaceChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self._persist()
         self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     @Slot(str)  # pyrefly: ignore [not-callable]
@@ -288,3 +314,76 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if self._current_workspace_id:
             self._current_workspace_id = ""
             self.currentWorkspaceChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    # ----------------------------- 持久化 -----------------------------
+
+    @property
+    def _persist_file(self) -> Path:
+        """持久化文件路径（运行时计算，跟随 ``CONFIG_DIR`` monkeypatch）。"""
+        return config_module.CONFIG_DIR / _PERSIST_FILENAME
+
+    def _persist(self) -> None:
+        """将所有工作区序列化到 ``~/.fuscan/workspaces.json``。
+
+        仅持久化「定义字段」（id/name/mode/target/rules_paths/use_builtin），
+        运行时状态（status/counts/summary）不持久化，重启后重置为「就绪」。
+        """
+        items = self._model.all_workspaces()
+        payload = {
+            "version": _PERSIST_VERSION,
+            "workspaces": [
+                {
+                    "id": item.workspace_id,
+                    "name": item.name,
+                    "mode": item.mode_str,
+                    "target": item.target,
+                    "rules_paths": list(item.rules_paths),
+                    "use_builtin": item.use_builtin,
+                }
+                for item in items
+            ],
+        }
+        try:
+            config_module.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            self._persist_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("工作区持久化失败: %s", exc)
+
+    def _load_persisted(self) -> None:
+        """从 ``~/.fuscan/workspaces.json`` 恢复工作区列表。
+
+        文件不存在/解析失败时静默跳过（首次启动或文件损坏）。
+        """
+        persist_file = self._persist_file
+        if not persist_file.exists():
+            return
+        try:
+            payload = json.loads(persist_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("工作区持久化文件读取失败: %s", exc)
+            return
+        if not isinstance(payload, dict) or payload.get("version") != _PERSIST_VERSION:
+            logger.warning("工作区持久化版本不兼容，跳过: %s", payload.get("version"))
+            return
+        workspaces = payload.get("workspaces", [])
+        if not isinstance(workspaces, list):
+            return
+        for ws in workspaces:
+            if not isinstance(ws, dict):
+                continue
+            ws_id = ws.get("id", "")
+            if not ws_id or self._model.get_workspace(ws_id) is not None:
+                continue
+            try:
+                self._create_workspace(
+                    ws_id=ws_id,
+                    name=str(ws.get("name", "任务")),
+                    mode_str=str(ws.get("mode", "folder")),
+                    target=str(ws.get("target", "")),
+                    rules_paths=ws.get("rules_paths", []),
+                    use_builtin=bool(ws.get("use_builtin", True)),
+                )
+            except Exception as exc:  # 持久化恢复容错：单条失败不阻塞其余
+                logger.warning("工作区 %s 恢复失败: %s", ws_id, exc)
+        if self._model.rowCount() > 0:
+            self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]

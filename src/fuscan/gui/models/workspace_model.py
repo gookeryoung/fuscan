@@ -227,6 +227,10 @@ class WorkspaceListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
             return self._items[row]
         return None
 
+    def all_workspaces(self) -> list[WorkspaceItem]:
+        """返回所有工作区（持久化用，按插入顺序）。"""
+        return list(self._items)
+
     def clear(self) -> None:
         """清空所有工作区。"""
         self.beginResetModel()

@@ -22,7 +22,7 @@ try:
         from PySide6.QtCore import QModelIndex, Qt  # pyrefly: ignore [missing-import]
 
     from fuscan.extractors.base import SpeedTier, default_registry  # noqa: F401
-    from fuscan.gui.qml.extractor_model import ExtractorListModel
+    from fuscan.gui.qml.models.extractor_model import ExtractorListModel
 
     PYSIDE_AVAILABLE = True
 except ImportError:

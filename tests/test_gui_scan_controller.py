@@ -20,10 +20,10 @@ pytestmark = pytest.mark.gui
 
 try:
     from fuscan.config import Config  # noqa: F401
-    from fuscan.gui.qml.config_controller import ConfigController
-    from fuscan.gui.qml.result_model import ResultListModel
-    from fuscan.gui.qml.rules_controller import RulesController
-    from fuscan.gui.qml.scan_controller import ScanController
+    from fuscan.gui.qml.controllers.config_controller import ConfigController
+    from fuscan.gui.qml.controllers.rules_controller import RulesController
+    from fuscan.gui.qml.controllers.scan_controller import ScanController
+    from fuscan.gui.qml.models.result_model import ResultListModel
     from fuscan.rules.model import (
         LeafMatch,
         MatchMode,
@@ -213,8 +213,8 @@ def fake_workers(monkeypatch: pytest.MonkeyPatch) -> tuple[list[FakeStatsWorker]
     """替换 ScanController 中的 FileStatsWorker 与 ScanWorker 为 Fake。"""
     FakeStatsWorker.instances.clear()
     FakeScanWorker.instances.clear()
-    monkeypatch.setattr("fuscan.gui.qml.scan_controller.FileStatsWorker", FakeStatsWorker)
-    monkeypatch.setattr("fuscan.gui.qml.scan_controller.ScanWorker", FakeScanWorker)
+    monkeypatch.setattr("fuscan.gui.qml.controllers.scan_controller.FileStatsWorker", FakeStatsWorker)
+    monkeypatch.setattr("fuscan.gui.qml.controllers.scan_controller.ScanWorker", FakeScanWorker)
     return FakeStatsWorker.instances, FakeScanWorker.instances
 
 
@@ -844,7 +844,7 @@ class TestExportResults:
         export_path = tmp_path / "export.csv"
         # mock QFileDialog.getSaveFileName 返回指定路径
         monkeypatch.setattr(
-            "fuscan.gui.qml.scan_controller.QFileDialog.getSaveFileName",
+            "fuscan.gui.qml.controllers.scan_controller.QFileDialog.getSaveFileName",
             lambda *args, **kwargs: (str(export_path), "CSV 文件 (*.csv)"),
         )
         controller.exportResults("csv")
@@ -864,7 +864,7 @@ class TestExportResults:
         controller._last_report = _make_scan_report(results=(result,))
 
         monkeypatch.setattr(
-            "fuscan.gui.qml.scan_controller.QFileDialog.getSaveFileName",
+            "fuscan.gui.qml.controllers.scan_controller.QFileDialog.getSaveFileName",
             lambda *args, **kwargs: ("", ""),
         )
         controller.exportResults("csv")  # 不应抛异常
@@ -881,7 +881,7 @@ class TestExportResults:
 
         # mock 路径指向无效位置触发 OSError
         monkeypatch.setattr(
-            "fuscan.gui.qml.scan_controller.QFileDialog.getSaveFileName",
+            "fuscan.gui.qml.controllers.scan_controller.QFileDialog.getSaveFileName",
             lambda *args, **kwargs: ("/nonexistent/path/export.csv", "CSV 文件 (*.csv)"),
         )
         controller.exportResults("csv")
@@ -899,7 +899,7 @@ class TestSelectFolder:
     ) -> None:
         """selectFolder 应调用 setFolderRoot。"""
         monkeypatch.setattr(
-            "fuscan.gui.qml.scan_controller.QFileDialog.getExistingDirectory",
+            "fuscan.gui.qml.controllers.scan_controller.QFileDialog.getExistingDirectory",
             lambda *args, **kwargs: str(tmp_path),
         )
         emitted: list[None] = []
@@ -915,7 +915,7 @@ class TestSelectFolder:
     ) -> None:
         """用户取消选择时不修改 folderRoot。"""
         monkeypatch.setattr(
-            "fuscan.gui.qml.scan_controller.QFileDialog.getExistingDirectory",
+            "fuscan.gui.qml.controllers.scan_controller.QFileDialog.getExistingDirectory",
             lambda *args, **kwargs: "",
         )
         original_root = controller._folder_root
@@ -938,7 +938,7 @@ class TestOpenLocationWithResult:
 
         called: list[Path] = []
         monkeypatch.setattr(
-            "fuscan.gui.qml.scan_controller.open_path_in_explorer",
+            "fuscan.gui.qml.controllers.scan_controller.open_path_in_explorer",
             called.append,
         )
         controller.openLocation()
@@ -957,7 +957,7 @@ class TestOpenLocationWithResult:
         result = _make_scan_result(Path("/tmp/test.txt"))
         controller._result_model.set_results((result,))
         controller.setSelectedResultIndex(0)
-        monkeypatch.setattr("fuscan.gui.qml.scan_controller.open_path_in_explorer", _raise)
+        monkeypatch.setattr("fuscan.gui.qml.controllers.scan_controller.open_path_in_explorer", _raise)
         controller.openLocation()  # 不应抛异常
 
     def test_copy_path_sets_clipboard(

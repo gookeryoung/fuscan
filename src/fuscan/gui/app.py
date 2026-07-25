@@ -32,9 +32,11 @@ __all__ = ["launch"]
 
 logger = logging.getLogger(__name__)
 
-# QML 文件目录（src/fuscan/gui/qml/）
+# QML 文件目录（src/fuscan/gui/qml/views/）
+# 按rule-12三层MVC分层，.qml视图文件全部在 views/ 子目录
 _QML_DIR = Path(__file__).parent / "qml"
-_MAIN_QML = _QML_DIR / "Main.qml"
+_VIEWS_DIR = _QML_DIR / "views"
+_MAIN_QML = _VIEWS_DIR / "Main.qml"
 
 
 def launch(argv: Sequence[str] | None = None) -> int:
@@ -61,8 +63,8 @@ def launch(argv: Sequence[str] | None = None) -> int:
     engine = QQmlApplicationEngine()
     controller.register_to(engine.rootContext())
 
-    # 添加 QML 文件目录到 import path（支持子目录 import）
-    engine.addImportPath(str(_QML_DIR))
+    # 添加 views/ 到 QML import path（支持 Main.qml 同目录引用 Sidebar/ContentArea 等）
+    engine.addImportPath(str(_VIEWS_DIR))
 
     # 加载主 QML
     engine.load(QUrl.fromLocalFile(str(_MAIN_QML)))  # pyrefly: ignore [missing-argument]

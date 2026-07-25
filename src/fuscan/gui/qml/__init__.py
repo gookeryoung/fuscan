@@ -1,6 +1,13 @@
-"""QML 控制器与数据模型子包。
+"""QML 子包：控制器、模型与主题令牌。
 
-公共 API：
+按 rule-12-pyside-dev.md 三层 MVC 分层：
+
+- :mod:`fuscan.gui.qml.controllers`：控制层（``QObject`` 子类）
+- :mod:`fuscan.gui.qml.models`：模型层（``QAbstractListModel`` 子类）
+- :mod:`fuscan.gui.qml.theme`：主题令牌（``ThemeController``，rule-12 指定位置）
+- :mod:`fuscan.gui.qml.severity_utils`：严重度文本/色值工具（跨层共享）
+
+公共 API（顶层导出，保持向后兼容）：
 
 - :class:`ThemeController`：主题令牌双向绑定（暗色模式 + 色彩/排版/间距）
 - :class:`AppController`：主控制器工厂，构造并注册所有 controller 到 QML context
@@ -15,14 +22,14 @@
 
 from __future__ import annotations
 
-from fuscan.gui.qml.about_controller import AboutController
-from fuscan.gui.qml.app_controller import AppController
-from fuscan.gui.qml.config_controller import ConfigController
-from fuscan.gui.qml.extractor_model import ExtractorListModel
-from fuscan.gui.qml.result_model import ResultListModel
-from fuscan.gui.qml.rule_model import RuleListModel
-from fuscan.gui.qml.rules_controller import RulesController
-from fuscan.gui.qml.scan_controller import ScanController
+from fuscan.gui.qml.controllers import (
+    AboutController,
+    AppController,
+    ConfigController,
+    RulesController,
+    ScanController,
+)
+from fuscan.gui.qml.models import ExtractorListModel, ResultListModel, RuleListModel
 from fuscan.gui.qml.theme import ThemeController
 
 __all__ = [

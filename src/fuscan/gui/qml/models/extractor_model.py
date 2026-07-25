@@ -27,7 +27,6 @@ except ImportError:  # pragma: no cover
     from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt  # pyrefly: ignore [missing-import]
 
 from fuscan.extractors.base import SpeedTier, default_registry
-from fuscan.gui.qml._severity_utils import severity_color_hex  # noqa: F401 - 保持引用一致
 
 __all__ = ["ExtractorListModel"]
 

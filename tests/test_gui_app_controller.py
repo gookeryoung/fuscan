@@ -24,10 +24,10 @@ try:
     from PySide2.QtCore import QObject
 
     from fuscan.gui.qml import AppController
-    from fuscan.gui.qml.about_controller import AboutController
-    from fuscan.gui.qml.config_controller import ConfigController
-    from fuscan.gui.qml.rules_controller import RulesController
-    from fuscan.gui.qml.scan_controller import ScanController
+    from fuscan.gui.qml.controllers.about_controller import AboutController
+    from fuscan.gui.qml.controllers.config_controller import ConfigController
+    from fuscan.gui.qml.controllers.rules_controller import RulesController
+    from fuscan.gui.qml.controllers.scan_controller import ScanController
     from fuscan.gui.qml.theme import ThemeController
 
     PYSIDE_AVAILABLE = True

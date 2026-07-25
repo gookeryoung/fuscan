@@ -78,14 +78,14 @@ packages = ["src/fuscan"]
 [tool.hatch.build.targets.wheel.force-include]
 "src/fuscan/py.typed" = "fuscan/py.typed"
 "src/fuscan/assets/docs/fuscan-用户手册.pdf" = "fuscan/assets/docs/fuscan-用户手册.pdf"
-"src/fuscan/gui/qml/Main.qml" = "fuscan/gui/qml/Main.qml"
-"src/fuscan/gui/qml/Sidebar.qml" = "fuscan/gui/qml/Sidebar.qml"
-"src/fuscan/gui/qml/ContentArea.qml" = "fuscan/gui/qml/ContentArea.qml"
-"src/fuscan/gui/qml/NavItem.qml" = "fuscan/gui/qml/NavItem.qml"
-"src/fuscan/gui/qml/pages/ScanPage.qml" = "fuscan/gui/qml/pages/ScanPage.qml"
-"src/fuscan/gui/qml/pages/RulesPage.qml" = "fuscan/gui/qml/pages/RulesPage.qml"
-"src/fuscan/gui/qml/pages/SettingsPage.qml" = "fuscan/gui/qml/pages/SettingsPage.qml"
-"src/fuscan/gui/qml/pages/AboutPage.qml" = "fuscan/gui/qml/pages/AboutPage.qml"
+"src/fuscan/gui/qml/views/Main.qml" = "fuscan/gui/qml/views/Main.qml"
+"src/fuscan/gui/qml/views/Sidebar.qml" = "fuscan/gui/qml/views/Sidebar.qml"
+"src/fuscan/gui/qml/views/ContentArea.qml" = "fuscan/gui/qml/views/ContentArea.qml"
+"src/fuscan/gui/qml/views/NavItem.qml" = "fuscan/gui/qml/views/NavItem.qml"
+"src/fuscan/gui/qml/views/pages/ScanPage.qml" = "fuscan/gui/qml/views/pages/ScanPage.qml"
+"src/fuscan/gui/qml/views/pages/RulesPage.qml" = "fuscan/gui/qml/views/pages/RulesPage.qml"
+"src/fuscan/gui/qml/views/pages/SettingsPage.qml" = "fuscan/gui/qml/views/pages/SettingsPage.qml"
+"src/fuscan/gui/qml/views/pages/AboutPage.qml" = "fuscan/gui/qml/views/pages/AboutPage.qml"
 "src/fuscan/gui/qml/qtquickcontrols2.conf" = "fuscan/gui/qml/qtquickcontrols2.conf"
 
 [tool.fspack.entries]

@@ -23,7 +23,7 @@ except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
 from fuscan.config import Config, load_config, save_config
-from fuscan.gui.qml.extractor_model import ExtractorListModel
+from fuscan.gui.qml.models.extractor_model import ExtractorListModel
 from fuscan.perf import set_perf_enabled
 
 if TYPE_CHECKING:

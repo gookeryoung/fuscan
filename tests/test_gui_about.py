@@ -17,7 +17,7 @@ pytestmark = pytest.mark.gui
 
 try:
     from fuscan import __author__, __description__, __license__, __version__
-    from fuscan.gui.qml.about_controller import AboutController
+    from fuscan.gui.qml.controllers.about_controller import AboutController
 
     PYSIDE_AVAILABLE = True
 except ImportError:
@@ -75,7 +75,7 @@ class TestOpenManual:
         self, about: AboutController, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """PDF 不存在时仅记录 warning，不抛异常。"""
-        from fuscan.gui.qml import about_controller
+        from fuscan.gui.qml.controllers import about_controller
 
         # 替换 MANUAL_PDF_PATH 为不存在的路径
         non_existent = tmp_path / "non_existent.pdf"

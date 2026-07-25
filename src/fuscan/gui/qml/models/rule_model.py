@@ -18,7 +18,7 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt  # pyrefly: ignore [missing-import]
 
-from fuscan.gui.qml._severity_utils import severity_color_hex, severity_text
+from fuscan.gui.qml.severity_utils import severity_color_hex, severity_text
 
 if TYPE_CHECKING:
     from fuscan.rules.model import Rule, RuleSet

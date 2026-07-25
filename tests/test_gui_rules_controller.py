@@ -18,9 +18,9 @@ pytestmark = pytest.mark.gui
 
 try:
     from fuscan.config import Config  # noqa: F401
-    from fuscan.gui.qml.config_controller import ConfigController
-    from fuscan.gui.qml.rule_model import RuleListModel
-    from fuscan.gui.qml.rules_controller import RulesController
+    from fuscan.gui.qml.controllers.config_controller import ConfigController
+    from fuscan.gui.qml.controllers.rules_controller import RulesController
+    from fuscan.gui.qml.models.rule_model import RuleListModel
 
     PYSIDE_AVAILABLE = True
 except ImportError:

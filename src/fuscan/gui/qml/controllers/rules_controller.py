@@ -26,7 +26,7 @@ except ImportError:  # pragma: no cover
     from PySide6.QtWidgets import QFileDialog, QMessageBox  # pyrefly: ignore [missing-import]
 
 from fuscan.config import Config
-from fuscan.gui.qml.rule_model import RuleListModel
+from fuscan.gui.qml.models.rule_model import RuleListModel
 from fuscan.rules import RuleError, load_ruleset, merge_multiple_rulesets
 from fuscan.rules.model import RuleSet
 

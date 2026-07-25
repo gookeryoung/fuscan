@@ -21,7 +21,7 @@ try:
     except ImportError:  # pragma: no cover
         from PySide6.QtCore import QModelIndex, Qt  # pyrefly: ignore [missing-import]
 
-    from fuscan.gui.qml.result_model import ResultListModel
+    from fuscan.gui.qml.models.result_model import ResultListModel
     from fuscan.rules.model import Severity
     from fuscan.scanner.result import RuleHit, ScanResult
 

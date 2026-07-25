@@ -19,8 +19,8 @@ pytestmark = pytest.mark.gui
 
 try:
     from fuscan.config import MAX_HISTORY, Config
-    from fuscan.gui.qml.config_controller import ConfigController
-    from fuscan.gui.qml.extractor_model import ExtractorListModel
+    from fuscan.gui.qml.controllers.config_controller import ConfigController
+    from fuscan.gui.qml.models.extractor_model import ExtractorListModel
 
     PYSIDE_AVAILABLE = True
 except ImportError:

@@ -11,6 +11,8 @@ ItemDelegate {
     property string pageId: ""
     property bool selected: false
     // clicked() 信号继承自 ItemDelegate，无需重复声明
+    // 外部通过 onClicked 连接处理页面切换（见 Sidebar.qml），禁止在此 emit clicked()
+    // 否则会导致无限递归（onClicked → clicked() → onClicked → ...）直至栈溢出崩溃
 
     Layout.fillWidth: true
     Layout.preferredHeight: 40
@@ -56,6 +58,4 @@ ItemDelegate {
             Behavior on color { ColorAnimation { duration: 120 } }
         }
     }
-
-    onClicked: navItem.clicked()
 }

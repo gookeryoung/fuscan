@@ -54,7 +54,7 @@ Item {
                 }
             }
             Repeater {
-                model: ["扫描", "文件类型", "忽略目录", "路径历史"]
+                model: ["扫描", "文件类型", "忽略目录"]
                 TabButton {
                     id: tabBtn
                     text: modelData
@@ -283,45 +283,6 @@ Item {
                         border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                         border.width: 1
                         radius: 4
-                    }
-                }
-            }
-
-            // ===== Tab 4: 路径历史 =====
-            ColumnLayout {
-                spacing: 8
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label {
-                        text: "扫描路径历史（最近优先，去重）"
-                        font.pixelSize: 11
-                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                        Layout.fillWidth: true
-                    }
-                    IconButton {
-                        text:"🗑 清除"
-                        tooltip: "清除全部路径历史"
-                        accent: "ghost"
-                        onClicked: configController.clearScanPaths()
-                    }
-                }
-                ListView {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    model: configController.scanPaths
-                    delegate: ItemDelegate {
-                        width: ListView.view.width
-                        height: 28
-                        Label {
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.left: parent.left
-                            anchors.leftMargin: 8
-                            text: modelData
-                            font.pixelSize: 12
-                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                            elide: Text.ElideMiddle
-                        }
                     }
                 }
             }

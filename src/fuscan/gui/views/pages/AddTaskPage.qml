@@ -298,6 +298,64 @@ Item {
                     onClicked: folderDialog.open()
                 }
             }
+
+            // 最近扫描目录（点击填入 folderRoot）
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+                visible: configController.scanPaths.length > 0
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: "最近扫描目录"
+                        font.pixelSize: 11
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        Layout.fillWidth: true
+                    }
+                    IconButton {
+                        text: "🗑 清除"
+                        tooltip: "清除全部路径历史"
+                        accent: "ghost"
+                        onClicked: configController.clearScanPaths()
+                    }
+                }
+                ListView {
+                    id: pathHistoryList
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Math.min(configController.scanPaths.length, 5) * 28
+                    clip: true
+                    interactive: false
+                    model: configController.scanPaths
+                    delegate: ItemDelegate {
+                        width: pathHistoryList.width
+                        height: 28
+                        onClicked: folderRoot = modelData
+                        Rectangle {
+                            anchors.fill: parent
+                            color: parent.hovered
+                                ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
+                                : "transparent"
+                            Behavior on color { ColorAnimation { duration: 120 } }
+                        }
+                        Label {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            anchors.leftMargin: 8
+                            anchors.right: parent.right
+                            anchors.rightMargin: 8
+                            text: modelData
+                            font.pixelSize: 12
+                            color: parent.hovered
+                                ? (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
+                                : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
+                            elide: Text.ElideMiddle
+                            ToolTip.visible: parent.hovered
+                            ToolTip.text: modelData
+                            ToolTip.delay: 400
+                        }
+                    }
+                }
+            }
         }
     }
 

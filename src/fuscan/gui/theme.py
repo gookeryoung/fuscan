@@ -17,6 +17,8 @@ emit ``themeChanged``，所有绑定表达式重新求值，实现暗色模式�
 
 from __future__ import annotations
 
+import sys
+
 try:
     from PySide2.QtCore import Property, QObject, Signal, Slot
     from PySide2.QtGui import QColor
@@ -24,10 +26,31 @@ except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
     from PySide6.QtGui import QColor  # pyrefly: ignore [missing-import]
 
-__all__ = ["ThemeController"]
+__all__ = ["ThemeController", "detect_font_families"]
 
 # 速度档次色（T1-T5，与 base.SpeedTier.color 一致）
 _SPEED_TIER_COLORS: tuple[str, ...] = ("#28A745", "#17A2B8", "#FFC107", "#FD7E14", "#DC3545")
+
+
+def detect_font_families() -> tuple[str, ...]:
+    """按平台返回优先级字体族列表，供 ``QFont.setFamilies()`` 回退使用。
+
+    跨平台最佳实践（Qt 5.13+ ``setFamilies`` 支持自动回退到首个可用字体）：
+
+    - **Windows**：``Microsoft YaHei UI``（Win10+ UI 字体，专为界面渲染优化）→
+      ``Microsoft YaHei``（Win7 兜底）→ ``Segoe UI``（英文/数字）→ ``Arial``
+    - **macOS**：``PingFang SC``（苹方，macOS 默认中文）→
+      ``.AppleSystemUIFont``（系统字体）→ ``Helvetica Neue``
+    - **Linux**：``Noto Sans CJK SC``（Google 思源黑体）→
+      ``Source Han Sans SC``（Adobe 思源黑体）→ ``Roboto`` → ``DejaVu Sans``
+
+    :return: 字体族优先级列表（首个可用者被采用）
+    """
+    if sys.platform == "win32":
+        return ("Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", "Arial")
+    if sys.platform == "darwin":
+        return ("PingFang SC", ".AppleSystemUIFont", "Helvetica Neue", "Arial")
+    return ("Noto Sans CJK SC", "Source Han Sans SC", "Roboto", "DejaVu Sans")
 
 
 class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -212,6 +235,16 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def fontSizePageTitle(self) -> int:
         """页面大标题字号（22px）。"""
         return 22
+
+    @Property(str, notify=themeChanged)  # pyrefly: ignore [not-callable]
+    def fontFamily(self) -> str:
+        """主字体族（首个可用字体名，供 QML ``font.family`` 显式绑定）。
+
+        全局字体回退由 ``app.py`` 的 ``QGuiApplication.setFont()`` +
+        ``QFont.setFamilies()`` 处理，QML 控件默认继承，无需每个控件单独设置。
+        仅在需要显式覆盖时绑定此令牌。
+        """
+        return detect_font_families()[0]
 
     # ----------------------------- 间距令牌（8px 基准网格） -----------------------------
 

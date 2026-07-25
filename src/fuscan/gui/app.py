@@ -17,16 +17,17 @@ from typing import Sequence
 
 try:
     from PySide2.QtCore import QUrl
-    from PySide2.QtGui import QGuiApplication
+    from PySide2.QtGui import QFont, QGuiApplication
     from PySide2.QtQml import QQmlApplicationEngine
     from PySide2.QtQuickControls2 import QQuickStyle
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import QUrl  # pyrefly: ignore [missing-import]
-    from PySide6.QtGui import QGuiApplication  # pyrefly: ignore [missing-import]
+    from PySide6.QtGui import QFont, QGuiApplication  # pyrefly: ignore [missing-import]
     from PySide6.QtQml import QQmlApplicationEngine  # pyrefly: ignore [missing-import]
     from PySide6.QtQuickControls2 import QQuickStyle  # pyrefly: ignore [missing-import]
 
 from fuscan.gui.controllers import AppController, register_qml_types
+from fuscan.gui.theme import detect_font_families
 
 __all__ = ["launch"]
 
@@ -36,6 +37,22 @@ logger = logging.getLogger(__name__)
 # 按rule-12三层MVC分层，.qml视图文件全部在 views/ 子目录
 _VIEWS_DIR = Path(__file__).parent / "views"
 _MAIN_QML = _VIEWS_DIR / "Main.qml"
+
+
+def _apply_global_font(app: QGuiApplication) -> None:
+    """设置全局默认字体（跨平台最佳实践）。
+
+    用 ``QFont.setFamilies()`` 设置优先级列表，Qt 自动选择首个可用字体：
+    - Windows: Microsoft YaHei UI → Microsoft YaHei → Segoe UI → Arial
+    - macOS: PingFang SC → .AppleSystemUIFont → Helvetica Neue
+    - Linux: Noto Sans CJK SC → Source Han Sans SC → Roboto → DejaVu Sans
+
+    QML 控件默认继承此全局字体，无需每个控件单独设置 ``font.family``。
+    """
+    font = QFont()
+    font.setFamilies(list(detect_font_families()))
+    font.setPixelSize(13)  # 正文字号，与 theme.fontSizeBody 一致
+    app.setFont(font)
 
 
 def launch(argv: Sequence[str] | None = None) -> int:
@@ -52,6 +69,9 @@ def launch(argv: Sequence[str] | None = None) -> int:
     app = QGuiApplication.instance() or QGuiApplication(args)
     app.setApplicationName("fuscan")
     app.setOrganizationName("fuscan")
+
+    # 设置全局跨平台字体（必须在 QML 引擎加载前，确保控件继承）
+    _apply_global_font(app)
 
     # 设置 QtQuick Controls 2 风格为 Fusion（跨平台一致）
     QQuickStyle.setStyle("Fusion")

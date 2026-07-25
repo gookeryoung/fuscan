@@ -1,4 +1,4 @@
-﻿"""``ThemeController`` 单元测试。
+"""``ThemeController`` 单元测试。
 
 验证主题令牌（色彩/排版/间距/圆角/按钮层级/速度档次色）的默认值与
 暗色模式切换行为。QML 通过 ``@Property`` 直接绑定，本测试确保令牌值
@@ -24,7 +24,7 @@ try:
     except ImportError:  # pragma: no cover
         from PySide6.QtGui import QColor  # pyrefly: ignore [missing-import]
 
-    from fuscan.gui.theme import ThemeController
+    from fuscan.gui.theme import ThemeController, detect_font_families
 
     PYSIDE_AVAILABLE = True
 except ImportError:
@@ -152,6 +152,54 @@ class TestTypographyTokens:
 
     def test_font_size_page_title(self, theme: ThemeController) -> None:
         assert theme.fontSizePageTitle == 22
+
+    def test_font_family_returns_non_empty_string(self, theme: ThemeController) -> None:
+        """fontFamily 应返回非空字符串（首个可用字体名）。"""
+        family = theme.fontFamily
+        assert isinstance(family, str)
+        assert len(family) > 0
+
+    def test_font_family_matches_detect_font_families_first(
+        self, theme: ThemeController
+    ) -> None:
+        """fontFamily 应与 detect_font_families() 首个字体一致。"""
+        assert theme.fontFamily == detect_font_families()[0]
+
+
+class TestDetectFontFamilies:
+    """``detect_font_families`` 跨平台字体族检测。"""
+
+    def test_returns_non_empty_tuple(self) -> None:
+        families = detect_font_families()
+        assert isinstance(families, tuple)
+        assert len(families) >= 3  # 至少 3 个回退字体
+
+    def test_windows_families(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("sys.platform", "win32")
+        families = detect_font_families()
+        assert "Microsoft YaHei UI" in families
+        assert "Segoe UI" in families
+        assert families[0] == "Microsoft YaHei UI"
+
+    def test_macos_families(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("sys.platform", "darwin")
+        families = detect_font_families()
+        assert "PingFang SC" in families
+        assert "Helvetica Neue" in families
+        assert families[0] == "PingFang SC"
+
+    def test_linux_families(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("sys.platform", "linux")
+        families = detect_font_families()
+        assert "Noto Sans CJK SC" in families
+        assert "Roboto" in families
+        assert families[0] == "Noto Sans CJK SC"
+
+    def test_all_families_are_strings(self) -> None:
+        families = detect_font_families()
+        for f in families:
+            assert isinstance(f, str)
+            assert len(f) > 0
 
 
 class TestSpacingTokens:

@@ -74,6 +74,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     folderRootChanged = Signal()
     rulesCountChanged = Signal()
     selectedDriveChanged = Signal()
+    # canStartScan 的独立 NOTIFY 信号：仅触发 canStartScan 重算，
+    # 不触发 QML 侧 Connections.onScanStateChanged（避免 StackView 误重建）
+    canStartScanChanged = Signal()
 
     def __init__(
         self,
@@ -137,7 +140,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """是否暂停中。"""
         return self._is_paused
 
-    @Property(bool, notify=scanStateChanged)  # pyrefly: ignore [not-callable]
+    @Property(bool, notify=canStartScanChanged)  # pyrefly: ignore [not-callable]
     def canStartScan(self) -> bool:
         """是否可开始扫描（规则集已加载 + 目标已选）。"""
         if self._scan_state == "scanning":
@@ -240,7 +243,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._config.scan_mode = _SCAN_MODE_INDEX_TO_STR[index]
             self._config_controller.save()
             self.scanModeChanged.emit()  # pyrefly: ignore [missing-attribute]
-            self.scanStateChanged.emit()  # pyrefly: ignore [missing-attribute]  # 触发 canStartScan 重算
+            self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     @Property(str, notify=selectedDriveChanged)  # pyrefly: ignore [not-callable]
     def selectedDrive(self) -> str:
@@ -255,7 +258,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._config.last_drive = drive
             self._config_controller.save()
             self.selectedDriveChanged.emit()  # pyrefly: ignore [missing-attribute]
-            self.scanStateChanged.emit()  # pyrefly: ignore [missing-attribute]
+            self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     @Slot(str)  # pyrefly: ignore [not-callable]
     def setFolderRoot(self, path_str: str) -> None:
@@ -264,7 +267,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._folder_root = path_str
             self._config_controller.add_scan_path(path_str)
             self.folderRootChanged.emit()  # pyrefly: ignore [missing-attribute]
-            self.scanStateChanged.emit()  # pyrefly: ignore [missing-attribute]
+            self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     @Property(int, notify=rulesCountChanged)  # pyrefly: ignore [not-callable]
     def rulesCount(self) -> int:
@@ -566,7 +569,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """规则集变化：刷新本地缓存与 canStartScan。"""
         self._ruleset = self._rules_controller.ruleset
         self.rulesCountChanged.emit()  # pyrefly: ignore [missing-attribute]
-        self.scanStateChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def _can_build_roots(self) -> bool:
         """判断当前是否可构建扫描根路径列表。"""
@@ -609,10 +612,15 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         return self._result_model.get_result(self._selected_result_index)
 
     def _set_scan_state(self, state: str) -> None:
-        """设置扫描状态并 emit 信号。"""
+        """设置扫描状态并 emit 信号。
+
+        scanState 变化会影响 canStartScan（scanning 态返回 False），
+        故同时 emit canStartScanChanged。
+        """
         if state != self._scan_state:
             self._scan_state = state
             self.scanStateChanged.emit()  # pyrefly: ignore [missing-attribute]
+            self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def _set_status(self, text: str, summary: str | None = None) -> None:
         """设置状态文本（同时更新 summary）。"""

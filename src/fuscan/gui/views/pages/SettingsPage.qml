@@ -66,99 +66,32 @@ Item {
                     color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                 }
             }
-            TabButton {
-                text: "扫描"
-                height: theme.btnHeightSecondary
-                contentItem: Label {
-                    text: parent.text
-                    color: parent.checked
-                          ? theme.colorPrimary
-                          : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
-                    font.pixelSize: theme.fontSizeBody
-                    font.bold: parent.checked
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    color: "transparent"
-                    Rectangle {
-                        anchors.bottom: parent.bottom
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: parent.width - 16
-                        height: 2
-                        color: parent.checked ? theme.colorPrimary : "transparent"
+            Repeater {
+                model: ["扫描", "文件类型", "忽略目录", "路径历史"]
+                TabButton {
+                    id: tabBtn
+                    text: modelData
+                    height: theme.btnHeightSecondary
+                    contentItem: Label {
+                        text: tabBtn.text
+                        color: tabBtn.checked
+                              ? theme.colorPrimary
+                              : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
+                        font.pixelSize: theme.fontSizeBody
+                        font.bold: tabBtn.checked
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
                     }
-                }
-            }
-            TabButton {
-                text: "文件类型"
-                height: theme.btnHeightSecondary
-                contentItem: Label {
-                    text: parent.text
-                    color: parent.checked
-                          ? theme.colorPrimary
-                          : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
-                    font.pixelSize: theme.fontSizeBody
-                    font.bold: parent.checked
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    color: "transparent"
-                    Rectangle {
-                        anchors.bottom: parent.bottom
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: parent.width - 16
-                        height: 2
-                        color: parent.checked ? theme.colorPrimary : "transparent"
-                    }
-                }
-            }
-            TabButton {
-                text: "忽略目录"
-                height: theme.btnHeightSecondary
-                contentItem: Label {
-                    text: parent.text
-                    color: parent.checked
-                          ? theme.colorPrimary
-                          : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
-                    font.pixelSize: theme.fontSizeBody
-                    font.bold: parent.checked
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    color: "transparent"
-                    Rectangle {
-                        anchors.bottom: parent.bottom
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: parent.width - 16
-                        height: 2
-                        color: parent.checked ? theme.colorPrimary : "transparent"
-                    }
-                }
-            }
-            TabButton {
-                text: "路径历史"
-                height: theme.btnHeightSecondary
-                contentItem: Label {
-                    text: parent.text
-                    color: parent.checked
-                          ? theme.colorPrimary
-                          : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
-                    font.pixelSize: theme.fontSizeBody
-                    font.bold: parent.checked
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    color: "transparent"
-                    Rectangle {
-                        anchors.bottom: parent.bottom
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: parent.width - 16
-                        height: 2
-                        color: parent.checked ? theme.colorPrimary : "transparent"
+                    background: Rectangle {
+                        id: tabBg
+                        color: "transparent"
+                        Rectangle {
+                            anchors.bottom: tabBg.bottom
+                            anchors.horizontalCenter: tabBg.horizontalCenter
+                            width: tabBg.width - 16
+                            height: 2
+                            color: tabBtn.checked ? theme.colorPrimary : "transparent"
+                        }
                     }
                 }
             }

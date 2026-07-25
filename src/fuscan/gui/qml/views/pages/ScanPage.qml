@@ -75,27 +75,36 @@ Item {
                 width: scanPage.width - 48
                 spacing: 16
 
-                // 扫描模式
-                Label {
-                    text: "扫描模式"
-                    font.pixelSize: 14
-                    font.bold: true
-                    color: Theme.isDark ? Theme.colorTextPrimary : Theme.colorTextPrimary
-                }
-                ComboBox {
-                    id: modeCombo
+                // 扫描模式（分段控件：单击切换，无需下拉）
+                TabBar {
+                    id: modeTabBar
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Theme.btnHeightSecondary
-                    model: ["全盘扫描", "盘符扫描", "文件夹扫描"]
                     currentIndex: ScanController.scanModeIndex
-                    onActivated: ScanController.setScanModeIndex(currentIndex)
+                    onCurrentIndexChanged: {
+                        // 仅在用户操作导致 currentIndex 与 controller 不一致时同步，避免循环
+                        if (currentIndex !== ScanController.scanModeIndex) {
+                            ScanController.setScanModeIndex(currentIndex)
+                        }
+                    }
+                    TabButton {
+                        text: "全盘扫描"
+                        height: Theme.btnHeightSecondary
+                    }
+                    TabButton {
+                        text: "盘符扫描"
+                        height: Theme.btnHeightSecondary
+                    }
+                    TabButton {
+                        text: "文件夹扫描"
+                        height: Theme.btnHeightSecondary
+                    }
                 }
 
                 // 目标路径（仅盘符/文件夹模式显示）
                 Loader {
                     Layout.fillWidth: true
                     active: ScanController.scanModeIndex !== 0
-                    sourceComponent: modeCombo.currentIndex === 1 ? driveComponent : folderComponent
+                    sourceComponent: ScanController.scanModeIndex === 1 ? driveComponent : folderComponent
                 }
 
                 // 已加载规则摘要

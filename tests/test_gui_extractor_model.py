@@ -1,4 +1,4 @@
-﻿"""``ExtractorListModel`` 单元测试。
+"""``ExtractorListModel`` 单元测试。
 
 覆盖从默认注册表加载、勾选状态管理、扩展名集合计算、批量全选/全不选、
 ``data()``/``roleNames()``/``rowCount()`` 等 ``QAbstractListModel`` 接口。
@@ -64,6 +64,7 @@ class TestRoleNames:
         assert roles[Qt.UserRole + 4] == b"speedTierText"
         assert roles[Qt.UserRole + 5] == b"speedTierColor"
         assert roles[Qt.UserRole + 6] == b"enabled"
+        assert roles[Qt.UserRole + 7] == b"formatLabel"
 
 
 class TestData:
@@ -107,6 +108,38 @@ class TestData:
     def test_data_returns_enabled_default_true(self, model: ExtractorListModel) -> None:
         idx = model.index(0)
         assert model.data(idx, Qt.UserRole + 6) is True
+
+    def test_data_returns_format_label_non_empty(self, model: ExtractorListModel) -> None:
+        """formatLabel role 应返回非空字符串（格式 tag 文本）。"""
+        for i in range(model.rowCount()):
+            idx = model.index(i)
+            label = model.data(idx, Qt.UserRole + 7)
+            assert isinstance(label, str)
+            assert label
+            # 应为大写（DOCX/PDF/XLSX 等）
+            assert label == label.upper()
+
+    def test_data_returns_format_label_from_paren(self, model: ExtractorListModel) -> None:
+        """带括号的 display_name（如 Word（DOCX））应提取括号内文本为 formatLabel。"""
+        # DocxExtractor.display_name = "Word（DOCX）" → formatLabel = "DOCX"
+        target_idx = -1
+        for i in range(model.rowCount()):
+            if model.data(model.index(i), Qt.UserRole + 1) == "DocxExtractor":
+                target_idx = i
+                break
+        assert target_idx >= 0, "DocxExtractor 应在默认注册表中"
+        assert model.data(model.index(target_idx), Qt.UserRole + 7) == "DOCX"
+
+    def test_data_returns_format_label_fallback_to_extension(self, model: ExtractorListModel) -> None:
+        """无括号的 display_name（如 PDF）应回退到首扩展名大写为 formatLabel。"""
+        target_idx = -1
+        for i in range(model.rowCount()):
+            if model.data(model.index(i), Qt.UserRole + 1) == "PdfExtractor":
+                target_idx = i
+                break
+        assert target_idx >= 0, "PdfExtractor 应在默认注册表中"
+        # PdfExtractor.display_name = "PDF"（无括号），supported_extensions = ("pdf",)
+        assert model.data(model.index(target_idx), Qt.UserRole + 7) == "PDF"
 
     def test_data_unknown_role_returns_empty(self, model: ExtractorListModel) -> None:
         idx = model.index(0)

@@ -37,6 +37,7 @@ _ROLE_EXTENSIONS = b"extensions"
 _ROLE_SPEED_TIER_TEXT = b"speedTierText"
 _ROLE_SPEED_TIER_COLOR = b"speedTierColor"
 _ROLE_ENABLED = b"enabled"
+_ROLE_FORMAT_LABEL = b"formatLabel"
 
 _ROLES: dict[int, bytes] = {
     Qt.UserRole + 1: _ROLE_CLASS_NAME,
@@ -45,10 +46,11 @@ _ROLES: dict[int, bytes] = {
     Qt.UserRole + 4: _ROLE_SPEED_TIER_TEXT,
     Qt.UserRole + 5: _ROLE_SPEED_TIER_COLOR,
     Qt.UserRole + 6: _ROLE_ENABLED,
+    Qt.UserRole + 7: _ROLE_FORMAT_LABEL,
 }
 
-# 去掉 display_name 中的全角括号后缀（如 "Word（DOCX）" → "Word"）
-_PAREN_RE = re.compile(r"（[^）]*）")
+# 提取 display_name 中全角括号内的格式标签（如 "Word（DOCX）" → "DOCX"）
+_PAREN_RE = re.compile(r"（([^）]*)）")
 
 _SPEED_TIER_TEXT: dict[SpeedTier, str] = {
     SpeedTier.VERY_FAST: "T1 极速",
@@ -70,7 +72,7 @@ _SPEED_TIER_COLOR: dict[SpeedTier, str] = {
 class _ExtractorRow:
     """提取器行数据（内部可变容器）。"""
 
-    __slots__ = ("class_name", "display_name", "enabled", "extensions", "speed_tier")
+    __slots__ = ("class_name", "display_name", "enabled", "extensions", "format_label", "speed_tier")
 
     def __init__(
         self,
@@ -81,7 +83,16 @@ class _ExtractorRow:
         enabled: bool,
     ) -> None:
         self.class_name = class_name
-        # 去掉全角括号后缀
+        # 提取全角括号内的格式标签（如 "Word（DOCX）" → "DOCX"）；
+        # 无括号时回退到首扩展名大写（如 "PDF" → "PDF"、"纯文本" → "TXT"）
+        paren_match = _PAREN_RE.search(display_name)
+        if paren_match is not None:
+            self.format_label = paren_match.group(1).strip().upper()
+        elif extensions:
+            self.format_label = extensions[0].upper()
+        else:  # pragma: no cover - 提取器注册时必带扩展名，防御性兜底
+            self.format_label = class_name.upper()
+        # 去掉全角括号后缀得到纯显示名（如 "Word（DOCX）" → "Word"）
         self.display_name = _PAREN_RE.sub("", display_name).strip()
         self.extensions = extensions
         self.speed_tier = speed_tier
@@ -119,6 +130,8 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
             return _SPEED_TIER_COLOR[row.speed_tier]
         if role == Qt.UserRole + 6:
             return row.enabled
+        if role == Qt.UserRole + 7:
+            return row.format_label
         return ""
 
     # ----------------------------- 公共 API -----------------------------

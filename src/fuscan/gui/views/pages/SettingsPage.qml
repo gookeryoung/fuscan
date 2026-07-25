@@ -256,12 +256,39 @@ Item {
                                             text: model.displayName
                                             font.pixelSize: 12
                                             color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                            Layout.fillWidth: true
                                         }
-                                        // 五格速度指示器：filled = 6 - tier
+                                        // 蓝色格式 tag：显示 formatLabel（如 DOCX/PDF/XLSX）
+                                        Rectangle {
+                                            radius: theme.radiusSm
+                                            color: theme.colorPrimary
+                                            Layout.leftMargin: 6
+                                            implicitWidth: formatTagLabel.implicitWidth + 12
+                                            implicitHeight: formatTagLabel.implicitHeight + 4
+                                            Label {
+                                                id: formatTagLabel
+                                                anchors.centerIn: parent
+                                                text: model.formatLabel
+                                                font.pixelSize: 10
+                                                font.bold: true
+                                                color: theme.colorTextOnPrimary
+                                            }
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        // 「解析速度」文字标签 + 五格指示器（含 ToolTip）
+                                        Label {
+                                            text: "解析速度"
+                                            font.pixelSize: 10
+                                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                            Layout.rightMargin: 4
+                                        }
                                         Row {
+                                            id: speedIndicator
                                             spacing: 2
                                             Layout.rightMargin: 8
+                                            // ToolTip：hover 时显示完整速度档次（如「T2 快速」）
+                                            ToolTip.visible: speedIndicatorMouseArea.containsMouse
+                                            ToolTip.delay: 300
+                                            ToolTip.text: "解析速度：" + model.speedTierText
                                             Repeater {
                                                 model: 5
                                                 Rectangle {
@@ -272,6 +299,12 @@ Item {
                                                         ? extractorDelegate.speedColor
                                                         : (theme.isDark ? theme.colorBorderDark : theme.colorBorder)
                                                 }
+                                            }
+                                            MouseArea {
+                                                id: speedIndicatorMouseArea
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.WhatsThisCursor
                                             }
                                         }
                                     }

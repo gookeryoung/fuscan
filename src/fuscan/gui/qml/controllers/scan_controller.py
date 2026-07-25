@@ -276,9 +276,13 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """当前规则集规则数。"""
         return len(self._ruleset.rules) if self._ruleset is not None else 0
 
-    @Property(ResultListModel)  # pyrefly: ignore [not-callable]
+    @Property(QObject)  # pyrefly: ignore [not-callable]
     def resultModel(self) -> ResultListModel:
-        """结果列表模型。"""
+        """结果列表模型。
+
+        用 ``QObject`` 作为 Property 类型，避免 PySide2 元类型系统对
+        ``QAbstractListModel*`` 未注册导致的 ``QMetaObjectBuilder`` 警告。
+        """
         return self._result_model
 
     # ----------------------------- 选中结果 -----------------------------

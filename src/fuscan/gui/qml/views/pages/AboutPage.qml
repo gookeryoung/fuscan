@@ -72,13 +72,37 @@ Item {
                 }
             }
 
-            // 用户手册入口
-            Button {
+            // 快捷入口
+            RowLayout {
                 Layout.alignment: Qt.AlignHCenter
-                Layout.preferredHeight: theme.btnHeightSecondary
-                Layout.preferredWidth: 200
-                text: "打开用户手册 PDF"
-                onClicked: aboutController.openManual()
+                spacing: 12
+                Button {
+                    Layout.preferredHeight: theme.btnHeightSecondary
+                    Layout.preferredWidth: 180
+                    text: "打开用户手册 PDF"
+                    onClicked: aboutController.openManual()
+                }
+                Button {
+                    Layout.preferredHeight: theme.btnHeightSecondary
+                    Layout.preferredWidth: 180
+                    text: "打开配置目录"
+                    onClicked: aboutController.openConfigDir()
+                    background: Rectangle {
+                        color: parent.down
+                              ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
+                              : "transparent"
+                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                        border.width: 1
+                        radius: theme.btnRadiusSecondary
+                    }
+                    contentItem: Label {
+                        text: parent.text
+                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        font.pixelSize: 12
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
             }
 
             // 第三方依赖

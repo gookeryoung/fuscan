@@ -74,9 +74,14 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     # ----------------------------- QML 属性 -----------------------------
 
-    @Property(WorkspaceListModel, notify=workspaceListChanged)  # pyrefly: ignore [not-callable]
+    @Property(QObject, notify=workspaceListChanged)  # pyrefly: ignore [not-callable]
     def workspaceModel(self) -> WorkspaceListModel:
-        """工作区列表模型。"""
+        """工作区列表模型。
+
+        用 ``QObject`` 作为 Property 类型，避免 PySide2 元类型系统对
+        ``QAbstractListModel*`` 未注册导致的 ``QMetaObjectBuilder`` 警告。
+        QML ``ListView.model`` 接受任何 ``QAbstractItemModel*``，绑定不受影响。
+        """
         return self._model
 
     @Property(int, notify=workspaceListChanged)  # pyrefly: ignore [not-callable]

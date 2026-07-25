@@ -82,3 +82,45 @@ class TestOpenManual:
         monkeypatch.setattr(about_controller, "MANUAL_PDF_PATH", non_existent)
         # 不应抛异常
         about.openManual()
+
+
+class TestOpenConfigDir:
+    """``openConfigDir`` Slot。"""
+
+    def test_open_config_dir_no_exception_when_missing(
+        self,
+        about: AboutController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """配置目录不存在时仅记录 warning，不抛异常。"""
+        from fuscan.gui.qml.controllers import about_controller
+
+        non_existent = tmp_path / "non_existent_config_dir"
+        monkeypatch.setattr(about_controller, "CONFIG_DIR", non_existent)
+        # 不应抛异常
+        about.openConfigDir()
+
+    def test_open_config_dir_calls_desktop_services(
+        self,
+        about: AboutController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """配置目录存在时应调用 QDesktopServices.openUrl。"""
+        from fuscan.gui.qml.controllers import about_controller
+
+        config_dir = tmp_path / "fuscan_config"
+        config_dir.mkdir()
+        monkeypatch.setattr(about_controller, "CONFIG_DIR", config_dir)
+
+        called_urls: list[str] = []
+
+        def fake_open_url(url: object) -> bool:
+            called_urls.append(str(url))
+            return True
+
+        monkeypatch.setattr(about_controller.QDesktopServices, "openUrl", fake_open_url)
+        about.openConfigDir()
+        assert len(called_urls) == 1
+        assert "fuscan_config" in called_urls[0]

@@ -54,24 +54,6 @@ Item {
                 font.pixelSize: theme.fontSizeSmall
                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
             }
-            Button {
-                Layout.preferredHeight: theme.btnHeightSecondary
-                text: "➕ 新建任务"
-                onClicked: homePage.addTaskRequested()
-                background: Rectangle {
-                    color: parent.down ? theme.colorPrimaryDark : theme.colorPrimary
-                    radius: theme.btnRadiusSecondary
-                    Behavior on color { ColorAnimation { duration: 120 } }
-                }
-                contentItem: Label {
-                    text: parent.text
-                    color: theme.colorTextOnPrimary
-                    font.pixelSize: 12
-                    font.bold: true
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
         }
 
         // ---------- 工作区列表 ----------
@@ -91,7 +73,7 @@ Item {
                 Label {
                     anchors.centerIn: parent
                     visible: workspaceList.count === 0
-                    text: "暂无任务\n点击右上角「新建任务」开始"
+                    text: "暂无任务\n点击左侧「添加任务」开始"
                     font.pixelSize: 13
                     color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                     horizontalAlignment: Text.AlignHCenter
@@ -145,7 +127,6 @@ Item {
     }
 
     // 信号：通知 ContentArea 切换页面
-    signal addTaskRequested()
     signal defineRulesRequested(string workspaceId)
     signal viewResultsRequested(string workspaceId)
     signal viewStatsRequested(string workspaceId)

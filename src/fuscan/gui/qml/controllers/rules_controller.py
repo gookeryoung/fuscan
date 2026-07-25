@@ -78,9 +78,13 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     # ----------------------------- QML 属性 -----------------------------
 
-    @Property(RuleListModel)  # pyrefly: ignore [not-callable]
+    @Property(QObject)  # pyrefly: ignore [not-callable]
     def ruleModel(self) -> RuleListModel:
-        """规则列表模型。"""
+        """规则列表模型。
+
+        用 ``QObject`` 作为 Property 类型，避免 PySide2 元类型系统对
+        ``QAbstractListModel*`` 未注册导致的 ``QMetaObjectBuilder`` 警告。
+        """
         return self._rule_model
 
     @Property(int, notify=rulesetChanged)  # pyrefly: ignore [not-callable]

@@ -152,9 +152,13 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     # ----------------------------- 文件类型（提取器勾选） -----------------------------
 
-    @Property(ExtractorListModel)  # pyrefly: ignore [not-callable]
+    @Property(QObject)  # pyrefly: ignore [not-callable]
     def extractorModel(self) -> ExtractorListModel:
-        """提取器勾选列表模型。"""
+        """提取器勾选列表模型。
+
+        用 ``QObject`` 作为 Property 类型，避免 PySide2 元类型系统对
+        ``QAbstractListModel*`` 未注册导致的 ``QMetaObjectBuilder`` 警告。
+        """
         return self._extractor_model
 
     @Property(str, notify=extractorCountChanged)  # pyrefly: ignore [not-callable]
@@ -225,6 +229,20 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """保存配置到 YAML 文件。"""
         save_config(self._config)
         self.configChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    @Slot()  # pyrefly: ignore [not-callable]
+    def resetToDefaults(self) -> None:
+        """重置扫描相关配置为默认值（不影响扫描路径历史与禁用提取器列表）。"""
+        self._config.scan_archives = True
+        self._config.max_workers = 5
+        self._config.max_file_size = 50 * 1024 * 1024
+        self._config.max_depth = None
+        self._config.cache_enabled = True
+        self._config.perf_log_enabled = False
+        self._config.ignore_dirs = list(Config.__dataclass_fields__["ignore_dirs"].default_factory())  # type: ignore[index]
+        set_perf_enabled(False)
+        self.save()
+        logger.info("配置已重置为默认值")
 
     @Slot()  # pyrefly: ignore [not-callable]
     def refresh_drives(self) -> None:

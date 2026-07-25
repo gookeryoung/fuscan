@@ -283,14 +283,21 @@ Item {
                         }
                         contentItem: Label {
                             text: parent.text
-                            color: parent.parent.checked ? theme.colorTextOnPrimary
+                            color: parent.checked ? theme.colorTextOnPrimary
                                 : (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
                             font.pixelSize: 12
-                            font.bold: parent.parent.checked
+                            font.bold: parent.checked
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
                     }
+                }
+                // 盘符为空时提示
+                Label {
+                    visible: configController.drives.length === 0
+                    text: "未检测到可用盘符"
+                    font.pixelSize: 12
+                    color: theme.colorWarning
                 }
             }
         }

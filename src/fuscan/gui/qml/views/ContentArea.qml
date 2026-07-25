@@ -50,7 +50,6 @@ Pane {
     Component {
         id: homePage
         HomePage {
-            onAddTaskRequested: contentArea.sidebarRef.currentPage = "addTask"
             onDefineRulesRequested: contentArea.sidebarRef.currentPage = "rules"
             onViewResultsRequested: contentArea.sidebarRef.currentPage = "home"
             onViewStatsRequested: contentArea.sidebarRef.currentPage = "home"

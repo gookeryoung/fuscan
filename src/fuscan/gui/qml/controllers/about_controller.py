@@ -18,7 +18,7 @@ except ImportError:  # pragma: no cover
     from PySide6.QtGui import QDesktopServices  # pyrefly: ignore [missing-import]
 
 from fuscan import __author__, __description__, __license__, __version__
-from fuscan.config import MANUAL_PDF_PATH
+from fuscan.config import CONFIG_DIR, MANUAL_PDF_PATH
 
 __all__ = ["AboutController"]
 
@@ -85,3 +85,16 @@ class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
         url = QUrl.fromLocalFile(str(MANUAL_PDF_PATH))
         if not QDesktopServices.openUrl(url):
             logger.warning("无法打开用户手册 PDF: %s", MANUAL_PDF_PATH)
+
+    @Slot()  # pyrefly: ignore [not-callable]
+    def openConfigDir(self) -> None:
+        """打开配置目录（系统文件管理器）。
+
+        方便用户查看 ``config.yaml`` / 规则文件 / 缓存等。
+        """
+        if not CONFIG_DIR.exists():
+            logger.warning("配置目录不存在: %s", CONFIG_DIR)
+            return
+        url = QUrl.fromLocalFile(str(CONFIG_DIR))
+        if not QDesktopServices.openUrl(url):
+            logger.warning("无法打开配置目录: %s", CONFIG_DIR)

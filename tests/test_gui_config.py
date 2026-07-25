@@ -225,3 +225,61 @@ class TestDrives:
         controller.drivesChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
         controller.refresh_drives()
         assert len(emitted) == 1
+
+
+class TestResetToDefaults:
+    """``resetToDefaults`` Slot。"""
+
+    def test_resets_scan_archives(self, controller: ConfigController) -> None:
+        controller.setScanArchives(False)
+        assert controller.scanArchives is False
+        controller.resetToDefaults()
+        assert controller.scanArchives is True
+
+    def test_resets_max_workers(self, controller: ConfigController) -> None:
+        controller.setMaxWorkers(8)
+        assert controller.maxWorkers == 8
+        controller.resetToDefaults()
+        assert controller.maxWorkers == 5
+
+    def test_resets_max_file_size_mb(self, controller: ConfigController) -> None:
+        controller.setMaxFileSizeMB(100)
+        controller.resetToDefaults()
+        assert controller.maxFileSizeMB == 50
+
+    def test_resets_max_depth(self, controller: ConfigController) -> None:
+        controller.setMaxDepth(10)
+        controller.resetToDefaults()
+        assert controller.maxDepth == 0  # 0 表示无限
+
+    def test_resets_cache_enabled(self, controller: ConfigController) -> None:
+        controller.setCacheEnabled(False)
+        controller.resetToDefaults()
+        assert controller.cacheEnabled is True
+
+    def test_resets_perf_log_enabled(self, controller: ConfigController) -> None:
+        controller.setPerfLogEnabled(True)
+        controller.resetToDefaults()
+        assert controller.perfLogEnabled is False
+
+    def test_resets_ignore_dirs(self, controller: ConfigController) -> None:
+        controller.setIgnoreDirsText("custom_dir\nanother")
+        controller.resetToDefaults()
+        # 默认 ignore_dirs 非空（含 system volume information 等）
+        assert "custom_dir" not in controller.ignoreDirsText
+
+    def test_emits_config_changed(self, controller: ConfigController) -> None:
+        emitted: list[None] = []
+        controller.configChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
+        controller.resetToDefaults()
+        assert len(emitted) >= 1
+
+    def test_persists_to_disk(self, controller: ConfigController, config_dir: Path) -> None:
+        """重置后应保存到磁盘。"""
+        controller.setMaxWorkers(8)
+        controller.resetToDefaults()
+        # 重新加载配置应得到默认值
+        from fuscan.config import load_config
+
+        reloaded = load_config()
+        assert reloaded.max_workers == 5

@@ -17,11 +17,35 @@ Item {
             spacing: 20
 
             // 标题
-            Label {
-                text: "设置"
-                font.pixelSize: 22
-                font.bold: true
-                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: "设置"
+                    font.pixelSize: 22
+                    font.bold: true
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
+                Item { Layout.fillWidth: true }
+                Button {
+                    Layout.preferredHeight: theme.btnHeightGhost
+                    text: "重置默认"
+                    onClicked: configController.resetToDefaults()
+                    background: Rectangle {
+                        color: parent.down
+                              ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
+                              : "transparent"
+                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                        border.width: 1
+                        radius: theme.btnRadiusGhost
+                    }
+                    contentItem: Label {
+                        text: parent.text
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        font.pixelSize: 11
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
             }
 
             // ---------- 扫描设置 ----------

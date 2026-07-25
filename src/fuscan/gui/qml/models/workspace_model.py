@@ -1,0 +1,239 @@
+"""工作区列表模型（QAbstractListModel）。
+
+按 rule-12-pyside-dev.md，工作区列表用 Model 暴露给 QML ``ListView`` 绑定，
+禁止 QML 侧 ``ListModel`` 动态 append。
+
+每个 :class:`WorkspaceItem` 描述一个独立的扫描任务，包含名称、扫描模式、
+目标路径、规则文件列表与最近一次扫描结果摘要。所有字段在 Python 端维护，
+QML 通过 role 读取展示字段，通过 :class:`WorkspaceController` 槽修改状态。
+
+公共 API：
+
+- :class:`WorkspaceItem`：工作区数据类（frozen dataclass）
+- :class:`WorkspaceListModel`：``QAbstractListModel`` 子类
+- :meth:`WorkspaceListModel.add_workspace`：追加工作区
+- :meth:`WorkspaceListModel.remove_workspace`：按 ID 移除工作区
+- :meth:`WorkspaceListModel.update_workspace`：按 ID 更新字段
+- :meth:`WorkspaceListModel.get_workspace`：按 ID 取工作区
+- :meth:`WorkspaceListModel.get_by_index`：按行号取工作区
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any
+
+try:
+    from PySide2.QtCore import QAbstractListModel, QModelIndex, Qt
+except ImportError:  # pragma: no cover
+    from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt  # pyrefly: ignore [missing-import]
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+__all__ = ["WorkspaceItem", "WorkspaceListModel"]
+
+# 扫描模式索引 ↔ 字符串映射（与 scan_controller._SCAN_MODE_INDEX_TO_STR 一致）
+_SCAN_MODE_INDEX_TO_STR: tuple[str, ...] = ("full", "drive", "folder")
+_SCAN_MODE_STR_TO_TEXT: dict[str, str] = {
+    "full": "全盘扫描",
+    "drive": "盘符扫描",
+    "folder": "文件夹扫描",
+}
+
+# QML role 名称（与 HomePage.qml delegate 中 model.* 一致）
+_ROLE_WORKSPACE_ID = b"workspaceId"
+_ROLE_NAME = b"name"
+_ROLE_MODE_TEXT = b"modeText"
+_ROLE_TARGET = b"target"
+_ROLE_RULES_TEXT = b"rulesText"
+_ROLE_STATUS_TEXT = b"statusText"
+_ROLE_MATCHED_COUNT = b"matchedCount"
+_ROLE_PASSED_COUNT = b"passedCount"
+_ROLE_SKIPPED_COUNT = b"skippedCount"
+_ROLE_ERROR_COUNT = b"errorCount"
+_ROLE_LAST_SUMMARY = b"lastSummary"
+_ROLE_INDEX = b"index"
+
+_ROLES: dict[int, bytes] = {
+    Qt.UserRole + 1: _ROLE_WORKSPACE_ID,
+    Qt.UserRole + 2: _ROLE_NAME,
+    Qt.UserRole + 3: _ROLE_MODE_TEXT,
+    Qt.UserRole + 4: _ROLE_TARGET,
+    Qt.UserRole + 5: _ROLE_RULES_TEXT,
+    Qt.UserRole + 6: _ROLE_STATUS_TEXT,
+    Qt.UserRole + 7: _ROLE_MATCHED_COUNT,
+    Qt.UserRole + 8: _ROLE_PASSED_COUNT,
+    Qt.UserRole + 9: _ROLE_SKIPPED_COUNT,
+    Qt.UserRole + 10: _ROLE_ERROR_COUNT,
+    Qt.UserRole + 11: _ROLE_LAST_SUMMARY,
+    Qt.UserRole + 12: _ROLE_INDEX,
+}
+
+
+@dataclass(frozen=True)
+class WorkspaceItem:
+    """工作区数据类（不可变，修改通过 :func:`dataclasses.replace` 重建）。
+
+    :param workspace_id: 唯一标识（``"ws-<8位hex>"`` 格式）
+    :param name: 工作区名称（用户输入或自动生成）
+    :param mode_str: 扫描模式字符串（``"full"``/``"drive"``/``"folder"``）
+    :param target: 扫描目标（盘符模式为盘符如 ``"C:\\"``，文件夹模式为路径）
+    :param rules_paths: 规则文件路径列表（空列表表示仅用内置规则）
+    :param use_builtin: 是否启用内置规则
+    :param status_text: 状态文本（``"就绪"``/``"扫描中"``/``"已完成"``/``"已取消"``/``"失败"``）
+    :param matched_count: 命中文件数
+    :param passed_count: 已通过文件数
+    :param skipped_count: 跳过文件数
+    :param error_count: 错误文件数
+    :param last_summary: 最近一次扫描摘要（含速度等）
+    """
+
+    workspace_id: str
+    name: str
+    mode_str: str = "folder"
+    target: str = ""
+    rules_paths: tuple[str, ...] = field(default_factory=tuple)
+    use_builtin: bool = True
+    status_text: str = "就绪"
+    matched_count: int = 0
+    passed_count: int = 0
+    skipped_count: int = 0
+    error_count: int = 0
+    last_summary: str = ""
+
+    @property
+    def mode_text(self) -> str:
+        """扫描模式中文文本。"""
+        return _SCAN_MODE_STR_TO_TEXT.get(self.mode_str, self.mode_str)
+
+    @property
+    def rules_text(self) -> str:
+        """规则摘要文本（如 ``"内置 + 2 文件"`` 或 ``"3 文件"``）。"""
+        files_count = len(self.rules_paths)
+        if self.use_builtin and files_count > 0:
+            return f"内置 + {files_count} 文件"
+        if self.use_builtin:
+            return "内置规则"
+        if files_count > 0:
+            return f"{files_count} 文件"
+        return "未配置规则"
+
+
+class WorkspaceListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritance]
+    """工作区列表模型。
+
+    存储 :class:`WorkspaceItem` 列表，按 role 返回展示字段。
+    所有修改操作（add/remove/update）均 emit 对应 ``QAbstractItemModel`` 信号，
+    QML ``ListView`` 自动刷新。
+    """
+
+    def __init__(self, parent: object | None = None) -> None:
+        super().__init__(parent)
+        self._items: list[WorkspaceItem] = []
+
+    def rowCount(self, parent: QModelIndex = None) -> int:  # type: ignore[assignment]
+        """返回工作区数量。"""
+        if parent is None:
+            parent = QModelIndex()
+        return 0 if parent.isValid() else len(self._items)
+
+    def roleNames(self) -> dict[int, bytes]:
+        """返回 role 名称映射。"""
+        return _ROLES
+
+    # role 偏移量 → WorkspaceItem 属性名映射（避免 data() 中长串 if-elif）
+    _ROLE_TO_ATTR: dict[int, str] = {
+        Qt.UserRole + 1: "workspace_id",
+        Qt.UserRole + 2: "name",
+        Qt.UserRole + 3: "mode_text",
+        Qt.UserRole + 4: "target",
+        Qt.UserRole + 5: "rules_text",
+        Qt.UserRole + 6: "status_text",
+        Qt.UserRole + 7: "matched_count",
+        Qt.UserRole + 8: "passed_count",
+        Qt.UserRole + 9: "skipped_count",
+        Qt.UserRole + 10: "error_count",
+        Qt.UserRole + 11: "last_summary",
+    }
+
+    def data(self, index: QModelIndex, role: int = Qt.DisplayRole) -> object:
+        """按 role 返回对应字段值。"""
+        if not index.isValid() or not (0 <= index.row() < len(self._items)):
+            return ""
+        item = self._items[index.row()]
+        attr = self._ROLE_TO_ATTR.get(role)
+        if attr is not None:
+            return getattr(item, attr)
+        if role == Qt.UserRole + 12:
+            return index.row()
+        return ""
+
+    # ----------------------------- 公共 API -----------------------------
+
+    def add_workspace(self, item: WorkspaceItem) -> int:
+        """追加工作区到列表末尾，返回新行号。
+
+        :param item: 工作区数据
+        :return: 新增行号
+        """
+        row = len(self._items)
+        self.beginInsertRows(QModelIndex(), row, row)
+        self._items.append(item)
+        self.endInsertRows()
+        return row
+
+    def remove_workspace(self, workspace_id: str) -> bool:
+        """按 ID 移除工作区。
+
+        :param workspace_id: 工作区 ID
+        :return: 是否成功移除
+        """
+        for idx, item in enumerate(self._items):
+            if item.workspace_id == workspace_id:
+                self.beginRemoveRows(QModelIndex(), idx, idx)
+                self._items.pop(idx)
+                self.endRemoveRows()
+                return True
+        return False
+
+    def update_workspace(self, workspace_id: str, **changes: Any) -> bool:
+        """按 ID 更新工作区字段（基于 :func:`dataclasses.replace`）。
+
+        :param workspace_id: 工作区 ID
+        :param changes: 要更新的字段关键字参数
+        :return: 是否成功更新
+        """
+        for idx, item in enumerate(self._items):
+            if item.workspace_id == workspace_id:
+                new_item = replace(item, **changes)
+                self._items[idx] = new_item
+                # 通知 QML 该行所有 role 变化
+                model_index = self.index(idx, 0)
+                self.dataChanged.emit(model_index, model_index, list(_ROLES.keys()))
+                return True
+        return False
+
+    def get_workspace(self, workspace_id: str) -> WorkspaceItem | None:
+        """按 ID 取工作区，未找到返回 None。"""
+        for item in self._items:
+            if item.workspace_id == workspace_id:
+                return item
+        return None
+
+    def get_by_index(self, row: int) -> WorkspaceItem | None:
+        """按行号取工作区，越界返回 None。"""
+        if 0 <= row < len(self._items):
+            return self._items[row]
+        return None
+
+    def clear(self) -> None:
+        """清空所有工作区。"""
+        self.beginResetModel()
+        self._items.clear()
+        self.endResetModel()
+
+    @property
+    def items(self) -> Sequence[WorkspaceItem]:
+        """原始工作区列表（只读）。"""
+        return tuple(self._items)

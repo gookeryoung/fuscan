@@ -2,9 +2,9 @@
 
 覆盖：
 
-- ``AppController`` 构造时聚合 5 个 controller（theme/config/rules/scan/about）
+- ``AppController`` 构造时聚合 5 个 controller（theme/config/rules/workspace/about）
 - ``register_to`` 将 controller 注册到 QQmlContext
-- ``cleanup`` 调用 ScanController.cleanup（资源释放）
+- ``cleanup`` 调用 WorkspaceController.cleanup（资源释放）
 - ``fuscan.gui.__init__`` 的 ``__getattr__`` 惰性导入 launch / AppController
 - 错误属性名抛 ``AttributeError``
 """
@@ -27,7 +27,7 @@ try:
     from fuscan.gui.qml.controllers.about_controller import AboutController
     from fuscan.gui.qml.controllers.config_controller import ConfigController
     from fuscan.gui.qml.controllers.rules_controller import RulesController
-    from fuscan.gui.qml.controllers.scan_controller import ScanController
+    from fuscan.gui.qml.controllers.workspace_controller import WorkspaceController
     from fuscan.gui.qml.theme import ThemeController
 
     PYSIDE_AVAILABLE = True
@@ -56,8 +56,8 @@ class TestConstruction:
     def test_rules_property(self, controller: AppController) -> None:
         assert isinstance(controller.rules, RulesController)
 
-    def test_scan_property(self, controller: AppController) -> None:
-        assert isinstance(controller.scan, ScanController)
+    def test_workspace_property(self, controller: AppController) -> None:
+        assert isinstance(controller.workspace, WorkspaceController)
 
     def test_about_property(self, controller: AppController) -> None:
         assert isinstance(controller.about, AboutController)
@@ -67,7 +67,7 @@ class TestConstruction:
         assert controller.theme.parent() is controller
         assert controller.config.parent() is controller
         assert controller.rules.parent() is controller
-        assert controller.scan.parent() is controller
+        assert controller.workspace.parent() is controller
         assert controller.about.parent() is controller
 
 
@@ -99,32 +99,32 @@ class TestRegisterTo:
             "Theme",
             "ConfigController",
             "RulesController",
-            "ScanController",
+            "WorkspaceController",
             "AboutController",
         }
         assert registered["Theme"] is controller.theme
         assert registered["ConfigController"] is controller.config
         assert registered["RulesController"] is controller.rules
-        assert registered["ScanController"] is controller.scan
+        assert registered["WorkspaceController"] is controller.workspace
         assert registered["AboutController"] is controller.about
 
 
 class TestCleanup:
-    """``cleanup`` 调用 ScanController.cleanup。"""
+    """``cleanup`` 调用 WorkspaceController.cleanup。"""
 
-    def test_cleanup_delegates_to_scan(
+    def test_cleanup_delegates_to_workspace(
         self,
         controller: AppController,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """cleanup 应委托给 ScanController.cleanup。"""
+        """cleanup 应委托给 WorkspaceController.cleanup。"""
         called = False
 
         def fake_cleanup() -> None:
             nonlocal called
             called = True
 
-        monkeypatch.setattr(controller.scan, "cleanup", fake_cleanup)
+        monkeypatch.setattr(controller.workspace, "cleanup", fake_cleanup)
         controller.cleanup()
         assert called is True
 

@@ -7,6 +7,7 @@
 - :class:`ScanController`：扫描工作流（状态机 + 进度 + 结果模型）
 - :class:`ConfigController`：配置持久化 + 盘符/路径历史/提取器勾选
 - :class:`RulesController`：规则文件管理 + 规则列表模型
+- :class:`WorkspaceController`：工作区管理（多任务）
 - :class:`AboutController`：关于页信息
 """
 
@@ -17,6 +18,7 @@ from fuscan.gui.qml.controllers.app_controller import AppController, register_qm
 from fuscan.gui.qml.controllers.config_controller import ConfigController
 from fuscan.gui.qml.controllers.rules_controller import RulesController
 from fuscan.gui.qml.controllers.scan_controller import ScanController
+from fuscan.gui.qml.controllers.workspace_controller import WorkspaceController
 
 __all__ = [
     "AboutController",
@@ -24,5 +26,6 @@ __all__ = [
     "ConfigController",
     "RulesController",
     "ScanController",
+    "WorkspaceController",
     "register_qml_types",
 ]

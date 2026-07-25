@@ -9,7 +9,7 @@ Pane {
 
     // 引用 Sidebar 以读取 currentPage
     property var sidebarRef: null
-    property string activePage: sidebarRef ? sidebarRef.currentPage : "scan"
+    property string activePage: sidebarRef ? sidebarRef.currentPage : "home"
 
     background: Rectangle {
         color: "transparent"
@@ -19,15 +19,18 @@ Pane {
         id: stack
         anchors.fill: parent
         anchors.margins: 24
-        initialItem: scanPage
+        initialItem: homePage
 
         // 根据 activePage 切换页面（replace 复用，避免重复创建）
         Connections {
             target: contentArea
             function onActivePageChanged() {
                 switch (contentArea.activePage) {
-                    case "scan":
-                        stack.replace(scanPage)
+                    case "home":
+                        stack.replace(homePage)
+                        break
+                    case "addTask":
+                        stack.replace(addTaskPage)
                         break
                     case "rules":
                         stack.replace(rulesPage)
@@ -43,19 +46,36 @@ Pane {
         }
     }
 
-    // ========== 4 个页面 Component ==========
+    // ========== 页面 Component ==========
     Component {
-        id: scanPage
-        ScanPage {}
+        id: homePage
+        HomePage {
+            onAddTaskRequested: contentArea.sidebarRef.currentPage = "addTask"
+            onDefineRulesRequested: contentArea.sidebarRef.currentPage = "rules"
+            onViewResultsRequested: contentArea.sidebarRef.currentPage = "home"
+            onViewStatsRequested: contentArea.sidebarRef.currentPage = "home"
+            onTaskSettingsRequested: contentArea.sidebarRef.currentPage = "settings"
+        }
     }
+
+    Component {
+        id: addTaskPage
+        AddTaskPage {
+            onCreated: contentArea.sidebarRef.currentPage = "home"
+            onCancelRequested: contentArea.sidebarRef.currentPage = "home"
+        }
+    }
+
     Component {
         id: rulesPage
         RulesPage {}
     }
+
     Component {
         id: settingsPage
         SettingsPage {}
     }
+
     Component {
         id: aboutPage
         AboutPage {}

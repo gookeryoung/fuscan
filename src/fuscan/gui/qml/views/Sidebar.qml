@@ -23,7 +23,7 @@ Pane {
     }
 
     // ========== 当前选中页（供 ContentArea 读取） ==========
-    property string currentPage: "scan"
+    property string currentPage: "home"
 
     ColumnLayout {
         anchors.fill: parent
@@ -60,17 +60,21 @@ Pane {
             }
         }
 
-        // ---------- 导航项列表 ----------
+        // ---------- 顶部主导航 ----------
         NavItem {
-            iconText: "📁"; label: "扫描"; pageId: "scan"
-            selected: sidebar.currentPage === "scan"
-            onClicked: { sidebar.currentPage = "scan" }
+            iconText: "🏠"; label: "首页"; pageId: "home"
+            selected: sidebar.currentPage === "home"
+            onClicked: { sidebar.currentPage = "home" }
         }
         NavItem {
-            iconText: "📋"; label: "规则"; pageId: "rules"
-            selected: sidebar.currentPage === "rules"
-            onClicked: { sidebar.currentPage = "rules" }
+            iconText: "➕"; label: "添加任务"; pageId: "addTask"
+            selected: sidebar.currentPage === "addTask"
+            onClicked: { sidebar.currentPage = "addTask" }
         }
+
+        Item { Layout.fillHeight: true }  // 弹性撑开
+
+        // ---------- 底部辅助导航 ----------
         NavItem {
             iconText: "⚙"; label: "设置"; pageId: "settings"
             selected: sidebar.currentPage === "settings"
@@ -82,13 +86,12 @@ Pane {
             onClicked: { sidebar.currentPage = "about" }
         }
 
-        Item { Layout.fillHeight: true }  // 弹性撑开
-
-        // ---------- 底部：暗色切换 ----------
+        // ---------- 暗色切换 ----------
         Rectangle {
             Layout.fillWidth: true
             Layout.leftMargin: 14
             Layout.rightMargin: 14
+            Layout.topMargin: 8
             Layout.bottomMargin: 16
             Layout.preferredHeight: 36
             radius: 8

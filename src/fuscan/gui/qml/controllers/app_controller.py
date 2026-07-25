@@ -1,7 +1,7 @@
 """主控制器工厂：构造并注册所有 controller 到 QML context。
 
 单入口构造 :class:`ThemeController`/`ConfigController`/`RulesController`/
-:class:`ScanController`/`AboutController`，供 ``app.py`` 调用
+:class:`WorkspaceController`/`AboutController`，供 ``app.py`` 调用
 ``engine.rootContext().setContextProperty`` 注册到 QML。
 
 公共 API：
@@ -33,7 +33,13 @@ from fuscan.gui.qml.controllers.about_controller import AboutController
 from fuscan.gui.qml.controllers.config_controller import ConfigController
 from fuscan.gui.qml.controllers.rules_controller import RulesController
 from fuscan.gui.qml.controllers.scan_controller import ScanController
-from fuscan.gui.qml.models import ExtractorListModel, ResultListModel, RuleListModel
+from fuscan.gui.qml.controllers.workspace_controller import WorkspaceController
+from fuscan.gui.qml.models import (
+    ExtractorListModel,
+    ResultListModel,
+    RuleListModel,
+    WorkspaceListModel,
+)
 from fuscan.gui.qml.theme import ThemeController
 
 __all__ = ["AppController", "register_qml_types"]
@@ -66,11 +72,13 @@ def register_qml_types() -> None:
     qmlRegisterType(ConfigController, "fuscan.controllers", 1, 0, "ConfigControllerType")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(RulesController, "fuscan.controllers", 1, 0, "RulesControllerType")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(ScanController, "fuscan.controllers", 1, 0, "ScanControllerType")  # pyrefly: ignore [bad-argument-type]
+    qmlRegisterType(WorkspaceController, "fuscan.controllers", 1, 0, "WorkspaceControllerType")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(AboutController, "fuscan.controllers", 1, 0, "AboutControllerType")  # pyrefly: ignore [bad-argument-type]
     # URI=fuscan.models，QML 用 `import fuscan.models 1.0` 后用各 model 类型
     qmlRegisterType(ExtractorListModel, "fuscan.models", 1, 0, "ExtractorListModel")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(RuleListModel, "fuscan.models", 1, 0, "RuleListModel")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(ResultListModel, "fuscan.models", 1, 0, "ResultListModel")  # pyrefly: ignore [bad-argument-type]
+    qmlRegisterType(WorkspaceListModel, "fuscan.models", 1, 0, "WorkspaceListModel")  # pyrefly: ignore [bad-argument-type]
 
 
 class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -81,12 +89,13 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        # 构造顺序：theme → config → rules → scan → about
-        # theme 不依赖其他；config 不依赖其他；rules 依赖 config；scan 依赖 config+rules；about 独立
+        # 构造顺序：theme → config → rules → workspace → about
+        # theme 不依赖其他；config 不依赖其他；rules 依赖 config；
+        # workspace 依赖 config+rules（内部按需构造 ScanController）；about 独立
         self._theme = ThemeController(self)
         self._config = ConfigController(self)
         self._rules = RulesController(self._config, self)
-        self._scan = ScanController(self._config, self._rules, self)
+        self._workspace = WorkspaceController(self._config, self._rules, self)
         self._about = AboutController(self)
 
     @property
@@ -105,9 +114,9 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
         return self._rules
 
     @property
-    def scan(self) -> ScanController:
-        """扫描控制器。"""
-        return self._scan
+    def workspace(self) -> WorkspaceController:
+        """工作区控制器。"""
+        return self._workspace
 
     @property
     def about(self) -> AboutController:
@@ -118,16 +127,16 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """注册所有 controller 到 QQmlContext（以 QML 可见的名字）。
 
         QML 中通过 ``Theme`` / ``ConfigController`` / ``RulesController`` /
-        ``ScanController`` / ``AboutController`` 直接访问。
+        ``WorkspaceController`` / ``AboutController`` 直接访问。
 
         :param context: ``QQmlContext`` 实例
         """
         context.setContextProperty("Theme", self._theme)  # pyrefly: ignore [missing-attribute]
         context.setContextProperty("ConfigController", self._config)  # pyrefly: ignore [missing-attribute]
         context.setContextProperty("RulesController", self._rules)  # pyrefly: ignore [missing-attribute]
-        context.setContextProperty("ScanController", self._scan)  # pyrefly: ignore [missing-attribute]
+        context.setContextProperty("WorkspaceController", self._workspace)  # pyrefly: ignore [missing-attribute]
         context.setContextProperty("AboutController", self._about)  # pyrefly: ignore [missing-attribute]
 
     def cleanup(self) -> None:
-        """窗口关闭时清理资源（扫描 worker + 缓存）。"""
-        self._scan.cleanup()
+        """窗口关闭时清理资源（工作区 ScanController + 缓存）。"""
+        self._workspace.cleanup()

@@ -134,6 +134,56 @@ class TestDarkColorTokens:
         assert theme.colorTextSecondaryDark == QColor("#A0A0B0")
 
 
+class TestDynamicDarkSwitch:
+    """通用色值属性在 isDark 切换时应动态返回对应深浅色值。
+
+    QML 中存在大量 ``theme.isDark ? theme.colorX : theme.colorX`` 三元（两侧
+    同名属性），只有当 ``colorX`` 本身根据 ``isDark`` 动态切换时三元才生效。
+    """
+
+    def test_primary_switches_in_dark(self, theme: ThemeController) -> None:
+        theme.setDark(True)
+        assert theme.colorPrimary == QColor("#7AA2F7")
+
+    def test_text_primary_switches_in_dark(self, theme: ThemeController) -> None:
+        theme.setDark(True)
+        assert theme.colorTextPrimary == QColor("#E0E0EF")
+
+    def test_text_secondary_switches_in_dark(self, theme: ThemeController) -> None:
+        theme.setDark(True)
+        assert theme.colorTextSecondary == QColor("#A0A0B0")
+
+    def test_bg_app_switches_in_dark(self, theme: ThemeController) -> None:
+        theme.setDark(True)
+        assert theme.colorBgApp == QColor("#1A1B26")
+
+    def test_bg_card_switches_in_dark(self, theme: ThemeController) -> None:
+        theme.setDark(True)
+        assert theme.colorBgCard == QColor("#1E1F2A")
+
+    def test_bg_hover_switches_in_dark(self, theme: ThemeController) -> None:
+        theme.setDark(True)
+        assert theme.colorBgHover == QColor("#2A2B3A")
+
+    def test_bg_selected_switches_in_dark(self, theme: ThemeController) -> None:
+        theme.setDark(True)
+        assert theme.colorBgSelected == QColor("#2A2B3A")
+
+    def test_border_switches_in_dark(self, theme: ThemeController) -> None:
+        theme.setDark(True)
+        assert theme.colorBorder == QColor("#2E2F3A")
+
+    def test_tokens_revert_after_toggle_back(self, theme: ThemeController) -> None:
+        """暗色 → 浅色切换后通用属性应回到浅色值。"""
+        theme.setDark(True)
+        theme.setDark(False)
+        assert theme.colorPrimary == QColor("#0366D6")
+        assert theme.colorTextPrimary == QColor("#24292E")
+        assert theme.colorBgApp == QColor("#F5F6F8")
+        assert theme.colorBgCard == QColor("#FFFFFF")
+        assert theme.colorBorder == QColor("#E1E4E8")
+
+
 class TestTypographyTokens:
     def test_font_size_caption(self, theme: ThemeController) -> None:
         assert theme.fontSizeCaption == 11

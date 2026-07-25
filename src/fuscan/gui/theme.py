@@ -89,8 +89,8 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(QColor, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def colorPrimary(self) -> QColor:
-        """主色（蓝）。"""
-        return QColor("#0366D6")
+        """主色（浅色蓝 / 暗色蓝紫，根据 isDark 动态切换）。"""
+        return QColor("#7AA2F7") if self._dark else QColor("#0366D6")
 
     @Property(QColor, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def colorPrimaryDark(self) -> QColor:
@@ -114,13 +114,13 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(QColor, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def colorTextPrimary(self) -> QColor:
-        """主文本色。"""
-        return QColor("#24292E")
+        """主文本色（根据 isDark 动态切换）。"""
+        return QColor("#E0E0EF") if self._dark else QColor("#24292E")
 
     @Property(QColor, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def colorTextSecondary(self) -> QColor:
-        """次要文本色。"""
-        return QColor("#586069")
+        """次要文本色（根据 isDark 动态切换）。"""
+        return QColor("#A0A0B0") if self._dark else QColor("#586069")
 
     @Property(QColor, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def colorTextOnPrimary(self) -> QColor:
@@ -129,28 +129,28 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(QColor, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def colorBgApp(self) -> QColor:
-        """应用背景色（中性灰）。"""
-        return QColor("#F5F6F8")
+        """应用背景色（根据 isDark 动态切换）。"""
+        return QColor("#1A1B26") if self._dark else QColor("#F5F6F8")
 
     @Property(QColor, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def colorBgCard(self) -> QColor:
-        """卡片背景色（白）。"""
-        return QColor("#FFFFFF")
+        """卡片背景色（根据 isDark 动态切换）。"""
+        return QColor("#1E1F2A") if self._dark else QColor("#FFFFFF")
 
     @Property(QColor, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def colorBgHover(self) -> QColor:
-        """hover 背景色。"""
-        return QColor("#F6F8FA")
+        """hover 背景色（根据 isDark 动态切换）。"""
+        return QColor("#2A2B3A") if self._dark else QColor("#F6F8FA")
 
     @Property(QColor, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def colorBgSelected(self) -> QColor:
-        """选中态背景色。"""
-        return QColor("#EDF3FF")
+        """选中态背景色（根据 isDark 动态切换）。"""
+        return QColor("#2A2B3A") if self._dark else QColor("#EDF3FF")
 
     @Property(QColor, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def colorBorder(self) -> QColor:
-        """边框色。"""
-        return QColor("#E1E4E8")
+        """边框色（根据 isDark 动态切换）。"""
+        return QColor("#2E2F3A") if self._dark else QColor("#E1E4E8")
 
     @Property(QColor, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def colorBorderMuted(self) -> QColor:

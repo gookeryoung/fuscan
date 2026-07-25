@@ -8,7 +8,7 @@ ItemDelegate {
     property string label: ""
     property string pageId: ""
     property bool selected: false
-    signal clicked()
+    // clicked() 信号继承自 ItemDelegate，无需重复声明
 
     Layout.fillWidth: true
     Layout.preferredHeight: 40

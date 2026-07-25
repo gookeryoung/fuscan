@@ -7,14 +7,18 @@ import fuscan.theme 1.0
 Button {
     id: control
 
+    // 类型化访问 Theme context property，消除 setContextProperty 导致的
+    // "Cannot read property 'xxx' of null" TypeError（详见 app_controller.py 注释）
+    property ThemeController appTheme: Theme
+
     property string tooltip: ""
     // accent: "primary"（主色填充）/ "secondary"（描边）/ "ghost"（扁平兜底）/ "danger"（危险红描边）
     property string accent: "ghost"
-    property int btnSize: accent === "primary" ? Theme.btnHeightSecondary
-        : accent === "secondary" ? Theme.btnHeightSecondary
-        : Theme.btnHeightGhost
+    property int btnSize: accent === "primary" ? appTheme.btnHeightSecondary
+        : accent === "secondary" ? appTheme.btnHeightSecondary
+        : appTheme.btnHeightGhost
     // dangerColor：accent="danger" 时使用，默认跟随主题危险色
-    property color dangerColor: Theme.colorDanger
+    property color dangerColor: appTheme.colorDanger
 
     implicitHeight: btnSize
     // 宽度自适应内容（Button 默认 implicitWidth = contentItem.implicitWidth + padding）
@@ -29,29 +33,29 @@ Button {
     ToolTip.delay: 400
 
     background: Rectangle {
-        radius: control.accent === "primary" ? Theme.btnRadiusPrimary
-            : control.accent === "secondary" ? Theme.btnRadiusSecondary
-            : Theme.btnRadiusGhost
+        radius: control.accent === "primary" ? appTheme.btnRadiusPrimary
+            : control.accent === "secondary" ? appTheme.btnRadiusSecondary
+            : appTheme.btnRadiusGhost
         color: {
             if (!control.enabled) {
                 return "transparent"
             }
             if (control.down) {
-                if (control.accent === "primary") return Theme.colorPrimaryDark
+                if (control.accent === "primary") return appTheme.colorPrimaryDark
                 if (control.accent === "danger") return control.dangerColor
-                return Theme.isDark ? Theme.colorBgHoverDark : Theme.colorBgHover
+                return appTheme.isDark ? appTheme.colorBgHoverDark : appTheme.colorBgHover
             }
             if (control.hovered) {
-                if (control.accent === "primary") return Theme.colorPrimary
-                return Theme.isDark ? Theme.colorBgHoverDark : Theme.colorBgHover
+                if (control.accent === "primary") return appTheme.colorPrimary
+                return appTheme.isDark ? appTheme.colorBgHoverDark : appTheme.colorBgHover
             }
-            if (control.accent === "primary") return Theme.colorPrimary
+            if (control.accent === "primary") return appTheme.colorPrimary
             return "transparent"
         }
         border.color: {
             if (!control.enabled) return "transparent"
             if (control.accent === "secondary") {
-                return Theme.isDark ? Theme.colorBorderDark : Theme.colorBorder
+                return appTheme.isDark ? appTheme.colorBorderDark : appTheme.colorBorder
             }
             if (control.accent === "danger") {
                 return control.dangerColor
@@ -67,13 +71,13 @@ Button {
         font.pixelSize: control.accent === "primary" ? 14 : 13
         color: {
             if (!control.enabled) {
-                return Theme.isDark ? Theme.colorTextSecondary : Theme.colorTextSecondary
+                return appTheme.isDark ? appTheme.colorTextSecondary : appTheme.colorTextSecondary
             }
-            if (control.accent === "primary") return Theme.colorTextOnPrimary
+            if (control.accent === "primary") return appTheme.colorTextOnPrimary
             if (control.accent === "danger") {
-                return control.down ? Theme.colorTextOnPrimary : control.dangerColor
+                return control.down ? appTheme.colorTextOnPrimary : control.dangerColor
             }
-            return Theme.isDark ? Theme.colorTextPrimary : Theme.colorTextPrimary
+            return appTheme.isDark ? appTheme.colorTextPrimary : appTheme.colorTextPrimary
         }
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter

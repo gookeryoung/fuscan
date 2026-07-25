@@ -239,8 +239,12 @@ Item {
                                 interactive: true
                                 model: configController.extractorModel
                                 delegate: ItemDelegate {
+                                    id: extractorDelegate
                                     width: ListView.view.width
                                     height: 32
+                                    // 速度档次 1-5，T1 最快（5 格满），T5 最慢（1 格）
+                                    property int tier: parseInt(model.speedTierText.charAt(1))
+                                    property color speedColor: model.speedTierColor
                                     RowLayout {
                                         anchors.fill: parent
                                         anchors.leftMargin: 8
@@ -254,10 +258,21 @@ Item {
                                             color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                             Layout.fillWidth: true
                                         }
-                                        Label {
-                                            text: model.speedTierText
-                                            font.pixelSize: 11
-                                            color: model.speedTierColor
+                                        // 五格速度指示器：filled = 6 - tier
+                                        Row {
+                                            spacing: 2
+                                            Layout.rightMargin: 8
+                                            Repeater {
+                                                model: 5
+                                                Rectangle {
+                                                    width: 6
+                                                    height: 12
+                                                    radius: 1
+                                                    color: index < (6 - extractorDelegate.tier)
+                                                        ? extractorDelegate.speedColor
+                                                        : (theme.isDark ? theme.colorBorderDark : theme.colorBorder)
+                                                }
+                                            }
                                         }
                                     }
                                 }

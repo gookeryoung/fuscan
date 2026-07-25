@@ -19,7 +19,16 @@ Pane {
         id: stack
         anchors.fill: parent
         anchors.margins: 24
+        clip: true  // 限制动画渲染在 StackView 边界内，避免溢出影响 sidebar
         initialItem: homePage
+
+        // 淡入淡出切换动画（替代默认水平滑动，避免动画溢出到 sidebar）
+        replaceEnter: Transition {
+            OpacityAnimator { from: 0.0; to: 1.0; duration: 180; easing.type: Easing.OutCubic }
+        }
+        replaceExit: Transition {
+            OpacityAnimator { from: 1.0; to: 0.0; duration: 120; easing.type: Easing.InCubic }
+        }
 
         // 根据 activePage 切换页面（replace 复用，避免重复创建）
         Connections {

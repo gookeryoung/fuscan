@@ -817,19 +817,21 @@ class TestExportResults:
         self,
         controller: ScanController,
         monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """无报告时 exportResults 应被忽略。"""
         # 不设置 _last_report，直接调用应不抛异常
-        controller.exportResults("csv")
+        controller.exportResults("csv", str(tmp_path / "export.csv"))
 
     def test_export_results_noop_when_no_hits(
         self,
         controller: ScanController,
         monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """报告无命中时 exportResults 应被忽略。"""
         controller._last_report = _make_scan_report(results=())
-        controller.exportResults("csv")
+        controller.exportResults("csv", str(tmp_path / "export.csv"))
 
     def test_export_results_writes_file(
         self,
@@ -842,32 +844,23 @@ class TestExportResults:
         controller._last_report = _make_scan_report(results=(result,))
 
         export_path = tmp_path / "export.csv"
-        # mock QFileDialog.getSaveFileName 返回指定路径
-        monkeypatch.setattr(
-            "fuscan.gui.qml.controllers.scan_controller.QFileDialog.getSaveFileName",
-            lambda *args, **kwargs: (str(export_path), "CSV 文件 (*.csv)"),
-        )
-        controller.exportResults("csv")
+        controller.exportResults("csv", str(export_path))
 
         assert export_path.exists()
         content = export_path.read_text(encoding="utf-8")
         assert "test.txt" in content or "敏感内容" in content
 
-    def test_export_results_cancelled_dialog(
+    def test_export_results_empty_path_noop(
         self,
         controller: ScanController,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """用户取消对话框时不导出。"""
+        """空路径时不导出（对应 QML FileDialog 取消）。"""
         result = _make_scan_result(tmp_path / "test.txt")
         controller._last_report = _make_scan_report(results=(result,))
 
-        monkeypatch.setattr(
-            "fuscan.gui.qml.controllers.scan_controller.QFileDialog.getSaveFileName",
-            lambda *args, **kwargs: ("", ""),
-        )
-        controller.exportResults("csv")  # 不应抛异常
+        controller.exportResults("csv", "")  # 不应抛异常
 
     def test_export_results_handles_oserror(
         self,
@@ -879,48 +872,9 @@ class TestExportResults:
         result = _make_scan_result(tmp_path / "test.txt")
         controller._last_report = _make_scan_report(results=(result,))
 
-        # mock 路径指向无效位置触发 OSError
-        monkeypatch.setattr(
-            "fuscan.gui.qml.controllers.scan_controller.QFileDialog.getSaveFileName",
-            lambda *args, **kwargs: ("/nonexistent/path/export.csv", "CSV 文件 (*.csv)"),
-        )
-        controller.exportResults("csv")
+        # 路径指向无效位置触发 OSError
+        controller.exportResults("csv", "/nonexistent/path/export.csv")
         assert "导出失败" in controller.statusText
-
-
-class TestSelectFolder:
-    """测试 selectFolder 选择目录。"""
-
-    def test_select_folder_sets_folder_root(
-        self,
-        controller: ScanController,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        """selectFolder 应调用 setFolderRoot。"""
-        monkeypatch.setattr(
-            "fuscan.gui.qml.controllers.scan_controller.QFileDialog.getExistingDirectory",
-            lambda *args, **kwargs: str(tmp_path),
-        )
-        emitted: list[None] = []
-        controller.folderRootChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
-        controller.selectFolder()
-        assert controller._folder_root == str(tmp_path)
-        assert len(emitted) == 1
-
-    def test_select_folder_cancelled_noop(
-        self,
-        controller: ScanController,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """用户取消选择时不修改 folderRoot。"""
-        monkeypatch.setattr(
-            "fuscan.gui.qml.controllers.scan_controller.QFileDialog.getExistingDirectory",
-            lambda *args, **kwargs: "",
-        )
-        original_root = controller._folder_root
-        controller.selectFolder()
-        assert controller._folder_root == original_root
 
 
 class TestOpenLocationWithResult:

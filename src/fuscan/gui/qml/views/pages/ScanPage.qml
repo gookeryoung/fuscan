@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtQuick.Dialogs 1.3
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
 
@@ -10,6 +11,38 @@ Item {
     property ThemeController theme: Theme
     property ScanControllerType scanController: ScanController
     property ConfigControllerType configController: ConfigController
+
+    // 当前待导出的格式（FileDialog 选定路径后传入 controller）
+    property string _pendingExportFmt: ""
+
+    // 文件夹选择对话框（替代 QFileDialog，避免 QWidget 依赖）
+    FileDialog {
+        id: folderDialog
+        title: "选择扫描目录"
+        selectFolder: true
+        selectExisting: true
+        folder: scanController.folderRoot.length > 0
+                ? "file:///" + scanController.folderRoot
+                : shortcuts.home
+        onAccepted: scanController.setFolderRoot(folderDialog.fileUrl.toString().replace(/^file:\/\/\//, ""))
+    }
+
+    // 导出文件保存对话框
+    FileDialog {
+        id: exportDialog
+        title: "导出扫描结果"
+        selectExisting: false
+        defaultSuffix: scanPage._pendingExportFmt
+        nameFilters: [
+            scanPage._pendingExportFmt === "csv"
+                ? "CSV 文件 (*.csv)"
+                : "JSON 文件 (*.json)"
+        ]
+        onAccepted: {
+            var path = exportDialog.fileUrl.toString().replace(/^file:\/\/\//, "")
+            scanController.exportResults(scanPage._pendingExportFmt, path)
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -92,7 +125,7 @@ Item {
                         }
                     }
                     TabButton {
-                        text: "文件夹扫描"
+                        text: "全盘扫描"
                         height: theme.btnHeightSecondary
                     }
                     TabButton {
@@ -100,7 +133,7 @@ Item {
                         height: theme.btnHeightSecondary
                     }
                     TabButton {
-                        text: "全盘扫描"
+                        text: "文件夹扫描"
                         height: theme.btnHeightSecondary
                     }
                 }
@@ -194,7 +227,7 @@ Item {
                 Button {
                     Layout.preferredHeight: theme.btnHeightSecondary
                     text: "选择..."
-                    onClicked: scanController.selectFolder()
+                    onClicked: folderDialog.open()
                 }
             }
         }
@@ -302,13 +335,19 @@ Item {
                     Layout.preferredHeight: theme.btnHeightGhost
                     text: "导出 CSV"
                     enabled: scanController.matchedCount > 0
-                    onClicked: scanController.exportResults("csv")
+                    onClicked: {
+                        scanPage._pendingExportFmt = "csv"
+                        exportDialog.open()
+                    }
                 }
                 Button {
                     Layout.preferredHeight: theme.btnHeightGhost
                     text: "导出 JSON"
                     enabled: scanController.matchedCount > 0
-                    onClicked: scanController.exportResults("json")
+                    onClicked: {
+                        scanPage._pendingExportFmt = "json"
+                        exportDialog.open()
+                    }
                 }
                 Button {
                     Layout.preferredHeight: theme.btnHeightPrimary

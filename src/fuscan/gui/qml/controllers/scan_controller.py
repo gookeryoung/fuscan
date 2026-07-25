@@ -9,8 +9,7 @@
 - :meth:`ScanController.start_scan`：开始扫描（启动 stats worker → scan worker 串行）
 - :meth:`ScanController.toggle_pause`：暂停/继续扫描
 - :meth:`ScanController.cancel_scan`：取消扫描
-- :meth:`ScanController.export_results`：导出 CSV/JSON
-- :meth:`ScanController.select_folder`：弹出 QFileDialog 选择目录
+- :meth:`ScanController.export_results`：导出 CSV/JSON（路径由 QML FileDialog 传入）
 - :meth:`ScanController.open_location` / :meth:`copy_path`：选中结果文件操作
 """
 
@@ -23,10 +22,8 @@ from typing import TYPE_CHECKING
 
 try:
     from PySide2.QtCore import Property, QObject, Signal, Slot
-    from PySide2.QtWidgets import QFileDialog
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
-    from PySide6.QtWidgets import QFileDialog  # pyrefly: ignore [missing-import]
 
 from fuscan.config import Config
 from fuscan.gui.explorer import open_path_in_explorer
@@ -260,6 +257,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self.selectedDriveChanged.emit()  # pyrefly: ignore [missing-attribute]
             self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
 
+    @Property(str, notify=folderRootChanged)  # pyrefly: ignore [not-callable]
+    def folderRoot(self) -> str:
+        """文件夹模式根路径。"""
+        return self._folder_root
+
     @Slot(str)  # pyrefly: ignore [not-callable]
     def setFolderRoot(self, path_str: str) -> None:
         """设置文件夹模式根路径。"""
@@ -402,22 +404,15 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if self._worker is not None:
             self._worker.cancel()
 
-    @Slot(str)  # pyrefly: ignore [not-callable]
-    def exportResults(self, fmt: str) -> None:
-        """导出结果为 CSV/JSON 文件。
+    @Slot(str, str)  # pyrefly: ignore [not-callable]
+    def exportResults(self, fmt: str, path_str: str) -> None:
+        """导出结果为 CSV/JSON 文件（路径由 QML FileDialog 选定后传入）。
 
         :param fmt: ``"csv"`` 或 ``"json"``
+        :param path_str: 导出文件绝对路径
         """
         if self._last_report is None or not self._last_report.hits:
             return
-        # 弹出文件保存对话框（在 QML 主线程执行）
-        suggested = f"fuscan-results.{fmt}"
-        path_str, _ = QFileDialog.getSaveFileName(
-            None,
-            "导出扫描结果",
-            suggested,
-            f"{fmt.upper()} 文件 (*.{fmt})",
-        )
         if not path_str:
             return
         try:
@@ -427,17 +422,6 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         except OSError as exc:
             logger.warning("导出失败: %s", exc, exc_info=True)
             self._set_status("导出失败", f"导出失败: {exc}")
-
-    @Slot()  # pyrefly: ignore [not-callable]
-    def selectFolder(self) -> None:
-        """弹出 QFileDialog 选择扫描目录。"""
-        path_str = QFileDialog.getExistingDirectory(
-            None,
-            "选择扫描目录",
-            self._folder_root or str(Path.home()),
-        )
-        if path_str:
-            self.setFolderRoot(path_str)
 
     @Slot()  # pyrefly: ignore [not-callable]
     def openLocation(self) -> None:

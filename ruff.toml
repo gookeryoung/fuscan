@@ -1,4 +1,4 @@
-extend-exclude = ["template", "docs", "*_ui.py", "resources_rc.py"]
+extend-exclude = ["template", "docs", "*_ui.py"]
 line-length    = 120
 target-version = "py38"
 

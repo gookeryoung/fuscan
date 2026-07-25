@@ -33,6 +33,3 @@ coverage.xml
 # Sphinx 文档构建输出
 docs/_build/
 .trae/refs
-
-# pyside2-rcc 误生成产物（正确位置为 src/fuscan/gui/resources_rc.py）
-src/fuscan/assets/resources_rc.py

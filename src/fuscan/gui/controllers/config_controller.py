@@ -190,8 +190,13 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.extractorCountChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.save()
 
-    def enabled_extensions(self) -> tuple[str, ...]:
-        """返回勾选提取器的扩展名集合（供 ScanController 使用）。"""
+    def enabled_extensions(self) -> tuple[str, ...] | None:
+        """返回勾选提取器的扩展名集合（供 ScanController 使用）。
+
+        :return: ``None`` 表示全部勾选（扫描所有文件）；空 tuple 表示全部取消勾选；
+            非空 tuple 表示按白名单过滤。详见
+            :meth:`ExtractorListModel.enabled_extensions`。
+        """
         return self._extractor_model.enabled_extensions()
 
     # ----------------------------- 扫描路径历史 -----------------------------

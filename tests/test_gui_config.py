@@ -167,10 +167,10 @@ class TestExtractorSelection:
         controller.setExtractorEnabled(first_class, True)
         assert first_class not in controller.config.disabled_extractors
 
-    def test_enabled_extensions_all_selected_returns_empty(self, controller: ConfigController) -> None:
-        """全部勾选时返回空 tuple（扫描所有文件）。"""
+    def test_enabled_extensions_all_selected_returns_none(self, controller: ConfigController) -> None:
+        """全部勾选时返回 None（扫描所有文件，与 Scanner scan_extensions 语义一致）。"""
         controller.selectAllExtractors()
-        assert controller.enabled_extensions() == ()
+        assert controller.enabled_extensions() is None
 
 
 class TestScanPaths:

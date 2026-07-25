@@ -102,18 +102,31 @@ Item {
                         Layout.fillHeight: true
                         clip: true
                         model: rulesController.rulesFileModel
+                        currentIndex: rulesController.selectedFileIndex
+                        onCurrentIndexChanged: rulesController.setSelectedFileIndex(currentIndex)
                         delegate: ItemDelegate {
                             width: rulesFileList.width
                             height: 36
-                            ColumnLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 8
-                                Label {
-                                    text: model.fileName
-                                    font.pixelSize: 12
-                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                    elide: Text.ElideMiddle
-                                }
+                            // QVariantList of dict 通过 modelData 访问字段
+                            text: modelData.fileName
+                            font.pixelSize: 12
+                            highlighted: ListView.isCurrentItem
+                            background: Rectangle {
+                                color: ListView.isCurrentItem
+                                    ? (theme.isDark ? theme.colorBgSelectedDark : theme.colorBgSelected)
+                                    : (parent.hovered
+                                        ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
+                                        : "transparent")
+                                Behavior on color { ColorAnimation { duration: 120 } }
+                            }
+                            contentItem: Label {
+                                text: parent.text
+                                font: parent.font
+                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                elide: Text.ElideMiddle
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: 12
+                                rightPadding: 12
                             }
                         }
                     }

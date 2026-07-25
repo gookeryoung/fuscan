@@ -234,10 +234,72 @@ Item {
                             }
                             ListView {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 280
+                                Layout.preferredHeight: 320
                                 clip: true
                                 interactive: true
                                 model: configController.extractorModel
+                                // 按 category 角色分组，配合 section.delegate 渲染类别头部
+                                section.property: "category"
+                                section.criteria: ViewSection.FullString
+                                section.delegate: Rectangle {
+                                    width: ListView.view.width
+                                    height: 36
+                                    color: theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 8
+                                        spacing: 8
+
+                                        // 类别头部三态 CheckBox：全选/全不选该类别
+                                        CheckBox {
+                                            id: catCheckBox
+                                            tristate: true
+                                            checkState: Qt.Unchecked
+
+                                            Component.onCompleted: catCheckBox.updateState()
+
+                                            Connections {
+                                                target: configController.extractorModel
+                                                onCategoryStatesChanged: catCheckBox.updateState()
+                                            }
+
+                                            function updateState() {
+                                                var s = configController.extractorModel.categoryStates[section]
+                                                if (s === "all") checkState = Qt.Checked
+                                                else if (s === "none") checkState = Qt.Unchecked
+                                                else checkState = Qt.PartiallyChecked
+                                            }
+
+                                            // 点击后：当前为 all → 全不选；其他 → 全选
+                                            onToggled: {
+                                                var s = configController.extractorModel.categoryStates[section]
+                                                configController.extractorModel.setCategoryEnabled(section, s !== "all")
+                                            }
+                                        }
+
+                                        Label {
+                                            text: section
+                                            font.bold: true
+                                            font.pixelSize: theme.fontSizeBody
+                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                        }
+
+                                        Item { Layout.fillWidth: true }
+
+                                        Label {
+                                            text: {
+                                                var s = configController.extractorModel.categoryStates[section]
+                                                if (s === "all") return "全部启用"
+                                                if (s === "none") return "全部禁用"
+                                                return "部分启用"
+                                            }
+                                            font.pixelSize: 11
+                                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                        }
+                                    }
+                                }
                                 delegate: ItemDelegate {
                                     id: extractorDelegate
                                     width: ListView.view.width
@@ -247,7 +309,7 @@ Item {
                                     property color speedColor: model.speedTierColor
                                     RowLayout {
                                         anchors.fill: parent
-                                        anchors.leftMargin: 8
+                                        anchors.leftMargin: 32
                                         CheckBox {
                                             checked: model.enabled
                                             onCheckedChanged: configController.setExtractorEnabled(model.className, checked)
@@ -281,23 +343,29 @@ Item {
                                             color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                             Layout.rightMargin: 4
                                         }
-                                        Row {
+                                        // Item 包裹 Row + MouseArea，避免 Row 内子项使用 anchors
+                                        Item {
                                             id: speedIndicator
-                                            spacing: 2
                                             Layout.rightMargin: 8
+                                            width: speedRow.width
+                                            height: speedRow.height
                                             // ToolTip：hover 时显示完整速度档次（如「T2 快速」）
                                             ToolTip.visible: speedIndicatorMouseArea.containsMouse
                                             ToolTip.delay: 300
                                             ToolTip.text: "解析速度：" + model.speedTierText
-                                            Repeater {
-                                                model: 5
-                                                Rectangle {
-                                                    width: 6
-                                                    height: 12
-                                                    radius: 1
-                                                    color: index < (6 - extractorDelegate.tier)
-                                                        ? extractorDelegate.speedColor
-                                                        : (theme.isDark ? theme.colorBorderDark : theme.colorBorder)
+                                            Row {
+                                                id: speedRow
+                                                spacing: 2
+                                                Repeater {
+                                                    model: 5
+                                                    Rectangle {
+                                                        width: 6
+                                                        height: 12
+                                                        radius: 1
+                                                        color: index < (6 - extractorDelegate.tier)
+                                                            ? extractorDelegate.speedColor
+                                                            : (theme.isDark ? theme.colorBorderDark : theme.colorBorder)
+                                                    }
                                                 }
                                             }
                                             MouseArea {

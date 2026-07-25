@@ -18,10 +18,10 @@ emit ``themeChanged``，所有绑定表达式重新求值，实现暗色模式�
 from __future__ import annotations
 
 try:
-    from PySide2.QtCore import Property, QObject, Signal
+    from PySide2.QtCore import Property, QObject, Signal, Slot
     from PySide2.QtGui import QColor
 except ImportError:  # pragma: no cover
-    from PySide6.QtCore import Property, QObject, Signal  # pyrefly: ignore [missing-import]
+    from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
     from PySide6.QtGui import QColor  # pyrefly: ignore [missing-import]
 
 __all__ = ["ThemeController"]
@@ -55,6 +55,7 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """当前是否为浅色模式（``not isDark`` 的便捷别名）。"""
         return not self._dark
 
+    @Slot(bool)  # pyrefly: ignore [not-callable]
     def setDark(self, value: bool) -> None:
         """切换暗色模式（QML 通过 ``Theme.setDark(...)`` 调用）。"""
         if self._dark != value:

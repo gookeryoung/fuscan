@@ -87,7 +87,7 @@ Item {
                         }
                     }
                     TabButton {
-                        text: "全盘扫描"
+                        text: "文件夹扫描"
                         height: Theme.btnHeightSecondary
                     }
                     TabButton {
@@ -95,7 +95,7 @@ Item {
                         height: Theme.btnHeightSecondary
                     }
                     TabButton {
-                        text: "文件夹扫描"
+                        text: "全盘扫描"
                         height: Theme.btnHeightSecondary
                     }
                 }

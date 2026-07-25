@@ -88,6 +88,8 @@ packages = ["src/fuscan"]
 "src/fuscan/gui/views/pages/RulesPage.qml" = "fuscan/gui/views/pages/RulesPage.qml"
 "src/fuscan/gui/views/pages/SettingsPage.qml" = "fuscan/gui/views/pages/SettingsPage.qml"
 "src/fuscan/gui/views/pages/AboutPage.qml" = "fuscan/gui/views/pages/AboutPage.qml"
+"src/fuscan/gui/views/pages/ResultsPage.qml" = "fuscan/gui/views/pages/ResultsPage.qml"
+"src/fuscan/gui/views/pages/StatsPage.qml" = "fuscan/gui/views/pages/StatsPage.qml"
 "src/fuscan/gui/qtquickcontrols2.conf" = "fuscan/gui/qtquickcontrols2.conf"
 
 [tool.fspack.entries]

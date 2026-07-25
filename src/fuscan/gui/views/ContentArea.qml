@@ -44,6 +44,12 @@ Pane {
                     case "rules":
                         stack.replace(rulesPage)
                         break
+                    case "results":
+                        stack.replace(resultsPage)
+                        break
+                    case "stats":
+                        stack.replace(statsPage)
+                        break
                     case "settings":
                         stack.replace(settingsPage)
                         break
@@ -60,8 +66,8 @@ Pane {
         id: homePage
         HomePage {
             onDefineRulesRequested: contentArea.sidebarRef.currentPage = "rules"
-            onViewResultsRequested: contentArea.sidebarRef.currentPage = "home"
-            onViewStatsRequested: contentArea.sidebarRef.currentPage = "home"
+            onViewResultsRequested: contentArea.sidebarRef.currentPage = "results"
+            onViewStatsRequested: contentArea.sidebarRef.currentPage = "stats"
             onTaskSettingsRequested: contentArea.sidebarRef.currentPage = "settings"
         }
     }
@@ -77,6 +83,20 @@ Pane {
     Component {
         id: rulesPage
         RulesPage {}
+    }
+
+    Component {
+        id: resultsPage
+        ResultsPage {
+            onBackRequested: contentArea.sidebarRef.currentPage = "home"
+        }
+    }
+
+    Component {
+        id: statsPage
+        StatsPage {
+            onBackRequested: contentArea.sidebarRef.currentPage = "home"
+        }
     }
 
     Component {

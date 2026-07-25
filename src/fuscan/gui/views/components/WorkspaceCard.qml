@@ -170,7 +170,7 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 8
 
-            // 左侧：定义规则 + 启动/暂停
+            // 左侧：定义规则 + 启动/暂停（统一 40px L2 次要，颜色区分主次）
             Button {
                 Layout.preferredHeight: theme.btnHeightSecondary
                 text: "定义规则"
@@ -192,9 +192,8 @@ Rectangle {
                 }
             }
             Button {
-                Layout.preferredHeight: theme.btnHeightPrimary
+                Layout.preferredHeight: theme.btnHeightSecondary
                 text: statusText === "扫描中" ? "暂停扫描" : "启动扫描"
-                enabled: statusText !== "扫描中" || true
                 onClicked: {
                     if (statusText === "扫描中" || statusText === "已暂停") {
                         workspaceController.togglePause(card.workspaceId)
@@ -203,10 +202,10 @@ Rectangle {
                     }
                 }
                 background: Rectangle {
-                    color: parent.enabled
-                          ? (parent.down ? theme.colorPrimaryDark : theme.colorPrimary)
-                          : theme.colorBorder
-                    radius: theme.btnRadiusPrimary
+                    color: parent.down
+                          ? theme.colorPrimaryDark
+                          : theme.colorPrimary
+                    radius: theme.btnRadiusSecondary
                     Behavior on color { ColorAnimation { duration: 120 } }
                 }
                 contentItem: Label {

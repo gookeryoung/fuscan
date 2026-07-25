@@ -66,7 +66,7 @@ Item {
             clip: true
             visible: workspaceController.hasActiveScan
 
-            // 居中展示进度卡片，避免内容贴边
+            // 进度卡片占满视口宽度，与工作区列表视觉宽度一致
             ColumnLayout {
                 width: parent.width
                 spacing: 12
@@ -75,8 +75,6 @@ Item {
 
                 ScanProgressCard {
                     Layout.fillWidth: true
-                    Layout.maximumWidth: 720
-                    Layout.alignment: Qt.AlignHCenter
                     workspaceId: workspaceController.activeScanWorkspaceId
                     taskName: workspaceController.activeScanWorkspaceName
                     modeText: workspaceController.activeScanModeText

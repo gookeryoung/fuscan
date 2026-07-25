@@ -195,7 +195,8 @@ Rectangle {
             IconButton {
                 text:"📊 查看结果"
                 tooltip: "查看扫描结果"
-                accent: "ghost"
+                // 扫描完成后高亮（与扫描前的扫描按钮同色），未完成时 disabled 变灰
+                accent: "primary"
                 // 扫描完成前未激活，扫描完成后激活
                 enabled: statusText === "已完成"
                 onClicked: card.viewResultsRequested(card.workspaceId)

@@ -3,6 +3,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
+import "../components"
 
 Item {
     id: aboutPage
@@ -76,32 +77,19 @@ Item {
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 12
-                Button {
-                    Layout.preferredHeight: theme.btnHeightSecondary
-                    Layout.preferredWidth: 180
-                    text: "打开用户手册 PDF"
+                IconButton {
+                    text:"📖 用户手册"
+                    tooltip: "打开用户手册 PDF"
+                    accent: "primary"
+                    Layout.preferredWidth: 160
                     onClicked: aboutController.openManual()
                 }
-                Button {
-                    Layout.preferredHeight: theme.btnHeightSecondary
-                    Layout.preferredWidth: 180
-                    text: "打开配置目录"
+                IconButton {
+                    text:"🗂 配置目录"
+                    tooltip: "打开配置目录"
+                    accent: "secondary"
+                    Layout.preferredWidth: 160
                     onClicked: aboutController.openConfigDir()
-                    background: Rectangle {
-                        color: parent.down
-                              ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                              : "transparent"
-                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                        border.width: 1
-                        radius: theme.btnRadiusSecondary
-                    }
-                    contentItem: Label {
-                        text: parent.text
-                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                        font.pixelSize: 12
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
                 }
             }
 

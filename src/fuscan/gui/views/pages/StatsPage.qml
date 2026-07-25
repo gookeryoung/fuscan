@@ -3,6 +3,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
+import "../components"
 
 // 统计页：展示当前工作区的扫描统计信息
 Item {
@@ -22,25 +23,11 @@ Item {
             Layout.fillWidth: true
             spacing: 12
 
-            Button {
-                Layout.preferredHeight: theme.btnHeightGhost
-                text: "← 返回"
+            IconButton {
+                text:"← 返回"
+                tooltip: "返回首页"
+                accent: "ghost"
                 onClicked: statsPage.backRequested()
-                background: Rectangle {
-                    color: parent.down
-                          ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                          : "transparent"
-                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                    border.width: 1
-                    radius: theme.btnRadiusGhost
-                }
-                contentItem: Label {
-                    text: parent.text
-                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                    font.pixelSize: 12
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
             }
             Label {
                 text: "统计信息"

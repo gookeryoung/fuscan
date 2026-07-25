@@ -3,6 +3,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
+import "../components"
 
 Item {
     id: rulesPage
@@ -95,28 +96,32 @@ Item {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 4
-                        Button {
-                            Layout.preferredHeight: theme.btnHeightGhost
-                            text: "↑"
+                        IconButton {
+                            text:"↑"
+                            tooltip: "上移"
+                            accent: "ghost"
                             enabled: rulesController.canMoveUp
                             onClicked: rulesController.moveUp()
                         }
-                        Button {
-                            Layout.preferredHeight: theme.btnHeightGhost
-                            text: "↓"
+                        IconButton {
+                            text:"↓"
+                            tooltip: "下移"
+                            accent: "ghost"
                             enabled: rulesController.canMoveDown
                             onClicked: rulesController.moveDown()
                         }
-                        Button {
-                            Layout.preferredHeight: theme.btnHeightGhost
-                            text: "−"
+                        IconButton {
+                            text:"−"
+                            tooltip: "移除选中规则文件"
+                            accent: "ghost"
                             enabled: rulesController.canRemove
                             onClicked: rulesController.removeSelected()
                         }
                         Item { Layout.fillWidth: true }
-                        Button {
-                            Layout.preferredHeight: theme.btnHeightSecondary
-                            text: "加载..."
+                        IconButton {
+                            text:"📂 加载"
+                            tooltip: "加载规则文件"
+                            accent: "secondary"
                             onClicked: rulesController.loadFile()
                         }
                     }

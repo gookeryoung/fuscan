@@ -170,30 +170,17 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 8
 
-            // 左侧：定义规则 + 启动/暂停（统一 40px L2 次要，颜色区分主次）
-            Button {
-                Layout.preferredHeight: theme.btnHeightSecondary
-                text: "定义规则"
+            // 左侧：定义规则 + 启动/暂停
+            IconButton {
+                text:"🔧 定义规则"
+                tooltip: "编辑该任务的规则集"
+                accent: "secondary"
                 onClicked: card.defineRulesRequested(card.workspaceId)
-                background: Rectangle {
-                    color: parent.down
-                          ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                          : "transparent"
-                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                    border.width: 1
-                    radius: theme.btnRadiusSecondary
-                }
-                contentItem: Label {
-                    text: parent.text
-                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                    font.pixelSize: 12
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
             }
-            Button {
-                Layout.preferredHeight: theme.btnHeightSecondary
-                text: statusText === "扫描中" ? "暂停扫描" : "启动扫描"
+            IconButton {
+                text:statusText === "扫描中" ? "⏸ 暂停" : "▶ 启动扫描"
+                tooltip: statusText === "扫描中" ? "暂停扫描" : "启动扫描"
+                accent: "primary"
                 onClicked: {
                     if (statusText === "扫描中" || statusText === "已暂停") {
                         workspaceController.togglePause(card.workspaceId)
@@ -201,88 +188,30 @@ Rectangle {
                         workspaceController.startScan(card.workspaceId)
                     }
                 }
-                background: Rectangle {
-                    color: parent.down
-                          ? theme.colorPrimaryDark
-                          : theme.colorPrimary
-                    radius: theme.btnRadiusSecondary
-                    Behavior on color { ColorAnimation { duration: 120 } }
-                }
-                contentItem: Label {
-                    text: parent.text
-                    color: theme.colorTextOnPrimary
-                    font.pixelSize: 12
-                    font.bold: true
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
             }
 
             Item { Layout.fillWidth: true }
 
             // 右侧：查看结果 + 统计 + 展开按钮
-            Button {
-                Layout.preferredHeight: theme.btnHeightGhost
-                text: "查看结果"
+            IconButton {
+                text:"📊 结果"
+                tooltip: "查看扫描结果"
+                accent: "ghost"
                 enabled: matchedCount > 0
                 onClicked: card.viewResultsRequested(card.workspaceId)
-                background: Rectangle {
-                    color: parent.down
-                          ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                          : "transparent"
-                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                    border.width: 1
-                    radius: theme.btnRadiusGhost
-                }
-                contentItem: Label {
-                    text: parent.text
-                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                    font.pixelSize: 12
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
             }
-            Button {
-                Layout.preferredHeight: theme.btnHeightGhost
-                text: "统计"
+            IconButton {
+                text:"📈 统计"
+                tooltip: "查看扫描统计"
+                accent: "ghost"
                 onClicked: card.viewStatsRequested(card.workspaceId)
-                background: Rectangle {
-                    color: parent.down
-                          ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                          : "transparent"
-                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                    border.width: 1
-                    radius: theme.btnRadiusGhost
-                }
-                contentItem: Label {
-                    text: parent.text
-                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                    font.pixelSize: 12
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
             }
             // 展开按钮（切换更多操作）
-            Button {
-                Layout.preferredHeight: theme.btnHeightGhost
-                Layout.preferredWidth: 32
-                text: card.expanded ? "▲" : "▼"
+            IconButton {
+                text:card.expanded ? "▲" : "▼"
+                tooltip: card.expanded ? "收起更多操作" : "展开更多操作"
+                accent: "ghost"
                 onClicked: card.expanded = !card.expanded
-                background: Rectangle {
-                    color: parent.down
-                          ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                          : "transparent"
-                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                    border.width: 1
-                    radius: theme.btnRadiusGhost
-                }
-                contentItem: Label {
-                    text: parent.text
-                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                    font.pixelSize: 11
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
             }
         }
 
@@ -303,87 +232,32 @@ Rectangle {
                 Layout.fillWidth: true
                 spacing: 8
 
-                Button {
-                    Layout.preferredHeight: theme.btnHeightGhost
-                    text: "导出 CSV"
+                IconButton {
+                    text:"📄 CSV"
+                    tooltip: "导出为 CSV"
+                    accent: "ghost"
                     enabled: matchedCount > 0
                     onClicked: exportCsvRequested(card.workspaceId)
-                    background: Rectangle {
-                        color: parent.down
-                              ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                              : "transparent"
-                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                        border.width: 1
-                        radius: theme.btnRadiusGhost
-                    }
-                    contentItem: Label {
-                        text: parent.text
-                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                        font.pixelSize: 12
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
                 }
-                Button {
-                    Layout.preferredHeight: theme.btnHeightGhost
-                    text: "导出 JSON"
+                IconButton {
+                    text:"📦 JSON"
+                    tooltip: "导出为 JSON"
+                    accent: "ghost"
                     enabled: matchedCount > 0
                     onClicked: exportJsonRequested(card.workspaceId)
-                    background: Rectangle {
-                        color: parent.down
-                              ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                              : "transparent"
-                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                        border.width: 1
-                        radius: theme.btnRadiusGhost
-                    }
-                    contentItem: Label {
-                        text: parent.text
-                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                        font.pixelSize: 12
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
                 }
-                Button {
-                    Layout.preferredHeight: theme.btnHeightGhost
-                    text: "任务设置"
+                IconButton {
+                    text:"⚙ 设置"
+                    tooltip: "任务级设置"
+                    accent: "ghost"
                     onClicked: taskSettingsRequested(card.workspaceId)
-                    background: Rectangle {
-                        color: parent.down
-                              ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                              : "transparent"
-                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                        border.width: 1
-                        radius: theme.btnRadiusGhost
-                    }
-                    contentItem: Label {
-                        text: parent.text
-                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                        font.pixelSize: 12
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
                 }
                 Item { Layout.fillWidth: true }
-                Button {
-                    Layout.preferredHeight: theme.btnHeightGhost
-                    text: "删除任务"
+                IconButton {
+                    text:"🗑 删除"
+                    tooltip: "删除该任务"
+                    accent: "danger"
                     onClicked: workspaceController.removeWorkspace(card.workspaceId)
-                    background: Rectangle {
-                        color: parent.down ? theme.colorDanger : "transparent"
-                        border.color: theme.colorDanger
-                        border.width: 1
-                        radius: theme.btnRadiusGhost
-                        Behavior on color { ColorAnimation { duration: 120 } }
-                    }
-                    contentItem: Label {
-                        text: parent.text
-                        color: parent.parent.down ? theme.colorTextOnPrimary : theme.colorDanger
-                        font.pixelSize: 12
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
                 }
             }
         }

@@ -3,6 +3,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
+import "../components"
 
 // 设置页：TabBar 分组切换，避免单页滚动过长
 Item {
@@ -28,25 +29,11 @@ Item {
                 color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
             }
             Item { Layout.fillWidth: true }
-            Button {
-                Layout.preferredHeight: theme.btnHeightGhost
-                text: "重置默认"
+            IconButton {
+                text:"↺ 重置"
+                tooltip: "重置扫描相关配置为默认值"
+                accent: "ghost"
                 onClicked: configController.resetToDefaults()
-                background: Rectangle {
-                    color: parent.down
-                          ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                          : "transparent"
-                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                    border.width: 1
-                    radius: theme.btnRadiusGhost
-                }
-                contentItem: Label {
-                    text: parent.text
-                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                    font.pixelSize: 11
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
             }
         }
 
@@ -225,14 +212,16 @@ Item {
                 spacing: 8
                 RowLayout {
                     Layout.fillWidth: true
-                    Button {
-                        Layout.preferredHeight: theme.btnHeightGhost
-                        text: "全选"
+                    IconButton {
+                        text:"☑ 全选"
+                        tooltip: "全部启用"
+                        accent: "ghost"
                         onClicked: configController.selectAllExtractors()
                     }
-                    Button {
-                        Layout.preferredHeight: theme.btnHeightGhost
-                        text: "全不选"
+                    IconButton {
+                        text:"☐ 全不选"
+                        tooltip: "全部禁用"
+                        accent: "ghost"
                         onClicked: configController.unselectAllExtractors()
                     }
                     Item { Layout.fillWidth: true }
@@ -309,25 +298,11 @@ Item {
                         color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                         Layout.fillWidth: true
                     }
-                    Button {
-                        Layout.preferredHeight: theme.btnHeightGhost
-                        text: "清除历史"
+                    IconButton {
+                        text:"🗑 清除"
+                        tooltip: "清除全部路径历史"
+                        accent: "ghost"
                         onClicked: configController.clearScanPaths()
-                        background: Rectangle {
-                            color: parent.down
-                                  ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                                  : "transparent"
-                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                            border.width: 1
-                            radius: theme.btnRadiusGhost
-                        }
-                        contentItem: Label {
-                            text: parent.text
-                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                            font.pixelSize: 11
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
                     }
                 }
                 ListView {

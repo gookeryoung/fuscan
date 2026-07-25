@@ -4,6 +4,7 @@ import QtQuick.Layouts 1.15
 import QtQuick.Dialogs 1.3
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
+import "../components"
 
 // 添加任务页：新建工作区表单
 Item {
@@ -152,10 +153,10 @@ Item {
                         Layout.fillWidth: true
                         elide: Text.ElideMiddle
                     }
-                    Button {
-                        Layout.preferredHeight: theme.btnHeightGhost
-                        Layout.preferredWidth: 32
-                        text: "×"
+                    IconButton {
+                        text:"✕"
+                        tooltip: "移除该规则文件"
+                        accent: "ghost"
                         onClicked: {
                             var paths = rulesPaths.slice()
                             paths.splice(index, 1)
@@ -164,25 +165,11 @@ Item {
                     }
                 }
             }
-            Button {
-                Layout.preferredHeight: theme.btnHeightSecondary
-                text: "➕ 添加规则文件"
+            IconButton {
+                text:"➕ 添加规则文件"
+                tooltip: "选择规则文件"
+                accent: "secondary"
                 onClicked: rulesFileDialog.open()
-                background: Rectangle {
-                    color: parent.down
-                          ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                          : "transparent"
-                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                    border.width: 1
-                    radius: theme.btnRadiusSecondary
-                }
-                contentItem: Label {
-                    text: parent.text
-                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                    font.pixelSize: 12
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
             }
 
             Item { Layout.fillHeight: true }  // 弹性撑开
@@ -192,29 +179,16 @@ Item {
                 Layout.fillWidth: true
                 spacing: 8
                 Item { Layout.fillWidth: true }
-                Button {
-                    Layout.preferredHeight: theme.btnHeightSecondary
-                    text: "取消"
+                IconButton {
+                    text:"✕"
+                    tooltip: "取消"
+                    accent: "ghost"
                     onClicked: addTaskPage.cancelRequested()
-                    background: Rectangle {
-                        color: parent.down
-                              ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                              : "transparent"
-                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                        border.width: 1
-                        radius: theme.btnRadiusSecondary
-                    }
-                    contentItem: Label {
-                        text: parent.text
-                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                        font.pixelSize: 12
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
                 }
-                Button {
-                    Layout.preferredHeight: theme.btnHeightPrimary
-                    text: "创建任务"
+                IconButton {
+                    text:"✓ 创建任务"
+                    tooltip: "创建扫描任务并返回首页"
+                    accent: "primary"
                     enabled: modeIndex === 0 || (modeIndex === 1 && selectedDrive.length > 0)
                              || (modeIndex === 2 && folderRoot.length > 0)
                     onClicked: {
@@ -224,21 +198,6 @@ Item {
                         workspaceController.addWorkspace(taskName, modeStr, target, rulesJson, useBuiltin)
                         addTaskPage.resetForm()
                         addTaskPage.created()
-                    }
-                    background: Rectangle {
-                        color: parent.enabled
-                          ? (parent.down ? theme.colorPrimaryDark : theme.colorPrimary)
-                          : theme.colorBorder
-                        radius: theme.btnRadiusPrimary
-                        Behavior on color { ColorAnimation { duration: 120 } }
-                    }
-                    contentItem: Label {
-                        text: parent.text
-                        color: theme.colorTextOnPrimary
-                        font.pixelSize: 13
-                        font.bold: true
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
                     }
                 }
             }
@@ -332,25 +291,11 @@ Item {
                         radius: theme.btnRadiusSecondary
                     }
                 }
-                Button {
-                    Layout.preferredHeight: theme.btnHeightSecondary
-                    text: "选择..."
+                IconButton {
+                    text:"📁 选择"
+                    tooltip: "选择扫描目录"
+                    accent: "secondary"
                     onClicked: folderDialog.open()
-                    background: Rectangle {
-                        color: parent.down
-                              ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                              : "transparent"
-                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                        border.width: 1
-                        radius: theme.btnRadiusSecondary
-                    }
-                    contentItem: Label {
-                        text: parent.text
-                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                        font.pixelSize: 12
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
                 }
             }
         }

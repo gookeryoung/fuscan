@@ -4,177 +4,358 @@ import QtQuick.Layouts 1.15
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
 
+// 设置页：TabBar 分组切换，避免单页滚动过长
 Item {
     id: settingsPage
     property ThemeController theme: Theme
     property ConfigControllerType configController: ConfigController
 
-    ScrollView {
+    ColumnLayout {
         anchors.fill: parent
-        clip: true
-        ColumnLayout {
-            width: settingsPage.width
-            spacing: 20
+        anchors.margins: 0
+        spacing: 0
 
-            // 标题
-            RowLayout {
-                Layout.fillWidth: true
-                Label {
-                    text: "设置"
-                    font.pixelSize: 22
-                    font.bold: true
-                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+        // ---------- 标题栏 ----------
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.leftMargin: 0
+            Layout.rightMargin: 0
+            spacing: 12
+            Label {
+                text: "设置"
+                font.pixelSize: theme.fontSizePageTitle
+                font.bold: true
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+            }
+            Item { Layout.fillWidth: true }
+            Button {
+                Layout.preferredHeight: theme.btnHeightGhost
+                text: "重置默认"
+                onClicked: configController.resetToDefaults()
+                background: Rectangle {
+                    color: parent.down
+                          ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
+                          : "transparent"
+                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                    border.width: 1
+                    radius: theme.btnRadiusGhost
                 }
-                Item { Layout.fillWidth: true }
-                Button {
-                    Layout.preferredHeight: theme.btnHeightGhost
-                    text: "重置默认"
-                    onClicked: configController.resetToDefaults()
-                    background: Rectangle {
-                        color: parent.down
-                              ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                              : "transparent"
-                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                        border.width: 1
-                        radius: theme.btnRadiusGhost
-                    }
-                    contentItem: Label {
-                        text: parent.text
-                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                        font.pixelSize: 11
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
+                contentItem: Label {
+                    text: parent.text
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    font.pixelSize: 11
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+        }
+
+        // ---------- TabBar ----------
+        TabBar {
+            id: settingsTabBar
+            Layout.fillWidth: true
+            Layout.topMargin: 8
+            spacing: 0
+            currentIndex: 0
+            background: Rectangle {
+                color: "transparent"
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    width: parent.width
+                    height: 1
+                    color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                }
+            }
+            TabButton {
+                text: "扫描"
+                height: theme.btnHeightSecondary
+                contentItem: Label {
+                    text: parent.text
+                    color: parent.checked
+                          ? theme.colorPrimary
+                          : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
+                    font.pixelSize: theme.fontSizeBody
+                    font.bold: parent.checked
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: "transparent"
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: parent.width - 16
+                        height: 2
+                        color: parent.checked ? theme.colorPrimary : "transparent"
                     }
                 }
             }
-
-            // ---------- 扫描设置 ----------
-            GroupBox {
-                Layout.fillWidth: true
-                title: "扫描设置"
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 8
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Label {
-                            text: "扫描压缩包"
-                            Layout.fillWidth: true
-                        }
-                        Switch {
-                            checked: configController.scanArchives
-                            onCheckedChanged: configController.setScanArchives(checked)
-                        }
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Label {
-                            text: "最大工作线程"
-                            Layout.fillWidth: true
-                        }
-                        SpinBox {
-                            from: 1
-                            to: 16
-                            value: configController.maxWorkers
-                            onValueChanged: configController.setMaxWorkers(value)
-                        }
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Label {
-                            text: "最大文件大小（MB）"
-                            Layout.fillWidth: true
-                        }
-                        SpinBox {
-                            from: 1
-                            to: 500
-                            value: configController.maxFileSizeMB
-                            onValueChanged: configController.setMaxFileSizeMB(value)
-                        }
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Label {
-                            text: "最大扫描深度（0=无限）"
-                            Layout.fillWidth: true
-                        }
-                        SpinBox {
-                            from: 0
-                            to: 50
-                            value: configController.maxDepth
-                            onValueChanged: configController.setMaxDepth(value)
-                        }
+            TabButton {
+                text: "文件类型"
+                height: theme.btnHeightSecondary
+                contentItem: Label {
+                    text: parent.text
+                    color: parent.checked
+                          ? theme.colorPrimary
+                          : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
+                    font.pixelSize: theme.fontSizeBody
+                    font.bold: parent.checked
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: "transparent"
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: parent.width - 16
+                        height: 2
+                        color: parent.checked ? theme.colorPrimary : "transparent"
                     }
                 }
             }
-
-            // ---------- 文件类型 ----------
-            GroupBox {
-                Layout.fillWidth: true
-                title: "文件类型（勾选启用）"
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 8
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Button {
-                            Layout.preferredHeight: theme.btnHeightGhost
-                            text: "全选"
-                            onClicked: configController.selectAllExtractors()
-                        }
-                        Button {
-                            Layout.preferredHeight: theme.btnHeightGhost
-                            text: "全不选"
-                            onClicked: configController.unselectAllExtractors()
-                        }
-                        Item { Layout.fillWidth: true }
-                        Label {
-                            text: configController.extractorCountText
-                            font.pixelSize: 11
-                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                        }
+            TabButton {
+                text: "忽略目录"
+                height: theme.btnHeightSecondary
+                contentItem: Label {
+                    text: parent.text
+                    color: parent.checked
+                          ? theme.colorPrimary
+                          : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
+                    font.pixelSize: theme.fontSizeBody
+                    font.bold: parent.checked
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: "transparent"
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: parent.width - 16
+                        height: 2
+                        color: parent.checked ? theme.colorPrimary : "transparent"
                     }
-                    ListView {
+                }
+            }
+            TabButton {
+                text: "路径历史"
+                height: theme.btnHeightSecondary
+                contentItem: Label {
+                    text: parent.text
+                    color: parent.checked
+                          ? theme.colorPrimary
+                          : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
+                    font.pixelSize: theme.fontSizeBody
+                    font.bold: parent.checked
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    color: "transparent"
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: parent.width - 16
+                        height: 2
+                        color: parent.checked ? theme.colorPrimary : "transparent"
+                    }
+                }
+            }
+        }
+
+        // ---------- 内容区（StackLayout 切换） ----------
+        StackLayout {
+            id: settingsStack
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            currentIndex: settingsTabBar.currentIndex
+
+            // ===== Tab 1: 扫描 =====
+            ScrollView {
+                clip: true
+                contentWidth: availableWidth
+                ColumnLayout {
+                    width: settingsStack.width
+                    spacing: 16
+
+                    GroupBox {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 200
-                        clip: true
-                        model: configController.extractorModel
-                        delegate: ItemDelegate {
-                            width: parent.width
-                            height: 32
+                        title: "扫描参数"
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 8
                             RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 8
-                                CheckBox {
-                                    checked: model.enabled
-                                    onCheckedChanged: configController.setExtractorEnabled(model.className, checked)
-                                }
+                                Layout.fillWidth: true
                                 Label {
-                                    text: model.displayName
-                                    font.pixelSize: 12
+                                    text: "扫描压缩包"
+                                    Layout.fillWidth: true
                                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                 }
-                                Item { Layout.fillWidth: true }
-                                Label {
-                                    text: model.speedTierText
-                                    font.pixelSize: 11
-                                    color: model.speedTierColor
+                                Switch {
+                                    checked: configController.scanArchives
+                                    onCheckedChanged: configController.setScanArchives(checked)
                                 }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label {
+                                    text: "最大工作线程"
+                                    Layout.fillWidth: true
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                }
+                                SpinBox {
+                                    from: 1
+                                    to: 16
+                                    value: configController.maxWorkers
+                                    onValueChanged: configController.setMaxWorkers(value)
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label {
+                                    text: "最大文件大小（MB）"
+                                    Layout.fillWidth: true
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                }
+                                SpinBox {
+                                    from: 1
+                                    to: 500
+                                    value: configController.maxFileSizeMB
+                                    onValueChanged: configController.setMaxFileSizeMB(value)
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label {
+                                    text: "最大扫描深度（0=无限）"
+                                    Layout.fillWidth: true
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                }
+                                SpinBox {
+                                    from: 0
+                                    to: 50
+                                    value: configController.maxDepth
+                                    onValueChanged: configController.setMaxDepth(value)
+                                }
+                            }
+                        }
+                    }
+
+                    GroupBox {
+                        Layout.fillWidth: true
+                        title: "缓存"
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 8
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label {
+                                    text: "启用扫描结果缓存"
+                                    Layout.fillWidth: true
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                }
+                                Switch {
+                                    checked: configController.cacheEnabled
+                                    onCheckedChanged: configController.setCacheEnabled(checked)
+                                }
+                            }
+                        }
+                    }
+
+                    GroupBox {
+                        Layout.fillWidth: true
+                        title: "性能"
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 8
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label {
+                                    text: "启用性能详细日志"
+                                    Layout.fillWidth: true
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                }
+                                Switch {
+                                    checked: configController.perfLogEnabled
+                                    onCheckedChanged: configController.setPerfLogEnabled(checked)
+                                }
+                            }
+                        }
+                    }
+                    Item { Layout.fillHeight: true }
+                }
+            }
+
+            // ===== Tab 2: 文件类型 =====
+            ColumnLayout {
+                spacing: 8
+                RowLayout {
+                    Layout.fillWidth: true
+                    Button {
+                        Layout.preferredHeight: theme.btnHeightGhost
+                        text: "全选"
+                        onClicked: configController.selectAllExtractors()
+                    }
+                    Button {
+                        Layout.preferredHeight: theme.btnHeightGhost
+                        text: "全不选"
+                        onClicked: configController.unselectAllExtractors()
+                    }
+                    Item { Layout.fillWidth: true }
+                    Label {
+                        text: configController.extractorCountText
+                        font.pixelSize: 11
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    }
+                }
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    model: configController.extractorModel
+                    delegate: ItemDelegate {
+                        width: ListView.view.width
+                        height: 32
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 8
+                            CheckBox {
+                                checked: model.enabled
+                                onCheckedChanged: configController.setExtractorEnabled(model.className, checked)
+                            }
+                            Label {
+                                text: model.displayName
+                                font.pixelSize: 12
+                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                Layout.fillWidth: true
+                            }
+                            Label {
+                                text: model.speedTierText
+                                font.pixelSize: 11
+                                color: model.speedTierColor
                             }
                         }
                     }
                 }
             }
 
-            // ---------- 忽略目录 ----------
-            GroupBox {
-                Layout.fillWidth: true
-                title: "忽略目录（一行一个）"
+            // ===== Tab 3: 忽略目录 =====
+            ColumnLayout {
+                spacing: 8
+                Label {
+                    text: "一行一个目录名（扫描时跳过匹配目录）"
+                    font.pixelSize: 11
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                }
                 TextArea {
-                    anchors.fill: parent
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
                     text: configController.ignoreDirsText
                     onTextChanged: configController.setIgnoreDirsText(text)
                     font.pixelSize: 12
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    wrapMode: TextArea.Wrap
                     background: Rectangle {
                         color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
                         border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
@@ -184,78 +365,55 @@ Item {
                 }
             }
 
-            // ---------- 缓存设置 ----------
-            GroupBox {
-                Layout.fillWidth: true
-                title: "缓存设置"
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 8
-                    RowLayout {
+            // ===== Tab 4: 路径历史 =====
+            ColumnLayout {
+                spacing: 8
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: "扫描路径历史（最近优先，去重）"
+                        font.pixelSize: 11
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                         Layout.fillWidth: true
-                        Label {
-                            text: "启用扫描结果缓存"
-                            Layout.fillWidth: true
-                        }
-                        Switch {
-                            checked: configController.cacheEnabled
-                            onCheckedChanged: configController.setCacheEnabled(checked)
-                        }
-                    }
-                }
-            }
-
-            // ---------- 性能 ----------
-            GroupBox {
-                Layout.fillWidth: true
-                title: "性能"
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 8
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Label {
-                            text: "启用性能详细日志"
-                            Layout.fillWidth: true
-                        }
-                        Switch {
-                            checked: configController.perfLogEnabled
-                            onCheckedChanged: configController.setPerfLogEnabled(checked)
-                        }
-                    }
-                }
-            }
-
-            // ---------- 路径历史 ----------
-            GroupBox {
-                Layout.fillWidth: true
-                title: "扫描路径历史"
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 8
-                    ListView {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 120
-                        clip: true
-                        model: configController.scanPaths
-                        delegate: ItemDelegate {
-                            width: parent.width
-                            height: 28
-                            Label {
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.left: parent.left
-                                anchors.leftMargin: 8
-                                text: modelData
-                                font.pixelSize: 12
-                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                elide: Text.ElideMiddle
-                            }
-                        }
                     }
                     Button {
                         Layout.preferredHeight: theme.btnHeightGhost
                         text: "清除历史"
                         onClicked: configController.clearScanPaths()
+                        background: Rectangle {
+                            color: parent.down
+                                  ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
+                                  : "transparent"
+                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                            border.width: 1
+                            radius: theme.btnRadiusGhost
+                        }
+                        contentItem: Label {
+                            text: parent.text
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            font.pixelSize: 11
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                }
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    model: configController.scanPaths
+                    delegate: ItemDelegate {
+                        width: ListView.view.width
+                        height: 28
+                        Label {
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.left: parent.left
+                            anchors.leftMargin: 8
+                            text: modelData
+                            font.pixelSize: 12
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            elide: Text.ElideMiddle
+                        }
                     }
                 }
             }

@@ -84,6 +84,7 @@ packages = ["src/fuscan"]
 "src/fuscan/gui/views/NavItem.qml" = "fuscan/gui/views/NavItem.qml"
 "src/fuscan/gui/views/components/WorkspaceCard.qml" = "fuscan/gui/views/components/WorkspaceCard.qml"
 "src/fuscan/gui/views/components/IconButton.qml" = "fuscan/gui/views/components/IconButton.qml"
+"src/fuscan/gui/views/components/ScanProgressCard.qml" = "fuscan/gui/views/components/ScanProgressCard.qml"
 "src/fuscan/gui/views/pages/HomePage.qml" = "fuscan/gui/views/pages/HomePage.qml"
 "src/fuscan/gui/views/pages/AddTaskPage.qml" = "fuscan/gui/views/pages/AddTaskPage.qml"
 "src/fuscan/gui/views/pages/RulesPage.qml" = "fuscan/gui/views/pages/RulesPage.qml"

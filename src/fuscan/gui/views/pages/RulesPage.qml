@@ -111,6 +111,9 @@ Item {
                             text: modelData.fileName
                             font.pixelSize: 12
                             highlighted: ListView.isCurrentItem
+                            // ItemDelegate 在 Qt Quick Controls 2 不会自动设置
+                            // ListView.currentIndex，需在 onClicked 显式同步选中
+                            onClicked: rulesFileList.currentIndex = index
                             background: Rectangle {
                                 color: ListView.isCurrentItem
                                     ? (theme.isDark ? theme.colorBgSelectedDark : theme.colorBgSelected)

@@ -1,4 +1,4 @@
-﻿"""``WorkspaceController`` 与 ``WorkspaceListModel`` 单元测试。
+"""``WorkspaceController`` 与 ``WorkspaceListModel`` 单元测试。
 
 覆盖：
 
@@ -811,3 +811,217 @@ class TestCleanup:
     def test_cleanup_no_workspaces_noop(self, controller: WorkspaceController) -> None:
         """无工作区时 cleanup 不应抛异常。"""
         controller.cleanup()
+
+
+class TestActiveScan:
+    """``activeScanWorkspaceId`` / ``hasActiveScan`` / ``activeScanController`` 等。
+
+    验证扫描中（含暂停态）工作区被标记为 active，扫描结束后清空，
+    HomePage 据此切换扫描进度面板与工作区列表视图。
+    """
+
+    def test_initial_no_active_scan(self, controller: WorkspaceController) -> None:
+        """构造初始应无扫描任务进行。"""
+        assert controller.activeScanWorkspaceId == ""
+        assert controller.hasActiveScan is False
+
+    def test_active_scan_set_when_scanning(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """工作区进入 scanning 态应被标记为 active。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        sc._scan_state = "scanning"  # type: ignore[attr-defined]
+        sc._is_paused = False  # type: ignore[attr-defined]
+
+        controller._sync_workspace_state(ws_id)
+
+        assert controller.activeScanWorkspaceId == ws_id
+        assert controller.hasActiveScan is True
+
+    def test_paused_keeps_active(self, controller: WorkspaceController) -> None:
+        """暂停态（scanning + isPaused=True）应保留 active。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        sc._scan_state = "scanning"  # type: ignore[attr-defined]
+        sc._is_paused = False  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+        assert controller.hasActiveScan is True
+
+        # 切到暂停
+        sc._is_paused = True  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+        assert controller.hasActiveScan is True
+        assert controller.activeScanWorkspaceId == ws_id
+
+    def test_results_clears_active(self, controller: WorkspaceController) -> None:
+        """扫描完成（results 态）应清空 active。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        # 进入扫描
+        sc._scan_state = "scanning"  # type: ignore[attr-defined]
+        sc._is_paused = False  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+        assert controller.hasActiveScan is True
+        # 完成
+        sc._scan_state = "results"  # type: ignore[attr-defined]
+        sc._status_text = "已完成"  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+        assert controller.hasActiveScan is False
+        assert controller.activeScanWorkspaceId == ""
+
+    def test_setup_clears_active(self, controller: WorkspaceController) -> None:
+        """扫描取消/失败回 setup 态应清空 active。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        sc._scan_state = "scanning"  # type: ignore[attr-defined]
+        sc._is_paused = False  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+        # 取消回 setup
+        sc._scan_state = "setup"  # type: ignore[attr-defined]
+        sc._status_text = "已取消"  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+        assert controller.hasActiveScan is False
+
+    def test_active_scan_controller_returns_associated(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """activeScanController 应返回扫描中工作区的 ScanController。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        sc._scan_state = "scanning"  # type: ignore[attr-defined]
+        sc._is_paused = False  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+
+        active_sc = controller.activeScanController
+        assert active_sc is sc
+
+    def test_active_scan_controller_fallback_when_no_active(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """无扫描任务时 activeScanController 应返回兜底实例。"""
+        sc = controller.activeScanController
+        assert isinstance(sc, ScanController)
+
+    def test_active_scan_workspace_metadata(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """activeScanWorkspaceName/ModeText/Target 应返回工作区元数据。"""
+        ws_id = controller.addWorkspace("我的任务", "full", "", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        sc._scan_state = "scanning"  # type: ignore[attr-defined]
+        sc._is_paused = False  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+
+        assert controller.activeScanWorkspaceName == "我的任务"
+        assert controller.activeScanModeText == "全盘扫描"
+        assert controller.activeScanTarget == ""
+
+    def test_active_scan_metadata_empty_when_no_active(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """无扫描任务时元数据 Property 应返回空串。"""
+        assert controller.activeScanWorkspaceName == ""
+        assert controller.activeScanModeText == ""
+        assert controller.activeScanTarget == ""
+
+    def test_active_scan_changed_emitted_on_enter(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """进入扫描态应 emit activeScanChanged。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        emitted: list[None] = []
+        controller.activeScanChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
+
+        sc._scan_state = "scanning"  # type: ignore[attr-defined]
+        sc._is_paused = False  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+        assert len(emitted) == 1
+
+    def test_active_scan_changed_emitted_on_exit(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """离开扫描态应 emit activeScanChanged。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        # 先进入扫描
+        sc._scan_state = "scanning"  # type: ignore[attr-defined]
+        sc._is_paused = False  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+
+        emitted: list[None] = []
+        controller.activeScanChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
+        # 完成
+        sc._scan_state = "results"  # type: ignore[attr-defined]
+        sc._status_text = "已完成"  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+        assert len(emitted) == 1
+
+    def test_active_scan_changed_not_emitted_when_no_change(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """状态不变时不应 emit activeScanChanged。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        sc._scan_state = "scanning"  # type: ignore[attr-defined]
+        sc._is_paused = False  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+
+        emitted: list[None] = []
+        controller.activeScanChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
+        # 仍是 scanning 态，仅进度变化
+        sc._progress_scanned = 100  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+        assert len(emitted) == 0
+
+    def test_remove_active_workspace_clears_active(
+        self,
+        controller: WorkspaceController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """删除扫描中的工作区应清空 active 状态。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        sc._scan_state = "scanning"  # type: ignore[attr-defined]
+        sc._is_paused = False  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+        assert controller.hasActiveScan is True
+
+        # mock cleanup 避免触发 worker 清理
+        monkeypatch.setattr(sc, "cleanup", lambda: None)
+        controller.removeWorkspace(ws_id)
+        assert controller.hasActiveScan is False
+        assert controller.activeScanWorkspaceId == ""
+
+    def test_cleanup_clears_active(self, controller: WorkspaceController) -> None:
+        """cleanup 应清空 active 状态。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        sc._scan_state = "scanning"  # type: ignore[attr-defined]
+        sc._is_paused = False  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+        assert controller.hasActiveScan is True
+
+        controller.cleanup()
+        assert controller.hasActiveScan is False
+        assert controller.activeScanWorkspaceId == ""

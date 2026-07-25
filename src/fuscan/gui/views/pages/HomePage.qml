@@ -43,24 +43,64 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             Label {
-                text: "工作区"
+                text: workspaceController.hasActiveScan ? "扫描中" : "工作区"
                 font.pixelSize: theme.fontSizePageTitle
                 font.bold: true
                 color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
             }
             Item { Layout.fillWidth: true }
             Label {
-                text: "共 " + workspaceController.workspaceCount + " 个任务"
+                // 扫描中隐藏任务计数，避免与扫描进度面板信息冗余
+                text: workspaceController.hasActiveScan
+                    ? "扫描进行中..."
+                    : ("共 " + workspaceController.workspaceCount + " 个任务")
                 font.pixelSize: theme.fontSizeSmall
                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
             }
         }
 
-        // ---------- 工作区列表 ----------
+        // ---------- 扫描进度面板（扫描中/暂停中显示，隐藏其余工作区） ----------
         ScrollView {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
+            visible: workspaceController.hasActiveScan
+
+            // 居中展示进度卡片，避免内容贴边
+            ColumnLayout {
+                width: parent.width
+                spacing: 12
+
+                Item { Layout.fillHeight: true; Layout.preferredHeight: 40 }
+
+                ScanProgressCard {
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: 720
+                    Layout.alignment: Qt.AlignHCenter
+                    workspaceId: workspaceController.activeScanWorkspaceId
+                    taskName: workspaceController.activeScanWorkspaceName
+                    modeText: workspaceController.activeScanModeText
+                    target: workspaceController.activeScanTarget
+                }
+
+                // 提示：扫描结束后自动恢复工作区列表
+                Label {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: "扫描结束后自动恢复工作区列表"
+                    font.pixelSize: 11
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                }
+
+                Item { Layout.fillHeight: true; Layout.preferredHeight: 40 }
+            }
+        }
+
+        // ---------- 工作区列表（无扫描任务时显示） ----------
+        ScrollView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            visible: !workspaceController.hasActiveScan
 
             ListView {
                 id: workspaceList

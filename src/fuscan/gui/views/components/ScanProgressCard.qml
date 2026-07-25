@@ -1,0 +1,240 @@
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+import fuscan.theme 1.0
+import fuscan.controllers 1.0
+
+// 扫描进度卡片：扫描中（含暂停态）显示，承载实时进度与控制按钮。
+// HomePage 在 hasActiveScan=true 时用此卡片替换工作区列表，
+// 隐藏其余工作区以聚焦当前扫描任务（用户需求：扫描结束才显示其余工作区）。
+Rectangle {
+    id: card
+    property ThemeController theme: Theme
+    property WorkspaceControllerType workspaceController: WorkspaceController
+
+    // 由 HomePage 注入：扫描中的工作区 ID 与展示字段
+    property string workspaceId: ""
+    property string taskName: ""
+    property string modeText: ""
+    property string target: ""
+
+    // 便捷别名：当前扫描控制器（已在 WorkspaceController.activeScanController 暴露）
+    property ScanControllerType scanController: workspaceController.activeScanController
+
+    implicitHeight: contentColumn.implicitHeight + 32
+    color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+    border.width: 1
+    radius: theme.radiusLg
+
+    // 状态色：扫描中=warning（黄），已暂停=text secondary
+    function statusColor() {
+        if (scanController.isPaused) return theme.colorTextSecondary
+        return theme.colorWarning
+    }
+
+    function statusText() {
+        if (scanController.isPaused) return "已暂停"
+        return "扫描中"
+    }
+
+    ColumnLayout {
+        id: contentColumn
+        anchors.fill: parent
+        anchors.margins: 20
+        spacing: 16
+
+        // ---------- 第一行：任务名 + 状态徽标 ----------
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+
+            Label {
+                text: "📋"
+                font.pixelSize: 18
+            }
+            Label {
+                text: taskName
+                font.pixelSize: theme.fontSizeHeading
+                font.bold: true
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+            }
+            // 状态徽标
+            Rectangle {
+                radius: 10
+                height: 24
+                width: statusBadgeLabel.width + 18
+                color: card.statusColor()
+                Label {
+                    id: statusBadgeLabel
+                    anchors.centerIn: parent
+                    text: card.statusText()
+                    font.pixelSize: 11
+                    font.bold: true
+                    color: theme.colorTextOnPrimary
+                }
+            }
+        }
+
+        // ---------- 第二行：任务元数据 ----------
+        GridLayout {
+            Layout.fillWidth: true
+            columns: 2
+            columnSpacing: 16
+            rowSpacing: 4
+
+            Label {
+                text: "模式"
+                font.pixelSize: 11
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+            }
+            Label {
+                text: modeText
+                font.pixelSize: 12
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+            }
+            Label {
+                text: "目标"
+                font.pixelSize: 11
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+            }
+            Label {
+                text: target || "—"
+                font.pixelSize: 12
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                Layout.fillWidth: true
+                elide: Text.ElideMiddle
+            }
+        }
+
+        // ---------- 第三行：当前文件 ----------
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 4
+
+            Label {
+                text: "当前文件"
+                font.pixelSize: 11
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+            }
+            Label {
+                Layout.fillWidth: true
+                text: scanController.currentFile || "—"
+                font.pixelSize: 12
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                elide: Text.ElideMiddle
+                // 暂停态淡化提示
+                opacity: scanController.isPaused ? 0.6 : 1.0
+            }
+        }
+
+        // ---------- 第四行：进度条 ----------
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 4
+
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: "进度"
+                    font.pixelSize: 11
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                }
+                Item { Layout.fillWidth: true }
+                Label {
+                    text: scanController.progressIndeterminate
+                        ? "统计中..."
+                        : (scanController.progressScanned + " / " + scanController.progressTotal)
+                    font.pixelSize: 11
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                }
+            }
+            ProgressBar {
+                id: progressBar
+                Layout.fillWidth: true
+                // 不确定模式（统计阶段）走 ProgressBar 默认动画
+                indeterminate: scanController.progressIndeterminate
+                from: 0.0
+                to: Math.max(scanController.progressTotal, 1)
+                value: scanController.progressScanned
+                background: Rectangle {
+                    implicitHeight: 6
+                    color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                    radius: 3
+                }
+                contentItem: Item {
+                    implicitHeight: 6
+                    Rectangle {
+                        width: progressBar.visualPosition * parent.width
+                        height: parent.height
+                        radius: 3
+                        color: card.statusColor()
+                        // 进度变化平滑过渡
+                        Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+                    }
+                }
+            }
+        }
+
+        // ---------- 第五行：分类计数 ----------
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 16
+
+            Label {
+                text: "<b style='color:#28A745'>通过 " + scanController.passedCount + "</b>"
+                textFormat: Text.RichText
+                font.pixelSize: 12
+            }
+            Label {
+                text: "<b style='color:#DC3545'>命中 " + scanController.matchedCount + "</b>"
+                textFormat: Text.RichText
+                font.pixelSize: 12
+            }
+            Label {
+                text: "<b style='color:#FFC107'>跳过 " + scanController.skippedCount + "</b>"
+                textFormat: Text.RichText
+                font.pixelSize: 12
+            }
+            Label {
+                text: "<b style='color:#DC3545'>错误 " + scanController.errorCount + "</b>"
+                textFormat: Text.RichText
+                font.pixelSize: 12
+            }
+            Item { Layout.fillWidth: true }
+        }
+
+        // ---------- 第六行：状态摘要 + 控制按钮 ----------
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+
+            Label {
+                Layout.fillWidth: true
+                text: scanController.statusSummary
+                font.pixelSize: 11
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                elide: Text.ElideRight
+            }
+
+            // 暂停/继续按钮：扫描中显示「暂停」，已暂停显示「继续」
+            IconButton {
+                text: scanController.isPaused ? "▶ 继续" : "⏸ 暂停"
+                tooltip: scanController.isPaused ? "继续扫描" : "暂停扫描"
+                accent: "secondary"
+                onClicked: workspaceController.togglePause(card.workspaceId)
+            }
+            // 取消按钮：危险操作
+            IconButton {
+                text: "⏹ 取消"
+                tooltip: "取消扫描"
+                accent: "danger"
+                onClicked: workspaceController.cancelScan(card.workspaceId)
+            }
+        }
+    }
+}

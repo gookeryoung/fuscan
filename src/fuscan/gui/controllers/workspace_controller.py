@@ -66,6 +66,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     workspaceListChanged = Signal()
     currentWorkspaceChanged = Signal()
+    # 当前扫描中（含暂停态）工作区变化：HomePage 据此切换扫描进度面板
+    activeScanChanged = Signal()
 
     def __init__(
         self,
@@ -79,6 +81,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._model = WorkspaceListModel(self)
         self._scan_controllers: dict[str, ScanController] = {}
         self._current_workspace_id: str = ""
+        # 当前扫描中（含暂停态）工作区 ID；空串表示无扫描任务进行
+        self._active_scan_workspace_id: str = ""
         # 恢复持久化的工作区
         self._load_persisted()
 
@@ -128,6 +132,52 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def hasCurrentWorkspace(self) -> bool:
         """是否有当前选中工作区。"""
         return bool(self._current_workspace_id) and self._current_workspace_id in self._scan_controllers
+
+    @Property(str, notify=activeScanChanged)  # pyrefly: ignore [not-callable]
+    def activeScanWorkspaceId(self) -> str:
+        """当前扫描中（含暂停态）工作区 ID；空串表示无扫描任务进行。
+
+        HomePage 据此决定显示扫描进度面板还是工作区列表：扫描进行/暂停期间
+        隐藏其他工作区，扫描结束（完成/取消/失败）后清空，恢复显示所有工作区。
+        """
+        return self._active_scan_workspace_id
+
+    @Property(bool, notify=activeScanChanged)  # pyrefly: ignore [not-callable]
+    def hasActiveScan(self) -> bool:
+        """是否存在扫描中（含暂停态）的工作区。"""
+        return bool(self._active_scan_workspace_id) and self._active_scan_workspace_id in self._scan_controllers
+
+    @Property(ScanController, notify=activeScanChanged)  # pyrefly: ignore [not-callable]
+    def activeScanController(self) -> ScanController:
+        """当前扫描中工作区的 :class:`ScanController` 实例。
+
+        无扫描任务时返回 :attr:`currentScanController` 的兜底实例，
+        避免 QML 绑定 null 报错（与 :attr:`currentScanController` 同策略）。
+        """
+        if self._active_scan_workspace_id and self._active_scan_workspace_id in self._scan_controllers:
+            return self._scan_controllers[self._active_scan_workspace_id]
+        # 兜底：复用 currentScanController 的 fallback 实例
+        if not hasattr(self, "_fallback_controller"):
+            self._fallback_controller = ScanController(self._config_controller, self._rules_controller, self)
+        return self._fallback_controller
+
+    @Property(str, notify=activeScanChanged)  # pyrefly: ignore [not-callable]
+    def activeScanWorkspaceName(self) -> str:
+        """当前扫描中工作区名称（供 ScanProgressCard 展示）。"""
+        item = self._model.get_workspace(self._active_scan_workspace_id)
+        return item.name if item is not None else ""
+
+    @Property(str, notify=activeScanChanged)  # pyrefly: ignore [not-callable]
+    def activeScanModeText(self) -> str:
+        """当前扫描中工作区的扫描模式文本。"""
+        item = self._model.get_workspace(self._active_scan_workspace_id)
+        return item.mode_text if item is not None else ""
+
+    @Property(str, notify=activeScanChanged)  # pyrefly: ignore [not-callable]
+    def activeScanTarget(self) -> str:
+        """当前扫描中工作区的目标路径。"""
+        item = self._model.get_workspace(self._active_scan_workspace_id)
+        return item.target if item is not None else ""
 
     # ----------------------------- QML 调用槽 -----------------------------
 
@@ -220,6 +270,10 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if self._current_workspace_id == ws_id:
             self._current_workspace_id = ""
             self.currentWorkspaceChanged.emit()  # pyrefly: ignore [missing-attribute]
+        # 若删除的是当前扫描中的工作区，清空 active 状态
+        if self._active_scan_workspace_id == ws_id:
+            self._active_scan_workspace_id = ""
+            self.activeScanChanged.emit()  # pyrefly: ignore [missing-attribute]
         self._persist()
         self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -273,6 +327,9 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         在 ScanController 的 scanStateChanged/progressChanged/statusChanged
         信号触发时调用，将状态/计数/摘要写回对应 WorkspaceItem。
+        同时维护 :attr:`_active_scan_workspace_id`：扫描中（含暂停态）的工作区
+        被标记为 active，扫描结束（完成/取消/失败/就绪）后清空，触发
+        :signal:`activeScanChanged` 通知 HomePage 切换视图。
         """
         controller = self._scan_controllers.get(ws_id)
         if controller is None:
@@ -282,6 +339,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return
 
         scan_state = controller.scanState
+        # scanning 态包含暂停（isPaused=True），仍视为 active
+        is_active = scan_state == "scanning"
         if scan_state == "scanning":
             status_text = "扫描中" if not controller.isPaused else "已暂停"
         elif scan_state == "results":
@@ -299,6 +358,15 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             last_summary=controller.statusSummary,
         )
 
+        # 同步 active scan 工作区 ID
+        if is_active:
+            if self._active_scan_workspace_id != ws_id:
+                self._active_scan_workspace_id = ws_id
+                self.activeScanChanged.emit()  # pyrefly: ignore [missing-attribute]
+        elif self._active_scan_workspace_id == ws_id:
+            self._active_scan_workspace_id = ""
+            self.activeScanChanged.emit()  # pyrefly: ignore [missing-attribute]
+
     def cleanup(self) -> None:
         """窗口关闭时清理所有 ScanController 资源。"""
         for controller in self._scan_controllers.values():
@@ -314,6 +382,10 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if self._current_workspace_id:
             self._current_workspace_id = ""
             self.currentWorkspaceChanged.emit()  # pyrefly: ignore [missing-attribute]
+        # 清理 active scan 工作区 ID
+        if self._active_scan_workspace_id:
+            self._active_scan_workspace_id = ""
+            self.activeScanChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     # ----------------------------- 持久化 -----------------------------
 

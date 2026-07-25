@@ -1,4 +1,4 @@
-﻿"""扫描工作流控制器：QML ↔ ScanWorker/FileStatsWorker 桥接。
+"""扫描工作流控制器：QML ↔ ScanWorker/FileStatsWorker 桥接。
 
 状态机三态：``setup`` → ``scanning`` → ``results``（取消/失败回 ``setup``）。
 所有耗时操作走 ``QThread`` Worker，QML 主线程仅渲染。
@@ -276,7 +276,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """当前规则集规则数。"""
         return len(self._ruleset.rules) if self._ruleset is not None else 0
 
-    @Property(QObject)  # pyrefly: ignore [not-callable]
+    @Property(QObject, notify=scanStateChanged)  # pyrefly: ignore [not-callable]
     def resultModel(self) -> ResultListModel:
         """结果列表模型。
 

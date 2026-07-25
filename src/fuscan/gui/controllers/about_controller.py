@@ -11,10 +11,10 @@ from __future__ import annotations
 import logging
 
 try:
-    from PySide2.QtCore import Property, QObject, QUrl, Slot
+    from PySide2.QtCore import Property, QObject, QUrl, Signal, Slot
     from PySide2.QtGui import QDesktopServices
 except ImportError:  # pragma: no cover
-    from PySide6.QtCore import Property, QObject, QUrl, Slot  # pyrefly: ignore [missing-import]
+    from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot  # pyrefly: ignore [missing-import]
     from PySide6.QtGui import QDesktopServices  # pyrefly: ignore [missing-import]
 
 from fuscan import __author__, __description__, __license__, __version__
@@ -48,30 +48,34 @@ _DEPENDENCIES: tuple[str, ...] = (
 class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
     """关于页控制器。"""
 
+    # 关于页内容为常量，运行时不变；QML 绑定要求 @Property 声明 NOTIFY，
+    # 否则报 "depends on non-NOTIFYable properties" 警告。共用一个信号即可。
+    infoChanged = Signal()
+
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
 
-    @Property(str)  # pyrefly: ignore [not-callable]
+    @Property(str, notify=infoChanged)  # pyrefly: ignore [not-callable]
     def version(self) -> str:
         """fuscan 版本号。"""
         return __version__
 
-    @Property(str)  # pyrefly: ignore [not-callable]
+    @Property(str, notify=infoChanged)  # pyrefly: ignore [not-callable]
     def description(self) -> str:
         """fuscan 描述。"""
         return __description__
 
-    @Property(str)  # pyrefly: ignore [not-callable]
+    @Property(str, notify=infoChanged)  # pyrefly: ignore [not-callable]
     def author(self) -> str:
         """作者。"""
         return __author__
 
-    @Property(str)  # pyrefly: ignore [not-callable]
+    @Property(str, notify=infoChanged)  # pyrefly: ignore [not-callable]
     def license(self) -> str:
         """License。"""
         return __license__
 
-    @Property("QVariantList")  # pyrefly: ignore [not-callable, bad-argument-type]
+    @Property("QVariantList", notify=infoChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
     def dependencies(self) -> list[str]:
         """第三方依赖列表。"""
         return list(_DEPENDENCIES)

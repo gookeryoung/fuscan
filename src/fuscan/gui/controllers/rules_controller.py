@@ -1,4 +1,4 @@
-﻿"""规则控制器：QML ↔ RuleSet/规则文件管理桥接。
+"""规则控制器：QML ↔ RuleSet/规则文件管理桥接。
 
 管理规则文件路径列表、内置规则勾选、规则集加载与合并。规则列表通过
 :class:`RuleListModel` 暴露给 QML ``ListView`` 绑定，规则文件列表通过
@@ -78,7 +78,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     # ----------------------------- QML 属性 -----------------------------
 
-    @Property(QObject)  # pyrefly: ignore [not-callable]
+    @Property(QObject, notify=rulesetChanged)  # pyrefly: ignore [not-callable]
     def ruleModel(self) -> RuleListModel:
         """规则列表模型。
 

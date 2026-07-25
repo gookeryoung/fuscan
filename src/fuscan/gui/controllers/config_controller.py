@@ -1,4 +1,4 @@
-﻿"""配置控制器：QML ↔ Config 持久化桥接。
+"""配置控制器：QML ↔ Config 持久化桥接。
 
 暴露 :class:`Config` 字段为 ``@Property``，QML 控件 ``onCheckedChanged``/
 ``onValueChanged`` 直接调用 setter 保存配置。同时管理盘符列表、扫描路径
@@ -152,7 +152,7 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     # ----------------------------- 文件类型（提取器勾选） -----------------------------
 
-    @Property(QObject)  # pyrefly: ignore [not-callable]
+    @Property(QObject, notify=configChanged)  # pyrefly: ignore [not-callable]
     def extractorModel(self) -> ExtractorListModel:
         """提取器勾选列表模型。
 

@@ -1367,3 +1367,206 @@ class TestScanControllerTaskOverrides:
 
         sc.setTaskOverride("max_file_size", 100 * 1024 * 1024)
         assert sc._effective_max_file_size() == 100 * 1024 * 1024  # type: ignore[attr-defined]
+
+    # ---------- iter-105 修复补充测试 ----------
+
+    def test_effective_max_depth_zero_means_unlimited(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """T1：max_depth=0 任务级覆盖应归一化为 None（与全局 setMaxDepth 一致）。
+
+        回归 B1 bug：未修复前 0 透传给 walker，被解释为「仅根目录直接子项」。
+        """
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+
+        sc.setTaskOverride("max_depth", 0)
+        # 修复后 0 应归一化为 None（无限深度）
+        assert sc._effective_max_depth() is None  # type: ignore[attr-defined]
+
+    def test_effective_max_depth_positive_passthrough(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """正数 max_depth 应原样透传。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+
+        sc.setTaskOverride("max_depth", 5)
+        assert sc._effective_max_depth() == 5  # type: ignore[attr-defined]
+
+
+class TestTaskOverrideRangeValidation:
+    """iter-105 M2 修复：任务级覆盖范围钳制测试。"""
+
+    def test_max_workers_out_of_range_rejected(self, controller: WorkspaceController) -> None:
+        """T2：max_workers 越界值（9999 / -1 / 0）应被拒绝，task_overrides 仍为空。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+
+        for bad_value in ("9999", "-1", "0", "17"):
+            controller.setTaskOverride(ws_id, "max_workers", bad_value)
+
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert "max_workers" not in overrides
+
+    def test_max_workers_in_range_accepted(self, controller: WorkspaceController) -> None:
+        """max_workers 在 1-16 范围内应被接受。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+
+        controller.setTaskOverride(ws_id, "max_workers", "8")
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert overrides["max_workers"] == 8
+
+    def test_max_file_size_out_of_range_rejected(self, controller: WorkspaceController) -> None:
+        """T2：max_file_size 越界值（0 / 负数 / 超 500MB）应被拒绝。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+
+        # 500MB = 500 * 1024 * 1024 = 524288000 字节，超过此值应拒绝
+        controller.setTaskOverride(ws_id, "max_file_size", str(524288001))
+        controller.setTaskOverride(ws_id, "max_file_size", "0")
+        controller.setTaskOverride(ws_id, "max_file_size", "-1")
+
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert "max_file_size" not in overrides
+
+    def test_max_file_size_in_range_accepted(self, controller: WorkspaceController) -> None:
+        """max_file_size 在 1B - 500MB 范围内应被接受。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+
+        controller.setTaskOverride(ws_id, "max_file_size", str(100 * 1024 * 1024))
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert overrides["max_file_size"] == 100 * 1024 * 1024
+
+    def test_max_depth_zero_accepted_but_normalized(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """max_depth=0 应被接受存储（在 _effective_max_depth 中归一化为 None）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+
+        controller.setTaskOverride(ws_id, "max_depth", "0")
+        # task_overrides 中存储 0
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert overrides["max_depth"] == 0
+        # _effective_max_depth 归一化为 None
+        assert sc._effective_max_depth() is None  # type: ignore[attr-defined]
+
+
+class TestTaskOverridesJsonErrorHandling:
+    """iter-105 M4 修复：taskOverridesJson 容错测试。"""
+
+    def test_task_overrides_json_handles_non_serializable(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """T19：task_overrides 含非 JSON 可序列化对象时应返回 "{}" 不抛异常。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # 直接通过 model 注入非可序列化对象（模拟外部代码污染）
+        item = controller.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+        bad_overrides = dict(item.task_overrides)
+        bad_overrides["_bad"] = object()  # object() 不可 JSON 序列化
+        controller.workspaceModel.update_workspace(ws_id, task_overrides=bad_overrides)
+
+        # 应返回 "{}" 并 warning，不抛异常
+        result = controller.taskOverridesJson(ws_id)
+        assert result == "{}"
+
+
+class TestTaskOverridesGlobalValueBehavior:
+    """iter-105 T3：覆盖值等于全局值时的行为测试。"""
+
+    def test_override_equal_to_global_is_stored(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """T3：明确锁定行为——覆盖值等于全局值时仍无条件存储。
+
+        当前实现选择「无条件存储」语义：用户显式设置的覆盖即使与全局值相同也持久化。
+        这样全局值后续变化时，任务级保持用户当时的选择。
+        """
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        global_value = controller._config_controller.scanArchives  # type: ignore[attr-defined]
+
+        controller.setTaskOverride(ws_id, "scan_archives", str(global_value).lower())
+
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert overrides.get("scan_archives") == global_value
+
+
+class TestLegacyPersistFileCompat:
+    """iter-105 T4：旧版本持久化文件（无 collected_count/task_overrides 字段）兼容测试。"""
+
+    def test_load_persisted_legacy_file_without_collected_count(
+        self,
+        config_dir: Path,
+    ) -> None:
+        """T4：旧版本 workspaces.json 缺 collected_count 字段时应默认为 0。"""
+        # 手动构造旧版本持久化文件（无 collected_count 与 task_overrides 字段）
+        persist_file = config_dir / "workspaces.json"
+        legacy_data: dict[str, object] = {
+            "version": 1,
+            "workspaces": [
+                {
+                    "id": "ws-legacy",
+                    "name": "旧任务",
+                    "mode": "folder",
+                    "target": "/old",
+                    "rules_paths": [],
+                    "use_builtin": True,
+                    "status_text": "已完成",
+                    "matched_count": 3,
+                    "passed_count": 5,
+                    "skipped_count": 1,
+                    "error_count": 0,
+                    "last_summary": "用时 0.5s",
+                    # 故意省略 collected_count 与 task_overrides
+                }
+            ],
+        }
+        persist_file.write_text(json.dumps(legacy_data, ensure_ascii=False), encoding="utf-8")
+
+        # 重新创建控制器，应能加载且 collected_count 默认 0、task_overrides 默认 {}
+        cfg = ConfigController()
+        rules = RulesController(cfg)
+        ctrl = WorkspaceController(cfg, rules)
+        item = ctrl.workspaceModel.get_workspace("ws-legacy")
+        assert item is not None
+        assert item.collected_count == 0
+        assert item.task_overrides == {}
+        ctrl.cleanup()
+
+
+class TestScanControllerOverrideSyncContract:
+    """iter-105 T5：ScanController.setTaskOverride 单向同步契约测试。"""
+
+    def test_scan_controller_set_override_does_not_leak_to_workspace_item(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """T5：直接调 ScanController.setTaskOverride 不应回写 WorkspaceItem.task_overrides。
+
+        契约：WorkspaceController → ScanController 是单向同步。
+        ScanController.setTaskOverride 是 @Slot 暴露给 QML 的，但 QML 应通过
+        WorkspaceController.setTaskOverride 调用以同时更新 WorkspaceItem。
+        直接调 ScanController.setTaskOverride 仅影响运行时扫描行为，
+        不会持久化也不会更新 WorkspaceItem。
+        """
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        item = controller.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+
+        # 直接调 ScanController.setTaskOverride
+        sc.setTaskOverride("max_workers", 7)  # type: ignore[attr-defined]
+
+        # ScanController 运行时已生效
+        assert sc._effective_max_workers() == 7  # type: ignore[attr-defined]
+        # 但 WorkspaceItem.task_overrides 不应被回写
+        assert "max_workers" not in item.task_overrides

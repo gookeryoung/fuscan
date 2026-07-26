@@ -403,10 +403,15 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         return self._config.max_file_size
 
     def _effective_max_depth(self) -> int | None:
-        """任务级覆盖优先的 max_depth（None 表示不限深度）。"""
+        """任务级覆盖优先的 max_depth（None 表示不限深度）。
+
+        与 :meth:`fuscan.gui.controllers.config_controller.ConfigController.setMaxDepth`
+        保持语义一致：``0`` 归一化为 ``None``（无限深度），避免 walker 把 ``0``
+        误解为「仅根目录直接子项」。
+        """
         value = self._task_overrides.get("max_depth")
         if isinstance(value, int):
-            return value
+            return value if value > 0 else None
         return self._config.max_depth
 
     def _effective_ignore_dirs(self) -> tuple[str, ...]:

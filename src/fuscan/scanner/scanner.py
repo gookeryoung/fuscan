@@ -54,6 +54,11 @@ _DEFAULT_MAX_FILE_SIZE: int = 50 * 1024 * 1024
 # tuple 拷贝与信号槽分发占用主线程时间片引起 UI 卡滞。
 _PROGRESS_LIST_MAX: int = 50
 
+# GIL 让步间隔：_scan_concurrent 每处理 N 个文件 sleep(0) 一次，
+# 让 UI 线程有机会处理 Qt 事件队列。20 个文件约对应 1-5ms 扫描时间，
+# sleep(0) 开销约 1μs，对吞吐影响可忽略。
+_GIL_YIELD_INTERVAL: int = 20
+
 
 def default_extract_content(entry: FileEntry) -> str:
     """默认内容提供器：通过提取器注册表按扩展名提取文本。
@@ -501,9 +506,9 @@ class Scanner:
         if not force and now - self._last_progress_time < self._progress_interval:
             return
         self._last_progress_time = now
-        # deque(maxlen=_PROGRESS_LIST_MAX) 已自动截断到最近条目，直接转 tuple
-        recent_skipped = tuple(self._skipped_dirs)
-        recent_matched = tuple(self._matched_files)
+        # deque 为空时跳过 tuple 拷贝（高频进度回调下的微小优化）
+        recent_skipped = tuple(self._skipped_dirs) if self._skipped_dirs else ()
+        recent_matched = tuple(self._matched_files) if self._matched_files else ()
         self._on_progress(
             ProgressInfo(
                 current_file=current_file,
@@ -531,6 +536,7 @@ class Scanner:
         matched = 0
         errors = 0
         matches = 0
+        yield_counter = 0
         for entry in entries:
             if self._check_control():
                 break
@@ -550,6 +556,11 @@ class Scanner:
                 scanned += 1
                 logger.warning("扫描文件失败 %s", entry.path, exc_info=True)
             self._emit_progress(str(entry.path), scanned, matched, errors, matches)
+            # GIL 让步：单线程扫描时也定期让出 GIL，避免长时间独占导致 UI 卡死
+            yield_counter += 1
+            if yield_counter >= _GIL_YIELD_INTERVAL:
+                yield_counter = 0
+                time.sleep(0)
         return scanned, matched, errors, matches
 
     def _scan_concurrent(
@@ -597,6 +608,10 @@ class Scanner:
                 pool.shutdown(wait=False)
                 return scanned, matched, errors, matches
             # 阻塞收集 future 结果（按完成顺序）
+            # GIL 让步：每 _GIL_YIELD_INTERVAL 个文件 sleep(0) 一次，让 UI 线程
+            # 有机会处理 Qt 事件队列，避免 5 个 worker 线程独占 GIL 导致界面卡死。
+            # time.sleep(0) 仅触发 GIL 释放/重获取，不真正睡眠，开销约 1μs。
+            yield_counter = 0
             for future in as_completed(future_to_entry):
                 if self._check_control():
                     _cancel_all_futures(future_to_entry)
@@ -618,6 +633,10 @@ class Scanner:
                     errors += 1
                     logger.warning("扫描文件失败 %s", entry.path, exc_info=True)
                 self._emit_progress(str(entry.path), scanned, matched, errors, matches)
+                yield_counter += 1
+                if yield_counter >= _GIL_YIELD_INTERVAL:
+                    yield_counter = 0
+                    time.sleep(0)
         finally:
             # 正常完成时等待所有 future；取消时已 shutdown(wait=False)，此处幂等
             pool.shutdown(wait=True)

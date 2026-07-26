@@ -3,7 +3,7 @@
 扁平化展示所有提取器（按 ``(category_order, display_name)`` 排序，同类相邻），
 每行包含类名、显示名、扩展名、速度档次（文本/色值）、格式标签、类别与勾选状态，
 供 QML ``ListView`` 直接绑定；QML 侧通过 ``section.property: "category"``
-实现按类别分组渲染，配合类别头部三态 CheckBox 统一勾选。
+实现按类别分组渲染，类别头部仅展示类别名（勾选状态由各行 CheckBox 体现）。
 
 公共 API：
 
@@ -14,8 +14,6 @@
 - :meth:`ExtractorListModel.enabled_extensions`：返回勾选提取器的扩展名集合
 - :meth:`ExtractorListModel.set_extractor_enabled`：QML 勾选回调
 - :meth:`ExtractorListModel.select_all` / :meth:`unselect_all`：全选/全不选
-- :attr:`ExtractorListModel.categoryStates`：各类别勾选状态（all/none/partial）
-- :meth:`ExtractorListModel.setCategoryEnabled`：QML 类别头部统一勾选回调
 """
 
 from __future__ import annotations
@@ -23,15 +21,12 @@ from __future__ import annotations
 import re
 
 try:
-    from PySide2.QtCore import Property, QAbstractListModel, QModelIndex, Qt, Signal, Slot
+    from PySide2.QtCore import QAbstractListModel, QModelIndex, Qt
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import (  # pyrefly: ignore [missing-import]
-        Property,
         QAbstractListModel,
         QModelIndex,
         Qt,
-        Signal,
-        Slot,
     )
 
 from fuscan.extractors.base import SpeedTier, default_registry
@@ -62,30 +57,39 @@ _ROLES: dict[int, bytes] = {
 # 提取 display_name 中全角括号内的格式标签（如 "Word（DOCX）" → "DOCX"）
 _PAREN_RE = re.compile(r"（([^）]*)）")
 
-# 类别显示顺序（按用户勾选习惯排列：文档优先 → 表格 → PDF/RTF → 文本 → 邮件 → 其他）
-_CATEGORY_ORDER: tuple[str, ...] = ("Office 文档", "表格", "PDF/RTF", "文本", "邮件", "其他")
+# 类别显示顺序（按用户勾选习惯排列：文档优先 → PDF/RTF → 文本 → 邮件 → 压缩包 → 其他）
+_CATEGORY_ORDER: tuple[str, ...] = ("Office 文档", "PDF/RTF", "文本", "邮件", "压缩包", "其他")
 
 # 按提取器 class_name 映射到类别（避免 display_name 字符串匹配的脆弱性）
 _CATEGORY_BY_CLASS: dict[str, str] = {
     "DocxExtractor": "Office 文档",
-    "LegacyDocExtractor": "Office 文档",
+    "DocExtractor": "Office 文档",
+    "XlsxExtractor": "Office 文档",
+    "XlsExtractor": "Office 文档",
     "PptxExtractor": "Office 文档",
-    "LegacyPptExtractor": "Office 文档",
+    "PptExtractor": "Office 文档",
     "WpsExtractor": "Office 文档",
     "OdtExtractor": "Office 文档",
-    "XlsxExtractor": "表格",
-    "LegacyXlsExtractor": "表格",
-    "OdsExtractor": "表格",
+    "OdsExtractor": "Office 文档",
     "PdfExtractor": "PDF/RTF",
     "RtfExtractor": "PDF/RTF",
     "PlainTextExtractor": "文本",
     "SourceCodeExtractor": "文本",
-    "ConfigFileExtractor": "文本",
-    "MarkupDataExtractor": "文本",
-    "StylesheetExtractor": "文本",
     "EmlExtractor": "邮件",
     "MsgExtractor": "邮件",
+    "ZipArchiveExtractor": "压缩包",
+    "RarArchiveExtractor": "压缩包",
+    "SevenZArchiveExtractor": "压缩包",
 }
+
+# 压缩包虚拟行定义：class_name、显示名、扩展名。
+# 压缩包扫描由 :class:`fuscan.archive.ArchiveScanner` 处理，不通过 Extractor 接口，
+# 因此在文件类型树中以虚拟行展示，扩展名走白名单过滤。
+_ARCHIVE_VIRTUAL_ROWS: tuple[tuple[str, str, str], ...] = (
+    ("ZipArchiveExtractor", "ZIP 压缩包", "zip"),
+    ("RarArchiveExtractor", "RAR 压缩包", "rar"),
+    ("SevenZArchiveExtractor", "7z 压缩包", "7z"),
+)
 
 
 def _classify(class_name: str) -> str:
@@ -100,15 +104,6 @@ _CATEGORY_ORDER_INDEX: dict[str, int] = {cat: i for i, cat in enumerate(_CATEGOR
 def _category_sort_key(category: str) -> int:
     """返回类别在 ``_CATEGORY_ORDER`` 中的序号，未列出类别排在末尾。"""
     return _CATEGORY_ORDER_INDEX.get(category, len(_CATEGORY_ORDER))
-
-
-def _category_state(enabled: int, total: int) -> str:
-    """根据已勾选数与总数返回 ``"all"`` / ``"none"`` / ``"partial"``。"""
-    if enabled == 0:
-        return "none"
-    if enabled == total:
-        return "all"
-    return "partial"
 
 
 _SPEED_TIER_TEXT: dict[SpeedTier, str] = {
@@ -163,11 +158,9 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
     """提取器勾选列表模型（扁平化，按 category 分组排序）。
 
     行按 ``(category_order, display_name)`` 排序，QML ``ListView`` 可通过
-    ``section.property: "category"`` 实现分组渲染，配合 ``categoryStates``
-    属性与 ``setCategoryEnabled`` Slot 实现按类别统一勾选。
+    ``section.property: "category"`` 实现分组渲染。类别头部仅展示类别名，
+    勾选状态由各行提取器 CheckBox 体现（iter-102 移除三态 CheckBox）。
     """
-
-    categoryStatesChanged = Signal()
 
     def __init__(self, parent: object | None = None) -> None:
         super().__init__(parent)
@@ -211,6 +204,12 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
         行按 ``(category_order, display_name)`` 排序，使同类提取器相邻，
         便于 QML ``ListView.section`` 按 ``category`` 角色分组渲染。
 
+        压缩包类别（ZIP/RAR/7z）为虚拟行，不对应实际提取器类（压缩包扫描
+        由 :class:`fuscan.archive.ArchiveScanner` 处理），仅用于文件类型树勾选
+        与扩展名白名单过滤。勾选状态通过 ``disabled_extractors`` 持久化，
+        与 ``Config.scan_archives`` 总开关配合使用：扫描器仅在
+        ``scan_archives=True`` 且扩展名在白名单内时才扫描对应压缩包格式。
+
         :param disabled_extractors: 未勾选的提取器类名列表（来自 ``Config.disabled_extractors``）
         """
         disabled_set = set(disabled_extractors or [])
@@ -226,25 +225,32 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
                     enabled=class_name not in disabled_set,
                 )
             )
+        # 压缩包虚拟行：扩展名走白名单，扫描由 ArchiveScanner 在 scan_archives=True 时执行。
+        # 速度档次标注为 T3 中速（实际解压耗时取决于压缩包大小与条目数）。
+        for class_name, display_name, ext in _ARCHIVE_VIRTUAL_ROWS:
+            rows.append(
+                _ExtractorRow(
+                    class_name=class_name,
+                    display_name=display_name,
+                    extensions=(ext,),
+                    speed_tier=SpeedTier.MEDIUM,
+                    enabled=class_name not in disabled_set,
+                )
+            )
         # 按 (category_order, display_name) 排序，保证同类相邻且类内稳定
         rows.sort(key=lambda r: (_category_sort_key(r.category), r.display_name))
         self._rows = rows
         self.endResetModel()
-        self.categoryStatesChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def set_disabled_extractors(self, disabled: list[str]) -> None:
         """按 disabled 列表批量更新勾选状态。"""
         disabled_set = set(disabled)
-        changed = False
         for i, row in enumerate(self._rows):
             new_enabled = row.class_name not in disabled_set
             if row.enabled != new_enabled:
                 row.enabled = new_enabled
                 idx = self.index(i)
                 self.dataChanged.emit(idx, idx, [Qt.UserRole + 6])
-                changed = True
-        if changed:
-            self.categoryStatesChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def disabled_extractors(self) -> list[str]:
         """返回未勾选的提取器类名列表。"""
@@ -279,7 +285,6 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
                     row.enabled = enabled
                     idx = self.index(i)
                     self.dataChanged.emit(idx, idx, [Qt.UserRole + 6])
-                    self.categoryStatesChanged.emit()  # pyrefly: ignore [missing-attribute]
                 return
 
     def select_all(self) -> None:
@@ -300,40 +305,6 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
         """已勾选提取器数。"""
         return sum(1 for row in self._rows if row.enabled)
 
-    # ----------------------------- 类别分组 API -----------------------------
-
-    @Property("QVariantMap", notify=categoryStatesChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
-    def categoryStates(self) -> dict[str, str]:
-        """每个类别的勾选状态（``"all"`` / ``"none"`` / ``"partial"``）。
-
-        QML ``ListView`` 的 ``section.delegate`` 通过 ``categoryStates[section]``
-        按键查询本类别状态，驱动类别头部三态 CheckBox 的 ``checkState``；
-        状态变化时由 ``categoryStatesChanged`` 信号触发重算。
-        """
-        states: dict[str, str] = {}
-        for cat in _CATEGORY_ORDER:
-            matching = [row for row in self._rows if row.category == cat]
-            if not matching:
-                continue
-            enabled = sum(1 for row in matching if row.enabled)
-            states[cat] = _category_state(enabled, len(matching))
-        return states
-
-    @Slot(str, bool)  # pyrefly: ignore [not-callable]
-    def setCategoryEnabled(self, category: str, enabled: bool) -> None:
-        """QML 类别头部勾选回调：批量切换该类别下所有提取器的勾选状态。
-
-        行已按类别排序，命中行必为连续区间，一次 ``dataChanged`` 批量发射，
-        避免逐行 emit（rule-12 批量更新原则）。
-        """
-        indices = [i for i, row in enumerate(self._rows) if row.category == category and row.enabled != enabled]
-        if not indices:
-            return
-        for i in indices:
-            self._rows[i].enabled = enabled
-        self.dataChanged.emit(self.index(indices[0]), self.index(indices[-1]), [Qt.UserRole + 6])
-        self.categoryStatesChanged.emit()  # pyrefly: ignore [missing-attribute]
-
     # ----------------------------- 内部方法 -----------------------------
 
     def _set_all_enabled(self, enabled: bool) -> None:
@@ -344,4 +315,3 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
             top = self.index(0)
             bottom = self.index(len(self._rows) - 1)
             self.dataChanged.emit(top, bottom, [Qt.UserRole + 6])
-            self.categoryStatesChanged.emit()  # pyrefly: ignore [missing-attribute]

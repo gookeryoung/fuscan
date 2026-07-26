@@ -248,10 +248,16 @@ Item {
                                     Layout.fillWidth: true
                                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                 }
+                                Label {
+                                    text: "当前机器最大线程=" + configController.cpuCount
+                                    font.pixelSize: theme.fontSizeCaption
+                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                }
                                 SpinBox {
                                     from: 1
                                     to: 16
                                     value: configController.maxWorkers
+                                    editable: true
                                     onValueChanged: configController.setMaxWorkers(value)
                                 }
                             }
@@ -266,6 +272,7 @@ Item {
                                     from: 1
                                     to: 500
                                     value: configController.maxFileSizeMB
+                                    editable: true
                                     onValueChanged: configController.setMaxFileSizeMB(value)
                                 }
                             }
@@ -366,46 +373,16 @@ Item {
                                 section.criteria: ViewSection.FullString
                                 section.delegate: Rectangle {
                                     width: ListView.view.width
-                                    height: 36
+                                    height: 32
                                     color: theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover
 
                                     RowLayout {
                                         anchors.fill: parent
-                                        anchors.leftMargin: 8
+                                        anchors.leftMargin: 12
                                         anchors.rightMargin: 8
                                         spacing: 8
 
-                                        // 类别头部三态 CheckBox：全选/全不选该类别
-                                        CheckBox {
-                                            id: catCheckBox
-                                            tristate: true
-                                            checkState: Qt.Unchecked
-
-                                            Component.onCompleted: catCheckBox.updateState()
-
-                                            Connections {
-                                                target: configController.extractorModel
-                                                function onCategoryStatesChanged() { catCheckBox.updateState() }
-                                            }
-
-                                            function updateState() {
-                                                var s = configController.extractorModel.categoryStates[section]
-                                                if (s === "all") checkState = Qt.Checked
-                                                else if (s === "none") checkState = Qt.Unchecked
-                                                else checkState = Qt.PartiallyChecked
-                                            }
-
-                                            // 用 onClicked 而非 onToggled：toggled 在程序性 updateState()
-                                            // 修改 checkState 时也会发射，会把 updateState 误判为用户点击，
-                                            // 勾满/清空一组时引发 setCategoryEnabled 信号死循环。
-                                            // 点击意图：当前 all → 全不选；其他（none/partial）→ 全选。
-                                            // 经 ConfigController.setCategoryEnabled 持久化配置。
-                                            onClicked: {
-                                                var s = configController.extractorModel.categoryStates[section]
-                                                configController.setCategoryEnabled(section, s !== "all")
-                                            }
-                                        }
-
+                                        // 类别标题：仅展示类别名，勾选状态由各行提取器 CheckBox 体现
                                         Label {
                                             text: section
                                             font.bold: true
@@ -414,17 +391,6 @@ Item {
                                         }
 
                                         Item { Layout.fillWidth: true }
-
-                                        Label {
-                                            text: {
-                                                var s = configController.extractorModel.categoryStates[section]
-                                                if (s === "all") return "全部启用"
-                                                if (s === "none") return "全部禁用"
-                                                return "部分启用"
-                                            }
-                                            font.pixelSize: 11
-                                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                        }
                                     }
                                 }
                                 delegate: ItemDelegate {

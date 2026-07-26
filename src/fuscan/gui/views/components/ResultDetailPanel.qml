@@ -41,6 +41,7 @@ Rectangle {
         anchors.bottomMargin: 100  // 给底部操作栏留空间
         clip: true
         visible: scanController.selectedResultIndex >= 0
+        contentWidth: availableWidth
 
         ColumnLayout {
             width: parent.width
@@ -296,21 +297,11 @@ Rectangle {
             wrapMode: Text.WordWrap
         }
 
-        // 第一行：移至暂存 + 上一条/下一条
+        // 第一行：上一条/下一条（左对齐）
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
 
-            IconButton {
-                text:"📦 移至暂存"
-                tooltip: "复制到暂存区隔离目录并标记为跳过"
-                accent: "secondary"
-                enabled: !scanController.detailIsArchiveEntry && scanController.selectedResultIndex >= 0
-                onClicked: {
-                    var msg = scanController.moveSelectedToStaging()
-                    opMsgLabel.text = msg
-                }
-            }
             IconButton {
                 text: "◀ 上一条"
                 tooltip: "查看上一条命中结果"
@@ -334,11 +325,21 @@ Rectangle {
             Item { Layout.fillWidth: true }
         }
 
-        // 第二行：替换内容（主操作，右侧）
+        // 第二行：移至暂存 + 替换内容（右对齐，移至暂存在替换内容左侧）
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
             Item { Layout.fillWidth: true }
+            IconButton {
+                text:"📦 移至暂存"
+                tooltip: "复制到暂存区隔离目录并标记为跳过"
+                accent: "secondary"
+                enabled: !scanController.detailIsArchiveEntry && scanController.selectedResultIndex >= 0
+                onClicked: {
+                    var msg = scanController.moveSelectedToStaging()
+                    opMsgLabel.text = msg
+                }
+            }
             IconButton {
                 text: "🔄 替换内容"
                 tooltip: "备份源文件并替换命中内容（按规则 replace_with）"

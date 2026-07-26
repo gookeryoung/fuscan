@@ -79,6 +79,13 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """最大工作线程数。"""
         return self._config.max_workers
 
+    @Property(int, notify=configChanged)  # pyrefly: ignore [not-callable]
+    def cpuCount(self) -> int:
+        """当前机器 CPU 逻辑核心数（供 QML 显示「当前机器最大线程=…」备注）。"""
+        import os
+
+        return os.cpu_count() or 1
+
     @Slot(int)  # pyrefly: ignore [not-callable]
     def setMaxWorkers(self, value: int) -> None:
         """设置最大工作线程数。"""
@@ -172,18 +179,6 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def setExtractorEnabled(self, class_name: str, enabled: bool) -> None:
         """QML 勾选回调：更新提取器勾选状态并保存。"""
         self._extractor_model.set_extractor_enabled(class_name, enabled)
-        self._config.disabled_extractors = self._extractor_model.disabled_extractors()
-        self.extractorCountChanged.emit()  # pyrefly: ignore [missing-attribute]
-        self.save()
-
-    @Slot(str, bool)  # pyrefly: ignore [not-callable]
-    def setCategoryEnabled(self, category: str, enabled: bool) -> None:
-        """QML 类别头部勾选回调：批量切换类别勾选状态并保存。
-
-        直接调用 ``ExtractorListModel.setCategoryEnabled`` 会绕过持久化，
-        导致重启后勾选状态丢失、勾选计数文本不刷新，必须经此方法同步配置。
-        """
-        self._extractor_model.setCategoryEnabled(category, enabled)
         self._config.disabled_extractors = self._extractor_model.disabled_extractors()
         self.extractorCountChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.save()

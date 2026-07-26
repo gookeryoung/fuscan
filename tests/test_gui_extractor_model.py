@@ -46,8 +46,10 @@ class TestRowCount:
         assert m.rowCount() == 0
 
     def test_load_from_registry_populates_rows(self, model: ExtractorListModel) -> None:
-        """加载默认注册表后行数应与 default_registry.list_extractors() 一致。"""
-        assert model.rowCount() == len(default_registry.list_extractors())
+        """加载默认注册表后行数应为注册表提取器数 + 压缩包虚拟行数（ZIP/RAR/7z）。"""
+        # 压缩包类别为虚拟行（不对应实际提取器类），扩展名走白名单过滤
+        archive_virtual_count = 3  # ZIP/RAR/7z
+        assert model.rowCount() == len(default_registry.list_extractors()) + archive_virtual_count
 
     def test_rowcount_with_parent_index_returns_zero(self, model: ExtractorListModel) -> None:
         """传有效 parent index 应返回 0（扁平模型无子节点）。"""
@@ -314,108 +316,100 @@ class TestCategorySort:
                 pytest.fail(f"类别 {cat} 在行 {i} 穿插出现，排序不连续")
 
 
-class TestCategoryStates:
-    """categoryStates 属性返回各类别的勾选状态。"""
+class TestArchiveVirtualRows:
+    """压缩包虚拟行：ZIP/RAR/7z 不对应实际提取器类，仅用于文件类型树勾选。"""
 
-    def test_all_selected_returns_all_state(self, model: ExtractorListModel) -> None:
-        """全部勾选时，每个类别状态应为 "all"。"""
-        states = model.categoryStates
-        assert all(v == "all" for v in states.values()), states
+    _EXPECTED_ARCHIVES = {
+        "ZipArchiveExtractor": ("ZIP 压缩包", "zip"),
+        "RarArchiveExtractor": ("RAR 压缩包", "rar"),
+        "SevenZArchiveExtractor": ("7z 压缩包", "7z"),
+    }
 
-    def test_unselect_all_returns_none_state(self, model: ExtractorListModel) -> None:
-        """全部不选时，每个类别状态应为 "none"。"""
-        model.unselect_all()
-        states = model.categoryStates
-        assert all(v == "none" for v in states.values()), states
+    def test_archive_rows_present(self, model: ExtractorListModel) -> None:
+        """加载注册表后应包含三个压缩包虚拟行。"""
+        class_names = {model.data(model.index(i), Qt.UserRole + 1) for i in range(model.rowCount())}
+        for cls in self._EXPECTED_ARCHIVES:
+            assert cls in class_names, f"压缩包虚拟行 {cls} 未出现在模型中"
 
-    def test_partial_selection_returns_partial_state(self, model: ExtractorListModel) -> None:
-        """部分勾选时，对应类别状态应为 "partial"。"""
-        # 找到第一个类别的第一个提取器，取消勾选
+    def test_archive_rows_category(self, model: ExtractorListModel) -> None:
+        """压缩包虚拟行的 category 应为「压缩包」。"""
+        for i in range(model.rowCount()):
+            class_name = model.data(model.index(i), Qt.UserRole + 1)
+            if class_name in self._EXPECTED_ARCHIVES:
+                category = model.data(model.index(i), Qt.UserRole + 8)
+                assert category == "压缩包", f"{class_name} 类别应为「压缩包」，实际 {category}"
+
+    def test_archive_rows_extensions(self, model: ExtractorListModel) -> None:
+        """压缩包虚拟行的扩展名应与定义一致。"""
+        for i in range(model.rowCount()):
+            class_name = model.data(model.index(i), Qt.UserRole + 1)
+            if class_name in self._EXPECTED_ARCHIVES:
+                _, expected_ext = self._EXPECTED_ARCHIVES[class_name]
+                exts_text = model.data(model.index(i), Qt.UserRole + 3)
+                assert exts_text == expected_ext, f"{class_name} 扩展名应为 {expected_ext}，实际 {exts_text}"
+
+    def test_archive_rows_enabled_by_default(self, model: ExtractorListModel) -> None:
+        """默认加载（无 disabled_extractors）时压缩包虚拟行应勾选。"""
+        for i in range(model.rowCount()):
+            class_name = model.data(model.index(i), Qt.UserRole + 1)
+            if class_name in self._EXPECTED_ARCHIVES:
+                enabled = model.data(model.index(i), Qt.UserRole + 6)
+                assert enabled is True, f"{class_name} 默认应勾选"
+
+    def test_archive_rows_disabled_via_config(self) -> None:
+        """通过 disabled_extractors 参数应能取消压缩包勾选。"""
+        m = ExtractorListModel()
+        m.load_from_registry(
+            disabled_extractors=["ZipArchiveExtractor", "RarArchiveExtractor", "SevenZArchiveExtractor"]
+        )
+        disabled = m.disabled_extractors()
+        assert "ZipArchiveExtractor" in disabled
+        assert "RarArchiveExtractor" in disabled
+        assert "SevenZArchiveExtractor" in disabled
+
+    def test_archive_rows_toggle_enabled(self, model: ExtractorListModel) -> None:
+        """set_extractor_enabled 应能切换压缩包虚拟行勾选状态。"""
+        model.set_extractor_enabled("ZipArchiveExtractor", False)
+        assert "ZipArchiveExtractor" in model.disabled_extractors()
+        model.set_extractor_enabled("ZipArchiveExtractor", True)
+        assert "ZipArchiveExtractor" not in model.disabled_extractors()
+
+    def test_archive_extensions_in_enabled_extensions(self, model: ExtractorListModel) -> None:
+        """勾选压缩包虚拟行后，enabled_extensions 应包含 zip/rar/7z 扩展名。"""
+        # 取消勾选一个非压缩包提取器，触发非 None 路径
         first_class = model.data(model.index(0), Qt.UserRole + 1)
-        first_cat = model.data(model.index(0), Qt.UserRole + 8)
         assert isinstance(first_class, str)
         model.set_extractor_enabled(first_class, False)
-        states = model.categoryStates
-        # 该类别至少有一个取消勾选，且原本有多个提取器时为 partial
-        # （若该类别只有一个提取器则为 "none"）
-        cat_count = sum(1 for i in range(model.rowCount()) if model.data(model.index(i), Qt.UserRole + 8) == first_cat)
-        expected = "none" if cat_count == 1 else "partial"
-        assert states[first_cat] == expected, f"类别 {first_cat} 状态应为 {expected}，实际 {states[first_cat]}"
+        exts = model.enabled_extensions()
+        assert exts is not None
+        assert "zip" in exts
+        assert "rar" in exts
+        assert "7z" in exts
 
-    def test_states_only_contains_present_categories(self, model: ExtractorListModel) -> None:
-        """categoryStates 仅包含实际存在提取器的类别。"""
-        states = model.categoryStates
-        for cat, state in states.items():
-            assert state in {"all", "none", "partial"}
-            # 该类别至少有一个提取器
-            count = sum(1 for i in range(model.rowCount()) if model.data(model.index(i), Qt.UserRole + 8) == cat)
-            assert count > 0, f"类别 {cat} 在模型中无提取器"
+    def test_archive_extensions_excluded_when_disabled(self, model: ExtractorListModel) -> None:
+        """取消压缩包勾选后，enabled_extensions 不应包含对应扩展名。"""
+        model.set_extractor_enabled("ZipArchiveExtractor", False)
+        # 取消勾选一个非压缩包提取器，触发非 None 路径
+        first_class = model.data(model.index(0), Qt.UserRole + 1)
+        assert isinstance(first_class, str)
+        model.set_extractor_enabled(first_class, False)
+        exts = model.enabled_extensions()
+        assert exts is not None
+        assert "zip" not in exts
+        assert "rar" in exts
+        assert "7z" in exts
 
-
-class TestSetCategoryEnabled:
-    """setCategoryEnabled Slot 批量切换类别内提取器勾选状态。"""
-
-    def test_enable_category_all(self, model: ExtractorListModel) -> None:
-        """先全不选，再启用某类别，该类别应全部勾选。"""
-        model.unselect_all()
-        first_cat = model.data(model.index(0), Qt.UserRole + 8)
-        model.setCategoryEnabled(first_cat, True)
-        # 该类别下所有提取器都应勾选
+    def test_archive_format_label(self, model: ExtractorListModel) -> None:
+        """压缩包虚拟行的 formatLabel 应为扩展名大写。"""
+        expected_labels = {
+            "ZipArchiveExtractor": "ZIP",
+            "RarArchiveExtractor": "RAR",
+            "SevenZArchiveExtractor": "7Z",
+        }
         for i in range(model.rowCount()):
-            if model.data(model.index(i), Qt.UserRole + 8) == first_cat:
-                assert model.data(model.index(i), Qt.UserRole + 6) is True
-
-    def test_disable_category_all(self, model: ExtractorListModel) -> None:
-        """先全选，再禁用某类别，该类别应全部不勾选。"""
-        model.select_all()
-        first_cat = model.data(model.index(0), Qt.UserRole + 8)
-        model.setCategoryEnabled(first_cat, False)
-        for i in range(model.rowCount()):
-            if model.data(model.index(i), Qt.UserRole + 8) == first_cat:
-                assert model.data(model.index(i), Qt.UserRole + 6) is False
-
-    def test_does_not_affect_other_categories(self, model: ExtractorListModel) -> None:
-        """禁用某类别不应影响其他类别的勾选状态。"""
-        model.select_all()
-        first_cat = model.data(model.index(0), Qt.UserRole + 8)
-        model.setCategoryEnabled(first_cat, False)
-        # 其他类别仍应全部勾选
-        for i in range(model.rowCount()):
-            cat = model.data(model.index(i), Qt.UserRole + 8)
-            if cat != first_cat:
-                assert model.data(model.index(i), Qt.UserRole + 6) is True, f"行 {i} 类别 {cat} 受到影响"
-
-    def test_updates_category_states(self, model: ExtractorListModel) -> None:
-        """禁用某类别后，categoryStates 中该类别应为 "none"。"""
-        model.select_all()
-        first_cat = model.data(model.index(0), Qt.UserRole + 8)
-        model.setCategoryEnabled(first_cat, False)
-        assert model.categoryStates[first_cat] == "none"
-
-    def test_unknown_category_noop(self, model: ExtractorListModel) -> None:
-        """未知类别名不应影响任何提取器状态。"""
-        before = model.disabled_extractors()
-        model.setCategoryEnabled("不存在的类别", True)
-        assert model.disabled_extractors() == before
-
-    def test_emits_signals_exactly_once(self, model: ExtractorListModel) -> None:
-        """批量切换应只 emit 一次 dataChanged 与一次 categoryStatesChanged。"""
-        data_changed_count: list[int] = []
-        cat_changed_count: list[int] = []
-        model.dataChanged.connect(lambda *_: data_changed_count.append(1))
-        model.categoryStatesChanged.connect(lambda: cat_changed_count.append(1))  # pyrefly: ignore [missing-attribute]
-        first_cat = model.data(model.index(0), Qt.UserRole + 8)
-        assert isinstance(first_cat, str)
-        model.setCategoryEnabled(first_cat, False)
-        assert len(data_changed_count) == 1
-        assert len(cat_changed_count) == 1
-
-    def test_no_change_emits_nothing(self, model: ExtractorListModel) -> None:
-        """类别状态已与目标一致时，不应 emit 任何信号。"""
-        first_cat = model.data(model.index(0), Qt.UserRole + 8)
-        assert isinstance(first_cat, str)
-        model.select_all()  # 该类别已全部勾选
-        emitted: list[int] = []
-        model.categoryStatesChanged.connect(lambda: emitted.append(1))  # pyrefly: ignore [missing-attribute]
-        model.setCategoryEnabled(first_cat, True)
-        assert emitted == []
+            class_name = model.data(model.index(i), Qt.UserRole + 1)
+            if class_name in expected_labels:
+                label = model.data(model.index(i), Qt.UserRole + 7)
+                assert label == expected_labels[class_name], (
+                    f"{class_name} formatLabel 应为 {expected_labels[class_name]}，实际 {label}"
+                )

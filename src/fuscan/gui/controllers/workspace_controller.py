@@ -222,10 +222,17 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         target: str,
         rules_paths: Sequence[str],
         use_builtin: bool,
+        status_text: str = "就绪",
+        matched_count: int = 0,
+        passed_count: int = 0,
+        skipped_count: int = 0,
+        error_count: int = 0,
+        last_summary: str = "",
     ) -> None:
         """创建工作区内部实现（构造 item + ScanController + 连接信号）。
 
         供 :meth:`addWorkspace`（新建）与 :meth:`_load_persisted`（恢复）共用。
+        持久化恢复时传入 ``status_text``/计数字段，使重启后仍能展示上次扫描状态。
         """
         item = WorkspaceItem(
             workspace_id=ws_id,
@@ -234,6 +241,12 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             target=target,
             rules_paths=tuple(rules_paths),
             use_builtin=use_builtin,
+            status_text=status_text,
+            matched_count=matched_count,
+            passed_count=passed_count,
+            skipped_count=skipped_count,
+            error_count=error_count,
+            last_summary=last_summary,
         )
         self._model.add_workspace(item)
 
@@ -344,7 +357,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if scan_state == "scanning":
             status_text = "扫描中" if not controller.isPaused else "已暂停"
         elif scan_state == "results":
-            status_text = "已完成"
+            # 直接使用 ScanController.statusText：正常完成="已完成"，取消="已完成[用户取消]"
+            status_text = controller.statusText or "已完成"
         else:
             status_text = controller.statusText or "就绪"
 
@@ -366,6 +380,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         elif self._active_scan_workspace_id == ws_id:
             self._active_scan_workspace_id = ""
             self.activeScanChanged.emit()  # pyrefly: ignore [missing-attribute]
+            # 扫描结束（scanning → 非 scanning）：持久化状态，重启后仍能展示
+            self._persist()
 
     def cleanup(self) -> None:
         """窗口关闭时清理所有 ScanController 资源。"""
@@ -397,8 +413,9 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def _persist(self) -> None:
         """将所有工作区序列化到 ``~/.fuscan/workspaces.json``。
 
-        仅持久化「定义字段」（id/name/mode/target/rules_paths/use_builtin），
-        运行时状态（status/counts/summary）不持久化，重启后重置为「就绪」。
+        持久化「定义字段」与「上次扫描状态」（status_text/counts/summary），
+        使重启后仍能展示上次扫描结果状态；ScanController 的运行时态
+        （scanState/worker/result_model）不持久化，重启后重置为 setup。
         """
         items = self._model.all_workspaces()
         payload = {
@@ -411,6 +428,13 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     "target": item.target,
                     "rules_paths": list(item.rules_paths),
                     "use_builtin": item.use_builtin,
+                    # iter-102 起持久化上次扫描状态，重启后仍能展示
+                    "status_text": item.status_text,
+                    "matched_count": item.matched_count,
+                    "passed_count": item.passed_count,
+                    "skipped_count": item.skipped_count,
+                    "error_count": item.error_count,
+                    "last_summary": item.last_summary,
                 }
                 for item in items
             ],
@@ -454,6 +478,13 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     target=str(ws.get("target", "")),
                     rules_paths=ws.get("rules_paths", []),
                     use_builtin=bool(ws.get("use_builtin", True)),
+                    # 恢复上次扫描状态（iter-102 起持久化）
+                    status_text=str(ws.get("status_text", "就绪")),
+                    matched_count=int(ws.get("matched_count", 0)),
+                    passed_count=int(ws.get("passed_count", 0)),
+                    skipped_count=int(ws.get("skipped_count", 0)),
+                    error_count=int(ws.get("error_count", 0)),
+                    last_summary=str(ws.get("last_summary", "")),
                 )
             except Exception as exc:  # 持久化恢复容错：单条失败不阻塞其余
                 logger.warning("工作区 %s 恢复失败: %s", ws_id, exc)

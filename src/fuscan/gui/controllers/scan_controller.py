@@ -192,6 +192,18 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """总文件数。"""
         return self._progress_total
 
+    @Property(float, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def progress(self) -> float:
+        """进度百分比（0-100）。
+
+        ``progressTotal <= 0`` 时返回 0（避免除零导致 NaN）。
+        扫描进行中按 ``progressScanned / progressTotal * 100`` 计算；
+        扫描完成后保留最终值（``_reset_scan_ui`` 不重置 ``_progress_scanned``）。
+        """
+        if self._progress_total <= 0:
+            return 0.0
+        return min(100.0, self._progress_scanned * 100.0 / self._progress_total)
+
     @Property(bool, notify=progressChanged)  # pyrefly: ignore [not-callable]
     def progressIndeterminate(self) -> bool:
         """进度条是否为不确定模式。"""
@@ -677,13 +689,14 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """扫描完成：填充结果模型并切到 results 态。"""
         self._last_report = report
         self._result_model.set_results(report.hits)
-        self._matched_count = len(report.hits)
+        # 从 report.stats 同步最终统计，确保扫描完成后统计页展示正确数值
+        self._sync_stats_from_report(report)
         self._reset_scan_ui()
         summary = report.summary()
         speed = report.stats.speed
         if speed > 0:
             summary += f" | 速度 {speed:.0f} 文件/s"
-        self._set_status("已完成" if not report.cancelled else "已取消", summary)
+        self._set_status("已完成" if not report.cancelled else "已完成[用户取消]", summary)
         self._set_scan_state("results" if report.hits else "setup")
 
     @Slot(str)  # pyrefly: ignore [not-callable]
@@ -698,9 +711,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """扫描被取消：有结果切 results，无结果切 setup。"""
         self._last_report = report
         self._result_model.set_results(report.hits)
-        self._matched_count = len(report.hits)
+        self._sync_stats_from_report(report)
         self._reset_scan_ui()
-        self._set_status("已取消", report.summary())
+        self._set_status("已完成[用户取消]", report.summary())
         self._set_scan_state("results" if report.hits else "setup")
 
     # ----------------------------- 内部方法 -----------------------------
@@ -710,6 +723,20 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._ruleset = self._rules_controller.ruleset
         self.rulesCountChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    def _sync_stats_from_report(self, report: ScanReport) -> None:
+        """从 ScanReport.stats 同步最终统计到进度字段。
+
+        扫描完成/取消时调用，确保统计页展示的 scanned/total/matched/skipped/errors
+        与报告一致（避免 ``_reset_scan_ui`` 前后数值不一致或归零）。
+        """
+        stats = report.stats
+        self._progress_total = stats.total_files
+        self._progress_scanned = stats.scanned_files
+        self._matched_count = stats.matched_files
+        self._skipped_count = stats.skipped_files
+        self._error_count = stats.errors
+        self._passed_count = max(stats.scanned_files - stats.matched_files - stats.errors, 0)
 
     def _can_build_roots(self) -> bool:
         """判断当前是否可构建扫描根路径列表。"""
@@ -771,11 +798,15 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def _reset_scan_ui(self) -> None:
-        """重置扫描 UI 到空闲状态。"""
+        """重置扫描 UI 到空闲状态。
+
+        保留 ``_progress_scanned`` / ``_progress_total`` / 计数字段，
+        使扫描完成后统计页仍能展示最终进度与计数；
+        这些字段在下一次 :meth:`startScan` 开头被重置为零。
+        """
         self._cancelling = False
         self._is_paused = False
         self._progress_indeterminate = False
-        self._progress_scanned = 0
         self._current_file = ""
         self._cleanup_workers()
         self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]

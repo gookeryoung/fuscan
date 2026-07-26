@@ -281,11 +281,15 @@ class Scanner:
     def _check_control(self) -> bool:
         """检查暂停与取消标志。
 
-        暂停时阻塞当前线程直到 resume；取消时返回 True。
+        暂停时阻塞当前线程直到 resume 或取消；取消时返回 True。
+        使用 0.5 秒超时循环等待，避免暂停期间无法响应取消请求导致死锁。
         """
         if self._cancel_event.is_set():
             return True
-        self._pause_event.wait()
+        # 超时等待：每 0.5 秒醒来重检取消标志，确保 cancel() 能及时解除暂停阻塞
+        while not self._pause_event.wait(timeout=0.5):
+            if self._cancel_event.is_set():
+                return True
         return self._cancel_event.is_set()
 
     def _on_skip_dir_internal(self, dir_path: str) -> None:
@@ -573,7 +577,12 @@ class Scanner:
         errors = 0
         matches = 0
         future_to_entry: dict[Future[ScanResult], FileEntry] = {}
-        with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
+        # 不使用 with 语句：取消时需要 shutdown(wait=False) 立即返回，
+        # 避免某个 worker 卡在 read_bytes() 上导致 with 退出时无限阻塞。
+        # 已运行 worker 在后台完成（_scan_entry 入口已检查取消标志会快速返回），
+        # 不影响下次扫描（Scanner 每次扫描重新构造，不复用线程池）。
+        pool = ThreadPoolExecutor(max_workers=self._max_workers)
+        try:
             cancelled_in_submit = False
             # 一次性提交所有 entries：阶段 1 已完成遍历，entries 内存可见且可索引
             for entry in entries:
@@ -583,14 +592,15 @@ class Scanner:
                 future = pool.submit(self._scan_entry, entry)
                 future_to_entry[future] = entry
             if cancelled_in_submit:
-                # 取消全部未启动 future，避免 with 退出时阻塞等待它们；
-                # 已运行 future（最多 max_workers 个）由 with 退出时统一等待
+                # 取消全部未启动 future，shutdown(wait=False) 不等待已运行 future
                 _cancel_all_futures(future_to_entry)
+                pool.shutdown(wait=False)
                 return scanned, matched, errors, matches
             # 阻塞收集 future 结果（按完成顺序）
             for future in as_completed(future_to_entry):
                 if self._check_control():
                     _cancel_all_futures(future_to_entry)
+                    pool.shutdown(wait=False)
                     break
                 entry = future_to_entry[future]
                 scanned += 1
@@ -608,6 +618,9 @@ class Scanner:
                     errors += 1
                     logger.warning("扫描文件失败 %s", entry.path, exc_info=True)
                 self._emit_progress(str(entry.path), scanned, matched, errors, matches)
+        finally:
+            # 正常完成时等待所有 future；取消时已 shutdown(wait=False)，此处幂等
+            pool.shutdown(wait=True)
         return scanned, matched, errors, matches
 
     def _accumulate_archive_results(
@@ -689,13 +702,11 @@ class Scanner:
             return scanned, matched, errors, matches
 
         # 多线程：archive 文件级别并行
-        # 取消加速（需求 req-13）：walk 循环检测到取消时立即对全部未启动 future
-        # 调 ``f.cancel()`` 并 ``return``，**不进入** ``as_completed`` 阻塞等待。
-        # ``ThreadPoolExecutor`` 上下文退出时仍会等待已运行 future（最多
-        # ``max_workers`` 个）完成，配合 ``max_file_size`` 大文件跳过将单 worker
-        # 阻塞上限控制在百毫秒级。
+        # 不使用 with 语句：取消时 shutdown(wait=False) 立即返回，避免大型压缩包
+        # list_entries() 卡住时 with 退出无限阻塞。已运行 worker 在后台完成。
         future_to_entry: dict[Future[tuple[ScanResult, ...]], FileEntry] = {}
-        with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
+        pool = ThreadPoolExecutor(max_workers=self._max_workers)
+        try:
             cancelled_in_walk = False
             for entry in archive_entries:
                 if self._check_control():
@@ -705,29 +716,35 @@ class Scanner:
                 future_to_entry[future] = entry
             if cancelled_in_walk:
                 _cancel_all_futures(future_to_entry)
+                pool.shutdown(wait=False)
                 return scanned, matched, errors, matches
             # 阻塞收集剩余 future
-            d_scanned, d_matched, d_errors, d_matches = self._collect_archive_futures(future_to_entry, results)
+            d_scanned, d_matched, d_errors, d_matches = self._collect_archive_futures(future_to_entry, results, pool)
             scanned += d_scanned
             matched += d_matched
             errors += d_errors
             matches += d_matches
+        finally:
+            pool.shutdown(wait=True)
         return scanned, matched, errors, matches
 
     def _collect_archive_futures(
         self,
         future_to_entry: dict[Future[tuple[ScanResult, ...]], FileEntry],
         results: list[ScanResult],
+        pool: ThreadPoolExecutor,
     ) -> tuple[int, int, int, int]:
         """阻塞收集压缩包扫描 future 结果，返回 ``(scanned, matched, errors, matches)`` 增量。
 
-        取消时对剩余未启动 future 调 ``cancel()`` 并 ``break``。进度回调使用
-        累计值（base + delta），按 archive 完成顺序触发。
+        取消时对剩余未启动 future 调 ``cancel()`` 并 ``shutdown(wait=False)`` 立即返回，
+        避免大型压缩包卡住时 as_completed 无限阻塞。进度回调使用累计值（base + delta），
+        按 archive 完成顺序触发。
         """
         scanned = matched = errors = matches = 0
         for future in as_completed(future_to_entry):
             if self._check_control():
                 _cancel_all_futures(future_to_entry)
+                pool.shutdown(wait=False)
                 break
             entry = future_to_entry[future]
             try:
@@ -796,7 +813,10 @@ class Scanner:
         """对单个文件应用所有规则，返回扫描结果。
 
         缓存模式下委托 :meth:`_scan_entry_cached`，否则走 :meth:`_scan_entry_uncached`。
+        取消时立即返回空结果，避免已提交的 future 执行无谓的 I/O。
         """
+        if self._cancel_event.is_set():
+            return ScanResult(path=entry.path, size=entry.size, hits=(), errors=0)
         if self._cache is None:
             return self._scan_entry_uncached(entry)
         return self._scan_entry_cached(entry)

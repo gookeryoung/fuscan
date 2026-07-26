@@ -175,36 +175,38 @@ Rectangle {
                         height: parent.height
                         radius: 3
                         color: card.statusColor()
-                        // 进度变化平滑过渡
-                        Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
                     }
                 }
             }
         }
 
-        // ---------- 第五行：分类计数 ----------
+        // ---------- 第五行：分类计数（PlainText + color，避免 RichText 解析开销） ----------
         RowLayout {
             Layout.fillWidth: true
             spacing: 16
 
             Label {
-                text: "<b style='color:#28A745'>通过 " + workspaceController.activeScanController.passedCount + "</b>"
-                textFormat: Text.RichText
+                text: "通过 " + workspaceController.activeScanController.passedCount
+                color: theme.colorSuccess
+                font.bold: true
                 font.pixelSize: 12
             }
             Label {
-                text: "<b style='color:#DC3545'>命中 " + workspaceController.activeScanController.matchedCount + "</b>"
-                textFormat: Text.RichText
+                text: "命中 " + workspaceController.activeScanController.matchedCount
+                color: theme.colorDanger
+                font.bold: true
                 font.pixelSize: 12
             }
             Label {
-                text: "<b style='color:#FFC107'>跳过 " + workspaceController.activeScanController.skippedCount + "</b>"
-                textFormat: Text.RichText
+                text: "跳过 " + workspaceController.activeScanController.skippedCount
+                color: theme.colorWarning
+                font.bold: true
                 font.pixelSize: 12
             }
             Label {
-                text: "<b style='color:#DC3545'>错误 " + workspaceController.activeScanController.errorCount + "</b>"
-                textFormat: Text.RichText
+                text: "错误 " + workspaceController.activeScanController.errorCount
+                color: theme.colorDanger
+                font.bold: true
                 font.pixelSize: 12
             }
             Item { Layout.fillWidth: true }

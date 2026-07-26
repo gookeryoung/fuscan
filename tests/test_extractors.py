@@ -1112,7 +1112,7 @@ class TestExtractorRegistry:
             XlsxExtractor: "Excel（XLSX）",
             OdsExtractor: "ODS 表格",
             OdtExtractor: "ODT 文档",
-            WpsExtractor: "WPS 文档",
+            WpsExtractor: "WPS 文档（WPS）",
             RtfExtractor: "RTF",
             EmlExtractor: "邮件（EML）",
             MsgExtractor: "Outlook 邮件（MSG）",

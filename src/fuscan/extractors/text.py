@@ -6,16 +6,10 @@
 大文件（>10MB）采用分块流式读取 + 增量解码，跳过 charset-normalizer
 全量分析以降低内存峰值。
 
-iter-88 起将原 ``TextExtractor``（57 个扩展名）拆分为 5 个子提取器，
-各自管理一类文本扩展名，在 GUI 勾选树中作为独立分类展示：
-
-- :class:`PlainTextExtractor`：纯文本（txt, log）
-- :class:`SourceCodeExtractor`：源代码（py, js, c, java, ...）
-- :class:`ConfigFileExtractor`：配置文件（ini, yaml, toml, ...）
-- :class:`MarkupDataExtractor`：标记与数据（md, json, html, ...）
-- :class:`StylesheetExtractor`：样式表（css, scss, sass, less）
-
-``TextExtractor`` 保留为基类提供提取逻辑，不再直接注册到默认注册表。
+iter-102 起 GUI 文件类型树中文本类别仅展示「纯文本」与「源代码」两项，
+原 ``ConfigFileExtractor``/``MarkupDataExtractor``/``StylesheetExtractor``
+的扩展名（配置文件/标记数据/样式表）合并到 :class:`SourceCodeExtractor`，
+避免文件类型树过度细分。``TextExtractor`` 保留为基类提供提取逻辑，不再直接注册。
 """
 
 from __future__ import annotations
@@ -29,17 +23,11 @@ from typing_extensions import override
 from fuscan.extractors.base import Extractor, ExtractorError, SpeedTier
 
 __all__ = [
-    "CONFIG_FILE_EXTENSIONS",
-    "MARKUP_DATA_EXTENSIONS",
     "PLAIN_TEXT_EXTENSIONS",
     "SOURCE_CODE_EXTENSIONS",
-    "STYLESHEET_EXTENSIONS",
     "TEXT_EXTENSIONS",
-    "ConfigFileExtractor",
-    "MarkupDataExtractor",
     "PlainTextExtractor",
     "SourceCodeExtractor",
-    "StylesheetExtractor",
     "TextExtractor",
 ]
 
@@ -51,8 +39,11 @@ PLAIN_TEXT_EXTENSIONS: tuple[str, ...] = (
     "log",
 )
 
-# 源代码扩展名（编程语言 + 脚本）
+# 源代码扩展名（编程语言 + 脚本 + 配置文件 + 标记数据 + 样式表）
+# iter-102 合并原 ConfigFile/MarkupData/Stylesheet 三类文本子提取器，
+# GUI 文件类型树中文本类别仅保留「纯文本」「源代码」两项，简化勾选界面。
 SOURCE_CODE_EXTENSIONS: tuple[str, ...] = (
+    # 编程语言 + 脚本
     "py",
     "js",
     "ts",
@@ -82,10 +73,7 @@ SOURCE_CODE_EXTENSIONS: tuple[str, ...] = (
     "bat",
     "cmd",
     "ps1",
-)
-
-# 配置文件扩展名
-CONFIG_FILE_EXTENSIONS: tuple[str, ...] = (
+    # 配置文件
     "conf",
     "ini",
     "cfg",
@@ -97,10 +85,7 @@ CONFIG_FILE_EXTENSIONS: tuple[str, ...] = (
     "gradle",
     "gitignore",
     "dockerignore",
-)
-
-# 标记与数据文件扩展名
-MARKUP_DATA_EXTENSIONS: tuple[str, ...] = (
+    # 标记与数据文件
     "md",
     "rst",
     "html",
@@ -112,23 +97,17 @@ MARKUP_DATA_EXTENSIONS: tuple[str, ...] = (
     "csv",
     "tsv",
     "sql",
-)
-
-# 样式表扩展名
-STYLESHEET_EXTENSIONS: tuple[str, ...] = (
+    # 样式表
     "css",
     "scss",
     "sass",
     "less",
 )
 
-# 全部纯文本扩展名（5 组并集，向后兼容）
+# 全部纯文本扩展名（向后兼容）
 TEXT_EXTENSIONS: tuple[str, ...] = (
     *PLAIN_TEXT_EXTENSIONS,
     *SOURCE_CODE_EXTENSIONS,
-    *CONFIG_FILE_EXTENSIONS,
-    *MARKUP_DATA_EXTENSIONS,
-    *STYLESHEET_EXTENSIONS,
 )
 
 _DEFAULT_MAX_SIZE = 100 * 1024 * 1024  # 100MB
@@ -264,6 +243,7 @@ class PlainTextExtractor(TextExtractor):
 
     iter-88 从 ``TextExtractor`` 拆分，提取逻辑继承基类，
     仅限定支持的扩展名子集与显示名。
+    display_name 包含全角括号后缀 ``（TXT）``，供 GUI 提取格式 TAG。
     """
 
     @property
@@ -274,14 +254,16 @@ class PlainTextExtractor(TextExtractor):
     @override
     @property
     def display_name(self) -> str:
-        return "纯文本"
+        return "纯文本（TXT）"
 
 
 class SourceCodeExtractor(TextExtractor):
-    """源代码子提取器：处理 py/js/java/c 等编程语言与脚本文件。
+    """源代码子提取器：处理编程语言、脚本、配置文件、标记数据与样式表。
 
-    iter-88 从 ``TextExtractor`` 拆分，提取逻辑继承基类，
-    仅限定支持的扩展名子集与显示名。
+    iter-102 起合并原 ConfigFile/MarkupData/Stylesheet 三类子提取器，
+    GUI 文件类型树中文本类别仅展示「纯文本」「源代码」两项，
+    避免勾选界面过度细分。提取逻辑继承基类。
+    display_name 包含全角括号后缀 ``（CODE）``，供 GUI 提取格式 TAG。
     """
 
     @property
@@ -292,61 +274,7 @@ class SourceCodeExtractor(TextExtractor):
     @override
     @property
     def display_name(self) -> str:
-        return "源代码"
-
-
-class ConfigFileExtractor(TextExtractor):
-    """配置文件子提取器：处理 ini/yaml/toml 等配置文件。
-
-    iter-88 从 ``TextExtractor`` 拆分，提取逻辑继承基类，
-    仅限定支持的扩展名子集与显示名。
-    """
-
-    @property
-    @override
-    def supported_extensions(self) -> tuple[str, ...]:
-        return CONFIG_FILE_EXTENSIONS
-
-    @override
-    @property
-    def display_name(self) -> str:
-        return "配置文件"
-
-
-class MarkupDataExtractor(TextExtractor):
-    """标记与数据子提取器：处理 md/json/xml/html 等标记与数据文件。
-
-    iter-88 从 ``TextExtractor`` 拆分，提取逻辑继承基类，
-    仅限定支持的扩展名子集与显示名。
-    """
-
-    @property
-    @override
-    def supported_extensions(self) -> tuple[str, ...]:
-        return MARKUP_DATA_EXTENSIONS
-
-    @override
-    @property
-    def display_name(self) -> str:
-        return "标记与数据"
-
-
-class StylesheetExtractor(TextExtractor):
-    """样式表子提取器：处理 css/scss/sass/less 样式文件。
-
-    iter-88 从 ``TextExtractor`` 拆分，提取逻辑继承基类，
-    仅限定支持的扩展名子集与显示名。
-    """
-
-    @property
-    @override
-    def supported_extensions(self) -> tuple[str, ...]:
-        return STYLESHEET_EXTENSIONS
-
-    @override
-    @property
-    def display_name(self) -> str:
-        return "样式表"
+        return "源代码（CODE）"
 
 
 def _detect_encoding_from_header(header: bytes) -> str | None:

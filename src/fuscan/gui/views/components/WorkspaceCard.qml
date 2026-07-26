@@ -43,9 +43,16 @@ Rectangle {
         if (statusText === "扫描中") return theme.colorWarning
         if (statusText === "已暂停") return theme.colorTextSecondary
         if (statusText === "已完成") return (matchedCount > 0 ? theme.colorDanger : theme.colorSuccess)
+        // 用户取消：红色（保持与命中相同的警示色）
+        if (statusText === "已完成[用户取消]") return theme.colorDanger
         if (statusText === "失败" || statusText === "已取消") return theme.colorWarning
         // 就绪：蓝色（非灰色），表示待命可操作
         return theme.colorPrimary
+    }
+
+    // 是否处于已完成态（含用户取消）：控制「更新扫描」「查看结果」按钮启用
+    function isCompletedState() {
+        return statusText === "已完成" || statusText === "已完成[用户取消]"
     }
 
     ColumnLayout {
@@ -213,7 +220,7 @@ Rectangle {
                 tooltip: statusText === "扫描中" ? "暂停扫描" : "启动扫描"
                 accent: "primary"
                 // 扫描完成后切换为未激活，避免已完成任务仍高亮扫描按钮
-                enabled: statusText !== "已完成"
+                enabled: !card.isCompletedState()
                 onClicked: {
                     if (statusText === "扫描中" || statusText === "已暂停") {
                         workspaceController.togglePause(card.workspaceId)
@@ -226,8 +233,8 @@ Rectangle {
                 text:"🔄 更新扫描"
                 tooltip: "对已完成扫描的任务重新扫描"
                 accent: "secondary"
-                // 仅已完成扫描的工作区可用，其余状态禁用
-                enabled: statusText === "已完成"
+                // 已完成（含用户取消）的工作区可重新扫描
+                enabled: card.isCompletedState()
                 onClicked: workspaceController.startScan(card.workspaceId)
             }
             IconButton {
@@ -235,8 +242,8 @@ Rectangle {
                 tooltip: "查看扫描结果"
                 // 扫描完成后高亮（与扫描前的扫描按钮同色），未完成时 disabled 变灰
                 accent: "primary"
-                // 扫描完成前未激活，扫描完成后激活
-                enabled: statusText === "已完成"
+                // 已完成（含用户取消）的工作区可查看结果
+                enabled: card.isCompletedState()
                 onClicked: card.viewResultsRequested(card.workspaceId)
             }
 

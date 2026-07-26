@@ -14,24 +14,32 @@ Item {
     property ConfigControllerType configController: ConfigController
     property RulesControllerType rulesController: RulesController
 
-    // 当前待导出的格式与目标工作区
-    property string _pendingExportFmt: ""
+    // 当前待导出的目标工作区
     property string _pendingExportWsId: ""
 
-    // 导出文件保存对话框
+    // CSV 导出文件保存对话框（静态 nameFilters 避免 Windows 原生对话框过滤器乱码）
     FileDialog {
-        id: exportDialog
-        title: "导出扫描结果"
+        id: exportCsvDialog
+        title: "导出扫描结果为 CSV"
         selectExisting: false
-        defaultSuffix: homePage._pendingExportFmt
-        nameFilters: [
-            homePage._pendingExportFmt === "csv"
-                ? "CSV 文件 (*.csv)"
-                : "JSON 文件 (*.json)"
-        ]
+        defaultSuffix: "csv"
+        nameFilters: ["CSV (*.csv)"]
         onAccepted: {
-            var path = exportDialog.fileUrl.toString().replace(/^file:\/\/\//, "")
-            workspaceController.exportResults(homePage._pendingExportWsId, homePage._pendingExportFmt, path)
+            var path = exportCsvDialog.fileUrl.toString().replace(/^file:\/\/\//, "")
+            workspaceController.exportResults(homePage._pendingExportWsId, "csv", path)
+        }
+    }
+
+    // JSON 导出文件保存对话框
+    FileDialog {
+        id: exportJsonDialog
+        title: "导出扫描结果为 JSON"
+        selectExisting: false
+        defaultSuffix: "json"
+        nameFilters: ["JSON (*.json)"]
+        onAccepted: {
+            var path = exportJsonDialog.fileUrl.toString().replace(/^file:\/\/\//, "")
+            workspaceController.exportResults(homePage._pendingExportWsId, "json", path)
         }
     }
 
@@ -151,14 +159,12 @@ Item {
                         homePage.viewStatsRequested(wsId)
                     }
                     onExportCsvRequested: function(wsId) {
-                        homePage._pendingExportFmt = "csv"
                         homePage._pendingExportWsId = wsId
-                        exportDialog.open()
+                        exportCsvDialog.open()
                     }
                     onExportJsonRequested: function(wsId) {
-                        homePage._pendingExportFmt = "json"
                         homePage._pendingExportWsId = wsId
-                        exportDialog.open()
+                        exportJsonDialog.open()
                     }
                     onTaskSettingsRequested: function(wsId) {
                         homePage.taskSettingsRequested(wsId)

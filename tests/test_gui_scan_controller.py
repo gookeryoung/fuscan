@@ -634,7 +634,7 @@ class TestScanWorkerCallbacks:
         scan_worker.emit_cancelled(report)
 
         assert controller.scanState == "results"
-        assert controller.statusText == "已取消"
+        assert controller.statusText == "已完成[用户取消]"
 
     def test_on_scan_cancelled_no_results(
         self,

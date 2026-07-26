@@ -4,8 +4,8 @@
 ODS、ODT、WPS、RTF、EML、MSG、XLS、DOC、PPT 等格式。
 提取器在 extract 方法内部懒加载第三方库依赖。
 
-iter-88 起将原 ``TextExtractor`` 拆分为 5 个子提取器（纯文本/源代码/
-配置文件/标记与数据/样式表），各自注册独立扩展名子集。
+iter-102 起原 ``ConfigFileExtractor``/``MarkupDataExtractor``/``StylesheetExtractor``
+的扩展名合并到 :class:`SourceCodeExtractor`，文本类别仅注册「纯文本」「源代码」两项。
 
 公共 API：
 
@@ -40,17 +40,11 @@ from fuscan.extractors.registry import register_all
 from fuscan.extractors.rtf import RtfExtractor
 from fuscan.extractors.spreadsheet import OdsExtractor, XlsxExtractor
 from fuscan.extractors.text import (
-    CONFIG_FILE_EXTENSIONS,
-    MARKUP_DATA_EXTENSIONS,
     PLAIN_TEXT_EXTENSIONS,
     SOURCE_CODE_EXTENSIONS,
-    STYLESHEET_EXTENSIONS,
     TEXT_EXTENSIONS,
-    ConfigFileExtractor,
-    MarkupDataExtractor,
     PlainTextExtractor,
     SourceCodeExtractor,
-    StylesheetExtractor,
     TextExtractor,
 )
 from fuscan.extractors.wps import WpsExtractor
@@ -59,20 +53,15 @@ from fuscan.extractors.wps import WpsExtractor
 register_all()
 
 __all__ = [
-    "CONFIG_FILE_EXTENSIONS",
-    "MARKUP_DATA_EXTENSIONS",
     "PLAIN_TEXT_EXTENSIONS",
     "SOURCE_CODE_EXTENSIONS",
-    "STYLESHEET_EXTENSIONS",
     "TEXT_EXTENSIONS",
-    "ConfigFileExtractor",
     "DocExtractor",
     "DocxExtractor",
     "EmlExtractor",
     "Extractor",
     "ExtractorError",
     "ExtractorRegistry",
-    "MarkupDataExtractor",
     "MsgExtractor",
     "OdsExtractor",
     "OdtExtractor",
@@ -83,7 +72,6 @@ __all__ = [
     "RtfExtractor",
     "SourceCodeExtractor",
     "SpeedTier",
-    "StylesheetExtractor",
     "TextExtractor",
     "WpsExtractor",
     "XlsExtractor",

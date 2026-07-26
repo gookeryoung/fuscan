@@ -48,7 +48,7 @@ class WpsExtractor(Extractor):
     @property
     def display_name(self) -> str:
         """返回提取器的中文显示名称。"""
-        return "WPS 文档"
+        return "WPS 文档（WPS）"
 
     @override
     def extract(self, path: Path) -> str:

@@ -43,6 +43,30 @@ Item {
         }
     }
 
+    // 清空所有工作区确认对话框
+    MessageDialog {
+        id: clearConfirmDialog
+        title: "清空所有工作区"
+        text: "将移除全部 " + workspaceController.workspaceCount + " 个任务及其扫描结果，此操作不可撤销。是否继续？"
+        icon: StandardIcon.Warning
+        standardButtons: StandardButton.Ok | StandardButton.Cancel
+        onAccepted: {
+            var ok = workspaceController.clearAllWorkspaces()
+            if (!ok) {
+                clearResultDialog.open()
+            }
+        }
+    }
+
+    // 清空结果提示对话框（扫描中拒绝清空时显示）
+    MessageDialog {
+        id: clearResultDialog
+        title: "无法清空"
+        text: "有任务正在扫描，请等待扫描结束或取消后再试。"
+        icon: StandardIcon.Information
+        standardButtons: StandardButton.Ok
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 16
@@ -57,6 +81,17 @@ Item {
                 color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
             }
             Item { Layout.fillWidth: true }
+            // 清空按钮：仅在有任务且无扫描进行时显示，避免误清空运行中任务
+            Button {
+                visible: !workspaceController.hasActiveScan && workspaceController.workspaceCount > 0
+                text: "清空"
+                flat: true
+                // L3 辅助操作：32px 高度，扁平兜底
+                implicitHeight: 32
+                font.pixelSize: theme.fontSizeSmall
+                palette.buttonText: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                onClicked: clearConfirmDialog.open()
+            }
             Label {
                 // 扫描中隐藏任务计数，避免与扫描进度面板信息冗余
                 text: workspaceController.hasActiveScan

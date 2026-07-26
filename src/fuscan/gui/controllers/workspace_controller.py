@@ -631,6 +631,52 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """检查工作区 ID 是否存在。"""
         return self._model.get_workspace(ws_id) is not None
 
+    @Slot(result=bool)  # pyrefly: ignore [not-callable]
+    def clearAllWorkspaces(self) -> bool:
+        """清空所有工作区（iter-108 快速移除全部任务）。
+
+        :return: 是否成功清空。扫描中/暂停中拒绝清空返回 False，
+            避免破坏运行时 worker 状态；空列表视为已成功无需操作返回 True。
+
+        清理所有 :class:`ScanController` 资源、清空 model、重置当前/活动工作区 ID，
+        并持久化空列表到 ``workspaces.json``。绑定中的 :class:`RulesController`
+        若指向被清空的工作区，自动解绑恢复全局模式。
+        """
+        # 扫描中/暂停中拒绝清空
+        if self._active_scan_workspace_id:
+            logger.warning(
+                "工作区 %s 正在扫描，拒绝清空",
+                self._active_scan_workspace_id,
+            )
+            return False
+        if self._model.rowCount() == 0:
+            # 空列表：仍清理可能残留的状态，并视为成功
+            if self._current_workspace_id:
+                self._current_workspace_id = ""
+                self.currentWorkspaceChanged.emit()  # pyrefly: ignore [missing-attribute]
+            return True
+        # 清理所有 ScanController
+        for controller in self._scan_controllers.values():
+            controller.cleanup()
+            controller.deleteLater()
+        self._scan_controllers.clear()
+        self._model.clear()
+        # 重置当前/活动工作区 ID
+        if self._current_workspace_id:
+            self._current_workspace_id = ""
+            self.currentWorkspaceChanged.emit()  # pyrefly: ignore [missing-attribute]
+        # active_scan_workspace_id 已在入口校验非空，此处清空兜底
+        if self._active_scan_workspace_id:
+            self._active_scan_workspace_id = ""
+            self.activeScanChanged.emit()  # pyrefly: ignore [missing-attribute]
+        # 若 RulesController 绑定到已清空的工作区，自动解绑
+        if self._rules_controller.isBound:
+            self._rules_controller.unbindWorkspace()
+        # 持久化空列表
+        self._persist()
+        self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
+        return True
+
     # ----------------------------- 内部方法 -----------------------------
 
     def _sync_workspace_state(self, ws_id: str) -> None:

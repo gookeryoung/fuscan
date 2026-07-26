@@ -1382,6 +1382,176 @@ class TestBindRulesController:
         assert controller._rules_controller.isBound is False
 
 
+class TestClearAllWorkspaces:
+    """iter-108 清空所有工作区测试。"""
+
+    def test_clear_all_returns_true_when_empty(self, controller: WorkspaceController) -> None:
+        """空工作区列表清空应返回 True。"""
+        assert controller.clearAllWorkspaces() is True
+        assert controller.workspaceCount == 0
+
+    def test_clear_all_removes_all_workspaces(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """清空应移除所有工作区。"""
+        controller.addWorkspace("t1", "folder", "/tmp", "[]", True)
+        controller.addWorkspace("t2", "folder", "/tmp", "[]", True)
+        controller.addWorkspace("t3", "folder", "/tmp", "[]", True)
+        assert controller.workspaceCount == 3
+
+        assert controller.clearAllWorkspaces() is True
+        assert controller.workspaceCount == 0
+        assert tuple(controller.workspaceModel.items) == ()
+
+    def test_clear_all_rejected_when_scanning(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """扫描中状态拒绝清空。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        # 模拟扫描中状态
+        sc._scan_state = "scanning"  # type: ignore[attr-defined]
+        sc._is_paused = False  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+        assert controller.hasActiveScan is True
+
+        # 扫描中应拒绝清空
+        assert controller.clearAllWorkspaces() is False
+        # 工作区仍存在
+        assert controller.workspaceCount == 1
+
+    def test_clear_all_rejected_when_paused(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """暂停中状态同样拒绝清空。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        sc._scan_state = "scanning"  # type: ignore[attr-defined]
+        sc._is_paused = True  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+        assert controller.hasActiveScan is True
+
+        assert controller.clearAllWorkspaces() is False
+        assert controller.workspaceCount == 1
+
+    def test_clear_all_resets_current_workspace_id(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """清空后 currentWorkspaceId 应被重置为空串。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        assert controller.currentWorkspaceId == ws_id
+
+        controller.clearAllWorkspaces()
+        assert controller.currentWorkspaceId == ""
+        assert controller.hasCurrentWorkspace is False
+
+    def test_clear_all_calls_cleanup_on_scan_controllers(
+        self,
+        controller: WorkspaceController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """清空应调用每个 ScanController 的 cleanup。"""
+        ws_id1 = controller.addWorkspace("t1", "folder", "/tmp", "[]", True)
+        ws_id2 = controller.addWorkspace("t2", "folder", "/tmp", "[]", True)
+        sc1 = controller._scan_controllers[ws_id1]
+        sc2 = controller._scan_controllers[ws_id2]
+
+        cleanup_calls: list[ScanController] = []
+        monkeypatch.setattr(sc1, "cleanup", lambda: cleanup_calls.append(sc1))
+        monkeypatch.setattr(sc2, "cleanup", lambda: cleanup_calls.append(sc2))
+
+        controller.clearAllWorkspaces()
+
+        assert sc1 in cleanup_calls
+        assert sc2 in cleanup_calls
+        # ScanController 映射应清空
+        assert len(controller._scan_controllers) == 0
+
+    def test_clear_all_persists_empty_list(
+        self,
+        controller: WorkspaceController,
+        config_dir: Path,
+    ) -> None:
+        """清空后 workspaces.json 应包含空 workspaces 列表。"""
+        controller.addWorkspace("t1", "folder", "/tmp", "[]", True)
+        controller.addWorkspace("t2", "folder", "/tmp", "[]", True)
+        persist_file = config_dir / "workspaces.json"
+        assert persist_file.exists()
+        # 清空前有 2 个工作区
+        data_before = json.loads(persist_file.read_text(encoding="utf-8"))
+        assert len(data_before["workspaces"]) == 2
+
+        controller.clearAllWorkspaces()
+
+        # 清空后持久化文件应包含空列表
+        data_after = json.loads(persist_file.read_text(encoding="utf-8"))
+        assert data_after["version"] == 1
+        assert data_after["workspaces"] == []
+
+    def test_clear_all_emits_workspace_list_changed(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """清空应 emit workspaceListChanged 信号。"""
+        controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        emitted: list[None] = []
+        controller.workspaceListChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
+
+        controller.clearAllWorkspaces()
+        assert len(emitted) == 1
+
+    def test_clear_all_no_signal_when_empty(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """空列表清空不应 emit workspaceListChanged。"""
+        emitted: list[None] = []
+        controller.workspaceListChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
+
+        assert controller.clearAllWorkspaces() is True
+        assert len(emitted) == 0
+
+    def test_clear_all_unbinds_rules_controller(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """清空时若 RulesController 处于绑定态应自动解绑。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.bindRulesController(ws_id)
+        assert controller._rules_controller.isBound is True
+
+        controller.clearAllWorkspaces()
+
+        # 绑定的工作区已被清空，RulesController 应自动解绑恢复全局模式
+        assert controller._rules_controller.isBound is False
+        assert controller._rules_controller.boundWorkspaceId == ""
+
+    def test_clear_all_after_results_state_allowed(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """已完成状态应允许清空（仅扫描中/暂停中拒绝）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        # 模拟扫描完成进入 results 状态
+        sc._scan_state = "results"  # type: ignore[attr-defined]
+        sc._status_text = "已完成"  # type: ignore[attr-defined]
+        controller._sync_workspace_state(ws_id)
+        # results 状态不再属于 active scan
+        assert controller.hasActiveScan is False
+
+        assert controller.clearAllWorkspaces() is True
+        assert controller.workspaceCount == 0
+
+
 class TestTaskOverrides:
     """iter-104 任务级配置覆盖测试。"""
 

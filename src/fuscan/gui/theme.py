@@ -346,8 +346,22 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(str, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def iconsDir(self) -> str:
-        """图标目录绝对路径（供 QML ``Image { source: "file:///" + theme.iconsDir + "/xxx.svg" }``）。"""
+        """图标目录绝对路径（供 QML ``Image { source: "file:///" + theme.iconsDir + "/xxx.svg" }``）。
+
+        .. deprecated::
+            仅供旧代码兼容，新代码改用 :attr:`iconsPrefix` 走 qrc 资源访问，
+            避免 Win7 等老系统磁盘 I/O 阻塞。
+        """
         return str(Path(__file__).parent.parent / "assets" / "icons")
+
+    @Property(str, notify=themeChanged)  # pyrefly: ignore [not-callable]
+    def iconsPrefix(self) -> str:
+        """图标 qrc 前缀（供 QML ``Image { source: theme.iconsPrefix + "xxx.svg" }``）。
+
+        返回 ``qrc:/icons/``，对应 ``resources.qrc`` 中 ``alias="icons/xxx.svg"`` 的资源。
+        所有 SVG 图标已编译进 ``resources_rc.py``，无需磁盘 I/O。
+        """
+        return "qrc:/icons/"
 
     # ----------------------------- 按钮三级层级 -----------------------------
 

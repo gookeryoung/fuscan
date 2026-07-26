@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RCC version="1.0">
+  <qresource prefix="/">
+    <file alias="qml/components/IconButton.qml">views/components/IconButton.qml</file>
+    <file alias="qml/components/ResultDetailPanel.qml">views/components/ResultDetailPanel.qml</file>
+    <file alias="qml/components/ScanProgressCard.qml">views/components/ScanProgressCard.qml</file>
+    <file alias="qml/components/WorkspaceCard.qml">views/components/WorkspaceCard.qml</file>
+    <file alias="qml/ContentArea.qml">views/ContentArea.qml</file>
+    <file alias="qml/Main.qml">views/Main.qml</file>
+    <file alias="qml/NavItem.qml">views/NavItem.qml</file>
+    <file alias="qml/pages/AboutPage.qml">views/pages/AboutPage.qml</file>
+    <file alias="qml/pages/AddTaskPage.qml">views/pages/AddTaskPage.qml</file>
+    <file alias="qml/pages/HomePage.qml">views/pages/HomePage.qml</file>
+    <file alias="qml/pages/ResultsPage.qml">views/pages/ResultsPage.qml</file>
+    <file alias="qml/pages/RulesPage.qml">views/pages/RulesPage.qml</file>
+    <file alias="qml/pages/SettingsPage.qml">views/pages/SettingsPage.qml</file>
+    <file alias="qml/pages/StatsPage.qml">views/pages/StatsPage.qml</file>
+    <file alias="qml/Sidebar.qml">views/Sidebar.qml</file>
+    <file alias="icons/about.svg">../assets/icons/about.svg</file>
+    <file alias="icons/all_disk.svg">../assets/icons/all_disk.svg</file>
+    <file alias="icons/disk.svg">../assets/icons/disk.svg</file>
+    <file alias="icons/edit.svg">../assets/icons/edit.svg</file>
+    <file alias="icons/export.svg">../assets/icons/export.svg</file>
+    <file alias="icons/export_csv.svg">../assets/icons/export_csv.svg</file>
+    <file alias="icons/export_json.svg">../assets/icons/export_json.svg</file>
+    <file alias="icons/export_pdf.svg">../assets/icons/export_pdf.svg</file>
+    <file alias="icons/favicon.svg">../assets/icons/favicon.svg</file>
+    <file alias="icons/folder.svg">../assets/icons/folder.svg</file>
+    <file alias="icons/hard_disk.svg">../assets/icons/hard_disk.svg</file>
+    <file alias="icons/history.svg">../assets/icons/history.svg</file>
+    <file alias="icons/load_list.svg">../assets/icons/load_list.svg</file>
+    <file alias="icons/manual.svg">../assets/icons/manual.svg</file>
+    <file alias="icons/more.svg">../assets/icons/more.svg</file>
+    <file alias="icons/pause.svg">../assets/icons/pause.svg</file>
+    <file alias="icons/rescan.svg">../assets/icons/rescan.svg</file>
+    <file alias="icons/rules.svg">../assets/icons/rules.svg</file>
+    <file alias="icons/scan.svg">../assets/icons/scan.svg</file>
+    <file alias="icons/search.svg">../assets/icons/search.svg</file>
+    <file alias="icons/settings.svg">../assets/icons/settings.svg</file>
+    <file alias="icons/stats.svg">../assets/icons/stats.svg</file>
+    <file alias="icons/stop.svg">../assets/icons/stop.svg</file>
+    <file alias="icons/target.svg">../assets/icons/target.svg</file>
+  </qresource>
+</RCC>

@@ -77,21 +77,10 @@ packages = ["src/fuscan"]
 [tool.hatch.build.targets.wheel.force-include]
 "src/fuscan/py.typed" = "fuscan/py.typed"
 "src/fuscan/assets/docs/fuscan-用户手册.pdf" = "fuscan/assets/docs/fuscan-用户手册.pdf"
-"src/fuscan/gui/views/Main.qml" = "fuscan/gui/views/Main.qml"
-"src/fuscan/gui/views/Sidebar.qml" = "fuscan/gui/views/Sidebar.qml"
-"src/fuscan/gui/views/ContentArea.qml" = "fuscan/gui/views/ContentArea.qml"
-"src/fuscan/gui/views/NavItem.qml" = "fuscan/gui/views/NavItem.qml"
-"src/fuscan/gui/views/components/WorkspaceCard.qml" = "fuscan/gui/views/components/WorkspaceCard.qml"
-"src/fuscan/gui/views/components/IconButton.qml" = "fuscan/gui/views/components/IconButton.qml"
-"src/fuscan/gui/views/components/ScanProgressCard.qml" = "fuscan/gui/views/components/ScanProgressCard.qml"
-"src/fuscan/gui/views/components/ResultDetailPanel.qml" = "fuscan/gui/views/components/ResultDetailPanel.qml"
-"src/fuscan/gui/views/pages/HomePage.qml" = "fuscan/gui/views/pages/HomePage.qml"
-"src/fuscan/gui/views/pages/AddTaskPage.qml" = "fuscan/gui/views/pages/AddTaskPage.qml"
-"src/fuscan/gui/views/pages/RulesPage.qml" = "fuscan/gui/views/pages/RulesPage.qml"
-"src/fuscan/gui/views/pages/SettingsPage.qml" = "fuscan/gui/views/pages/SettingsPage.qml"
-"src/fuscan/gui/views/pages/AboutPage.qml" = "fuscan/gui/views/pages/AboutPage.qml"
-"src/fuscan/gui/views/pages/ResultsPage.qml" = "fuscan/gui/views/pages/ResultsPage.qml"
-"src/fuscan/gui/views/pages/StatsPage.qml" = "fuscan/gui/views/pages/StatsPage.qml"
+# QML 与 SVG 资源已编译进 resources_rc.py（由 scripts/build_qrc.py 生成）
+# 打包时仅需包含编译产物与清单，无需单独包含 .qml/.svg 源文件
+"src/fuscan/gui/resources_rc.py" = "fuscan/gui/resources_rc.py"
+"src/fuscan/gui/resources.qrc" = "fuscan/gui/resources.qrc"
 "src/fuscan/gui/qtquickcontrols2.conf" = "fuscan/gui/qtquickcontrols2.conf"
 
 [tool.fspack.entries]

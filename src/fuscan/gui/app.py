@@ -5,6 +5,13 @@
 构造 controller 注册到 QML context。
 
 参考实现：``ref/pyside2_qml_dashboard/main.py``
+
+QML 加载策略（iter-108 启动加速）：
+
+- 所有 ``.qml`` 与 ``.svg`` 资源由 ``scripts/build_qrc.py`` 编译进
+  ``resources_rc.py``，运行时通过 ``qrc:/`` 路径访问，避免 Win7 等老系统
+  磁盘 I/O 阻塞。
+- 修改 QML/SVG 后须重新运行 ``uv run python scripts/build_qrc.py`` 重建。
 """
 
 from __future__ import annotations
@@ -12,7 +19,6 @@ from __future__ import annotations
 import logging
 import sys
 import warnings
-from pathlib import Path
 from typing import Sequence
 
 try:
@@ -26,6 +32,7 @@ except ImportError:  # pragma: no cover
     from PySide6.QtQml import QQmlApplicationEngine  # pyrefly: ignore [missing-import]
     from PySide6.QtQuickControls2 import QQuickStyle  # pyrefly: ignore [missing-import]
 
+from fuscan.gui import resources_rc  # noqa: F401  注册 qrc 资源
 from fuscan.gui.controllers import AppController, register_qml_types
 from fuscan.gui.theme import detect_font_families
 
@@ -33,10 +40,10 @@ __all__ = ["launch"]
 
 logger = logging.getLogger(__name__)
 
-# QML 文件目录（src/fuscan/gui/views/）
-# 按rule-12三层MVC分层，.qml视图文件全部在 views/ 子目录
-_VIEWS_DIR = Path(__file__).parent / "views"
-_MAIN_QML = _VIEWS_DIR / "Main.qml"
+# QML 资源 qrc 路径前缀（resources.qrc 中 alias=qml/Main.qml）
+# QML 间相对 import（如 import "pages"）在 qrc 内自动解析
+_QML_IMPORT_PATH = "qrc:/qml"
+_MAIN_QML_URL = "qrc:/qml/Main.qml"
 
 
 def _apply_global_font(app: QGuiApplication) -> None:
@@ -94,14 +101,14 @@ def launch(argv: Sequence[str] | None = None) -> int:
     engine = QQmlApplicationEngine()
     controller.register_to(engine.rootContext())
 
-    # 添加 views/ 到 QML import path（支持 Main.qml 同目录引用 Sidebar/ContentArea 等）
-    engine.addImportPath(str(_VIEWS_DIR))
+    # 添加 qrc:/qml 到 QML import path（支持 Main.qml 同目录引用 Sidebar/ContentArea 等）
+    engine.addImportPath(_QML_IMPORT_PATH)
 
-    # 加载主 QML
-    engine.load(QUrl.fromLocalFile(str(_MAIN_QML)))  # pyrefly: ignore [missing-argument]
+    # 加载主 QML（从 qrc 资源，避免文件系统 I/O）
+    engine.load(QUrl(_MAIN_QML_URL))  # pyrefly: ignore [missing-argument]
 
     if not engine.rootObjects():
-        logger.error("QML 加载失败：%s", _MAIN_QML)
+        logger.error("QML 加载失败：%s", _MAIN_QML_URL)
         return -1
 
     # 窗口关闭时清理 controller 资源

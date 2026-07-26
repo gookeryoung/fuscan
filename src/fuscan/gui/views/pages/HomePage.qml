@@ -116,6 +116,8 @@ Item {
                 anchors.fill: parent
                 model: workspaceController.workspaceModel
                 spacing: 12
+                // iter-106 P1：预渲染屏幕外 delegate，避免滚动时 WorkspaceCard 重建
+                cacheBuffer: 500
                 implicitHeight: contentHeight
 
                 // 空态引导

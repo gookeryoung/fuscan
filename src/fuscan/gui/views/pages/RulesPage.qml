@@ -101,6 +101,8 @@ Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
+                        // iter-106 P1：预渲染屏幕外 delegate，避免滚动时重建
+                        cacheBuffer: 500
                         model: rulesController.rulesFileModel
                         currentIndex: rulesController.selectedFileIndex
                         onCurrentIndexChanged: rulesController.setSelectedFileIndex(currentIndex)
@@ -197,6 +199,8 @@ Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
+                        // iter-106 P1：预渲染屏幕外 delegate，避免滚动时重建
+                        cacheBuffer: 1000
                         model: rulesController.ruleModel
                         delegate: ItemDelegate {
                             width: ruleListView.width

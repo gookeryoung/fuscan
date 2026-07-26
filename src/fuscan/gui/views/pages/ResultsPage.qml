@@ -76,6 +76,9 @@ Item {
                     anchors.margins: 8
                     model: workspaceController.currentScanController.resultModel
                     spacing: 4
+                    // iter-106 P0：大规模命中（1000+）时预渲染屏幕外 delegate，
+                    // 避免滚动时频繁销毁重建（每个 delegate 含路径/规则/严重度绑定）
+                    cacheBuffer: 2000
                     currentIndex: workspaceController.currentScanController.selectedResultIndex
 
                     // 空态引导

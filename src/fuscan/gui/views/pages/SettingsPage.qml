@@ -396,6 +396,8 @@ Item {
                                 Layout.preferredHeight: 320
                                 clip: true
                                 interactive: true
+                                // iter-106 P1：预渲染屏幕外 delegate，避免滚动时重建
+                                cacheBuffer: 500
                                 model: configController.extractorModel
                                 // 按 category 角色分组，配合 section.delegate 渲染类别头部
                                 section.property: "category"

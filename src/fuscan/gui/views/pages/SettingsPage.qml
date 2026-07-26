@@ -411,7 +411,31 @@ Item {
                                         anchors.rightMargin: 8
                                         spacing: 8
 
-                                        // 类别标题：仅展示类别名，勾选状态由各行提取器 CheckBox 体现
+                                        // 类别父节点勾选框（iter-104 统一勾选）：
+                                        // 三态显示：0=全不选, 1=全选, 2=部分选中
+                                        // 点击切换为相反状态（全选↔全不选）
+                                        CheckBox {
+                                            id: categoryCheckbox
+                                            // tristate 让 Qt 允许三态显示（包含 PartiallyChecked）
+                                            tristate: true
+                                            // 根据 categoryEnabledState 计算三态
+                                            checkState: {
+                                                var state = configController.categoryEnabledState(section)
+                                                if (state === 1) return Qt.Checked
+                                                if (state === 2) return Qt.PartiallyChecked
+                                                return Qt.Unchecked
+                                            }
+                                            onClicked: {
+                                                // 点击时切换为相反状态：当前全选→全不选，否则→全选
+                                                var state = configController.categoryEnabledState(section)
+                                                configController.setCategoryEnabled(section, state !== 1)
+                                            }
+                                            ToolTip.visible: hovered
+                                            ToolTip.text: "统一勾选/取消该类别下所有文件类型"
+                                            ToolTip.delay: 400
+                                        }
+
+                                        // 类别标题
                                         Label {
                                             text: section
                                             font.bold: true

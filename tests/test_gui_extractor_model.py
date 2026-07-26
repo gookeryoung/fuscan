@@ -306,6 +306,87 @@ class TestSelectAll:
         assert len(model.disabled_extractors()) == model.total_count
 
 
+class TestCategoryEnabled:
+    """iter-104 父节点统一勾选：set_category_enabled 与 category_enabled_state 测试。"""
+
+    def test_category_enabled_state_all_selected(self, model: ExtractorListModel) -> None:
+        """默认全部勾选时，任意类别 state=1（全选）。"""
+        for i in range(model.rowCount()):
+            cat = model.data(model.index(i), Qt.UserRole + 8)
+            assert isinstance(cat, str)
+            assert model.category_enabled_state(cat) == 1
+
+    def test_category_enabled_state_none_selected(self, model: ExtractorListModel) -> None:
+        """全部取消勾选后，任意类别 state=0（全不选）。"""
+        model.unselect_all()
+        for i in range(model.rowCount()):
+            cat = model.data(model.index(i), Qt.UserRole + 8)
+            assert isinstance(cat, str)
+            assert model.category_enabled_state(cat) == 0
+
+    def test_category_enabled_state_partial(self, model: ExtractorListModel) -> None:
+        """仅取消类别内一个提取器，该类别 state=2（部分选中）。"""
+        # 找到「文本」类别下的第一个提取器并取消勾选
+        target_idx = -1
+        target_cat = ""
+        for i in range(model.rowCount()):
+            cat = model.data(model.index(i), Qt.UserRole + 8)
+            if cat == "文本":
+                assert isinstance(cat, str)
+                target_idx = i
+                target_cat = cat
+                break
+        assert target_idx >= 0, "文本类别应存在"
+        class_name = model.data(model.index(target_idx), Qt.UserRole + 1)
+        assert isinstance(class_name, str)
+        model.set_extractor_enabled(class_name, False)
+        # 该类别至少有 2 个提取器（PlainText + SourceCode），state 应为 2
+        assert model.category_enabled_state(target_cat) == 2
+
+    def test_set_category_enabled_uncheck_all(self, model: ExtractorListModel) -> None:
+        """set_category_enabled(False) 应取消该类别下所有提取器勾选。"""
+        # 选定「Office 文档」类别
+        target_cat = "Office 文档"
+        # 确保该类别有提取器
+        cat_rows = [i for i in range(model.rowCount()) if model.data(model.index(i), Qt.UserRole + 8) == target_cat]
+        assert len(cat_rows) > 0, "Office 文档类别应有提取器"
+        model.set_category_enabled(target_cat, False)
+        # 该类别下所有提取器应未勾选
+        for i in cat_rows:
+            assert model.data(model.index(i), Qt.UserRole + 6) is False
+        # state 应为 0
+        assert model.category_enabled_state(target_cat) == 0
+        # 其他类别不应受影响
+        for i in range(model.rowCount()):
+            if model.data(model.index(i), Qt.UserRole + 8) != target_cat:
+                assert model.data(model.index(i), Qt.UserRole + 6) is True
+
+    def test_set_category_enabled_check_all(self, model: ExtractorListModel) -> None:
+        """set_category_enabled(True) 应勾选该类别下所有提取器。"""
+        target_cat = "文本"
+        # 先全部取消
+        model.unselect_all()
+        assert model.category_enabled_state(target_cat) == 0
+        # 再勾选文本类别
+        model.set_category_enabled(target_cat, True)
+        assert model.category_enabled_state(target_cat) == 1
+        # 其他类别仍为 0
+        for i in range(model.rowCount()):
+            cat = model.data(model.index(i), Qt.UserRole + 8)
+            if cat != target_cat:
+                assert model.data(model.index(i), Qt.UserRole + 6) is False
+
+    def test_set_category_enabled_unknown_category_noop(self, model: ExtractorListModel) -> None:
+        """未知类别应返回 False 且不修改任何行。"""
+        original_count = model.enabled_count
+        assert model.set_category_enabled("不存在的类别", False) is False
+        assert model.enabled_count == original_count
+
+    def test_category_enabled_state_unknown_category_returns_zero(self, model: ExtractorListModel) -> None:
+        """未知类别 state 应返回 0。"""
+        assert model.category_enabled_state("不存在的类别") == 0
+
+
 class TestCounts:
     def test_total_count_matches_row_count(self, model: ExtractorListModel) -> None:
         assert model.total_count == model.rowCount()

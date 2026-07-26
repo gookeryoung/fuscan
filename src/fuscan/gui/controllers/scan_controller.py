@@ -94,6 +94,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._cache: CacheStore | None = None
         self._skip_store: SkipStore = SkipStore()
         self._result_model: ResultListModel = ResultListModel(self)
+        # 任务级配置覆盖（iter-104）：键为 Config 字段名，值为该任务专属覆盖值
+        # 通过 _effective_<field>() 方法优先读取覆盖值，回退到全局 Config
+        self._task_overrides: dict[str, object] = {}
 
         # 扫描状态
         self._scan_state: str = "setup"  # setup / scanning / results
@@ -353,6 +356,56 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self.folderRootChanged.emit()  # pyrefly: ignore [missing-attribute]
             self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
 
+    # ----------------------------- 任务级配置覆盖（iter-104） -----------------------------
+
+    @Slot(str, object)  # pyrefly: ignore [not-callable]
+    def setTaskOverride(self, key: str, value: object) -> None:
+        """设置任务级配置覆盖（iter-104）。
+
+        :param key: Config 字段名（``scan_archives``/``max_workers``/
+            ``max_file_size``/``max_depth``/``ignore_dirs``）
+        :param value: 覆盖值（类型须与 Config 字段一致）
+
+        覆盖值在 :meth:`_effective_scan_archives`/`_effective_max_workers` 等
+        方法中优先读取，未设置时回退到全局 :attr:`_config`。
+        """
+        self._task_overrides[key] = value
+
+    def _effective_scan_archives(self) -> bool:
+        """任务级覆盖优先的 scan_archives。"""
+        value = self._task_overrides.get("scan_archives")
+        if isinstance(value, bool):
+            return value
+        return self._config.scan_archives
+
+    def _effective_max_workers(self) -> int:
+        """任务级覆盖优先的 max_workers。"""
+        value = self._task_overrides.get("max_workers")
+        if isinstance(value, int):
+            return value
+        return self._config.max_workers
+
+    def _effective_max_file_size(self) -> int:
+        """任务级覆盖优先的 max_file_size。"""
+        value = self._task_overrides.get("max_file_size")
+        if isinstance(value, int):
+            return value
+        return self._config.max_file_size
+
+    def _effective_max_depth(self) -> int | None:
+        """任务级覆盖优先的 max_depth（None 表示不限深度）。"""
+        value = self._task_overrides.get("max_depth")
+        if isinstance(value, int):
+            return value
+        return self._config.max_depth
+
+    def _effective_ignore_dirs(self) -> tuple[str, ...]:
+        """任务级覆盖优先的 ignore_dirs。"""
+        value = self._task_overrides.get("ignore_dirs")
+        if isinstance(value, tuple):
+            return value
+        return tuple(self._config.ignore_dirs)
+
     @Property(int, notify=rulesCountChanged)  # pyrefly: ignore [not-callable]
     def rulesCount(self) -> int:
         """当前规则集规则数。"""
@@ -604,9 +657,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._stats_worker = FileStatsWorker(
             ruleset=self._ruleset,
             roots=roots,
-            scan_archives=self._config.scan_archives,
-            max_depth=self._config.max_depth,
-            ignore_dirs=tuple(self._config.ignore_dirs),
+            scan_archives=self._effective_scan_archives(),
+            max_depth=self._effective_max_depth(),
+            ignore_dirs=self._effective_ignore_dirs(),
             scan_extensions=self._config_controller.enabled_extensions(),
             skip_paths=self._skip_store.paths(),
         )
@@ -763,11 +816,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._worker = ScanWorker(
             ruleset=self._ruleset,
             roots=[wr.root for wr in results],
-            scan_archives=self._config.scan_archives,
-            max_workers=self._config.max_workers,
-            max_depth=self._config.max_depth,
-            max_file_size=self._config.max_file_size,
-            ignore_dirs=tuple(self._config.ignore_dirs),
+            scan_archives=self._effective_scan_archives(),
+            max_workers=self._effective_max_workers(),
+            max_depth=self._effective_max_depth(),
+            max_file_size=self._effective_max_file_size(),
+            ignore_dirs=self._effective_ignore_dirs(),
             cache=cache,
             source_files=source_files,
             scan_extensions=self._config_controller.enabled_extensions(),

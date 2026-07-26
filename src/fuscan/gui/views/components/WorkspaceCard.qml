@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtQuick.Dialogs 1.3 as Dialogs
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
 
@@ -314,6 +315,23 @@ Rectangle {
                 spacing: 8
 
                 IconButton {
+                    text:"🎯 切换目标"
+                    tooltip: "修改该任务的扫描模式与目标路径"
+                    accent: "ghost"
+                    // 扫描中/暂停中禁用
+                    enabled: statusText !== "扫描中" && statusText !== "已暂停"
+                    onClicked: {
+                        // 用当前工作区状态初始化编辑表单
+                        var modeStr = card.modeText === "全盘扫描" ? "full"
+                                   : (card.modeText === "盘符扫描" ? "drive" : "folder")
+                        editTargetDialog.editModeIndex = modeStr === "full" ? 0
+                            : (modeStr === "drive" ? 1 : 2)
+                        editTargetDialog.editDrive = modeStr === "drive" ? card.target : ""
+                        editTargetDialog.editFolder = modeStr === "folder" ? card.target : ""
+                        editTargetDialog.open()
+                    }
+                }
+                IconButton {
                     text:"📄 CSV"
                     tooltip: "导出为 CSV"
                     accent: "ghost"
@@ -329,9 +347,28 @@ Rectangle {
                 }
                 IconButton {
                     text:"⚙ 设置"
-                    tooltip: "任务级设置"
+                    tooltip: "任务级设置（仅对该任务生效）"
                     accent: "ghost"
-                    onClicked: taskSettingsRequested(card.workspaceId)
+                    onClicked: {
+                        // 从 workspaceController 读取当前任务级覆盖
+                        var jsonStr = workspaceController.taskOverridesJson(card.workspaceId)
+                        var overrides = {}
+                        try { overrides = JSON.parse(jsonStr) } catch(e) { overrides = {} }
+                        // 全局配置作为默认值（未覆盖时显示全局值）
+                        taskSettingsDialog.editScanArchives = overrides.scan_archives !== undefined
+                            ? overrides.scan_archives : ConfigController.scanArchives
+                        taskSettingsDialog.editMaxWorkers = overrides.max_workers !== undefined
+                            ? overrides.max_workers : ConfigController.maxWorkers
+                        taskSettingsDialog.editMaxFileSizeMB = overrides.max_file_size !== undefined
+                            ? Math.floor(overrides.max_file_size / (1024 * 1024))
+                            : ConfigController.maxFileSizeMB
+                        taskSettingsDialog.editMaxDepth = overrides.max_depth !== undefined
+                            ? overrides.max_depth : ConfigController.maxDepth
+                        // ignore_dirs 数组转成多行文本
+                        var dirs = overrides.ignore_dirs !== undefined ? overrides.ignore_dirs : []
+                        taskSettingsDialog.editIgnoreDirs = Array.isArray(dirs) ? dirs.join("\n") : ""
+                        taskSettingsDialog.open()
+                    }
                 }
                 Item { Layout.fillWidth: true }
                 IconButton {
@@ -344,8 +381,295 @@ Rectangle {
         }
     }
 
+    // ---------- 切换目标对话框（iter-104 任务切换扫描目标） ----------
+    Dialog {
+        id: editTargetDialog
+        title: "切换扫描目标"
+        modal: true
+        anchors.centerIn: parent
+        width: 420
+        standardButtons: Dialog.Cancel | Dialog.Ok
+
+        // 临时编辑状态
+        property int editModeIndex: 2
+        property string editDrive: ""
+        property string editFolder: ""
+
+        contentItem: ColumnLayout {
+            spacing: 12
+
+            Label {
+                text: "扫描模式"
+                font.bold: true
+                font.pixelSize: theme.fontSizeBody
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+            }
+            TabBar {
+                id: editModeTabBar
+                Layout.fillWidth: true
+                currentIndex: editTargetDialog.editModeIndex
+                onCurrentIndexChanged: editTargetDialog.editModeIndex = currentIndex
+                TabButton {
+                    text: "全盘扫描"
+                    height: theme.btnHeightSecondary
+                }
+                TabButton {
+                    text: "盘符扫描"
+                    height: theme.btnHeightSecondary
+                }
+                TabButton {
+                    text: "文件夹扫描"
+                    height: theme.btnHeightSecondary
+                }
+            }
+
+            // 盘符选择（modeIndex === 1）
+            RowLayout {
+                Layout.fillWidth: true
+                visible: editTargetDialog.editModeIndex === 1
+                spacing: 6
+                Repeater {
+                    model: ConfigController.drives
+                    delegate: Button {
+                        Layout.preferredWidth: 72
+                        Layout.preferredHeight: theme.btnHeightSecondary
+                        text: modelData
+                        checkable: true
+                        checked: editTargetDialog.editDrive === modelData
+                        onClicked: editTargetDialog.editDrive = modelData
+                        background: Rectangle {
+                            color: parent.checked
+                                  ? (parent.down ? theme.colorPrimaryDark : theme.colorPrimary)
+                                  : (parent.down
+                                      ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
+                                      : "transparent")
+                            border.color: parent.checked ? theme.colorPrimary
+                                : (theme.isDark ? theme.colorBorderDark : theme.colorBorder)
+                            border.width: 1
+                            radius: theme.btnRadiusSecondary
+                        }
+                        contentItem: Label {
+                            text: parent.text
+                            color: parent.checked ? theme.colorTextOnPrimary
+                                : (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
+                            font.pixelSize: 12
+                            font.bold: parent.checked
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                }
+                Label {
+                    visible: ConfigController.drives.length === 0
+                    text: "未检测到可用盘符"
+                    font.pixelSize: 12
+                    color: theme.colorWarning
+                }
+            }
+
+            // 文件夹选择（modeIndex === 2）
+            RowLayout {
+                Layout.fillWidth: true
+                visible: editTargetDialog.editModeIndex === 2
+                spacing: 8
+                TextField {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: theme.btnHeightSecondary
+                    placeholderText: "选择或输入扫描目录"
+                    text: editTargetDialog.editFolder
+                    onTextChanged: editTargetDialog.editFolder = text
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    background: Rectangle {
+                        color: "transparent"
+                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                        border.width: 1
+                        radius: theme.btnRadiusSecondary
+                    }
+                }
+                IconButton {
+                    text:"📁 选择"
+                    tooltip: "选择扫描目录"
+                    accent: "secondary"
+                    onClicked: folderDialogForEdit.open()
+                }
+            }
+        }
+
+        onAccepted: {
+            var modeStr = editTargetDialog.editModeIndex === 0 ? "full"
+                       : (editTargetDialog.editModeIndex === 1 ? "drive" : "folder")
+            var target = editTargetDialog.editModeIndex === 0 ? ""
+                       : (editTargetDialog.editModeIndex === 1 ? editTargetDialog.editDrive : editTargetDialog.editFolder)
+            workspaceController.updateWorkspaceTarget(card.workspaceId, modeStr, target)
+        }
+    }
+
+    // 切换目标对话框用的文件夹选择器
+    Dialogs.FileDialog {
+        id: folderDialogForEdit
+        title: "选择扫描目录"
+        selectFolder: true
+        selectExisting: true
+        folder: editTargetDialog.editFolder.length > 0
+            ? "file:///" + editTargetDialog.editFolder
+            : shortcuts.home
+        onAccepted: {
+            editTargetDialog.editFolder = folderDialogForEdit.fileUrl.toString().replace(/^file:\/\/\//, "")
+        }
+    }
+
     // 信号：导出 / 任务设置
     signal exportCsvRequested(string workspaceId)
     signal exportJsonRequested(string workspaceId)
     signal taskSettingsRequested(string workspaceId)
+
+    // ---------- 任务级设置对话框（iter-104 任务专属配置覆盖） ----------
+    Dialog {
+        id: taskSettingsDialog
+        title: "任务级设置 — " + card.taskName
+        modal: true
+        anchors.centerIn: parent
+        width: 460
+        standardButtons: Dialog.Cancel | Dialog.Ok
+
+        // 临时编辑状态（初始化时从 taskOverridesJson 读取）
+        property bool editScanArchives: true
+        property int editMaxWorkers: 5
+        property int editMaxFileSizeMB: 50
+        property int editMaxDepth: 10
+        property string editIgnoreDirs: ""
+
+        contentItem: ColumnLayout {
+            spacing: 12
+
+            Label {
+                text: "仅对该任务生效，不影响全局设置。留空或默认值时使用全局配置。"
+                font.pixelSize: 11
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+
+            // 扫描压缩包
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: "扫描压缩包"
+                    Layout.fillWidth: true
+                    font.pixelSize: theme.fontSizeBody
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
+                Switch {
+                    checked: taskSettingsDialog.editScanArchives
+                    onCheckedChanged: taskSettingsDialog.editScanArchives = checked
+                }
+            }
+
+            // 最大工作线程
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: "最大工作线程"
+                    Layout.fillWidth: true
+                    font.pixelSize: theme.fontSizeBody
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
+                Label {
+                    text: "当前机器最大线程=" + ConfigController.cpuCount
+                    font.pixelSize: theme.fontSizeCaption
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                }
+                SpinBox {
+                    from: 1
+                    to: 16
+                    value: taskSettingsDialog.editMaxWorkers
+                    editable: true
+                    onValueChanged: taskSettingsDialog.editMaxWorkers = value
+                }
+            }
+
+            // 最大文件大小（MB）
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: "最大文件大小（MB）"
+                    Layout.fillWidth: true
+                    font.pixelSize: theme.fontSizeBody
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
+                SpinBox {
+                    from: 1
+                    to: 1024
+                    value: taskSettingsDialog.editMaxFileSizeMB
+                    editable: true
+                    onValueChanged: taskSettingsDialog.editMaxFileSizeMB = value
+                }
+            }
+
+            // 最大递归深度
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: "最大递归深度"
+                    Layout.fillWidth: true
+                    font.pixelSize: theme.fontSizeBody
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
+                SpinBox {
+                    from: 1
+                    to: 64
+                    value: taskSettingsDialog.editMaxDepth
+                    editable: true
+                    onValueChanged: taskSettingsDialog.editMaxDepth = value
+                }
+            }
+
+            // 忽略目录
+            Label {
+                text: "忽略目录（一行一个）"
+                font.pixelSize: theme.fontSizeBody
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+            }
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 100
+                clip: true
+                TextArea {
+                    text: taskSettingsDialog.editIgnoreDirs
+                    onTextChanged: taskSettingsDialog.editIgnoreDirs = text
+                    font.pixelSize: theme.fontSizeBody
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    background: Rectangle {
+                        color: "transparent"
+                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                        border.width: 1
+                        radius: theme.btnRadiusSecondary
+                    }
+                }
+            }
+        }
+
+        onAccepted: {
+            // 提交所有覆盖（与全局值不同才提交，避免无意义持久化）
+            var keys = ["scan_archives", "max_workers", "max_file_size", "max_depth", "ignore_dirs"]
+            for (var i = 0; i < keys.length; i++) {
+                var key = keys[i]
+                var value
+                if (key === "scan_archives") value = taskSettingsDialog.editScanArchives
+                else if (key === "max_workers") value = taskSettingsDialog.editMaxWorkers
+                else if (key === "max_file_size") value = taskSettingsDialog.editMaxFileSizeMB * 1024 * 1024
+                else if (key === "max_depth") value = taskSettingsDialog.editMaxDepth
+                else if (key === "ignore_dirs") {
+                    var lines = taskSettingsDialog.editIgnoreDirs.split("\n")
+                    var cleaned = []
+                    for (var j = 0; j < lines.length; j++) {
+                        var line = lines[j].trim()
+                        if (line.length > 0) cleaned.push(line)
+                    }
+                    value = cleaned
+                }
+                workspaceController.setTaskOverride(card.workspaceId, key, JSON.stringify(value))
+            }
+        }
+    }
 }

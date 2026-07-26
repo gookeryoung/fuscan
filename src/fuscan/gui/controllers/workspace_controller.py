@@ -51,6 +51,56 @@ _MODE_STR_TO_INDEX: dict[str, int] = {"full": 0, "drive": 1, "folder": 2}
 _PERSIST_FILENAME = "workspaces.json"
 _PERSIST_VERSION = 1
 
+# 允许任务级覆盖的 Config 字段及类型校验器（iter-104）
+_TASK_OVERRIDE_KEYS: dict[str, type] = {
+    "scan_archives": bool,
+    "max_workers": int,
+    "max_file_size": int,
+    "max_depth": int,
+    "ignore_dirs": tuple,
+}
+
+
+def _serialize_task_overrides(overrides: dict[str, object]) -> dict[str, object]:
+    """序列化 task_overrides 供 JSON 持久化。
+
+    ``ignore_dirs`` 的 tuple 转为 list（JSON 不支持 tuple），其余字段原样返回。
+    非白名单字段被剔除。
+    """
+    out: dict[str, object] = {}
+    for key, value in overrides.items():
+        if key not in _TASK_OVERRIDE_KEYS:
+            continue
+        if key == "ignore_dirs" and isinstance(value, tuple):
+            out[key] = list(value)
+        else:
+            out[key] = value
+    return out
+
+
+def _deserialize_task_overrides(raw: object) -> dict[str, object]:
+    """反序列化 task_overrides（容错：跳过类型不符字段）。
+
+    ``ignore_dirs`` 的 list 转为 tuple，类型不符字段跳过并 warning。
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, object] = {}
+    for key, value in raw.items():
+        if key not in _TASK_OVERRIDE_KEYS:
+            logger.warning("反序列化 task_overrides：跳过未知字段 %s", key)
+            continue
+        if key == "ignore_dirs":
+            if isinstance(value, list) and all(isinstance(x, str) for x in value):
+                out[key] = tuple(value)
+            else:
+                logger.warning("task_overrides.ignore_dirs 类型不符，跳过: %r", value)
+        elif isinstance(value, _TASK_OVERRIDE_KEYS[key]):
+            out[key] = value
+        else:
+            logger.warning("task_overrides.%s 类型不符，跳过: %r", key, value)
+    return out
+
 
 class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
     """工作区控制器。
@@ -228,6 +278,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         skipped_count: int = 0,
         error_count: int = 0,
         last_summary: str = "",
+        task_overrides: dict[str, object] | None = None,
     ) -> None:
         """创建工作区内部实现（构造 item + ScanController + 连接信号）。
 
@@ -247,6 +298,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             skipped_count=skipped_count,
             error_count=error_count,
             last_summary=last_summary,
+            task_overrides=dict(task_overrides) if task_overrides else {},
         )
         self._model.add_workspace(item)
 
@@ -259,6 +311,9 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             scan_controller.setSelectedDrive(target)
         elif mode_str == "folder" and target:
             scan_controller.setFolderRoot(target)
+        # 同步任务级配置覆盖到 ScanController（iter-104）
+        for key, value in item.task_overrides.items():
+            scan_controller.setTaskOverride(key, value)
         # 连接状态变化信号以回写工作区
         scan_controller.scanStateChanged.connect(  # pyrefly: ignore [missing-attribute]
             lambda ws_id=ws_id: self._sync_workspace_state(ws_id)
@@ -327,6 +382,108 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if controller is None:
             return
         controller.exportResults(fmt, path_str)
+
+    @Slot(str, str, str)  # pyrefly: ignore [not-callable]
+    def updateWorkspaceTarget(self, ws_id: str, mode_str: str, target: str) -> None:
+        """更新工作区扫描目标（iter-104 任务切换扫描目标）。
+
+        :param ws_id: 工作区 ID
+        :param mode_str: 新的扫描模式（``"full"``/``"drive"``/``"folder"``）
+        :param target: 新的目标（盘符或文件夹路径，全盘模式忽略）
+
+        更新 :class:`WorkspaceItem` 的 mode_str/target 字段并同步到对应
+        :class:`ScanController`；仅当工作区处于 ``就绪``/``已完成`` 状态时
+        允许修改，扫描中/暂停中拒绝修改以避免破坏运行时状态。
+        """
+        item = self._model.get_workspace(ws_id)
+        if item is None:
+            logger.warning("工作区 %s 不存在，无法更新目标", ws_id)
+            return
+        # 扫描中/暂停中拒绝修改
+        if item.status_text in ("扫描中", "已暂停"):
+            logger.warning("工作区 %s 处于 %s 状态，拒绝修改目标", ws_id, item.status_text)
+            return
+        # 规范化参数
+        if mode_str not in _MODE_STR_TO_INDEX:
+            logger.warning("无效的扫描模式: %s", mode_str)
+            return
+        # 全盘模式 target 强制为空
+        if mode_str == "full":
+            target = ""
+        # 同步到 model
+        self._model.update_workspace(ws_id, mode_str=mode_str, target=target)
+        # 同步到 ScanController
+        controller = self._scan_controllers.get(ws_id)
+        if controller is not None:
+            mode_index = _MODE_STR_TO_INDEX[mode_str]
+            controller.setScanModeIndex(mode_index)
+            if mode_str == "drive" and target:
+                controller.setSelectedDrive(target)
+            elif mode_str == "folder" and target:
+                controller.setFolderRoot(target)
+        self._persist()
+        self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    @Slot(str, result=str)  # pyrefly: ignore [not-callable]
+    def taskOverridesJson(self, ws_id: str) -> str:
+        """返回指定工作区的任务级配置覆盖 JSON 字符串（iter-104）。
+
+        :param ws_id: 工作区 ID
+        :return: JSON 字符串（如 ``{"scan_archives": false, "max_workers": 8}``）；
+            工作区不存在返回 ``"{}"``
+        """
+        item = self._model.get_workspace(ws_id)
+        if item is None:
+            return "{}"
+        return json.dumps(item.task_overrides, ensure_ascii=False)
+
+    @Slot(str, str, str)  # pyrefly: ignore [not-callable]
+    def setTaskOverride(self, ws_id: str, key: str, value_json: str) -> None:
+        """设置任务级配置覆盖（iter-104）。
+
+        :param ws_id: 工作区 ID
+        :param key: Config 字段名（如 ``"scan_archives"``/``"max_workers"``）
+        :param value_json: 值的 JSON 字符串（如 ``"false"``/``"8"``/``"["a","b"]"``）
+
+        支持 5 个字段：``scan_archives``/``max_workers``/``max_file_size``/
+        ``max_depth``/``ignore_dirs``。其他字段忽略。
+        修改后持久化并同步到对应 ScanController。
+        """
+        item = self._model.get_workspace(ws_id)
+        if item is None:
+            logger.warning("工作区 %s 不存在，无法设置任务级配置", ws_id)
+            return
+        # 白名单：允许覆盖的 Config 字段
+        allowed_keys = {"scan_archives", "max_workers", "max_file_size", "max_depth", "ignore_dirs"}
+        if key not in allowed_keys:
+            logger.warning("不允许覆盖字段: %s", key)
+            return
+        try:
+            value = json.loads(value_json)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("任务级配置值 JSON 解析失败: %s", value_json)
+            return
+        # 类型校验
+        if key == "scan_archives" and not isinstance(value, bool):
+            logger.warning("scan_archives 应为 bool，得到 %s", type(value).__name__)
+            return
+        if key in ("max_workers", "max_file_size", "max_depth") and not isinstance(value, int):
+            logger.warning("%s 应为 int，得到 %s", key, type(value).__name__)
+            return
+        if key == "ignore_dirs":
+            if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+                logger.warning("ignore_dirs 应为 list[str]")
+                return
+            value = tuple(value)
+        # 更新 WorkspaceItem.task_overrides（replace 重建 frozen dataclass）
+        new_overrides = dict(item.task_overrides)
+        new_overrides[key] = value
+        self._model.update_workspace(ws_id, task_overrides=new_overrides)
+        # 同步到 ScanController
+        controller = self._scan_controllers.get(ws_id)
+        if controller is not None:
+            controller.setTaskOverride(key, value)
+        self._persist()
 
     @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
     def workspaceExists(self, ws_id: str) -> bool:
@@ -435,6 +592,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     "skipped_count": item.skipped_count,
                     "error_count": item.error_count,
                     "last_summary": item.last_summary,
+                    # iter-104 起持久化任务级配置覆盖
+                    "task_overrides": _serialize_task_overrides(item.task_overrides),
                 }
                 for item in items
             ],
@@ -485,6 +644,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     skipped_count=int(ws.get("skipped_count", 0)),
                     error_count=int(ws.get("error_count", 0)),
                     last_summary=str(ws.get("last_summary", "")),
+                    # 恢复任务级配置覆盖（iter-104 起持久化）
+                    task_overrides=_deserialize_task_overrides(ws.get("task_overrides", {})),
                 )
             except Exception as exc:  # 持久化恢复容错：单条失败不阻塞其余
                 logger.warning("工作区 %s 恢复失败: %s", ws_id, exc)

@@ -1064,3 +1064,255 @@ class TestActiveScan:
         controller.cleanup()
         assert controller.hasActiveScan is False
         assert controller.activeScanWorkspaceId == ""
+
+
+class TestUpdateWorkspaceTarget:
+    """iter-104 任务切换扫描目标测试。"""
+
+    def test_update_target_folder_mode(self, controller: WorkspaceController) -> None:
+        """更新 folder 模式目标应同步到 WorkspaceItem 与 ScanController。"""
+        ws_id = controller.addWorkspace("t", "folder", "/old", "[]", True)
+        controller.updateWorkspaceTarget(ws_id, "folder", "/new/path")
+
+        item = controller.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+        assert item.mode_str == "folder"
+        assert item.target == "/new/path"
+        # ScanController 同步
+        sc = controller.currentScanController if controller.currentWorkspaceId == ws_id else None
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        assert sc.folderRoot == "/new/path"
+
+    def test_update_target_to_drive_mode(self, controller: WorkspaceController) -> None:
+        """从 folder 切换到 drive 模式应正确同步。"""
+        ws_id = controller.addWorkspace("t", "folder", "/old", "[]", True)
+        controller.updateWorkspaceTarget(ws_id, "drive", "C:\\")
+
+        item = controller.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+        assert item.mode_str == "drive"
+        assert item.target == "C:\\"
+
+    def test_update_target_to_full_mode_ignores_target(self, controller: WorkspaceController) -> None:
+        """全盘模式应强制清空 target。"""
+        ws_id = controller.addWorkspace("t", "folder", "/old", "[]", True)
+        controller.updateWorkspaceTarget(ws_id, "full", "/should/be/ignored")
+
+        item = controller.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+        assert item.mode_str == "full"
+        assert item.target == ""
+
+    def test_update_target_rejected_when_scanning(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """扫描中/暂停中应拒绝修改目标。"""
+        ws_id = controller.addWorkspace("t", "folder", "/old", "[]", True)
+        # 强制设为扫描中状态
+        item = controller.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+        controller.workspaceModel.update_workspace(ws_id, status_text="扫描中")
+
+        controller.updateWorkspaceTarget(ws_id, "folder", "/new")
+
+        # 应保持原值
+        item = controller.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+        assert item.target == "/old"
+
+    def test_update_target_invalid_mode_noop(self, controller: WorkspaceController) -> None:
+        """无效的扫描模式应被拒绝。"""
+        ws_id = controller.addWorkspace("t", "folder", "/old", "[]", True)
+        controller.updateWorkspaceTarget(ws_id, "invalid_mode", "/new")
+
+        item = controller.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+        assert item.mode_str == "folder"
+        assert item.target == "/old"
+
+    def test_update_target_unknown_workspace_noop(self, controller: WorkspaceController) -> None:
+        """未知工作区 ID 应静默返回。"""
+        controller.updateWorkspaceTarget("ws-nonexistent", "folder", "/new")
+        # 不抛异常即通过
+
+    def test_update_target_persists(self, controller: WorkspaceController, config_dir: Path) -> None:
+        """更新目标应持久化到 workspaces.json。"""
+        ws_id = controller.addWorkspace("t", "folder", "/old", "[]", True)
+        controller.updateWorkspaceTarget(ws_id, "folder", "/new/persisted")
+
+        persist_file = config_dir / "workspaces.json"
+        assert persist_file.exists()
+        data = json.loads(persist_file.read_text(encoding="utf-8"))
+        ws_data = next(w for w in data["workspaces"] if w["id"] == ws_id)
+        assert ws_data["target"] == "/new/persisted"
+        assert ws_data["mode"] == "folder"
+
+
+class TestTaskOverrides:
+    """iter-104 任务级配置覆盖测试。"""
+
+    def test_task_overrides_json_default_empty(self, controller: WorkspaceController) -> None:
+        """新建工作区默认无覆盖，taskOverridesJson 返回 '{}'。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        assert controller.taskOverridesJson(ws_id) == "{}"
+
+    def test_set_task_override_scan_archives(self, controller: WorkspaceController) -> None:
+        """setTaskOverride 应更新 task_overrides 字段。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setTaskOverride(ws_id, "scan_archives", "false")
+
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert overrides == {"scan_archives": False}
+
+    def test_set_task_override_max_workers(self, controller: WorkspaceController) -> None:
+        """setTaskOverride 应支持 int 字段。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setTaskOverride(ws_id, "max_workers", "8")
+
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert overrides == {"max_workers": 8}
+
+    def test_set_task_override_ignore_dirs_list_to_tuple(self, controller: WorkspaceController) -> None:
+        """ignore_dirs 列表应在内部转为 tuple。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setTaskOverride(ws_id, "ignore_dirs", '[".git", "node_modules"]')
+
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        # 序列化时 tuple 转为 list
+        assert overrides == {"ignore_dirs": [".git", "node_modules"]}
+        # 内部存储为 tuple（通过 ScanController 同步验证）
+        sc = controller._scan_controllers[ws_id]  # type: ignore[attr-defined]
+        assert sc._task_overrides["ignore_dirs"] == (".git", "node_modules")  # type: ignore[attr-defined]
+
+    def test_set_task_override_invalid_key_noop(self, controller: WorkspaceController) -> None:
+        """不允许覆盖的字段应被拒绝。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setTaskOverride(ws_id, "backup_dir", '"/custom"')
+
+        assert controller.taskOverridesJson(ws_id) == "{}"
+
+    def test_set_task_override_invalid_json_noop(self, controller: WorkspaceController) -> None:
+        """无效 JSON 应被拒绝。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setTaskOverride(ws_id, "scan_archives", "not a json")
+
+        assert controller.taskOverridesJson(ws_id) == "{}"
+
+    def test_set_task_override_wrong_type_noop(self, controller: WorkspaceController) -> None:
+        """类型不符应被拒绝。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # scan_archives 应为 bool，传字符串
+        controller.setTaskOverride(ws_id, "scan_archives", '"not_bool"')
+
+        assert controller.taskOverridesJson(ws_id) == "{}"
+
+    def test_set_task_override_syncs_to_scan_controller(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """setTaskOverride 应同步到对应 ScanController。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setTaskOverride(ws_id, "max_workers", "12")
+
+        sc = controller._scan_controllers[ws_id]  # type: ignore[attr-defined]
+        assert sc._task_overrides.get("max_workers") == 12  # type: ignore[attr-defined]
+        # _effective_max_workers 应返回覆盖值
+        assert sc._effective_max_workers() == 12  # type: ignore[attr-defined]
+
+    def test_task_overrides_persisted(self, controller: WorkspaceController, config_dir: Path) -> None:
+        """任务级覆盖应持久化到 workspaces.json。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setTaskOverride(ws_id, "scan_archives", "false")
+        controller.setTaskOverride(ws_id, "max_workers", "8")
+
+        persist_file = config_dir / "workspaces.json"
+        data = json.loads(persist_file.read_text(encoding="utf-8"))
+        ws_data = next(w for w in data["workspaces"] if w["id"] == ws_id)
+        assert ws_data["task_overrides"]["scan_archives"] is False
+        assert ws_data["task_overrides"]["max_workers"] == 8
+
+    def test_task_overrides_restored_on_restart(
+        self,
+        config_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """重启后应恢复任务级覆盖并同步到 ScanController。"""
+        # 第一次启动：创建工作区并设置覆盖
+        cfg1 = ConfigController()
+        rules1 = RulesController(cfg1)
+        ctrl1 = WorkspaceController(cfg1, rules1)
+        ws_id = ctrl1.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ctrl1.setTaskOverride(ws_id, "scan_archives", "false")
+        ctrl1.setTaskOverride(ws_id, "max_workers", "6")
+        ctrl1.cleanup()
+        cfg1.save()
+
+        # 第二次启动：重新创建控制器，应恢复覆盖
+        cfg2 = ConfigController()
+        rules2 = RulesController(cfg2)
+        ctrl2 = WorkspaceController(cfg2, rules2)
+
+        overrides = json.loads(ctrl2.taskOverridesJson(ws_id))
+        assert overrides.get("scan_archives") is False
+        assert overrides.get("max_workers") == 6
+        # ScanController 也应同步
+        sc = ctrl2._scan_controllers[ws_id]  # type: ignore[attr-defined]
+        assert sc._effective_scan_archives() is False  # type: ignore[attr-defined]
+        assert sc._effective_max_workers() == 6  # type: ignore[attr-defined]
+        ctrl2.cleanup()
+
+
+class TestScanControllerTaskOverrides:
+    """iter-104 ScanController 任务级覆盖 _effective_* 方法测试。"""
+
+    def test_effective_uses_global_when_no_override(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """无覆盖时应使用全局 Config 值。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+
+        # 默认无覆盖，应等于全局值
+        assert sc._effective_scan_archives() == controller._config_controller.scanArchives  # type: ignore[attr-defined]
+        assert sc._effective_max_workers() == controller._config_controller.maxWorkers  # type: ignore[attr-defined]
+
+    def test_effective_uses_override_when_set(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """有覆盖时应使用覆盖值。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+
+        sc.setTaskOverride("scan_archives", False)
+        sc.setTaskOverride("max_workers", 7)
+        assert sc._effective_scan_archives() is False  # type: ignore[attr-defined]
+        assert sc._effective_max_workers() == 7  # type: ignore[attr-defined]
+
+    def test_effective_ignore_dirs_returns_tuple(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """_effective_ignore_dirs 应返回 tuple。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+
+        sc.setTaskOverride("ignore_dirs", (".git", "node_modules"))
+        result = sc._effective_ignore_dirs()  # type: ignore[attr-defined]
+        assert isinstance(result, tuple)
+        assert result == (".git", "node_modules")
+
+    def test_effective_max_file_size(self, controller: WorkspaceController) -> None:
+        """_effective_max_file_size 应优先用覆盖值。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+
+        sc.setTaskOverride("max_file_size", 100 * 1024 * 1024)
+        assert sc._effective_max_file_size() == 100 * 1024 * 1024  # type: ignore[attr-defined]

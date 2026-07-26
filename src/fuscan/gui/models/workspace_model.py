@@ -90,6 +90,18 @@ class WorkspaceItem:
     :param skipped_count: 跳过文件数
     :param error_count: 错误文件数
     :param last_summary: 最近一次扫描摘要（含速度等）
+    :param task_overrides: 任务级配置覆盖（iter-104）
+
+        ``dict[str, object]``，键为 :class:`fuscan.config.Config` 字段名，
+        值为该任务专属的覆盖值。支持的字段：
+
+        - ``"scan_archives"``: bool
+        - ``"max_workers"``: int
+        - ``"max_file_size"``: int（字节）
+        - ``"max_depth"``: int
+        - ``"ignore_dirs"``: tuple[str, ...]
+
+        未在 dict 中的字段使用全局 :class:`Config` 默认值。
     """
 
     workspace_id: str
@@ -104,6 +116,7 @@ class WorkspaceItem:
     skipped_count: int = 0
     error_count: int = 0
     last_summary: str = ""
+    task_overrides: dict[str, object] = field(default_factory=dict)
 
     @property
     def mode_text(self) -> str:

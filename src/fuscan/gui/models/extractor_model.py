@@ -312,6 +312,42 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
                     self.dataChanged.emit(idx, idx, [Qt.UserRole + 6])
                 return
 
+    def set_category_enabled(self, category: str, enabled: bool) -> bool:
+        """批量设置某类别下所有提取器的勾选状态（iter-104 父节点统一勾选）。
+
+        :param category: 类别名（如 ``"Office 文档"``/``"文本"``）
+        :param enabled: True=全部勾选，False=全部取消勾选
+        :return: 是否实际修改了任意行（无变化返回 False）
+        """
+        changed = False
+        for i, row in enumerate(self._rows):
+            if row.category == category and row.enabled != enabled:
+                row.enabled = enabled
+                idx = self.index(i)
+                self.dataChanged.emit(idx, idx, [Qt.UserRole + 6])
+                changed = True
+        return changed
+
+    def category_enabled_state(self, category: str) -> int:
+        """返回类别勾选状态（iter-104 父节点三态显示）。
+
+        :param category: 类别名
+        :return: 三态值
+
+            - ``0``：全部未勾选
+            - ``1``：全部勾选
+            - ``2``：部分勾选
+        """
+        rows = [row for row in self._rows if row.category == category]
+        if not rows:
+            return 0
+        enabled_count = sum(1 for row in rows if row.enabled)
+        if enabled_count == 0:
+            return 0
+        if enabled_count == len(rows):
+            return 1
+        return 2
+
     def select_all(self) -> None:
         """全选。"""
         self._set_all_enabled(True)

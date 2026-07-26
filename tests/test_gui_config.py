@@ -188,6 +188,29 @@ class TestFontSettings:
         assert controller.fontBold is True
         assert controller.config.font_bold is True
 
+    def test_min_font_size_default_12(self, controller: ConfigController) -> None:
+        """默认最小字号为 12。"""
+        assert controller.minFontSize == 12
+
+    def test_set_min_font_size_persists(self, controller: ConfigController) -> None:
+        """设置最小字号应持久化到 Config。"""
+        controller.setMinFontSize(14)
+        assert controller.minFontSize == 14
+        assert controller.config.min_font_size == 14
+
+    def test_set_min_font_size_clamps_to_range(self, controller: ConfigController) -> None:
+        """最小字号应钳制到 8-24 范围。"""
+        controller.setMinFontSize(2)
+        assert controller.minFontSize == 8
+        controller.setMinFontSize(100)
+        assert controller.minFontSize == 24
+
+    def test_set_min_font_size_noop_when_same(self, controller: ConfigController) -> None:
+        """相同最小字号不应触发持久化。"""
+        controller.setMinFontSize(12)
+        controller.setMinFontSize(12)
+        assert controller.minFontSize == 12
+
     def test_set_font_family_noop_when_same(self, controller: ConfigController) -> None:
         """相同字体族不应触发持久化。"""
         controller.setFontFamily("Arial")
@@ -200,10 +223,12 @@ class TestFontSettings:
         controller.setFontFamily("Arial")
         controller.setFontSize(20)
         controller.setFontBold(True)
+        controller.setMinFontSize(16)
         controller.resetToDefaults()
         assert controller.fontFamily == ""
         assert controller.fontSize == 14
         assert controller.fontBold is False
+        assert controller.minFontSize == 12
 
 
 class TestExtractorSelection:

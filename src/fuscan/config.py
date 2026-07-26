@@ -183,6 +183,8 @@ class Config:
     font_family: str | None = None
     # 字体大小（基准字号，ThemeController 基于 base 计算其他字号）：默认 14
     font_size: int = 14
+    # 最小字体大小（caption 等小字号的下限，避免在高 DPI 屏幕上过小）：默认 12
+    min_font_size: int = 12
     # 是否加粗
     font_bold: bool = False
 

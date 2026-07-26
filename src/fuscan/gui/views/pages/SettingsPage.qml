@@ -177,6 +177,35 @@ Item {
                         }
                     }
 
+                    // 最小字号
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Label {
+                            text: "最小字号"
+                            font.pixelSize: theme.fontSizeBody
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            Layout.preferredWidth: 80
+                        }
+                        ComboBox {
+                            id: minFontSizeCombo
+                            model: [8, 9, 10, 11, 12, 13, 14, 15, 16]
+                            displayText: configController.minFontSize + " px"
+                            onActivated: {
+                                configController.setMinFontSize(minFontSizeCombo.currentValue)
+                            }
+                            Component.onCompleted: {
+                                var idx = minFontSizeCombo.find(configController.minFontSize)
+                                if (idx >= 0) minFontSizeCombo.currentIndex = idx
+                            }
+                        }
+                        Label {
+                            text: "（小字号下限，避免高 DPI 屏幕显示过小）"
+                            font.pixelSize: theme.fontSizeCaption
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+                    }
+
                     // 加粗
                     RowLayout {
                         Layout.fillWidth: true

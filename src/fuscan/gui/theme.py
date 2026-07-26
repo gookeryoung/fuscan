@@ -69,6 +69,7 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 字体配置（由 ConfigController.setFontConfig 注入，默认 14px）
         self._font_family: str | None = None
         self._font_size: int = 14
+        self._min_font_size: int = 12
         self._font_bold: bool = False
 
     # ----------------------------- 暗色模式 -----------------------------
@@ -92,20 +93,28 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     # ----------------------------- 字体配置 -----------------------------
 
-    @Slot(str, int, bool)  # pyrefly: ignore [not-callable]
-    def setFontConfig(self, family: str, size: int, bold: bool) -> None:
+    @Slot(str, int, bool, int)  # pyrefly: ignore [not-callable]
+    def setFontConfig(self, family: str, size: int, bold: bool, min_size: int = 12) -> None:
         """注入用户字体配置（由 :class:`ConfigController` 启动时调用）。
 
         :param family: 字体族名（空串表示使用平台默认）
         :param size: 基准字号（默认 14，ThemeController 基于 base 计算其他字号）
         :param bold: 是否加粗
+        :param min_size: 最小字号下限（caption 等小字号不低于此值，默认 12）
         """
         new_family = family if family else None
         size = max(8, min(32, size))  # 钳制到合理范围，避免极端值
-        if self._font_family != new_family or self._font_size != size or self._font_bold != bold:
+        min_size = max(8, min(24, min_size))  # 最小字体钳制到 8-24
+        if (
+            self._font_family != new_family
+            or self._font_size != size
+            or self._font_bold != bold
+            or self._min_font_size != min_size
+        ):
             self._font_family = new_family
             self._font_size = size
             self._font_bold = bold
+            self._min_font_size = min_size
             self.themeChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     # ----------------------------- 色彩令牌（浅色） -----------------------------
@@ -231,13 +240,18 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(int, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def fontSizeCaption(self) -> int:
-        """caption 字号（base - 2，默认 12px）。"""
-        return self._font_size - 2
+        """caption 字号（base - 2，但不低于用户设定的最小字号）。"""
+        return max(self._min_font_size, self._font_size - 2)
 
     @Property(int, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def fontSizeSmall(self) -> int:
-        """小字号（base - 1，默认 13px）。"""
-        return self._font_size - 1
+        """小字号（base - 1，但不低于用户设定的最小字号）。"""
+        return max(self._min_font_size, self._font_size - 1)
+
+    @Property(int, notify=themeChanged)  # pyrefly: ignore [not-callable]
+    def fontSizeMin(self) -> int:
+        """最小字号下限（用户可配置，caption/small 不低于此值）。"""
+        return self._min_font_size
 
     @Property(int, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def fontSizeBody(self) -> int:

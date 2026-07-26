@@ -105,7 +105,12 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def _apply_font_config_to_theme(self) -> None:
         """将 ConfigController 的字体配置同步到 ThemeController。"""
         cfg = self._config.config
-        self._theme.setFontConfig(cfg.font_family or "", cfg.font_size, cfg.font_bold)
+        self._theme.setFontConfig(
+            cfg.font_family or "",
+            cfg.font_size,
+            cfg.font_bold,
+            cfg.min_font_size,
+        )
         # 同步全局 QGuiApplication 字体（影响 QML 控件默认继承）
         try:
             from PySide2.QtGui import QFont, QGuiApplication  # type: ignore[import-not-found]

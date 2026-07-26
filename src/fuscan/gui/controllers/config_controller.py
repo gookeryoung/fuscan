@@ -277,8 +277,26 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._config.font_bold = value
             self._on_font_config_changed()
 
+    @Property(int, notify=fontConfigChanged)  # pyrefly: ignore [not-callable]
+    def minFontSize(self) -> int:
+        """最小字号下限（caption/small 不低于此值，默认 12）。"""
+        return self._config.min_font_size
+
+    @Slot(int)  # pyrefly: ignore [not-callable]
+    def setMinFontSize(self, value: int) -> None:
+        """设置最小字号下限（钳制到 8-24 范围）。"""
+        size = max(8, min(24, value))
+        if size != self._config.min_font_size:
+            self._config.min_font_size = size
+            self._on_font_config_changed()
+
     def _on_font_config_changed(self) -> None:
-        """字体配置变更：持久化 + 发出信号。"""
+        """字体配置变更：持久化 + 发出信号。
+
+        ThemeController 同步由 :class:`AppController` 监听 ``fontConfigChanged``
+        信号后调用 ``setFontConfig`` 完成（含最小字号），避免在 ConfigController
+        中反向依赖 GUI 层 ThemeController 实例。
+        """
         save_config(self._config)
         self.fontConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.configChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -300,10 +318,11 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._config.cache_enabled = True
         self._config.perf_log_enabled = False
         self._config.ignore_dirs = list(Config.__dataclass_fields__["ignore_dirs"].default_factory())  # type: ignore[index]
-        # 字体设置也重置为默认（平台默认字体、14px、不加粗）
+        # 字体设置也重置为默认（平台默认字体、14px、最小 12px、不加粗）
         self._config.font_family = None
         self._config.font_size = 14
         self._config.font_bold = False
+        self._config.min_font_size = 12
         set_perf_enabled(False)
         self.save()
         self.fontConfigChanged.emit()  # pyrefly: ignore [missing-attribute]

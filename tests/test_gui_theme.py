@@ -203,6 +203,45 @@ class TestTypographyTokens:
     def test_font_size_page_title(self, theme: ThemeController) -> None:
         assert theme.fontSizePageTitle == 22
 
+    def test_font_size_min_default_12(self, theme: ThemeController) -> None:
+        """默认最小字号下限为 12。"""
+        assert theme.fontSizeMin == 12
+
+    def test_font_size_caption_respects_min(self, theme: ThemeController) -> None:
+        """caption 字号不应低于用户设定的最小字号。"""
+        # 默认 base=14，min=12，caption=12（14-2=12，被 min 钳制为 12）
+        assert theme.fontSizeCaption == 12
+        # 设置 min_size=14，caption 应被钳制为 14
+        theme.setFontConfig("", 14, False, 14)
+        assert theme.fontSizeCaption == 14
+        # 设置 base=20，min=10，caption=18（20-2=18，高于 min 不被钳制）
+        theme.setFontConfig("", 20, False, 10)
+        assert theme.fontSizeCaption == 18
+
+    def test_font_size_small_respects_min(self, theme: ThemeController) -> None:
+        """small 字号不应低于用户设定的最小字号。"""
+        # 默认 base=14，min=12，small=13（14-1=13，高于 min 不被钳制）
+        assert theme.fontSizeSmall == 13
+        # 设置 min_size=14，small 应被钳制为 14
+        theme.setFontConfig("", 14, False, 14)
+        assert theme.fontSizeSmall == 14
+
+    def test_set_font_config_propagates_min_size(self, theme: ThemeController) -> None:
+        """setFontConfig 应同步最小字号并 emit themeChanged。"""
+        emitted: list[None] = []
+        theme.themeChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
+        theme.setFontConfig("", 14, False, 15)
+        assert theme.fontSizeMin == 15
+        assert len(emitted) == 1
+
+    def test_set_font_config_noop_when_same(self, theme: ThemeController) -> None:
+        """相同配置不应 emit 信号。"""
+        theme.setFontConfig("", 14, False, 12)
+        emitted: list[None] = []
+        theme.themeChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
+        theme.setFontConfig("", 14, False, 12)
+        assert len(emitted) == 0
+
     def test_font_family_returns_non_empty_string(self, theme: ThemeController) -> None:
         """fontFamily 应返回非空字符串（首个可用字体名）。"""
         family = theme.fontFamily

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from fuscan.cache.hashes import hash_bytes
+from fuscan.config import DEFAULT_MAX_FILE_SIZE
 from fuscan.extractors import extract_content_from_bytes
 from fuscan.rules.model import (
     AndMatch,
@@ -2212,10 +2213,10 @@ class TestScannerCancelSpeedup:
     """
 
     def test_cancel_all_futures_marks_cancelled(self) -> None:
-        """``_cancel_all_futures`` 对每个 future 调 ``cancel()``，未启动的会被标记为已取消。"""
+        """``cancel_all_futures`` 对每个 future 调 ``cancel()``，未启动的会被标记为已取消。"""
         from concurrent.futures import Future, ThreadPoolExecutor
 
-        from fuscan.scanner.scanner import _cancel_all_futures
+        from fuscan.scanner._helpers import cancel_all_futures
 
         with ThreadPoolExecutor(max_workers=1) as pool:
             # 提交一个慢任务占用 worker，确保后续 future 排队未启动
@@ -2229,8 +2230,8 @@ class TestScannerCancelSpeedup:
             # 排队的 future（worker 被占用，不会立即启动）
             pending_futures: list[Future[str]] = [pool.submit(lambda: "x") for _ in range(3)]
 
-            # 对全部 future 调 _cancel_all_futures
-            _cancel_all_futures(pending_futures)
+            # 对全部 future 调 cancel_all_futures
+            cancel_all_futures(pending_futures)
 
             # 排队的 future 应全部被成功取消（cancel() 返回 True）
             cancelled_count = sum(1 for f in pending_futures if f.cancelled())
@@ -2241,11 +2242,11 @@ class TestScannerCancelSpeedup:
             assert running_future.result(timeout=2) == "done"
 
     def test_cancel_all_futures_empty_iterable(self) -> None:
-        """``_cancel_all_futures`` 对空输入应安全返回。"""
-        from fuscan.scanner.scanner import _cancel_all_futures
+        """``cancel_all_futures`` 对空输入应安全返回。"""
+        from fuscan.scanner._helpers import cancel_all_futures
 
         # 空列表不应抛异常
-        _cancel_all_futures([])
+        cancel_all_futures([])
 
     def test_pipelined_cancel_skips_as_completed(self, tmp_path: Path) -> None:
         """流水线 walk 阶段取消时跳过 ``as_completed`` 阻塞，快速返回。
@@ -2355,33 +2356,35 @@ class TestScannerMaxFileSize:
 
     def test_normalize_max_file_size_none_returns_default(self) -> None:
         """``None`` 退化为默认值 50MB。"""
-        from fuscan.scanner.scanner import _DEFAULT_MAX_FILE_SIZE
+        from fuscan.scanner._helpers import normalize_max_file_size
 
-        assert Scanner._normalize_max_file_size(None) == _DEFAULT_MAX_FILE_SIZE
-        assert Scanner._normalize_max_file_size(None) == 50 * 1024 * 1024
+        assert normalize_max_file_size(None) == DEFAULT_MAX_FILE_SIZE
+        assert normalize_max_file_size(None) == 50 * 1024 * 1024
 
     def test_normalize_max_file_size_negative_returns_default(self) -> None:
         """负数退化为默认值。"""
-        from fuscan.scanner.scanner import _DEFAULT_MAX_FILE_SIZE
+        from fuscan.scanner._helpers import normalize_max_file_size
 
-        assert Scanner._normalize_max_file_size(-1) == _DEFAULT_MAX_FILE_SIZE
-        assert Scanner._normalize_max_file_size(-100) == _DEFAULT_MAX_FILE_SIZE
+        assert normalize_max_file_size(-1) == DEFAULT_MAX_FILE_SIZE
+        assert normalize_max_file_size(-100) == DEFAULT_MAX_FILE_SIZE
 
     def test_normalize_max_file_size_zero_means_unlimited(self) -> None:
         """0 表示不限制。"""
-        assert Scanner._normalize_max_file_size(0) == 0
+        from fuscan.scanner._helpers import normalize_max_file_size
+
+        assert normalize_max_file_size(0) == 0
 
     def test_normalize_max_file_size_positive_value(self) -> None:
         """正数原样返回。"""
-        assert Scanner._normalize_max_file_size(1024) == 1024
-        assert Scanner._normalize_max_file_size(50 * 1024 * 1024) == 50 * 1024 * 1024
+        from fuscan.scanner._helpers import normalize_max_file_size
+
+        assert normalize_max_file_size(1024) == 1024
+        assert normalize_max_file_size(50 * 1024 * 1024) == 50 * 1024 * 1024
 
     def test_scanner_default_max_file_size(self) -> None:
         """未传入 ``max_file_size`` 时使用默认值 50MB。"""
-        from fuscan.scanner.scanner import _DEFAULT_MAX_FILE_SIZE
-
         scanner = Scanner(_build_ruleset(_filename_rule("r", "x")))
-        assert scanner._max_file_size == _DEFAULT_MAX_FILE_SIZE
+        assert scanner._max_file_size == DEFAULT_MAX_FILE_SIZE
 
     def test_scanner_explicit_max_file_size(self) -> None:
         """显式传入 ``max_file_size`` 时使用传入值。"""
@@ -2395,10 +2398,8 @@ class TestScannerMaxFileSize:
 
     def test_scanner_max_file_size_negative_falls_back_to_default(self) -> None:
         """``max_file_size`` 为负数时退化为默认值。"""
-        from fuscan.scanner.scanner import _DEFAULT_MAX_FILE_SIZE
-
         scanner = Scanner(_build_ruleset(_filename_rule("r", "x")), max_file_size=-1)
-        assert scanner._max_file_size == _DEFAULT_MAX_FILE_SIZE
+        assert scanner._max_file_size == DEFAULT_MAX_FILE_SIZE
 
     def test_scan_skips_oversize_file_content(self, tmp_path: Path) -> None:
         """非缓存模式下超过 ``max_file_size`` 的文件不读取内容（内容规则不命中）。"""

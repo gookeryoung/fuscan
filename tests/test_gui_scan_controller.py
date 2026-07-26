@@ -348,18 +348,6 @@ class TestSelectedResult:
         assert controller.detailHitsModel == []
 
 
-class TestStatusBadge:
-    def test_status_badge_color_setup(self, controller: ScanController) -> None:
-        assert controller.scanState == "setup"
-        assert controller.statusBadgeColor == "#F0F0F0"
-
-    def test_status_badge_border_setup(self, controller: ScanController) -> None:
-        assert controller.statusBadgeBorder == "#CCC"
-
-    def test_status_badge_text_setup(self, controller: ScanController) -> None:
-        assert controller.statusBadgeText == "#888"
-
-
 class TestRulesetChange:
     def test_ruleset_loaded_on_construction(
         self,

@@ -88,7 +88,8 @@ def default_content_provider(entry: FileEntry, *, max_size: int = 50 * 1024 * 10
     """默认内容提供器：读取文本文件内容，限制最大 50MB。
 
     二进制文件或超大文件返回空字符串，由上层决定是否跳过。
-    阈值与 :attr:`fuscan.config.Config.max_file_size` 一致。
+    阈值与 :data:`fuscan.config.DEFAULT_MAX_FILE_SIZE` 对齐（独立硬编码以保持
+    本模块无 fuscan.config 依赖，便于在轻量场景独立复用 FileEntry/default_content_provider）。
     """
     if entry.is_dir or entry.size > max_size:
         return ""

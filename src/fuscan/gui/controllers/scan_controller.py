@@ -29,6 +29,17 @@ except ImportError:  # pragma: no cover
 from fuscan.config import Config, default_backup_dir, detect_default_staging_dir
 from fuscan.gui.explorer import open_path_in_explorer
 from fuscan.gui.models.result_model import ResultListModel
+from fuscan.gui.models.workspace_model import (
+    STR_STATUS_CANCELLED,
+    STR_STATUS_DONE,
+    STR_STATUS_PAUSED,
+    STR_STATUS_READY,
+)
+from fuscan.gui.scan_mode import (
+    SCAN_MODE_DEFAULT_INDEX,
+    SCAN_MODE_STR_TO_INDEX,
+    scan_mode_index_to_str,
+)
 from fuscan.gui.severity_utils import severity_color_hex, severity_text
 from fuscan.replacer import ReplaceStatus, replace_in_file
 from fuscan.scanner import ScanReport
@@ -46,9 +57,17 @@ __all__ = ["ScanController"]
 
 logger = logging.getLogger(__name__)
 
-# 扫描模式索引 ↔ Config.scan_mode 字符串映射
-_SCAN_MODE_INDEX_TO_STR: tuple[str, ...] = ("full", "drive", "folder")
-_SCAN_MODE_STR_TO_INDEX: dict[str, int] = {s: i for i, s in enumerate(_SCAN_MODE_INDEX_TO_STR)}
+# 扫描状态机字符串（与 QML 侧 ContentArea.qml 的 case 分支对齐）
+STATE_SETUP: str = "setup"
+STATE_SCANNING: str = "scanning"
+STATE_RESULTS: str = "results"
+
+# 扫描阶段字符串（QML 侧 StatsPage.qml 按 phase 切换展示）
+PHASE_SETUP: str = "setup"
+PHASE_WALK: str = "walk"
+PHASE_SCAN: str = "scan"
+PHASE_ARCHIVE: str = "archive"
+PHASE_DONE: str = "done"
 
 
 class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -104,7 +123,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._workspace_use_builtin: bool = True
 
         # 扫描状态
-        self._scan_state: str = "setup"  # setup / scanning / results
+        self._scan_state: str = STATE_SETUP  # setup / scanning / results
         self._cancelling: bool = False
         self._is_paused: bool = False
 
@@ -113,8 +132,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._progress_total: int = 0
         self._progress_indeterminate: bool = False
         self._current_file: str = ""
-        self._status_summary: str = "就绪"
-        self._status_text: str = "就绪"
+        self._status_summary: str = STR_STATUS_READY
+        self._status_text: str = STR_STATUS_READY
         self._passed_count: int = 0
         self._matched_count: int = 0
         self._skipped_count: int = 0
@@ -122,7 +141,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 阶段独立进度（iter-105 双进度条）：
         # walk 阶段：discovered 持续增长，skipped/user_skipped 反映白名单与用户标记跳过
         # scan 阶段：scanned/total 反映解析进度，与上方 progressScanned/progressTotal 同步
-        self._scan_phase: str = "setup"  # setup / walk / scan / archive / done
+        self._scan_phase: str = PHASE_SETUP  # setup / walk / scan / archive / done
         self._walk_discovered: int = 0
         self._walk_skipped: int = 0
         self._walk_user_skipped: int = 0
@@ -131,7 +150,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._scan_done: bool = False
 
         # 扫描目标
-        self._scan_mode_index: int = _SCAN_MODE_STR_TO_INDEX.get(self._config.scan_mode, 2)
+        self._scan_mode_index: int = SCAN_MODE_STR_TO_INDEX.get(self._config.scan_mode, SCAN_MODE_DEFAULT_INDEX)
         self._selected_drive: str = self._config.last_drive or ""
         self._folder_root: str = ""
         if self._config_controller.scanPaths:
@@ -164,7 +183,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     @Property(bool, notify=canStartScanChanged)  # pyrefly: ignore [not-callable]
     def canStartScan(self) -> bool:
         """是否可开始扫描（规则集已加载 + 目标已选）。"""
-        if self._scan_state == "scanning":
+        if self._scan_state == STATE_SCANNING:
             return False
         if self._ruleset is None:
             return False
@@ -174,33 +193,6 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def statusText(self) -> str:
         """状态徽标文本。"""
         return self._status_text
-
-    @Property(str, notify=statusChanged)  # pyrefly: ignore [not-callable]
-    def statusBadgeColor(self) -> str:
-        """状态徽标背景色。"""
-        if self._scan_state == "scanning":
-            return "#E8F5E9"
-        if self._scan_state == "results":
-            return "#E3F2FD" if self._matched_count > 0 else "#F0F0F0"
-        return "#F0F0F0"
-
-    @Property(str, notify=statusChanged)  # pyrefly: ignore [not-callable]
-    def statusBadgeBorder(self) -> str:
-        """状态徽标边框色。"""
-        if self._scan_state == "scanning":
-            return "#4CAF50"
-        if self._scan_state == "results":
-            return "#0366D6" if self._matched_count > 0 else "#CCC"
-        return "#CCC"
-
-    @Property(str, notify=statusChanged)  # pyrefly: ignore [not-callable]
-    def statusBadgeText(self) -> str:
-        """状态徽标文本色。"""
-        if self._scan_state == "scanning":
-            return "#2E7D32"
-        if self._scan_state == "results":
-            return "#0D47A1" if self._matched_count > 0 else "#888"
-        return "#888"
 
     # ----------------------------- 进度 -----------------------------
 
@@ -339,9 +331,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     @Slot(int)  # pyrefly: ignore [not-callable]
     def setScanModeIndex(self, index: int) -> None:
         """设置扫描模式索引。"""
-        if 0 <= index < len(_SCAN_MODE_INDEX_TO_STR) and index != self._scan_mode_index:
+        mode_str = scan_mode_index_to_str(index)
+        if mode_str is not None and index != self._scan_mode_index:
             self._scan_mode_index = index
-            self._config.scan_mode = _SCAN_MODE_INDEX_TO_STR[index]
+            self._config.scan_mode = mode_str
             self._config_controller.save()
             self.scanModeChanged.emit()  # pyrefly: ignore [missing-attribute]
             self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -641,7 +634,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     @Slot()  # pyrefly: ignore [not-callable]
     def startScan(self) -> None:
         """开始扫描（启动 stats worker → scan worker 串行）。"""
-        if self._scan_state == "scanning":
+        if self._scan_state == STATE_SCANNING:
             return
         if self._ruleset is None:
             logger.warning("未加载规则集，无法开始扫描")
@@ -656,10 +649,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._selected_result_index = -1
         self._cancelling = False
         self._is_paused = False
-        self._set_scan_state("scanning")
+        self._set_scan_state(STATE_SCANNING)
         self._set_status("扫描中...", "准备统计...")
         # 阶段重置：进入 walk 阶段（iter-105 双进度条）
-        self._scan_phase = "walk"
+        self._scan_phase = PHASE_WALK
         self._walk_indeterminate = True
         self._walk_done = False
         self._scan_done = False
@@ -709,7 +702,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             if self._worker is not None:
                 self._worker.pause()
             self._is_paused = True
-            self._set_status("已暂停", "已暂停")
+            self._set_status(STR_STATUS_PAUSED, STR_STATUS_PAUSED)
         self.scanStateChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     @Slot()  # pyrefly: ignore [not-callable]
@@ -790,11 +783,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if info.phase != self._scan_phase:
             self._scan_phase = info.phase
             # walk → scan/archive 切换时标记 walk 阶段完成
-            if info.phase in ("scan", "archive") and not self._walk_done:
+            if info.phase in (PHASE_SCAN, PHASE_ARCHIVE) and not self._walk_done:
                 self._walk_done = True
                 self._walk_indeterminate = False
         # walk 阶段：仅 discovered/skipped/user_skipped 增长，scanned/matched/errors 恒为 0
-        if info.phase == "walk":
+        if info.phase == PHASE_WALK:
             self._walk_indeterminate = False
             self._walk_discovered = info.total
             self._walk_skipped = info.skipped
@@ -833,7 +826,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # scan 阶段总文件数 = walk 收集的 entries 总数（不含跳过项）
         self._progress_total = sum(len(wr.entries) for wr in results)
         self._progress_indeterminate = False
-        self._scan_phase = "scan"
+        self._scan_phase = PHASE_SCAN
         self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
         cache, source_files = self._build_cache_context()
         assert self._ruleset is not None
@@ -862,14 +855,14 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """stats 失败：切回 setup 并提示。"""
         self._reset_scan_ui()
         self._set_status("统计失败", error)
-        self._set_scan_state("setup")
+        self._set_scan_state(STATE_SETUP)
 
     @Slot(object)  # pyrefly: ignore [not-callable]
     def _on_stats_cancelled(self, results: list[WalkResult]) -> None:  # noqa: ARG002
         """stats 被取消：切回 setup。"""
         self._reset_scan_ui()
         self._set_status("已取消", "已取消统计")
-        self._set_scan_state("setup")
+        self._set_scan_state(STATE_SETUP)
 
     @Slot(object)  # pyrefly: ignore [not-callable]
     def _on_scan_finished(self, report: ScanReport) -> None:
@@ -880,21 +873,21 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._sync_stats_from_report(report)
         # 标记 scan 阶段完成（iter-105 双进度条）
         self._scan_done = True
-        self._scan_phase = "done"
+        self._scan_phase = PHASE_DONE
         self._reset_scan_ui()
         summary = report.summary()
         speed = report.stats.speed
         if speed > 0:
             summary += f" | 速度 {speed:.0f} 文件/s"
-        self._set_status("已完成" if not report.cancelled else "已完成[用户取消]", summary)
-        self._set_scan_state("results" if report.hits else "setup")
+        self._set_status(STR_STATUS_DONE if not report.cancelled else STR_STATUS_CANCELLED, summary)
+        self._set_scan_state(STATE_RESULTS if report.hits else STATE_SETUP)
 
     @Slot(str)  # pyrefly: ignore [not-callable]
     def _on_scan_failed(self, error: str) -> None:
         """扫描失败：切回 setup 并提示。"""
         self._reset_scan_ui()
         self._set_status("扫描失败", error)
-        self._set_scan_state("setup")
+        self._set_scan_state(STATE_SETUP)
 
     @Slot(object)  # pyrefly: ignore [not-callable]
     def _on_scan_cancelled(self, report: ScanReport) -> None:
@@ -904,10 +897,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._sync_stats_from_report(report)
         # 取消时标记 scan 阶段完成（避免进度条卡在中间）
         self._scan_done = True
-        self._scan_phase = "done"
+        self._scan_phase = PHASE_DONE
         self._reset_scan_ui()
-        self._set_status("已完成[用户取消]", report.summary())
-        self._set_scan_state("results" if report.hits else "setup")
+        self._set_status(STR_STATUS_CANCELLED, report.summary())
+        self._set_scan_state(STATE_RESULTS if report.hits else STATE_SETUP)
 
     # ----------------------------- 内部方法 -----------------------------
 

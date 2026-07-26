@@ -29,18 +29,34 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt  # pyrefly: ignore [missing-import]
 
+from fuscan.gui.scan_mode import scan_mode_text
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-__all__ = ["WorkspaceItem", "WorkspaceListModel"]
+__all__ = [
+    "STR_STATUS_CANCELLED",
+    "STR_STATUS_DONE",
+    "STR_STATUS_FAILED",
+    "STR_STATUS_PAUSED",
+    "STR_STATUS_READY",
+    "STR_STATUS_SCANNING",
+    "WorkspaceItem",
+    "WorkspaceListModel",
+]
 
-# 扫描模式索引 ↔ 字符串映射（与 scan_controller._SCAN_MODE_INDEX_TO_STR 一致）
-_SCAN_MODE_INDEX_TO_STR: tuple[str, ...] = ("full", "drive", "folder")
-_SCAN_MODE_STR_TO_TEXT: dict[str, str] = {
-    "full": "全盘扫描",
-    "drive": "盘符扫描",
-    "folder": "文件夹扫描",
-}
+# 工作区状态展示文本（跨 controller/QML 共享，QML 侧用字符串字面量与此处对齐）。
+# 历史上这些字符串散落在 workspace_controller/scan_controller/WorkspaceCard.qml 等
+# 多处硬编码，本处集中为唯一来源，便于检索与重命名。
+STR_STATUS_READY: str = "就绪"
+STR_STATUS_SCANNING: str = "扫描中"
+STR_STATUS_PAUSED: str = "已暂停"
+STR_STATUS_DONE: str = "已完成"
+STR_STATUS_CANCELLED: str = "已完成[用户取消]"
+STR_STATUS_FAILED: str = "失败"
+
+# 扫描中或已暂停的状态集合（用于"拒绝修改目标/清空工作区"等守卫判断）
+ACTIVE_STATUS_TEXTS: frozenset[str] = frozenset({STR_STATUS_SCANNING, STR_STATUS_PAUSED})
 
 # QML role 名称（与 HomePage.qml delegate 中 model.* 一致）
 _ROLE_WORKSPACE_ID = b"workspaceId"
@@ -133,7 +149,7 @@ class WorkspaceItem:
     target: str = ""
     rules_paths: tuple[str, ...] = field(default_factory=tuple)
     use_builtin: bool = True
-    status_text: str = "就绪"
+    status_text: str = STR_STATUS_READY
     matched_count: int = 0
     passed_count: int = 0
     skipped_count: int = 0
@@ -145,7 +161,7 @@ class WorkspaceItem:
     @property
     def mode_text(self) -> str:
         """扫描模式中文文本。"""
-        return _SCAN_MODE_STR_TO_TEXT.get(self.mode_str, self.mode_str)
+        return scan_mode_text(self.mode_str)
 
     @property
     def rules_text(self) -> str:

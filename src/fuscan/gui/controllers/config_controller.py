@@ -22,7 +22,7 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
-from fuscan.config import Config, load_config, save_config
+from fuscan.config import DEFAULT_MAX_FILE_SIZE, Config, load_config, save_config
 from fuscan.gui.models.extractor_model import ExtractorListModel
 from fuscan.perf import set_perf_enabled
 
@@ -329,7 +329,7 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """重置扫描相关配置为默认值（不影响扫描路径历史与禁用提取器列表）。"""
         self._config.scan_archives = True
         self._config.max_workers = 5
-        self._config.max_file_size = 50 * 1024 * 1024
+        self._config.max_file_size = DEFAULT_MAX_FILE_SIZE
         self._config.max_depth = None
         self._config.cache_enabled = True
         self._config.perf_log_enabled = False

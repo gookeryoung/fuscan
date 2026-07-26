@@ -17,12 +17,13 @@ from fuscan.archive.base import (
     get_reader,
 )
 from fuscan.cache.hashes import hash_bytes
+from fuscan.config import DEFAULT_MAX_FILE_SIZE
 from fuscan.extractors import ExtractorError, extract_content_from_bytes
 from fuscan.rules.model import Rule, RuleSet
+from fuscan.scanner._helpers import empty_content_provider, spec_needs_content
 from fuscan.scanner.context import FileEntry, MatchContext
 from fuscan.scanner.matchers import Matcher, build_matcher
 from fuscan.scanner.result import RuleHit, ScanResult
-from fuscan.scanner.scanner import _empty_content_provider, _spec_needs_content
 
 if TYPE_CHECKING:
     from fuscan.cache import CacheStore
@@ -45,7 +46,7 @@ class ArchiveScanner:
         self,
         ruleset: RuleSet,
         password: str | None = None,
-        max_entry_size: int = 50 * 1024 * 1024,
+        max_entry_size: int = DEFAULT_MAX_FILE_SIZE,
         cache: CacheStore | None = None,
         scan_extensions: frozenset[str] | None = None,
     ) -> None:
@@ -60,7 +61,7 @@ class ArchiveScanner:
         self._scan_extensions: frozenset[str] | None = scan_extensions
         self._compiled: list[tuple[Rule, Matcher]] = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
         # 预计算规则集是否含 CONTENT 规则；为空时跳过所有条目内容读取
-        self._has_content_rule: bool = any(_spec_needs_content(rule.match) for rule in ruleset.rules)
+        self._has_content_rule: bool = any(spec_needs_content(rule.match) for rule in ruleset.rules)
         # 缓存模式：由父 Scanner 调 register_ruleset 登记规则，此处仅读取规则哈希
         self._cache: CacheStore | None = cache
         self._compiled_with_hash: list[tuple[Rule, Matcher, str]] = []
@@ -159,7 +160,7 @@ class ArchiveScanner:
             def content_provider(_fe: FileEntry) -> str:
                 return self._read_entry_content(archive_path, entry, reader)
         else:
-            content_provider = _empty_content_provider
+            content_provider = empty_content_provider
 
         context = MatchContext(file_entry, content_provider=content_provider)
         hits: list[RuleHit] = []

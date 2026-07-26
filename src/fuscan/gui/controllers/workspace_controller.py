@@ -32,7 +32,16 @@ except ImportError:  # pragma: no cover
 
 from fuscan import config as config_module
 from fuscan.gui.controllers.scan_controller import ScanController
-from fuscan.gui.models.workspace_model import WorkspaceItem, WorkspaceListModel
+from fuscan.gui.models.workspace_model import (
+    ACTIVE_STATUS_TEXTS,
+    STR_STATUS_DONE,
+    STR_STATUS_PAUSED,
+    STR_STATUS_READY,
+    STR_STATUS_SCANNING,
+    WorkspaceItem,
+    WorkspaceListModel,
+)
+from fuscan.gui.scan_mode import SCAN_MODE_DEFAULT_INDEX, SCAN_MODE_STR_TO_INDEX
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -68,9 +77,6 @@ def _load_workspace_ruleset(rules_paths: Sequence[str], use_builtin: bool) -> Ru
         logger.warning("工作区规则集加载失败: %s", exc)
         return None
 
-
-# 扫描模式字符串 ↔ 索引（与 scan_controller._SCAN_MODE_INDEX_TO_STR 一致）
-_MODE_STR_TO_INDEX: dict[str, int] = {"full": 0, "drive": 1, "folder": 2}
 
 # 持久化文件名（路径在 _persist_file property 中运行时计算，跟随 CONFIG_DIR monkeypatch）
 _PERSIST_FILENAME = "workspaces.json"
@@ -330,7 +336,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         target: str,
         rules_paths: Sequence[str],
         use_builtin: bool,
-        status_text: str = "就绪",
+        status_text: str = STR_STATUS_READY,
         matched_count: int = 0,
         passed_count: int = 0,
         skipped_count: int = 0,
@@ -365,7 +371,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 为该工作区构造独立的 ScanController
         scan_controller = ScanController(self._config_controller, self._rules_controller, self)
         # 按工作区参数初始化 ScanController
-        mode_index = _MODE_STR_TO_INDEX.get(mode_str, 2)
+        mode_index = SCAN_MODE_STR_TO_INDEX.get(mode_str, SCAN_MODE_DEFAULT_INDEX)
         scan_controller.setScanModeIndex(mode_index)
         if mode_str == "drive" and target:
             scan_controller.setSelectedDrive(target)
@@ -464,11 +470,11 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             logger.warning("工作区 %s 不存在，无法更新目标", ws_id)
             return
         # 扫描中/暂停中拒绝修改
-        if item.status_text in ("扫描中", "已暂停"):
+        if item.status_text in ACTIVE_STATUS_TEXTS:
             logger.warning("工作区 %s 处于 %s 状态，拒绝修改目标", ws_id, item.status_text)
             return
         # 规范化参数
-        if mode_str not in _MODE_STR_TO_INDEX:
+        if mode_str not in SCAN_MODE_STR_TO_INDEX:
             logger.warning("无效的扫描模式: %s", mode_str)
             return
         # 全盘模式 target 强制为空
@@ -479,7 +485,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 同步到 ScanController
         controller = self._scan_controllers.get(ws_id)
         if controller is not None:
-            mode_index = _MODE_STR_TO_INDEX[mode_str]
+            mode_index = SCAN_MODE_STR_TO_INDEX[mode_str]
             controller.setScanModeIndex(mode_index)
             if mode_str == "drive" and target:
                 controller.setSelectedDrive(target)
@@ -505,7 +511,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if item is None:
             logger.warning("工作区 %s 不存在，无法更新规则", ws_id)
             return
-        if item.status_text in ("扫描中", "已暂停"):
+        if item.status_text in ACTIVE_STATUS_TEXTS:
             logger.warning("工作区 %s 处于 %s 状态，拒绝修改规则", ws_id, item.status_text)
             return
         # 规范化为 tuple[str, ...]
@@ -696,12 +702,12 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # scanning 态包含暂停（isPaused=True），仍视为 active
         is_active = scan_state == "scanning"
         if scan_state == "scanning":
-            status_text = "扫描中" if not controller.isPaused else "已暂停"
+            status_text = STR_STATUS_SCANNING if not controller.isPaused else STR_STATUS_PAUSED
         elif scan_state == "results":
-            # 直接使用 ScanController.statusText：正常完成="已完成"，取消="已完成[用户取消]"
-            status_text = controller.statusText or "已完成"
+            # 直接使用 ScanController.statusText：正常完成=STR_STATUS_DONE，取消=STR_STATUS_CANCELLED
+            status_text = controller.statusText or STR_STATUS_DONE
         else:
-            status_text = controller.statusText or "就绪"
+            status_text = controller.statusText or STR_STATUS_READY
 
         self._model.update_workspace(
             ws_id,
@@ -825,7 +831,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     rules_paths=ws.get("rules_paths", []),
                     use_builtin=bool(ws.get("use_builtin", True)),
                     # 恢复上次扫描状态（iter-102 起持久化）
-                    status_text=str(ws.get("status_text", "就绪")),
+                    status_text=str(ws.get("status_text", STR_STATUS_READY)),
                     matched_count=int(ws.get("matched_count", 0)),
                     passed_count=int(ws.get("passed_count", 0)),
                     skipped_count=int(ws.get("skipped_count", 0)),

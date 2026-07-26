@@ -1,6 +1,16 @@
 """压缩文件扫描模块。
 
 提供 ZIP/RAR/7Z 压缩包条目列举与内容读取能力，供 ArchiveScanner 调用。
+
+公共 API：
+
+- :class:`ArchiveEntry` / :class:`ArchiveError` / :class:`ArchiveReader`
+- :class:`ArchiveReaderFactory` / :func:`default_factory` / :func:`get_reader`
+- :func:`is_archive`：判断路径是否为支持的压缩包
+- :class:`RarReader` / :class:`SevenZReader` / :class:`ZipReader`：具体读取器
+- :func:`register_all`：注册所有内置读取器（幂等，模块导入时自动调用一次）
+- :class:`ArchiveScanner`：压缩包扫描器（延迟导入以避免与
+  :mod:`fuscan.archive.scanner` 形成循环依赖）
 """
 
 from __future__ import annotations
@@ -48,5 +58,7 @@ def register_all(factory: ArchiveReaderFactory = default_factory) -> None:
 register_all()
 
 
-# 延迟导入避免循环依赖
+# 延迟导入避免循环依赖：fuscan.archive.scanner 依赖 fuscan.scanner.scanner，
+# 而 fuscan.scanner.scanner 通过 TYPE_CHECKING 引用 ArchiveScanner，模块加载顺序
+# 上需先完成 base/reader 子模块导入，再导入 scanner.scanner。
 from fuscan.archive.scanner import ArchiveScanner  # noqa: E402

@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from fuscan.scanner._helpers import default_extract_content, default_extract_content_with_hash
 from fuscan.scanner.context import (
     ContentProvider,
     FileEntry,
@@ -37,7 +38,7 @@ from fuscan.scanner.result import (
     ScanStats,
     WalkResult,
 )
-from fuscan.scanner.scanner import Scanner, default_extract_content, default_extract_content_with_hash
+from fuscan.scanner.scanner import Scanner
 from fuscan.scanner.walker import FileWalker, list_drives
 
 __all__ = [

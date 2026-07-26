@@ -1330,7 +1330,7 @@ class TestHitCache:
         try:
             # 临时缩小容量以便测试
             with pytest.MonkeyPatch.context() as mp:
-                mp.setattr(store_mod, "_HIT_CACHE_MAX", 3)
+                mp.setattr(store_mod, "HIT_CACHE_MAX", 3)
                 for i in range(5):
                     fh = hash_bytes(f"content-{i}".encode())
                     store.put_result(fh, rule_hash, None)

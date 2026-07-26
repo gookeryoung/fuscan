@@ -888,6 +888,53 @@ class TestScanPhaseProgress:
         assert controller.progressTotal == 0
         assert len(scan_instances) == 1
 
+    def test_walk_classified_initial_zero(self, controller: ScanController) -> None:
+        """初始 walkClassified 应为 0（无扫描数据）。"""
+        assert controller.walkClassified == 0
+
+    def test_walk_classified_calc(self, controller: ScanController) -> None:
+        """walkClassified = walkDiscovered - walkSkipped - walkUserSkipped，下界 0。"""
+        # 直接通过内部字段设置验证 Property 计算
+        controller._walk_discovered = 100
+        controller._walk_skipped = 30
+        controller._walk_user_skipped = 5
+        assert controller.walkClassified == 65
+
+    def test_walk_classified_clamped_to_zero(self, controller: ScanController) -> None:
+        """当 skipped + user_skipped > discovered 时应下界为 0（避免负数）。"""
+        controller._walk_discovered = 10
+        controller._walk_skipped = 30
+        controller._walk_user_skipped = 5
+        assert controller.walkClassified == 0
+
+    def test_walk_classified_after_walk_progress(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """walk 进度回调后 walkClassified 应反映 (discovered - skipped - user_skipped)。"""
+        stats_instances, _ = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+
+        info = ProgressInfo(
+            current_file="/tmp/x.txt",
+            scanned=0,
+            total=100,
+            skipped=30,
+            matched=0,
+            errors=0,
+            elapsed=1.0,
+            matches=0,
+            phase="walk",
+            user_skipped=5,
+        )
+        stats_instances[0].emit_progress(info)
+        # 100 - 30 - 5 = 65
+        assert controller.walkClassified == 65
+
     def test_scan_finished_marks_scan_done(
         self,
         controller: ScanController,

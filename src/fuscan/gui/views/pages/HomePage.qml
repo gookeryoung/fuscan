@@ -141,6 +141,7 @@ Item {
                     passedCount: model.passedCount
                     skippedCount: model.skippedCount
                     errorCount: model.errorCount
+                    collectedCount: model.collectedCount
                     lastSummary: model.lastSummary
 
                     onDefineRulesRequested: function(wsId) {

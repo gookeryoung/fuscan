@@ -281,6 +281,16 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """walk 阶段用户标记跳过的文件数。"""
         return self._walk_user_skipped
 
+    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def walkClassified(self) -> int:
+        """walk 阶段收集到的符合文件类型的文件数（实际进入扫描阶段的文件数）。
+
+        计算：``walkDiscovered - walkSkipped - walkUserSkipped``，下界为 0。
+        用于统计 UI 展示「符合类型 N」。
+        """
+        classified = self._walk_discovered - self._walk_skipped - self._walk_user_skipped
+        return max(0, classified)
+
     @Property(bool, notify=progressChanged)  # pyrefly: ignore [not-callable]
     def walkIndeterminate(self) -> bool:
         """walk 阶段进度条是否为不确定模式（刚启动尚未收到首个进度）。"""

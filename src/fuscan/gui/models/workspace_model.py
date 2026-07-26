@@ -56,6 +56,7 @@ _ROLE_ERROR_COUNT = b"errorCount"
 _ROLE_LAST_SUMMARY = b"lastSummary"
 _ROLE_INDEX = b"index"
 _ROLE_RULES_TAGS = b"rulesTags"
+_ROLE_COLLECTED_COUNT = b"collectedCount"
 
 _ROLES: dict[int, bytes] = {
     Qt.UserRole + 1: _ROLE_WORKSPACE_ID,
@@ -71,6 +72,7 @@ _ROLES: dict[int, bytes] = {
     Qt.UserRole + 11: _ROLE_LAST_SUMMARY,
     Qt.UserRole + 12: _ROLE_INDEX,
     Qt.UserRole + 13: _ROLE_RULES_TAGS,
+    Qt.UserRole + 14: _ROLE_COLLECTED_COUNT,
 }
 
 
@@ -90,6 +92,7 @@ class WorkspaceItem:
     :param skipped_count: 跳过文件数
     :param error_count: 错误文件数
     :param last_summary: 最近一次扫描摘要（含速度等）
+    :param collected_count: walk 阶段收集到的符合文件类型的文件数（iter-105）
     :param task_overrides: 任务级配置覆盖（iter-104）
 
         ``dict[str, object]``，键为 :class:`fuscan.config.Config` 字段名，
@@ -116,6 +119,7 @@ class WorkspaceItem:
     skipped_count: int = 0
     error_count: int = 0
     last_summary: str = ""
+    collected_count: int = 0
     task_overrides: dict[str, object] = field(default_factory=dict)
 
     @property
@@ -189,6 +193,7 @@ class WorkspaceListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
         Qt.UserRole + 10: "error_count",
         Qt.UserRole + 11: "last_summary",
         Qt.UserRole + 13: "rules_tags",
+        Qt.UserRole + 14: "collected_count",
     }
 
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole) -> object:

@@ -203,6 +203,7 @@ def _make_item(
     skipped_count: int = 0,
     error_count: int = 0,
     last_summary: str = "",
+    collected_count: int = 0,
 ) -> WorkspaceItem:
     """构造测试用 WorkspaceItem。"""
     return WorkspaceItem(
@@ -218,6 +219,7 @@ def _make_item(
         skipped_count=skipped_count,
         error_count=error_count,
         last_summary=last_summary,
+        collected_count=collected_count,
     )
 
 
@@ -231,15 +233,16 @@ class TestWorkspaceListModel:
         assert list(model.items) == []
 
     def test_role_names_returns_all_roles(self) -> None:
-        """roleNames 应返回所有 12 个 role。"""
+        """roleNames 应返回所有 14 个 role。"""
         model = WorkspaceListModel()
         roles = model.roleNames()
-        assert len(roles) == 13
+        assert len(roles) == 14
         assert roles[Qt.UserRole + 1] == b"workspaceId"
         assert roles[Qt.UserRole + 2] == b"name"
         assert roles[Qt.UserRole + 3] == b"modeText"
         assert roles[Qt.UserRole + 12] == b"index"
         assert roles[Qt.UserRole + 13] == b"rulesTags"
+        assert roles[Qt.UserRole + 14] == b"collectedCount"
 
     def test_row_count_with_parent_index(self) -> None:
         """传有效 parent 时 rowCount 应为 0（扁平列表）。"""
@@ -284,6 +287,7 @@ class TestWorkspaceListModel:
             skipped_count=2,
             error_count=1,
             last_summary="用时 1.2s",
+            collected_count=42,
         )
         model.add_workspace(item)
         idx = model.index(0, 0)
@@ -300,6 +304,7 @@ class TestWorkspaceListModel:
         assert model.data(idx, Qt.UserRole + 10) == 1
         assert model.data(idx, Qt.UserRole + 11) == "用时 1.2s"
         assert model.data(idx, Qt.UserRole + 12) == 0
+        assert model.data(idx, Qt.UserRole + 14) == 42
 
     def test_data_invalid_index_returns_empty(self) -> None:
         """无效 index 时 data() 返回空字符串。"""
@@ -772,6 +777,10 @@ class TestSyncWorkspaceState:
         sc._error_count = 1  # type: ignore[attr-defined]
         sc._status_summary = "用时 1.5s"  # type: ignore[attr-defined]
         sc._status_text = "已完成"  # type: ignore[attr-defined]
+        # iter-105：walk 阶段收集到的符合文件类型文件数也应回写
+        sc._walk_discovered = 100  # type: ignore[attr-defined]
+        sc._walk_skipped = 30  # type: ignore[attr-defined]
+        sc._walk_user_skipped = 5  # type: ignore[attr-defined]
 
         controller._sync_workspace_state(ws_id)
 
@@ -783,6 +792,8 @@ class TestSyncWorkspaceState:
         assert item.skipped_count == 2
         assert item.error_count == 1
         assert item.last_summary == "用时 1.5s"
+        # 100 - 30 - 5 = 65
+        assert item.collected_count == 65
 
     def test_sync_scanning_state(self, controller: WorkspaceController) -> None:
         """scanning 状态应回写为「扫描中」。"""
@@ -1148,6 +1159,46 @@ class TestUpdateWorkspaceTarget:
         ws_data = next(w for w in data["workspaces"] if w["id"] == ws_id)
         assert ws_data["target"] == "/new/persisted"
         assert ws_data["mode"] == "folder"
+
+    def test_collected_count_persisted_and_restored(
+        self,
+        config_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """iter-105：collected_count 应持久化到 workspaces.json 并在重启后恢复。"""
+        # 第一次启动：创建工作区并模拟扫描完成（写入 collected_count）
+        cfg1 = ConfigController()
+        rules1 = RulesController(cfg1)
+        ctrl1 = WorkspaceController(cfg1, rules1)
+        ws_id = ctrl1.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ctrl1.setCurrentWorkspaceId(ws_id)
+        sc1 = ctrl1.currentScanController
+        # 模拟 walk 阶段结果：发现 100，跳过 30，用户跳过 5 → 符合 65
+        sc1._walk_discovered = 100  # type: ignore[attr-defined]
+        sc1._walk_skipped = 30  # type: ignore[attr-defined]
+        sc1._walk_user_skipped = 5  # type: ignore[attr-defined]
+        sc1._scan_state = "results"  # type: ignore[attr-defined]
+        sc1._status_text = "已完成"  # type: ignore[attr-defined]
+        # 标记为 active scan，使 _sync_workspace_state 走「扫描结束持久化」分支
+        ctrl1._active_scan_workspace_id = ws_id  # type: ignore[attr-defined]
+        ctrl1._sync_workspace_state(ws_id)
+        ctrl1.cleanup()
+        cfg1.save()
+
+        # 验证持久化文件中包含 collected_count
+        persist_file = config_dir / "workspaces.json"
+        data = json.loads(persist_file.read_text(encoding="utf-8"))
+        ws_data = next(w for w in data["workspaces"] if w["id"] == ws_id)
+        assert ws_data["collected_count"] == 65
+
+        # 第二次启动：重新创建控制器，应恢复 collected_count
+        cfg2 = ConfigController()
+        rules2 = RulesController(cfg2)
+        ctrl2 = WorkspaceController(cfg2, rules2)
+        item = ctrl2.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+        assert item.collected_count == 65
+        ctrl2.cleanup()
 
 
 class TestTaskOverrides:

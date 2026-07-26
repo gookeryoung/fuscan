@@ -278,6 +278,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         skipped_count: int = 0,
         error_count: int = 0,
         last_summary: str = "",
+        collected_count: int = 0,
         task_overrides: dict[str, object] | None = None,
     ) -> None:
         """创建工作区内部实现（构造 item + ScanController + 连接信号）。
@@ -298,6 +299,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             skipped_count=skipped_count,
             error_count=error_count,
             last_summary=last_summary,
+            collected_count=collected_count,
             task_overrides=dict(task_overrides) if task_overrides else {},
         )
         self._model.add_workspace(item)
@@ -527,6 +529,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             skipped_count=controller.skippedCount,
             error_count=controller.errorCount,
             last_summary=controller.statusSummary,
+            collected_count=controller.walkClassified,
         )
 
         # 同步 active scan 工作区 ID
@@ -592,6 +595,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     "skipped_count": item.skipped_count,
                     "error_count": item.error_count,
                     "last_summary": item.last_summary,
+                    # iter-105 起持久化收集到的符合文件类型文件数
+                    "collected_count": item.collected_count,
                     # iter-104 起持久化任务级配置覆盖
                     "task_overrides": _serialize_task_overrides(item.task_overrides),
                 }
@@ -644,6 +649,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     skipped_count=int(ws.get("skipped_count", 0)),
                     error_count=int(ws.get("error_count", 0)),
                     last_summary=str(ws.get("last_summary", "")),
+                    # 恢复收集到的符合文件类型文件数（iter-105 起持久化）
+                    collected_count=int(ws.get("collected_count", 0)),
                     # 恢复任务级配置覆盖（iter-104 起持久化）
                     task_overrides=_deserialize_task_overrides(ws.get("task_overrides", {})),
                 )

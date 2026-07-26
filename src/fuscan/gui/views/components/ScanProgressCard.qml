@@ -171,9 +171,10 @@ Rectangle {
                     Label {
                         text: workspaceController.activeScanController.walkIndeterminate
                             ? "统计中..."
-                            : (workspaceController.activeScanController.walkDiscovered + " 个文件 | 跳过 "
-                               + workspaceController.activeScanController.walkSkipped + " | 用户跳过 "
-                               + workspaceController.activeScanController.walkUserSkipped)
+                            : ("符合 " + workspaceController.activeScanController.walkClassified
+                               + " / 发现 " + workspaceController.activeScanController.walkDiscovered
+                               + " | 跳过 " + workspaceController.activeScanController.walkSkipped
+                               + " | 用户跳过 " + workspaceController.activeScanController.walkUserSkipped)
                         font.pixelSize: 11
                         color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                     }

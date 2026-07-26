@@ -23,6 +23,7 @@ Rectangle {
     property int passedCount: 0
     property int skippedCount: 0
     property int errorCount: 0
+    property int collectedCount: 0
     property string lastSummary: ""
 
     // 是否展开（显示更多操作）
@@ -181,6 +182,13 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             spacing: 12
+            // 收集到的符合文件类型文件数（iter-105 新增）
+            Label {
+                text: "<b style='color:#0366D6'>符合 " + collectedCount + "</b>"
+                textFormat: Text.RichText
+                font.pixelSize: 11
+                visible: collectedCount > 0
+            }
             Label {
                 text: "<b style='color:#28A745'>通过 " + passedCount + "</b>"
                 textFormat: Text.RichText

@@ -155,12 +155,17 @@ Item {
                         // 收集统计网格
                         GridLayout {
                             Layout.fillWidth: true
-                            columns: 3
+                            columns: 4
                             columnSpacing: 12
                             rowSpacing: 4
 
                             Label {
                                 text: "已发现"
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            }
+                            Label {
+                                text: "符合类型"
                                 font.pixelSize: 11
                                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                             }
@@ -179,6 +184,12 @@ Item {
                                 font.pixelSize: 14
                                 font.bold: true
                                 color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                            }
+                            Label {
+                                text: workspaceController.currentScanController.walkClassified
+                                font.pixelSize: 14
+                                font.bold: true
+                                color: theme.isDark ? theme.colorPrimary : theme.colorPrimary
                             }
                             Label {
                                 text: workspaceController.currentScanController.walkSkipped

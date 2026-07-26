@@ -12,7 +12,7 @@
 - T3 中速（``MEDIUM``）：50-200ms/MB，单次 XML 解析 + 树遍历
   - DOCX/ODT/RTF/WPS/MSG
 - T4 慢速（``SLOW``）：200-1000ms/MB，单元格遍历或字节级扫描
-  - ODS（odfpy）/PPTX/DOC/PPT
+  - ODS（zipfile+xml）/PPTX/DOC/PPT
 - T5 极慢（``VERY_SLOW``）：> 1000ms/MB，复杂页面布局分析
   - PDF（pypdf 回退）
 
@@ -198,48 +198,18 @@ def _make_pdf_sample() -> bytes:
 
 
 def _make_odt_sample() -> bytes:
-    """生成典型 ODT 文档样本。
+    """生成典型 ODT 文档样本（用 zipfile 手工构造，无 odfpy 依赖）。"""
+    from tests._odf_samples import make_odt_sample
 
-    使用 odfpy 生成；未安装时跳过测试。
-    """
-    try:
-        from odf.opendocument import OpenDocumentText
-        from odf.text import P
-    except ImportError:
-        pytest.skip("odfpy 未安装，跳过 ODT 基准测试")
-    doc = OpenDocumentText()
-    for i in range(20):
-        p = P(text=f"段落 {i}：password secret 内容")
-        doc.text.addElement(p)  # type: ignore[attr-defined]
-    buf = io.BytesIO()
-    doc.write(buf)
-    return buf.getvalue()
+    return make_odt_sample([f"段落 {i}：password secret 内容" for i in range(20)])
 
 
 def _make_ods_sample() -> bytes:
-    """生成典型 ODS 表格样本。
+    """生成典型 ODS 表格样本（用 zipfile 手工构造，无 odfpy 依赖）。"""
+    from tests._odf_samples import make_ods_sample
 
-    使用 odfpy 生成；未安装时跳过测试。
-    """
-    try:
-        from odf.opendocument import OpenDocumentSpreadsheet
-        from odf.table import Table, TableCell, TableRow
-        from odf.text import P
-    except ImportError:
-        pytest.skip("odfpy 未安装，跳过 ODS 基准测试")
-    doc = OpenDocumentSpreadsheet()
-    table = Table(name="数据")
-    for row_idx in range(50):
-        row = TableRow()
-        for col_idx in range(5):
-            cell = TableCell()
-            cell.addElement(P(text=f"cell_{row_idx}_{col_idx}_password"))
-            row.addElement(cell)
-        table.addElement(row)
-    doc.spreadsheet.addElement(table)  # type: ignore[attr-defined]
-    buf = io.BytesIO()
-    doc.write(buf)
-    return buf.getvalue()
+    rows = [[f"cell_{r}_{c}_password" for c in range(5)] for r in range(50)]
+    return make_ods_sample(rows)
 
 
 def _make_wps_sample() -> bytes:
@@ -407,6 +377,20 @@ class TestTier3Medium:
         content = extractor.extract_from_bytes(data)
         assert "password" in content
 
+    def test_ods_extractor_tier(self) -> None:
+        """OdsExtractor 声明为 T3 中速（iter-109 改用 zipfile+xml）。"""
+        extractor = OdsExtractor()
+        _assert_tier(extractor, SpeedTier.MEDIUM)
+
+    def test_ods_extraction_speed(self) -> None:
+        """典型 ODS 表格提取应在 2s 内完成（T3 中速基准）。"""
+        extractor = OdsExtractor()
+        data = _make_ods_sample()
+        elapsed = _measure(extractor.extract_from_bytes, data)
+        _assert_time_within_tier(elapsed, SpeedTier.MEDIUM, "OdsExtractor")
+        content = extractor.extract_from_bytes(data)
+        assert "password" in content
+
     def test_rtf_extractor_tier(self) -> None:
         """RtfExtractor 声明为 T3 中速。"""
         extractor = RtfExtractor()
@@ -460,20 +444,6 @@ class TestTier4Slow:
         data = _make_pptx_sample()
         elapsed = _measure(extractor.extract_from_bytes, data)
         _assert_time_within_tier(elapsed, SpeedTier.SLOW, "PptxExtractor")
-        content = extractor.extract_from_bytes(data)
-        assert "password" in content
-
-    def test_ods_extractor_tier(self) -> None:
-        """OdsExtractor 声明为 T4 慢速。"""
-        extractor = OdsExtractor()
-        _assert_tier(extractor, SpeedTier.SLOW)
-
-    def test_ods_extraction_speed(self) -> None:
-        """典型 ODS 表格提取应在 5s 内完成（T4 慢速基准）。"""
-        extractor = OdsExtractor()
-        data = _make_ods_sample()
-        elapsed = _measure(extractor.extract_from_bytes, data)
-        _assert_time_within_tier(elapsed, SpeedTier.SLOW, "OdsExtractor")
         content = extractor.extract_from_bytes(data)
         assert "password" in content
 

@@ -147,7 +147,7 @@
 - **DOC/PPT**：OLE 二进制格式，无简单生成方式
 - **XLS**：BIFF 格式，需 xlwt 库（xlrd 2.0+ 只读）
 - **MSG**：extract-msg 仅支持读取
-- **ODT/ODS**：需 odfpy 库
+- **ODT/ODS**：用 ``tests/_odf_samples.py`` 的 ``zipfile`` 手工构造（iter-109 移除 odfpy 依赖）
 
 ## 复现方式
 

@@ -933,7 +933,7 @@ class TestPdfExtractorOxideBackend:
 
 
 # ---------------------------------------------------------------------------
-# OdtExtractor / OdsExtractor（依赖 odfpy）
+# OdtExtractor / OdsExtractor（用标准库 zipfile+xml 解析，无 odfpy 依赖）
 # ---------------------------------------------------------------------------
 
 
@@ -950,39 +950,37 @@ class TestOdfExtractors:
         with pytest.raises(ExtractorError, match="ODT 解析失败"):
             OdtExtractor().extract(path)
 
-    def test_odt_extract_real_file(self, tmp_path: Path) -> None:
-        """使用 odfpy 创建真实 ODT 文件并提取。"""
-        from odf.opendocument import OpenDocumentText
-        from odf.text import H, P
+    def test_odt_read_failure_raises(self, tmp_path: Path) -> None:
+        """ODT 文件读取失败（权限/不存在）应抛出 ExtractorError。"""
+        path = tmp_path / "nonexistent.odt"
+        with pytest.raises(ExtractorError, match="文件读取失败"):
+            OdtExtractor().extract(path)
 
-        doc = OpenDocumentText()
-        p = P(text="段落含 password 内容")
-        doc.text.addElement(p)  # pyrefly: ignore [missing-attribute]
-        h = H(outlinelevel="1", text="标题 secret")
-        doc.text.addElement(h)  # pyrefly: ignore [missing-attribute]
+    def test_ods_read_failure_raises(self, tmp_path: Path) -> None:
+        """ODS 文件读取失败应抛出 ExtractorError。"""
+        path = tmp_path / "nonexistent.ods"
+        with pytest.raises(ExtractorError, match="文件读取失败"):
+            OdsExtractor().extract(path)
+
+    def test_odt_extract_real_file(self, tmp_path: Path) -> None:
+        """用 zipfile 构造真实 ODT 文件并提取。"""
+        from tests._odf_samples import make_odt_sample
+
         path = tmp_path / "real.odt"
-        doc.save(str(path))
+        path.write_bytes(
+            make_odt_sample(["段落含 password 内容", "标题 secret"]),
+        )
 
         content = OdtExtractor().extract(path)
         assert "password" in content
         assert "secret" in content
 
     def test_ods_extract_real_file(self, tmp_path: Path) -> None:
-        """使用 odfpy 创建真实 ODS 文件并提取。"""
-        from odf.opendocument import OpenDocumentSpreadsheet
-        from odf.table import Table, TableCell, TableRow
-        from odf.text import P
+        """用 zipfile 构造真实 ODS 文件并提取。"""
+        from tests._odf_samples import make_ods_sample
 
-        doc = OpenDocumentSpreadsheet()
-        table = Table(name="数据")
-        row = TableRow()
-        cell = TableCell()
-        cell.addElement(P(text="cell_password"))
-        row.addElement(cell)
-        table.addElement(row)
-        doc.spreadsheet.addElement(table)  # pyrefly: ignore [missing-attribute]
         path = tmp_path / "real.ods"
-        doc.save(str(path))
+        path.write_bytes(make_ods_sample([["cell_password"]]))
 
         content = OdsExtractor().extract(path)
         assert "cell_password" in content
@@ -993,49 +991,131 @@ class TestOdfExtractors:
         with pytest.raises(ExtractorError, match="ODS 解析失败"):
             OdsExtractor().extract(path)
 
-    def test_odt_import_error_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """odfpy 未安装时应抛出 ExtractorError。"""
-        path = tmp_path / "test.odt"
-        path.write_bytes(b"fake")
-        import builtins
+    def test_odt_missing_content_xml_raises(self, tmp_path: Path) -> None:
+        """ZIP 包缺少 content.xml 时应抛出 ExtractorError。"""
+        import zipfile
 
-        original_import = builtins.__import__
-
-        def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
-            if name == "odf.opendocument":
-                raise ImportError("No module named 'odf'")
-            return original_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", fake_import)
-        with pytest.raises(ExtractorError, match="odfpy 未安装"):
+        path = tmp_path / "empty.odt"
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("mimetype", "application/vnd.oasis.opendocument.text")
+        with pytest.raises(ExtractorError, match="ODT 解析失败"):
             OdtExtractor().extract(path)
 
-    def test_ods_import_error_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """odfpy 未安装时 OdsExtractor 应抛出 ExtractorError。"""
-        path = tmp_path / "test.ods"
-        path.write_bytes(b"fake")
-        import builtins
+    def test_ods_missing_content_xml_raises(self, tmp_path: Path) -> None:
+        """ZIP 包缺少 content.xml 时应抛出 ExtractorError。"""
+        import zipfile
 
-        original_import = builtins.__import__
-
-        def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
-            if name == "odf.opendocument":
-                raise ImportError("No module named 'odf'")
-            return original_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", fake_import)
-        with pytest.raises(ExtractorError, match="odfpy 未安装"):
+        path = tmp_path / "empty.ods"
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("mimetype", "application/vnd.oasis.opendocument.spreadsheet")
+        with pytest.raises(ExtractorError, match="ODS 解析失败"):
             OdsExtractor().extract(path)
 
-    def test_ods_cell_text_exception_returns_empty(self) -> None:
-        """_extract_cell_text 在 str(cell) 抛异常时应返回空字符串。"""
+    def test_odt_extract_from_bytes_matches_path(self, tmp_path: Path) -> None:
+        """OdtExtractor 从 bytes 提取与从 path 提取结果一致。"""
+        from tests._odf_samples import make_odt_sample
+
+        data = make_odt_sample(["odt password 内容", "标题内容"])
+        path = tmp_path / "test.odt"
+        path.write_bytes(data)
+        extractor = OdtExtractor()
+        assert extractor.extract(path) == extractor.extract_from_bytes(data)
+
+    def test_ods_extract_from_bytes_matches_path(self, tmp_path: Path) -> None:
+        """OdsExtractor 从 bytes 提取与从 path 提取结果一致。"""
+        from tests._odf_samples import make_ods_sample
+
+        data = make_ods_sample([["cell1", "cell2"], ["cell3", "ods_password"]])
+        path = tmp_path / "test.ods"
+        path.write_bytes(data)
         extractor = OdsExtractor()
+        assert extractor.extract(path) == extractor.extract_from_bytes(data)
 
-        class BadCell:
-            def __str__(self) -> str:
-                raise RuntimeError("模拟单元格转换失败")
+    def test_ods_multi_row_multi_col_extraction(self) -> None:
+        """ODS 多行多列单元格应以 \\t 分隔列、\\n 分隔行。"""
+        from tests._odf_samples import make_ods_sample
 
-        assert extractor._extract_cell_text(BadCell()) == ""
+        data = make_ods_sample(
+            [
+                ["A1", "B1", "C1"],
+                ["A2", "B2", "C2"],
+            ],
+        )
+        content = OdsExtractor().extract_from_bytes(data)
+        lines = content.split("\n")
+        assert lines == ["A1\tB1\tC1", "A2\tB2\tC2"]
+
+    def test_odt_empty_paragraphs_returns_empty(self) -> None:
+        """ODT 无段落时应返回空字符串。"""
+        from tests._odf_samples import make_odt_sample
+
+        data = make_odt_sample([])
+        assert OdtExtractor().extract_from_bytes(data) == ""
+
+    def test_ods_empty_rows_returns_empty(self) -> None:
+        """ODS 无行时应返回空字符串。"""
+        from tests._odf_samples import make_ods_sample
+
+        data = make_ods_sample([])
+        assert OdsExtractor().extract_from_bytes(data) == ""
+
+    def test_odt_xml_special_chars_escaped(self) -> None:
+        """ODT 段落中的 XML 特殊字符应正确转义与提取。"""
+        from tests._odf_samples import make_odt_sample
+
+        data = make_odt_sample(["a < b & c > d", 'quote " test'])
+        content = OdtExtractor().extract_from_bytes(data)
+        assert "a < b & c > d" in content
+        assert 'quote " test' in content
+
+    def test_element_text_handles_nested_elements(self) -> None:
+        """element_text 应递归提取嵌套子元素文本与 tail。"""
+        import xml.etree.ElementTree as ET
+
+        from fuscan.extractors._odf_xml import TEXT_NS, element_text
+
+        # 构造 <text:p>前<text:span>中</text:span>后</text:p>
+        parent = ET.Element(f"{{{TEXT_NS}}}p")
+        parent.text = "前"
+        child = ET.SubElement(parent, f"{{{TEXT_NS}}}span")
+        child.text = "中"
+        child.tail = "后"
+        assert element_text(parent) == "前中后"
+
+    def test_element_text_empty_element_returns_empty(self) -> None:
+        """element_text 对无文本无子元素的应返回空串。"""
+        import xml.etree.ElementTree as ET
+
+        from fuscan.extractors._odf_xml import TEXT_NS, element_text
+
+        empty = ET.Element(f"{{{TEXT_NS}}}p")
+        assert element_text(empty) == ""
+
+    def test_odt_nested_paragraph_extraction(self) -> None:
+        """ODT 段落含嵌套 span 时应正确提取完整文本。"""
+        import io
+        import zipfile
+
+        # 手工构造带嵌套 span 的 ODT
+        content_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<office:document-content "
+            'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+            'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+            'office:version="1.2">\n'
+            "<office:body><office:text>\n"
+            "<text:p>前<text:span>中</text:span>后password</text:p>\n"
+            "</office:text></office:body></office:document-content>\n"
+        )
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            mi = zipfile.ZipInfo("mimetype")
+            mi.compress_type = zipfile.ZIP_STORED
+            zf.writestr(mi, b"application/vnd.oasis.opendocument.text")
+            zf.writestr("content.xml", content_xml.encode("utf-8"))
+
+        content = OdtExtractor().extract_from_bytes(buf.getvalue())
+        assert content == "前中后password"
 
 
 # ---------------------------------------------------------------------------
@@ -1313,36 +1393,23 @@ class TestExtractFromBytes:
 
     def test_odt_extract_from_bytes_matches_path(self, tmp_path: Path) -> None:
         """OdtExtractor 从 bytes 提取与从 path 提取结果一致。"""
-        from odf.opendocument import OpenDocumentText
-        from odf.text import P
+        from tests._odf_samples import make_odt_sample
 
-        doc = OpenDocumentText()
-        doc.text.addElement(P(text="odt password 内容"))  # pyrefly: ignore [missing-attribute]
+        data = make_odt_sample(["odt password 内容", "标题内容"])
         path = tmp_path / "test.odt"
-        doc.save(str(path))
+        path.write_bytes(data)
 
-        data = path.read_bytes()
         extractor = OdtExtractor()
         assert extractor.extract_from_bytes(data) == extractor.extract(path)
 
     def test_ods_extract_from_bytes_matches_path(self, tmp_path: Path) -> None:
         """OdsExtractor 从 bytes 提取与从 path 提取结果一致。"""
-        from odf.opendocument import OpenDocumentSpreadsheet
-        from odf.table import Table, TableCell, TableRow
-        from odf.text import P
+        from tests._odf_samples import make_ods_sample
 
-        doc = OpenDocumentSpreadsheet()
-        table = Table(name="数据")
-        row = TableRow()
-        cell = TableCell()
-        cell.addElement(P(text="ods_password"))
-        row.addElement(cell)
-        table.addElement(row)
-        doc.spreadsheet.addElement(table)  # pyrefly: ignore [missing-attribute]
+        data = make_ods_sample([["cell1", "ods_password"]])
         path = tmp_path / "test.ods"
-        doc.save(str(path))
+        path.write_bytes(data)
 
-        data = path.read_bytes()
         extractor = OdsExtractor()
         assert extractor.extract_from_bytes(data) == extractor.extract(path)
 

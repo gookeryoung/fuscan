@@ -22,8 +22,8 @@ src/fuscan/
 │   ├── text.py     # 纯文本（charset-normalizer）
 │   ├── pdf.py      # PDF（pypdf）
 │   ├── office.py   # DOCX/PPTX（python-docx/python-pptx）
-│   ├── spreadsheet.py  # XLSX/ODS（openpyxl/odfpy）
-│   ├── odf.py      # ODT（odfpy）
+│   ├── spreadsheet.py  # XLSX/ODS（calamine / zipfile+xml）
+│   ├── odf.py      # ODT（zipfile+xml，iter-109 移除 odfpy）
 │   └── wps.py      # WPS（OOXML 检测 + 复用 Office 库）
 ├── archive/        # 压缩文件扫描
 │   ├── base.py     # ArchiveReader ABC + ArchiveEntry
@@ -122,10 +122,12 @@ watchdog 短时间内可能触发多次事件。FileMonitor 用 Dict[Path, float
 GBK 编码的短文本（如"密码"）可能被 charset-normalizer 误判为韩文。
 解法：测试中使用足够长的 GBK 文本（至少 20 字符）。
 
-### 2. odfpy H 元素必填属性
+### 2. ODF 测试样本构造（iter-109 移除 odfpy 依赖）
 
-odfpy 的 `H`（标题）元素需要 `outlinelevel` 属性，否则抛 AttributeError。
-创建测试 ODT 时需：`H(outlinelevel="1", text="标题")`。
+ODT/ODS 测试样本用 `tests/_odf_samples.py` 的 `make_odt_sample` /
+`make_ods_sample` 通过 `zipfile` 手工构造最小合法 ODF 包
+（`mimetype` + `content.xml`），不再依赖 odfpy。
+单元格 XML 特殊字符需用 `_escape_xml` 转义。
 
 ### 3. Windows chmod 限制
 

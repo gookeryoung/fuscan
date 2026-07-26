@@ -31,7 +31,6 @@ _DEPENDENCIES: tuple[str, ...] = (
     "watchdog - 文件系统监控",
     "python-docx - DOCX 文档提取",
     "python-pptx - PPTX 演示提取",
-    "odfpy - ODF 文档提取",
     "pypdf / pdf_oxide - PDF 文本提取",
     "python-calamine - XLSX/XLS 表格提取",
     "rarfile - RAR 压缩包读取",

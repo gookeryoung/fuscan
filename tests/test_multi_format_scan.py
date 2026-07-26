@@ -248,14 +248,11 @@ class TestDocumentFormats:
 
     def test_odt_db_connection_match_text(self, tmp_path: Path) -> None:
         """odt 文档中的数据库连接串应被扫描到且 match_text 正确。"""
-        from odf.opendocument import OpenDocumentText
-        from odf.text import P
+        from tests._odf_samples import make_odt_sample
 
-        doc = OpenDocumentText()
-        p = P(text=f"数据库连接: {_DB_CONN_SAMPLE}")
-        doc.text.addElement(p)  # pyrefly: ignore [missing-attribute]
+        data = make_odt_sample([f"数据库连接: {_DB_CONN_SAMPLE}"])
         path = tmp_path / "config.odt"
-        doc.save(str(path))
+        path.write_bytes(data)
 
         scanner = Scanner(_build_ruleset(_db_rule()))
         report = scanner.scan(tmp_path)
@@ -265,14 +262,11 @@ class TestDocumentFormats:
 
     def test_odt_bearer_match_text(self, tmp_path: Path) -> None:
         """odt 文档中的 Bearer 令牌应被扫描到且 match_text 正确。"""
-        from odf.opendocument import OpenDocumentText
-        from odf.text import P
+        from tests._odf_samples import make_odt_sample
 
-        doc = OpenDocumentText()
-        p = P(text=f"Authorization: {_BEARER_SAMPLE}")
-        doc.text.addElement(p)  # pyrefly: ignore [missing-attribute]
+        data = make_odt_sample([f"Authorization: {_BEARER_SAMPLE}"])
         path = tmp_path / "auth.odt"
-        doc.save(str(path))
+        path.write_bytes(data)
 
         scanner = Scanner(_build_ruleset(_bearer_rule()))
         report = scanner.scan(tmp_path)

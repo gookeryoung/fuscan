@@ -2,19 +2,26 @@
 
 XLSX/XLSM 使用 calamine（Rust + PyO3）提取所有工作表单元格文本，相比
 openpyxl 的纯 Python 逐单元格遍历有 5-10 倍提速，且 Rust 侧执行期间释放
-GIL，避免阻塞 Qt 主线程。ODS 因 calamine 0.3.x 对 odfpy 生成的标准 ODS
-解析不完整，暂保留 odfpy 实现（Python 3.10+ 虽使用 calamine 0.8.2，但
-ODS 提取器未切换以保持行为一致）。
+GIL，避免阻塞 Qt 主线程。ODS 用标准库 ``zipfile`` + ``xml.etree``
+解析 ``content.xml``（iter-109 移除 odfpy 依赖以兼容 fspack 打包）。
 """
 
 from __future__ import annotations
 
 import io
 import logging
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from typing_extensions import override
 
+from fuscan.extractors._odf_xml import (
+    TABLE_NS,
+    TEXT_NS,
+    element_text,
+    iter_elements,
+    load_content_xml,
+)
 from fuscan.extractors.base import Extractor, ExtractorError, SpeedTier
 
 __all__ = ["OdsExtractor", "XlsxExtractor"]
@@ -33,10 +40,10 @@ def _extract_calamine_workbook(
 ) -> str:
     """使用 calamine (Rust + PyO3) 提取工作簿所有工作表文本。
 
-    支持 XLSX/XLSM/XLSB/XLS 等 Excel 格式（calamine 0.3.x 对 ODS 解析不
-    完整，OdsExtractor 仍走 odfpy 后端）。calamine 在 Rust 侧完成全部解析
-    与单元格遍历，PyO3 边界仅一次性返回二维列表，避免 Python 层逐单元格
-    调用带来的 GIL 长期占用。
+    支持 XLSX/XLSM/XLSB/XLS 等 Excel 格式。ODS 由 :class:`OdsExtractor`
+    用标准库 ``zipfile`` + ``xml.etree`` 独立解析（iter-109 移除 odfpy
+    依赖）。calamine 在 Rust 侧完成全部解析与单元格遍历，PyO3 边界仅
+    一次性返回二维列表，避免 Python 层逐单元格调用带来的 GIL 长期占用。
 
     :param data: 工作簿字节内容
     :param max_rows: 单工作表最大行数（超出截断）
@@ -136,9 +143,11 @@ class XlsxExtractor(Extractor):
 class OdsExtractor(Extractor):
     """ODS 电子表格文本提取器（OpenDocument Spreadsheet）。
 
-    使用 odfpy 解析 ODS 表格。calamine 0.3.x 对 odfpy 生成的标准 ODS 单元格
-    解析不完整（0.4+ 已修复但要求 Python 3.9+，fuscan 仍支持 Python 3.8），
-    故 ODS 暂保留 odfpy 实现，speed_tier 维持 T4 慢速。
+    iter-109 起改用标准库 ``zipfile`` + ``xml.etree.ElementTree`` 直接
+    解析 ODS 的 ``content.xml``，移除 odfpy 依赖（odfpy 在 PyPI 上仅有
+    sdist，无预编译 wheel，与 fspack 的 ``--only-binary=:all:`` 打包策略
+    冲突）。speed_tier 从 T4 慢速调整为 T3 中速：标准库 XML 解析 +
+    TableRow/Cell 遍历比 odfpy 的对象封装略快。
     """
 
     @property
@@ -150,8 +159,8 @@ class OdsExtractor(Extractor):
     @property
     @override
     def speed_tier(self) -> SpeedTier:
-        """ODS XML 解析 + TableRow/Cell 遍历为 T4 慢速。"""
-        return SpeedTier.SLOW
+        """ODS ZIP 解压 + XML 解析 + TableRow/Cell 遍历为 T3 中速。"""
+        return SpeedTier.MEDIUM
 
     @override
     @property
@@ -170,33 +179,44 @@ class OdsExtractor(Extractor):
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:
-        """从内存字节提取 ODS 表格文本。"""
-        try:
-            from odf.opendocument import load
-            from odf.table import TableCell, TableRow
-        except ImportError as exc:
-            raise ExtractorError("odfpy 未安装，无法提取 ODS") from exc
+        """从内存字节提取 ODS 表格文本。
 
+        :param data: ODS 文件完整字节内容（ZIP 格式）
+        :return: 各行文本以 ``\\n`` 分隔，行内单元格以 ``\\t`` 分隔
+        :raises ExtractorError: ZIP 解压失败、content.xml 缺失或 XML 解析失败
+        """
         try:
-            doc = load(io.BytesIO(data))
+            root = load_content_xml(data)
+        except KeyError as exc:
+            raise ExtractorError(f"ODS 解析失败: 缺少 content.xml: {exc}") from exc
         except Exception as exc:
             raise ExtractorError(f"ODS 解析失败: {exc}") from exc
 
         parts: list[str] = []
-        for row in doc.getElementsByType(TableRow):
-            row_texts = []
-            for cell in row.getElementsByType(TableCell):
-                text = self._extract_cell_text(cell)
-                if text:
-                    row_texts.append(text)
+        for row in iter_elements(root, TABLE_NS, ("table-row",)):
+            row_texts: list[str] = []
+            for cell in iter_elements(row, TABLE_NS, ("table-cell",)):
+                # 单元格文本在 <text:p> 子元素中，递归提取
+                cell_text = self._extract_cell_text(cell)
+                if cell_text:
+                    row_texts.append(cell_text)
             if row_texts:
                 parts.append("\t".join(row_texts))
 
         return "\n".join(parts)
 
-    def _extract_cell_text(self, cell: object) -> str:
-        """提取单元格内所有文本节点。"""
-        try:
-            return str(cell).strip()
-        except Exception:
-            return ""
+    def _extract_cell_text(self, cell: ET.Element) -> str:
+        """提取单元格内所有 ``<text:p>`` 段落文本。
+
+        ODS 单元格的文本内容封装在 ``<text:p>`` 子元素中，一个单元格
+        可能包含多个段落（用 ``\\n`` 分隔）。空白单元格返回空串。
+
+        :param cell: ``<table:table-cell>`` 元素
+        :return: 单元格内所有段落文本拼接（已 ``strip``）
+        """
+        parts: list[str] = []
+        for paragraph in iter_elements(cell, TEXT_NS, ("p",)):
+            text = element_text(paragraph)
+            if text:
+                parts.append(text)
+        return "\n".join(parts)

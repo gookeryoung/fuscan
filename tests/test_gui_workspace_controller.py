@@ -141,6 +141,44 @@ class TestWorkspaceItem:
         item = WorkspaceItem(workspace_id="ws-1", name="t", use_builtin=False)
         assert item.rules_text == "未配置规则"
 
+    def test_rules_tags_builtin_only(self) -> None:
+        """仅启用内置规则时返回单个内置 TAG。"""
+        item = WorkspaceItem(workspace_id="ws-1", name="t", use_builtin=True)
+        tags = item.rules_tags
+        assert len(tags) == 1
+        assert tags[0] == {"name": "内置", "is_builtin": True}
+
+    def test_rules_tags_builtin_with_files(self) -> None:
+        """内置 + 规则文件混合：内置在前，用户文件在后。"""
+        item = WorkspaceItem(
+            workspace_id="ws-1",
+            name="t",
+            rules_paths=("a.yaml", "b.json"),
+            use_builtin=True,
+        )
+        tags = item.rules_tags
+        assert len(tags) == 3
+        assert tags[0] == {"name": "内置", "is_builtin": True}
+        assert tags[1] == {"name": "a.yaml", "is_builtin": False}
+        assert tags[2] == {"name": "b.json", "is_builtin": False}
+
+    def test_rules_tags_files_only(self) -> None:
+        """仅规则文件（无内置）：返回用户文件 TAG 列表。"""
+        item = WorkspaceItem(
+            workspace_id="ws-1",
+            name="t",
+            rules_paths=("rules.yaml",),
+            use_builtin=False,
+        )
+        tags = item.rules_tags
+        assert len(tags) == 1
+        assert tags[0] == {"name": "rules.yaml", "is_builtin": False}
+
+    def test_rules_tags_no_rules(self) -> None:
+        """无规则：返回空列表。"""
+        item = WorkspaceItem(workspace_id="ws-1", name="t", use_builtin=False)
+        assert item.rules_tags == []
+
     def test_frozen_immutable(self) -> None:
         """frozen dataclass 应禁止字段赋值。"""
         item = WorkspaceItem(workspace_id="ws-1", name="t")
@@ -196,11 +234,12 @@ class TestWorkspaceListModel:
         """roleNames 应返回所有 12 个 role。"""
         model = WorkspaceListModel()
         roles = model.roleNames()
-        assert len(roles) == 12
+        assert len(roles) == 13
         assert roles[Qt.UserRole + 1] == b"workspaceId"
         assert roles[Qt.UserRole + 2] == b"name"
         assert roles[Qt.UserRole + 3] == b"modeText"
         assert roles[Qt.UserRole + 12] == b"index"
+        assert roles[Qt.UserRole + 13] == b"rulesTags"
 
     def test_row_count_with_parent_index(self) -> None:
         """传有效 parent 时 rowCount 应为 0（扁平列表）。"""

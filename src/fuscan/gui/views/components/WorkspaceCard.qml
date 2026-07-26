@@ -16,6 +16,7 @@ Rectangle {
     property string modeText: ""
     property string target: ""
     property string rulesText: ""
+    property var rulesTags: []
     property string statusText: ""
     property int matchedCount: 0
     property int passedCount: 0
@@ -122,10 +123,39 @@ Rectangle {
                 font.pixelSize: 11
                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
             }
-            Label {
-                text: rulesText
-                font.pixelSize: 12
-                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+            // 规则 TAG 标签列表：内置=灰色，用户定义=绿色，从左到右排列
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 4
+                Repeater {
+                    model: rulesTags
+                    delegate: Rectangle {
+                        radius: 4
+                        height: 18
+                        width: tagLabel.width + 12
+                        // 内置=灰色背景，用户定义=绿色背景
+                        color: modelData.is_builtin
+                            ? (theme.isDark ? theme.colorBorderDark : theme.colorBorder)
+                            : theme.colorSuccess
+                        Label {
+                            id: tagLabel
+                            anchors.centerIn: parent
+                            text: modelData.name
+                            font.pixelSize: 10
+                            font.bold: true
+                            color: modelData.is_builtin
+                                ? (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
+                                : theme.colorTextOnPrimary
+                        }
+                    }
+                }
+                // 空态：未配置规则
+                Label {
+                    visible: rulesTags.length === 0
+                    text: "未配置规则"
+                    font.pixelSize: 11
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                }
             }
         }
 

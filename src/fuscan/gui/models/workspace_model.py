@@ -21,6 +21,7 @@ QML 通过 role 读取展示字段，通过 :class:`WorkspaceController` 槽修�
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 try:
@@ -54,6 +55,7 @@ _ROLE_SKIPPED_COUNT = b"skippedCount"
 _ROLE_ERROR_COUNT = b"errorCount"
 _ROLE_LAST_SUMMARY = b"lastSummary"
 _ROLE_INDEX = b"index"
+_ROLE_RULES_TAGS = b"rulesTags"
 
 _ROLES: dict[int, bytes] = {
     Qt.UserRole + 1: _ROLE_WORKSPACE_ID,
@@ -68,6 +70,7 @@ _ROLES: dict[int, bytes] = {
     Qt.UserRole + 10: _ROLE_ERROR_COUNT,
     Qt.UserRole + 11: _ROLE_LAST_SUMMARY,
     Qt.UserRole + 12: _ROLE_INDEX,
+    Qt.UserRole + 13: _ROLE_RULES_TAGS,
 }
 
 
@@ -119,6 +122,23 @@ class WorkspaceItem:
             return f"{files_count} 文件"
         return "未配置规则"
 
+    @property
+    def rules_tags(self) -> list[dict[str, object]]:
+        """规则标签列表（供 QML TAG 标签展示）。
+
+        每项：``{"name": 规则名, "is_builtin": bool}``
+
+        - 内置规则：``is_builtin=True``，name 为 ``"内置"``
+        - 用户规则文件：``is_builtin=False``，name 为文件名（含扩展名）
+        - 未配置任何规则时返回空列表
+        """
+        tags: list[dict[str, object]] = []
+        if self.use_builtin:
+            tags.append({"name": "内置", "is_builtin": True})
+        for path in self.rules_paths:
+            tags.append({"name": Path(path).name, "is_builtin": False})
+        return tags
+
 
 class WorkspaceListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritance]
     """工作区列表模型。
@@ -155,6 +175,7 @@ class WorkspaceListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
         Qt.UserRole + 9: "skipped_count",
         Qt.UserRole + 10: "error_count",
         Qt.UserRole + 11: "last_summary",
+        Qt.UserRole + 13: "rules_tags",
     }
 
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole) -> object:

@@ -542,28 +542,222 @@ Item {
                 }
             }
 
-            // ===== Tab 3: 忽略目录 =====
-            ColumnLayout {
-                spacing: 8
-                Label {
-                    text: "一行一个目录名（扫描时跳过匹配目录）"
-                    font.pixelSize: 11
-                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                }
-                TextArea {
+            // ===== Tab 3: 忽略目录（分类管理） =====
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: availableWidth
+
+                ColumnLayout {
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    text: configController.ignoreDirsText
-                    onTextChanged: configController.setIgnoreDirsText(text)
-                    font.pixelSize: 12
-                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                    wrapMode: TextArea.Wrap
-                    background: Rectangle {
+                    spacing: 8
+
+                    Label {
+                        text: "按目录名匹配（大小写不敏感，任意层级）。勾选表示扫描时跳过该目录。"
+                        font.pixelSize: 11
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                    }
+
+                    // ---------- 预设分类列表 ----------
+                    Repeater {
+                        model: configController.ignoreDirCategories
+
+                        // 分类卡片
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 0
+                            Layout.rightMargin: 0
+                            // 高度由内容撑开：header 高度 + 子目录列表高度
+                            height: categoryColumn.implicitHeight + 16
+                            color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                            border.width: 1
+                            radius: theme.radiusSm
+
+                            property var categoryData: modelData
+                            property string categoryName: modelData.category
+                            property var categoryDirs: modelData.dirs
+                            property bool categoryAllEnabled: modelData.allEnabled
+
+                            ColumnLayout {
+                                id: categoryColumn
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                spacing: 4
+
+                                // 分类标题行：全选 CheckBox + 分类名
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+
+                                    CheckBox {
+                                        tristate: true
+                                        checkState: categoryData.allEnabled ? Qt.Checked : Qt.Unchecked
+                                        // tristate 仅用于显示，点击时切全选/全不选
+                                        onClicked: {
+                                            var willEnable = !(categoryData.allEnabled)
+                                            configController.setIgnoreDirCategoryEnabled(categoryName, willEnable)
+                                        }
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "统一勾选/取消该分类下所有目录"
+                                        ToolTip.delay: 400
+                                    }
+
+                                    Label {
+                                        text: categoryName
+                                        font.bold: true
+                                        font.pixelSize: theme.fontSizeBody
+                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                    }
+
+                                    Item { Layout.fillWidth: true }
+
+                                    // 目录计数
+                                    Label {
+                                        text: categoryDirs.length + " 项"
+                                        font.pixelSize: 11
+                                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    }
+                                }
+
+                                // 分类下目录列表
+                                Repeater {
+                                    model: categoryDirs
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Layout.leftMargin: 28
+                                        spacing: 8
+
+                                        CheckBox {
+                                            checked: modelData.enabled
+                                            onClicked: configController.toggleIgnoreDir(modelData.name, checked)
+                                        }
+
+                                        Label {
+                                            text: modelData.name
+                                            font.pixelSize: 12
+                                            font.family: "Consolas, Monaco, monospace"
+                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                        }
+
+                                        Item { Layout.fillWidth: true }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ---------- 自定义目录区 ----------
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: customColumn.implicitHeight + 16
                         color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
                         border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                         border.width: 1
-                        radius: 4
+                        radius: theme.radiusSm
+
+                        ColumnLayout {
+                            id: customColumn
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            spacing: 4
+
+                            Label {
+                                text: "自定义目录"
+                                font.bold: true
+                                font.pixelSize: theme.fontSizeBody
+                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                            }
+
+                            Label {
+                                text: "添加不在预设分类中的目录名，扫描时同样跳过。"
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            }
+
+                            // 添加输入行
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                TextField {
+                                    id: customDirInput
+                                    Layout.fillWidth: true
+                                    font.pixelSize: 12
+                                    font.family: "Consolas, Monaco, monospace"
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                    placeholderText: "输入目录名后按 Enter 或点击添加"
+                                    onAccepted: {
+                                        if (text.trim().length > 0) {
+                                            configController.addCustomIgnoreDir(text)
+                                            text = ""
+                                        }
+                                    }
+                                    background: Rectangle {
+                                        color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                        border.width: 1
+                                        radius: theme.radiusSm
+                                    }
+                                }
+
+                                Button {
+                                    text: "添加"
+                                    implicitHeight: 32
+                                    font.pixelSize: theme.fontSizeSmall
+                                    enabled: customDirInput.text.trim().length > 0
+                                    onClicked: {
+                                        configController.addCustomIgnoreDir(customDirInput.text)
+                                        customDirInput.text = ""
+                                    }
+                                }
+                            }
+
+                            // 自定义目录列表
+                            Repeater {
+                                model: configController.customIgnoreDirs
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.leftMargin: 8
+                                    spacing: 8
+
+                                    Label {
+                                        text: modelData
+                                        font.pixelSize: 12
+                                        font.family: "Consolas, Monaco, monospace"
+                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                        Layout.fillWidth: true
+                                    }
+
+                                    Button {
+                                        text: "✕"
+                                        flat: true
+                                        implicitHeight: 24
+                                        implicitWidth: 24
+                                        font.pixelSize: 12
+                                        palette.buttonText: theme.colorDanger
+                                        onClicked: configController.removeCustomIgnoreDir(modelData)
+                                    }
+                                }
+                            }
+
+                            // 空状态提示
+                            Label {
+                                visible: configController.customIgnoreDirs.length === 0
+                                text: "（暂无自定义目录）"
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                Layout.leftMargin: 8
+                            }
+                        }
                     }
+
+                    Item { Layout.fillHeight: true }
                 }
             }
         }

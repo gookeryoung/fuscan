@@ -125,20 +125,88 @@ class TestCacheAndPerf:
 
 
 class TestIgnoreDirs:
-    def test_ignore_dirs_text_default_non_empty(self, controller: ConfigController) -> None:
-        """默认 ignore_dirs 含版本控制/缓存等目录，文本应非空。"""
-        assert controller.ignoreDirsText != ""
-        assert ".git" in controller.ignoreDirsText
+    def test_ignore_dir_categories_default_non_empty(self, controller: ConfigController) -> None:
+        """默认 ignoreDirCategories 含多个分类，每个分类含目录项。"""
+        cats = controller.ignoreDirCategories
+        assert len(cats) > 0
+        # 版本控制分类应存在且含 .git
+        vc_cats = [c for c in cats if c["category"] == "版本控制"]
+        assert len(vc_cats) == 1
+        vc_dirs = vc_cats[0]["dirs"]
+        assert any(d["name"] == ".git" and d["enabled"] for d in vc_dirs)
 
-    def test_set_ignore_dirs_text(self, controller: ConfigController) -> None:
-        text = ".git\n__pycache__\nvenv"
-        controller.setIgnoreDirsText(text)
-        assert controller.config.ignore_dirs == [".git", "__pycache__", "venv"]
-        assert controller.ignoreDirsText == text
+    def test_toggle_ignore_dir_disable_and_enable(self, controller: ConfigController) -> None:
+        """toggleIgnoreDir 可取消勾选预设目录并重新勾选。"""
+        # 初始 .git 在忽略列表中
+        assert ".git" in controller.config.ignore_dirs
+        # 取消勾选
+        controller.toggleIgnoreDir(".git", False)
+        assert ".git" not in controller.config.ignore_dirs
+        # 重新勾选
+        controller.toggleIgnoreDir(".git", True)
+        assert ".git" in controller.config.ignore_dirs
 
-    def test_set_ignore_dirs_text_strips_empty_lines(self, controller: ConfigController) -> None:
-        controller.setIgnoreDirsText("  .git  \n\n\n__pycache__\n")
-        assert controller.config.ignore_dirs == [".git", "__pycache__"]
+    def test_toggle_ignore_dir_case_insensitive_removal(self, controller: ConfigController) -> None:
+        """取消勾选时按大小写不敏感移除。"""
+        controller.toggleIgnoreDir(".GIT", False)
+        assert ".git" not in controller.config.ignore_dirs
+
+    def test_set_ignore_dir_category_enabled_batch(self, controller: ConfigController) -> None:
+        """setIgnoreDirCategoryEnabled 批量取消/勾选整个分类。"""
+        # 取消整个 Python 分类
+        controller.setIgnoreDirCategoryEnabled("Python", False)
+        assert "__pycache__" not in controller.config.ignore_dirs
+        assert ".venv" not in controller.config.ignore_dirs
+        # 重新勾选
+        controller.setIgnoreDirCategoryEnabled("Python", True)
+        assert "__pycache__" in controller.config.ignore_dirs
+        assert ".venv" in controller.config.ignore_dirs
+
+    def test_add_custom_ignore_dir(self, controller: ConfigController) -> None:
+        """addCustomIgnoreDir 添加自定义目录到忽略列表。"""
+        controller.addCustomIgnoreDir("my_special_cache")
+        assert "my_special_cache" in controller.config.ignore_dirs
+        assert "my_special_cache" in controller.customIgnoreDirs
+
+    def test_add_custom_ignore_dir_dedup_case_insensitive(self, controller: ConfigController) -> None:
+        """addCustomIgnoreDir 大小写不敏感去重。"""
+        controller.addCustomIgnoreDir(".git")
+        # 已存在 .git（小写），不应重复添加
+        count = controller.config.ignore_dirs.count(".git")
+        assert count == 1
+
+    def test_add_custom_ignore_dir_ignores_empty(self, controller: ConfigController) -> None:
+        """addCustomIgnoreDir 忽略空字符串。"""
+        before = len(controller.config.ignore_dirs)
+        controller.addCustomIgnoreDir("   ")
+        assert len(controller.config.ignore_dirs) == before
+
+    def test_remove_custom_ignore_dir(self, controller: ConfigController) -> None:
+        """removeCustomIgnoreDir 移除自定义目录。"""
+        controller.addCustomIgnoreDir("temp_cache")
+        assert "temp_cache" in controller.config.ignore_dirs
+        controller.removeCustomIgnoreDir("temp_cache")
+        assert "temp_cache" not in controller.config.ignore_dirs
+
+    def test_custom_ignore_dirs_excludes_preset(self, controller: ConfigController) -> None:
+        """customIgnoreDirs 不含预设分类中的目录。"""
+        controller.addCustomIgnoreDir("custom_only")
+        custom = controller.customIgnoreDirs
+        assert "custom_only" in custom
+        # 预设目录不出现在自定义列表中
+        assert ".git" not in custom
+        assert "node_modules" not in custom
+
+    def test_large_software_category_exists(self, controller: ConfigController) -> None:
+        """大型软件分类应存在并含 ANSYS/Autodesk/SolidWorks 等目录。"""
+        cats = controller.ignoreDirCategories
+        ls_cats = [c for c in cats if c["category"] == "大型软件"]
+        assert len(ls_cats) == 1
+        dir_names = [d["name"] for d in ls_cats[0]["dirs"]]
+        assert "ANSYS Inc" in dir_names
+        assert "Autodesk" in dir_names
+        assert "SOLIDWORKS Corp" in dir_names
+        assert "Kingsoft" in dir_names
 
 
 class TestFontSettings:
@@ -353,10 +421,13 @@ class TestResetToDefaults:
         assert controller.perfLogEnabled is False
 
     def test_resets_ignore_dirs(self, controller: ConfigController) -> None:
-        controller.setIgnoreDirsText("custom_dir\nanother")
+        controller.addCustomIgnoreDir("custom_dir")
+        controller.addCustomIgnoreDir("another")
+        assert "custom_dir" in controller.config.ignore_dirs
         controller.resetToDefaults()
         # 默认 ignore_dirs 非空（含 system volume information 等）
-        assert "custom_dir" not in controller.ignoreDirsText
+        assert "custom_dir" not in controller.config.ignore_dirs
+        assert "another" not in controller.config.ignore_dirs
 
     def test_emits_config_changed(self, controller: ConfigController) -> None:
         emitted: list[None] = []

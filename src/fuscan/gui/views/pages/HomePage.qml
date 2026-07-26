@@ -1,7 +1,7 @@
 import QtQuick 2.15
+import QtQuick.Dialogs 1.3
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import QtQuick.Dialogs 1.3
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
 import "../components"
@@ -43,28 +43,150 @@ Item {
         }
     }
 
-    // 清空所有工作区确认对话框
-    MessageDialog {
+    // 清空所有工作区确认对话框（自绘 Dialog，与应用本体风格一致）
+    Dialog {
         id: clearConfirmDialog
-        title: "清空所有工作区"
-        text: "将移除全部 " + workspaceController.workspaceCount + " 个任务及其扫描结果，此操作不可撤销。是否继续？"
-        icon: StandardIcon.Warning
-        standardButtons: StandardButton.Ok | StandardButton.Cancel
-        onAccepted: {
-            var ok = workspaceController.clearAllWorkspaces()
-            if (!ok) {
-                clearResultDialog.open()
+        modal: true
+        anchors.centerIn: parent
+        width: 380
+        // 不用 standardButtons：自绘按钮以统一 theme 令牌配色
+
+        contentItem: Rectangle {
+            color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+            border.width: 1
+            radius: theme.radiusMd
+            implicitWidth: 380
+            implicitHeight: confirmColumn.implicitHeight + 32
+
+            ColumnLayout {
+                id: confirmColumn
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 16
+
+                // 标题行：警告图标 + 标题
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label {
+                        text: "⚠"
+                        font.pixelSize: theme.fontSizeHeading
+                        color: theme.colorWarning
+                    }
+                    Label {
+                        text: "清空所有工作区"
+                        font.pixelSize: theme.fontSizeHeading
+                        font.bold: true
+                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "将移除全部 " + workspaceController.workspaceCount + " 个任务及其扫描结果，此操作不可撤销。是否继续？"
+                    font.pixelSize: theme.fontSizeBody
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    wrapMode: Text.WordWrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignRight
+                    spacing: 8
+                    Button {
+                        text: "取消"
+                        flat: true
+                        implicitHeight: theme.btnHeightSecondary
+                        font.pixelSize: theme.fontSizeBody
+                        onClicked: clearConfirmDialog.reject()
+                    }
+                    Button {
+                        text: "清空"
+                        implicitHeight: theme.btnHeightPrimary
+                        font.pixelSize: theme.fontSizeBody
+                        palette.buttonText: theme.colorTextOnPrimary
+                        background: Rectangle {
+                            color: theme.colorDanger
+                            radius: theme.radiusSm
+                        }
+                        onClicked: {
+                            var ok = workspaceController.clearAllWorkspaces()
+                            clearConfirmDialog.close()
+                            if (!ok) {
+                                clearResultDialog.open()
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
-    // 清空结果提示对话框（扫描中拒绝清空时显示）
-    MessageDialog {
+    // 清空结果提示对话框（扫描中拒绝清空时显示，自绘风格）
+    Dialog {
         id: clearResultDialog
-        title: "无法清空"
-        text: "有任务正在扫描，请等待扫描结束或取消后再试。"
-        icon: StandardIcon.Information
-        standardButtons: StandardButton.Ok
+        modal: true
+        anchors.centerIn: parent
+        width: 340
+
+        contentItem: Rectangle {
+            color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+            border.width: 1
+            radius: theme.radiusMd
+            implicitWidth: 340
+            implicitHeight: resultColumn.implicitHeight + 32
+
+            ColumnLayout {
+                id: resultColumn
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 16
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label {
+                        text: "ℹ"
+                        font.pixelSize: theme.fontSizeHeading
+                        color: theme.colorPrimary
+                    }
+                    Label {
+                        text: "无法清空"
+                        font.pixelSize: theme.fontSizeHeading
+                        font.bold: true
+                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "有任务正在扫描，请等待扫描结束或取消后再试。"
+                    font.pixelSize: theme.fontSizeBody
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    wrapMode: Text.WordWrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignRight
+                    Button {
+                        text: "知道了"
+                        implicitHeight: theme.btnHeightPrimary
+                        font.pixelSize: theme.fontSizeBody
+                        palette.buttonText: theme.colorTextOnPrimary
+                        background: Rectangle {
+                            color: theme.colorPrimary
+                            radius: theme.radiusSm
+                        }
+                        onClicked: clearResultDialog.close()
+                    }
+                }
+            }
+        }
     }
 
     ColumnLayout {

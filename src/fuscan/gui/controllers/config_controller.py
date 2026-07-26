@@ -22,7 +22,7 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
-from fuscan.config import DEFAULT_MAX_FILE_SIZE, Config, load_config, save_config
+from fuscan.config import DEFAULT_MAX_FILE_SIZE, IGNORE_DIR_CATEGORIES, Config, load_config, save_config
 from fuscan.gui.models.extractor_model import ExtractorListModel
 from fuscan.perf import set_perf_enabled
 
@@ -46,6 +46,8 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
     extractorCountChanged = Signal()
     # 字体配置变更信号：AppController 监听此信号同步到 ThemeController
     fontConfigChanged = Signal()
+    # 忽略目录变更信号：分类视图与自定义列表变更时发射，QML 刷新 ListView
+    ignoreDirsChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -144,20 +146,104 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
             set_perf_enabled(value)
             self.save()
 
-    # ----------------------------- 忽略目录 -----------------------------
+    # ----------------------------- 忽略目录（分类管理） -----------------------------
 
-    @Property(str, notify=configChanged)  # pyrefly: ignore [not-callable]
-    def ignoreDirsText(self) -> str:
-        """忽略目录文本（一行一个目录名）。"""
-        return "\n".join(self._config.ignore_dirs)
+    @Property("QVariantList", notify=ignoreDirsChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
+    def ignoreDirCategories(self) -> list[dict[str, object]]:
+        """忽略目录分类视图（QML ListView 展示）。
+
+        每项格式：``{"category": str, "dirs": [{"name": str, "enabled": bool}, ...], "allEnabled": bool}``。
+        ``enabled`` 表示该目录是否在当前 ``Config.ignore_dirs`` 中（用户可取消勾选预设目录）。
+        """
+        # 当前启用的目录集合（小写），用于快速查询
+        enabled_lower = {d.lower() for d in self._config.ignore_dirs}
+        result: list[dict[str, object]] = []
+        for category, dirs in IGNORE_DIR_CATEGORIES:
+            dir_items = [{"name": d, "enabled": d.lower() in enabled_lower} for d in dirs]
+            all_enabled = all(item["enabled"] for item in dir_items)
+            result.append(
+                {
+                    "category": category,
+                    "dirs": dir_items,
+                    "allEnabled": all_enabled,
+                }
+            )
+        return result
+
+    @Property("QVariantList", notify=ignoreDirsChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
+    def customIgnoreDirs(self) -> list[str]:
+        """用户自定义忽略目录（不在预设分类中的目录名列表）。"""
+        preset_lower = {d.lower() for _, dirs in IGNORE_DIR_CATEGORIES for d in dirs}
+        return [d for d in self._config.ignore_dirs if d.lower() not in preset_lower]
+
+    @Slot(str, bool)  # pyrefly: ignore [not-callable]
+    def toggleIgnoreDir(self, dir_name: str, enabled: bool) -> None:
+        """勾选或取消勾选一个忽略目录。
+
+        :param dir_name: 目录名（精确匹配，大小写敏感）
+        :param enabled: True 表示加入忽略列表，False 表示移除
+        """
+        current_lower = {d.lower() for d in self._config.ignore_dirs}
+        if enabled:
+            if dir_name.lower() not in current_lower:
+                self._config.ignore_dirs.append(dir_name)
+        else:
+            # 按大小写不敏感移除（保留用户可能修改的大小写变体）
+            self._config.ignore_dirs = [d for d in self._config.ignore_dirs if d.lower() != dir_name.lower()]
+        self.save()
+        self.ignoreDirsChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    @Slot(str, bool)  # pyrefly: ignore [not-callable]
+    def setIgnoreDirCategoryEnabled(self, category: str, enabled: bool) -> None:
+        """批量勾选或取消整个分类的目录。
+
+        :param category: 分类名
+        :param enabled: True 表示全选，False 表示全不选
+        """
+        target_dirs = dict(IGNORE_DIR_CATEGORIES).get(category, ())
+        if not target_dirs:
+            return
+        target_lower = {d.lower() for d in target_dirs}
+        if enabled:
+            # 添加分类下所有未启用的目录
+            existing_lower = {d.lower() for d in self._config.ignore_dirs}
+            for d in target_dirs:
+                if d.lower() not in existing_lower:
+                    self._config.ignore_dirs.append(d)
+        else:
+            # 移除分类下所有目录
+            self._config.ignore_dirs = [d for d in self._config.ignore_dirs if d.lower() not in target_lower]
+        self.save()
+        self.ignoreDirsChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     @Slot(str)  # pyrefly: ignore [not-callable]
-    def setIgnoreDirsText(self, text: str) -> None:
-        """设置忽略目录文本。"""
-        new_dirs = [line.strip() for line in text.split("\n") if line.strip()]
-        if new_dirs != self._config.ignore_dirs:
-            self._config.ignore_dirs = new_dirs
+    def addCustomIgnoreDir(self, dir_name: str) -> None:
+        """添加自定义忽略目录名。
+
+        :param dir_name: 目录名（前后空白会被去除）
+        """
+        name = dir_name.strip()
+        if not name:
+            return
+        # 大小写不敏感去重
+        existing_lower = {d.lower() for d in self._config.ignore_dirs}
+        if name.lower() in existing_lower:
+            return
+        self._config.ignore_dirs.append(name)
+        self.save()
+        self.ignoreDirsChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    @Slot(str)  # pyrefly: ignore [not-callable]
+    def removeCustomIgnoreDir(self, dir_name: str) -> None:
+        """移除自定义忽略目录名（大小写不敏感）。
+
+        :param dir_name: 要移除的目录名
+        """
+        before = len(self._config.ignore_dirs)
+        self._config.ignore_dirs = [d for d in self._config.ignore_dirs if d.lower() != dir_name.lower()]
+        if len(self._config.ignore_dirs) != before:
             self.save()
+            self.ignoreDirsChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     # ----------------------------- 文件类型（提取器勾选） -----------------------------
 
@@ -342,6 +428,7 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         set_perf_enabled(False)
         self.save()
         self.fontConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.ignoreDirsChanged.emit()  # pyrefly: ignore [missing-attribute]
         logger.info("配置已重置为默认值")
 
     @Slot()  # pyrefly: ignore [not-callable]

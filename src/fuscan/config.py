@@ -27,6 +27,7 @@ __all__ = [
     "CONFIG_DIR",
     "CONFIG_PATH",
     "DEFAULT_MAX_FILE_SIZE",
+    "IGNORE_DIR_CATEGORIES",
     "MANUAL_PDF_PATH",
     "Config",
     "default_backup_dir",
@@ -55,6 +56,113 @@ MAX_HISTORY = 15
 # 此处为唯一权威来源，其他模块应引用本常量。
 # 可通过 Config.max_file_size 与 Scanner(max_file_size=...) 覆盖。
 DEFAULT_MAX_FILE_SIZE: int = 50 * 1024 * 1024
+
+# 忽略目录预设分类：有序映射（分类名 → 该分类下的目录名元组）。
+# 用于设置页「忽略目录」Tab 的分类展示与管理。
+# Config.ignore_dirs 的默认值从本常量扁平化派生，保持 Scanner/FileWalker
+# 的扁平 list[str] 接口不变，分类信息仅作为 UI 层元数据。
+# 匹配规则：按目录名匹配（大小写不敏感，任意层级），见 FileWalker._ignore_dirs。
+IGNORE_DIR_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("版本控制", (".git", ".svn", ".hg")),
+    (
+        "Python",
+        (
+            "__pycache__",
+            ".mypy_cache",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".venv",
+            "venv",
+            "env",
+            ".tox",
+            ".eggs",
+        ),
+    ),
+    (
+        "Node / JavaScript",
+        (
+            "node_modules",
+            ".sass-cache",
+            ".npm",
+            ".yarn",
+            ".pnpm-store",
+            ".next",
+            ".nuxt",
+            ".turbo",
+            ".parcel-cache",
+            ".svelte-kit",
+        ),
+    ),
+    ("Rust / Cargo", ("target", ".cargo", ".rustup")),
+    ("Java", (".gradle", ".m2", ".ivy")),
+    (".NET / Visual Studio", (".vs", "packages", ".nuget")),
+    ("PHP", ("vendor",)),
+    ("Apple", ("Pods", "DerivedData")),
+    ("Flutter / Dart", (".dart_tool",)),
+    ("构建输出", ("dist", "build", "out")),
+    ("IDE", (".idea", ".vscode")),
+    (
+        "缓存 / 临时 / 日志",
+        (
+            ".cache",
+            "tmp",
+            "temp",
+            "logs",
+            "log",
+            ".Trash",
+            "Trash",
+        ),
+    ),
+    (
+        "大型软件",
+        (
+            # ANSYS
+            "ANSYS Inc",
+            # AutoCAD
+            "Autodesk",
+            # SolidWorks
+            "SOLIDWORKS Corp",
+            "SolidWorks",
+            # Microsoft Office
+            "Microsoft Office",
+            "Office16",
+            "Office15",
+            "Office14",
+            # WPS Office
+            "Kingsoft",
+            "WPS Office",
+            # MATLAB
+            "MATLAB",
+            "MathWorks",
+            # Adobe
+            "Adobe",
+            # Corel
+            "Corel",
+            # 其他工程软件
+            "TecPlot",
+            "STK",
+            "Altium",
+        ),
+    ),
+    (
+        "Windows 系统目录",
+        (
+            "Program Files",
+            "Program Files (x86)",
+            "Windows",
+            "WinSxS",
+            "ProgramData",
+            "System Volume Information",
+            "$Recycle.Bin",
+        ),
+    ),
+    ("fuscan", (".fuscan-cache",)),
+)
+
+
+def _default_ignore_dirs() -> list[str]:
+    """从 IGNORE_DIR_CATEGORIES 扁平化派生默认忽略目录列表。"""
+    return [d for _, dirs in IGNORE_DIR_CATEGORIES for d in dirs]
 
 
 @dataclass
@@ -110,82 +218,11 @@ class Config:
     # False 时仅保留文件名，冲突时追加序号（如 b.1.txt.bak）。
     backup_preserve_relative_path: bool = True
     # 忽略目录名（按目录名匹配任意层级，大小写不敏感）。
-    # 含版本控制元数据、语言工具链缓存、构建输出、IDE 配置、临时/日志目录，
-    # 以及 Windows 系统目录（含大量二进制/系统文件，扫描无意义且拖慢速度）。
-    # 用户可在设置对话框「忽略项」Tab 中增删。
-    ignore_dirs: list[str] = field(
-        default_factory=lambda: [
-            # 版本控制
-            ".git",
-            ".svn",
-            ".hg",
-            # Python
-            "__pycache__",
-            ".mypy_cache",
-            ".pytest_cache",
-            ".ruff_cache",
-            ".venv",
-            "venv",
-            "env",
-            ".tox",
-            ".eggs",
-            # Node / JavaScript
-            "node_modules",
-            ".sass-cache",
-            ".npm",
-            ".yarn",
-            ".pnpm-store",
-            ".next",
-            ".nuxt",
-            ".turbo",
-            ".parcel-cache",
-            ".svelte-kit",
-            # Rust / Cargo
-            "target",
-            ".cargo",
-            ".rustup",
-            # Java
-            ".gradle",
-            ".m2",
-            ".ivy",
-            # .NET / Visual Studio
-            ".vs",
-            "packages",
-            ".nuget",
-            # PHP
-            "vendor",
-            # Apple
-            "Pods",
-            "DerivedData",
-            # Flutter / Dart
-            ".dart_tool",
-            # 构建输出
-            "dist",
-            "build",
-            "out",
-            # IDE
-            ".idea",
-            ".vscode",
-            # 缓存 / 临时 / 日志
-            ".cache",
-            "tmp",
-            "temp",
-            "logs",
-            "log",
-            ".Trash",
-            "Trash",
-            # Windows 系统目录（含大量二进制/系统文件，扫描无意义）
-            "Program Files",
-            "Program Files (x86)",
-            "Windows",
-            "WinSxS",
-            "ProgramData",
-            "System Volume Information",
-            "$Recycle.Bin",
-            # fuscan 暂存区目录：避免扫描被移动到暂存区的文件
-            ".fuscan-cache",
-        ]
-    )
+    # 默认值从 IGNORE_DIR_CATEGORIES 扁平化派生，含版本控制、语言工具链缓存、
+    # 构建输出、IDE 配置、临时/日志目录、大型软件安装目录（ANSYS/AutoCAD/
+    # SolidWorks/Office/WPS/MATLAB/Adobe 等）以及 Windows 系统目录。
+    # 用户可在设置对话框「忽略目录」Tab 中按分类增删。
+    ignore_dirs: list[str] = field(default_factory=_default_ignore_dirs)
     # ----------------------------- 通用设置（字体） -----------------------------
     # 字体族：None 表示使用平台默认字体（detect_font_families() 探测）
     font_family: str | None = None

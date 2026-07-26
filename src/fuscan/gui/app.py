@@ -1,4 +1,4 @@
-﻿"""GUI 应用入口：构造 QGuiApplication 与 QQmlApplicationEngine。
+"""GUI 应用入口：构造 QGuiApplication 与 QQmlApplicationEngine。
 
 提供 :func:`launch` 函数供 CLI ``gui`` 子命令调用，也可作为脚本直接运行。
 按 rule-12-pyside-dev.md 要求，UI 全部在 ``.qml`` 文件定义，Python 侧仅
@@ -40,18 +40,26 @@ _MAIN_QML = _VIEWS_DIR / "Main.qml"
 
 
 def _apply_global_font(app: QGuiApplication) -> None:
-    """设置全局默认字体（跨平台最佳实践）。
+    """设置全局默认字体（跨平台最佳实践 + 用户配置覆盖）。
 
     用 ``QFont.setFamilies()`` 设置优先级列表，Qt 自动选择首个可用字体：
-    - Windows: Microsoft YaHei UI → Microsoft YaHei → Segoe UI → Arial
-    - macOS: PingFang SC → .AppleSystemUIFont → Helvetica Neue
-    - Linux: Noto Sans CJK SC → Source Han Sans SC → Roboto → DejaVu Sans
+    - 用户配置 font_family 优先（SettingsPage 通用设置）
+    - 否则按平台默认：Windows → Microsoft YaHei UI；macOS → PingFang SC；Linux → Noto Sans CJK SC
 
+    字号与加粗从用户配置读取（默认 14px、不加粗），
     QML 控件默认继承此全局字体，无需每个控件单独设置 ``font.family``。
     """
+    from fuscan.config import load_config
+
+    cfg = load_config()
     font = QFont()
-    font.setFamilies(list(detect_font_families()))
-    font.setPixelSize(13)  # 正文字号，与 theme.fontSizeBody 一致
+    if cfg.font_family:
+        font.setFamily(cfg.font_family)
+    else:
+        font.setFamilies(list(detect_font_families()))
+    font.setPixelSize(cfg.font_size)
+    if cfg.font_bold:
+        font.setBold(True)
     app.setFont(font)
 
 

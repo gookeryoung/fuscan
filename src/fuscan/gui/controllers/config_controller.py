@@ -44,6 +44,8 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
     scanPathsChanged = Signal()
     drivesChanged = Signal()
     extractorCountChanged = Signal()
+    # 字体配置变更信号：AppController 监听此信号同步到 ThemeController
+    fontConfigChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -240,6 +242,52 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self.save()
             self.scanPathsChanged.emit()  # pyrefly: ignore [missing-attribute]
 
+    # ----------------------------- 通用设置（字体） -----------------------------
+
+    @Property(str, notify=fontConfigChanged)  # pyrefly: ignore [not-callable]
+    def fontFamily(self) -> str:
+        """字体族名（空串表示使用平台默认）。"""
+        return self._config.font_family or ""
+
+    @Slot(str)  # pyrefly: ignore [not-callable]
+    def setFontFamily(self, value: str) -> None:
+        """设置字体族名（空串表示平台默认）。"""
+        new_value = value if value else None
+        if new_value != self._config.font_family:
+            self._config.font_family = new_value
+            self._on_font_config_changed()
+
+    @Property(int, notify=fontConfigChanged)  # pyrefly: ignore [not-callable]
+    def fontSize(self) -> int:
+        """基准字号（默认 14，其他字号基于此计算）。"""
+        return self._config.font_size
+
+    @Slot(int)  # pyrefly: ignore [not-callable]
+    def setFontSize(self, value: int) -> None:
+        """设置基准字号（钳制到 8-32 范围）。"""
+        size = max(8, min(32, value))
+        if size != self._config.font_size:
+            self._config.font_size = size
+            self._on_font_config_changed()
+
+    @Property(bool, notify=fontConfigChanged)  # pyrefly: ignore [not-callable]
+    def fontBold(self) -> bool:
+        """是否全局加粗。"""
+        return self._config.font_bold
+
+    @Slot(bool)  # pyrefly: ignore [not-callable]
+    def setFontBold(self, value: bool) -> None:
+        """设置是否加粗。"""
+        if value != self._config.font_bold:
+            self._config.font_bold = value
+            self._on_font_config_changed()
+
+    def _on_font_config_changed(self) -> None:
+        """字体配置变更：持久化 + 发出信号。"""
+        save_config(self._config)
+        self.fontConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.configChanged.emit()  # pyrefly: ignore [missing-attribute]
+
     # ----------------------------- 持久化 -----------------------------
 
     def save(self) -> None:
@@ -257,8 +305,13 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._config.cache_enabled = True
         self._config.perf_log_enabled = False
         self._config.ignore_dirs = list(Config.__dataclass_fields__["ignore_dirs"].default_factory())  # type: ignore[index]
+        # 字体设置也重置为默认（平台默认字体、14px、不加粗）
+        self._config.font_family = None
+        self._config.font_size = 14
+        self._config.font_bold = False
         set_perf_enabled(False)
         self.save()
+        self.fontConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
         logger.info("配置已重置为默认值")
 
     @Slot()  # pyrefly: ignore [not-callable]

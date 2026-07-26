@@ -141,6 +141,71 @@ class TestIgnoreDirs:
         assert controller.config.ignore_dirs == [".git", "__pycache__"]
 
 
+class TestFontSettings:
+    """字体配置（通用设置）测试。"""
+
+    def test_font_size_default_14(self, controller: ConfigController) -> None:
+        """默认字号为 14。"""
+        assert controller.fontSize == 14
+
+    def test_font_family_default_empty(self, controller: ConfigController) -> None:
+        """默认字体族为空串（表示平台默认）。"""
+        assert controller.fontFamily == ""
+
+    def test_font_bold_default_false(self, controller: ConfigController) -> None:
+        """默认不加粗。"""
+        assert controller.fontBold is False
+
+    def test_set_font_family_persists(self, controller: ConfigController) -> None:
+        """设置字体族应持久化到 Config。"""
+        controller.setFontFamily("Microsoft YaHei UI")
+        assert controller.fontFamily == "Microsoft YaHei UI"
+        assert controller.config.font_family == "Microsoft YaHei UI"
+
+    def test_set_font_family_empty_means_platform_default(self, controller: ConfigController) -> None:
+        """空串字体族表示平台默认（Config 中存储为 None）。"""
+        controller.setFontFamily("Arial")
+        controller.setFontFamily("")
+        assert controller.fontFamily == ""
+        assert controller.config.font_family is None
+
+    def test_set_font_size_clamps_to_range(self, controller: ConfigController) -> None:
+        """字号应钳制到 8-32 范围。"""
+        controller.setFontSize(4)
+        assert controller.fontSize == 8
+        controller.setFontSize(100)
+        assert controller.fontSize == 32
+
+    def test_set_font_size_normal(self, controller: ConfigController) -> None:
+        """正常字号设置应持久化。"""
+        controller.setFontSize(16)
+        assert controller.fontSize == 16
+        assert controller.config.font_size == 16
+
+    def test_set_font_bold(self, controller: ConfigController) -> None:
+        """设置加粗应持久化。"""
+        controller.setFontBold(True)
+        assert controller.fontBold is True
+        assert controller.config.font_bold is True
+
+    def test_set_font_family_noop_when_same(self, controller: ConfigController) -> None:
+        """相同字体族不应触发持久化。"""
+        controller.setFontFamily("Arial")
+        # 再次设置相同值，不应报错
+        controller.setFontFamily("Arial")
+        assert controller.fontFamily == "Arial"
+
+    def test_reset_to_defaults_resets_font(self, controller: ConfigController) -> None:
+        """resetToDefaults 应重置字体设置为默认值。"""
+        controller.setFontFamily("Arial")
+        controller.setFontSize(20)
+        controller.setFontBold(True)
+        controller.resetToDefaults()
+        assert controller.fontFamily == ""
+        assert controller.fontSize == 14
+        assert controller.fontBold is False
+
+
 class TestExtractorSelection:
     def test_extractor_count_text_format(self, controller: ConfigController) -> None:
         text = controller.extractorCountText

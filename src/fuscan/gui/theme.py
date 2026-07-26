@@ -66,6 +66,10 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._dark: bool = False
+        # 字体配置（由 ConfigController.setFontConfig 注入，默认 14px）
+        self._font_family: str | None = None
+        self._font_size: int = 14
+        self._font_bold: bool = False
 
     # ----------------------------- 暗色模式 -----------------------------
 
@@ -84,6 +88,24 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """切换暗色模式（QML 通过 ``Theme.setDark(...)`` 调用）。"""
         if self._dark != value:
             self._dark = value
+            self.themeChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    # ----------------------------- 字体配置 -----------------------------
+
+    @Slot(str, int, bool)  # pyrefly: ignore [not-callable]
+    def setFontConfig(self, family: str, size: int, bold: bool) -> None:
+        """注入用户字体配置（由 :class:`ConfigController` 启动时调用）。
+
+        :param family: 字体族名（空串表示使用平台默认）
+        :param size: 基准字号（默认 14，ThemeController 基于 base 计算其他字号）
+        :param bold: 是否加粗
+        """
+        new_family = family if family else None
+        size = max(8, min(32, size))  # 钳制到合理范围，避免极端值
+        if self._font_family != new_family or self._font_size != size or self._font_bold != bold:
+            self._font_family = new_family
+            self._font_size = size
+            self._font_bold = bold
             self.themeChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     # ----------------------------- 色彩令牌（浅色） -----------------------------
@@ -209,43 +231,55 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(int, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def fontSizeCaption(self) -> int:
-        """caption 字号（11px）。"""
-        return 11
+        """caption 字号（base - 2，默认 12px）。"""
+        return self._font_size - 2
 
     @Property(int, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def fontSizeSmall(self) -> int:
-        """小字号（12px）。"""
-        return 12
+        """小字号（base - 1，默认 13px）。"""
+        return self._font_size - 1
 
     @Property(int, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def fontSizeBody(self) -> int:
-        """正文字号（13px）。"""
-        return 13
+        """正文字号（base，默认 14px）。"""
+        return self._font_size
 
     @Property(int, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def fontSizeHeading(self) -> int:
-        """标题字号（15px）。"""
-        return 15
+        """标题字号（base + 2，默认 16px）。"""
+        return self._font_size + 2
 
     @Property(int, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def fontSizeTitle(self) -> int:
-        """大标题字号（18px）。"""
-        return 18
+        """大标题字号（base + 4，默认 18px）。"""
+        return self._font_size + 4
 
     @Property(int, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def fontSizePageTitle(self) -> int:
-        """页面大标题字号（22px）。"""
-        return 22
+        """页面大标题字号（base + 8，默认 22px）。"""
+        return self._font_size + 8
 
     @Property(str, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def fontFamily(self) -> str:
-        """主字体族（首个可用字体名，供 QML ``font.family`` 显式绑定）。
+        """主字体族（用户配置优先，否则返回平台默认字体族首个可用字体名）。
 
         全局字体回退由 ``app.py`` 的 ``QGuiApplication.setFont()`` +
         ``QFont.setFamilies()`` 处理，QML 控件默认继承，无需每个控件单独设置。
         仅在需要显式覆盖时绑定此令牌。
         """
+        if self._font_family:
+            return self._font_family
         return detect_font_families()[0]
+
+    @Property(bool, notify=themeChanged)  # pyrefly: ignore [not-callable]
+    def fontBold(self) -> bool:
+        """是否全局加粗（QML 通过 ``font.bold: theme.fontBold`` 绑定）。"""
+        return self._font_bold
+
+    @Property(int, notify=themeChanged)  # pyrefly: ignore [not-callable]
+    def fontSizeBase(self) -> int:
+        """基准字号（用户可配置，默认 14，其他字号基于此计算）。"""
+        return self._font_size
 
     # ----------------------------- 间距令牌（8px 基准网格） -----------------------------
 

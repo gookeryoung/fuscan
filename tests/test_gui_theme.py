@@ -186,16 +186,16 @@ class TestDynamicDarkSwitch:
 
 class TestTypographyTokens:
     def test_font_size_caption(self, theme: ThemeController) -> None:
-        assert theme.fontSizeCaption == 11
+        assert theme.fontSizeCaption == 12
 
     def test_font_size_small(self, theme: ThemeController) -> None:
-        assert theme.fontSizeSmall == 12
+        assert theme.fontSizeSmall == 13
 
     def test_font_size_body(self, theme: ThemeController) -> None:
-        assert theme.fontSizeBody == 13
+        assert theme.fontSizeBody == 14
 
     def test_font_size_heading(self, theme: ThemeController) -> None:
-        assert theme.fontSizeHeading == 15
+        assert theme.fontSizeHeading == 16
 
     def test_font_size_title(self, theme: ThemeController) -> None:
         assert theme.fontSizeTitle == 18
@@ -209,9 +209,7 @@ class TestTypographyTokens:
         assert isinstance(family, str)
         assert len(family) > 0
 
-    def test_font_family_matches_detect_font_families_first(
-        self, theme: ThemeController
-    ) -> None:
+    def test_font_family_matches_detect_font_families_first(self, theme: ThemeController) -> None:
         """fontFamily 应与 detect_font_families() 首个字体一致。"""
         assert theme.fontFamily == detect_font_families()[0]
 

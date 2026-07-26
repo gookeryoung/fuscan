@@ -54,7 +54,7 @@ Item {
                 }
             }
             Repeater {
-                model: ["扫描", "忽略目录"]
+                model: ["通用", "扫描", "忽略目录"]
                 TabButton {
                     id: tabBtn
                     text: modelData
@@ -92,7 +92,130 @@ Item {
             Layout.topMargin: 16
             currentIndex: settingsTabBar.currentIndex
 
-            // ===== Tab 1: 扫描 =====
+            // ===== Tab 1: 通用（字体设置） =====
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: availableWidth
+                ColumnLayout {
+                    width: settingsStack.width
+                    spacing: 16
+
+                    Label {
+                        text: "字体设置"
+                        font.pixelSize: theme.fontSizeHeading
+                        font.bold: true
+                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    }
+
+                    // 字体族
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Label {
+                            text: "字体"
+                            font.pixelSize: theme.fontSizeBody
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            Layout.preferredWidth: 80
+                        }
+                        ComboBox {
+                            id: fontFamilyCombo
+                            Layout.fillWidth: true
+                            // 用 Qt.fontFamilies() 获取系统可用字体列表
+                            model: Qt.fontFamilies()
+                            // 显示当前配置字体（空串显示"平台默认"）
+                            displayText: configController.fontFamily
+                                ? configController.fontFamily
+                                : "平台默认"
+                            onActivated: {
+                                configController.setFontFamily(fontFamilyCombo.currentText)
+                            }
+                            // 预选当前字体
+                            Component.onCompleted: {
+                                if (configController.fontFamily) {
+                                    var idx = fontFamilyCombo.find(configController.fontFamily)
+                                    if (idx >= 0) fontFamilyCombo.currentIndex = idx
+                                }
+                            }
+                        }
+                        // 清除按钮：恢复平台默认
+                        IconButton {
+                            text: "默认"
+                            tooltip: "恢复平台默认字体"
+                            accent: "ghost"
+                            onClicked: configController.setFontFamily("")
+                        }
+                    }
+
+                    // 字号
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Label {
+                            text: "字号"
+                            font.pixelSize: theme.fontSizeBody
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            Layout.preferredWidth: 80
+                        }
+                        ComboBox {
+                            id: fontSizeCombo
+                            model: [10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24]
+                            displayText: configController.fontSize + " px"
+                            onActivated: {
+                                configController.setFontSize(fontSizeCombo.currentValue)
+                            }
+                            Component.onCompleted: {
+                                var idx = fontSizeCombo.find(configController.fontSize)
+                                if (idx >= 0) fontSizeCombo.currentIndex = idx
+                            }
+                        }
+                        Label {
+                            text: "（基准字号，其他字号基于此计算）"
+                            font.pixelSize: theme.fontSizeCaption
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+                    }
+
+                    // 加粗
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Label {
+                            text: "加粗"
+                            font.pixelSize: theme.fontSizeBody
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            Layout.preferredWidth: 80
+                        }
+                        CheckBox {
+                            checked: configController.fontBold
+                            onCheckedChanged: configController.setFontBold(checked)
+                        }
+                    }
+
+                    // 预览
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 60
+                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                        border.width: 1
+                        radius: theme.radiusMd
+                        Label {
+                            anchors.centerIn: parent
+                            text: "字体预览 ABC 中文 123"
+                            font.family: configController.fontFamily || theme.fontFamily
+                            font.pixelSize: configController.fontSize
+                            font.bold: configController.fontBold
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        }
+                    }
+
+                    Item { Layout.fillHeight: true }
+                }
+            }
+
+            // ===== Tab 2: 扫描 =====
             ScrollView {
                 clip: true
                 contentWidth: availableWidth
@@ -262,7 +385,7 @@ Item {
 
                                             Connections {
                                                 target: configController.extractorModel
-                                                onCategoryStatesChanged: catCheckBox.updateState()
+                                                function onCategoryStatesChanged() { catCheckBox.updateState() }
                                             }
 
                                             function updateState() {
@@ -388,7 +511,7 @@ Item {
                 }
             }
 
-            // ===== Tab 2: 忽略目录 =====
+            // ===== Tab 3: 忽略目录 =====
             ColumnLayout {
                 spacing: 8
                 Label {

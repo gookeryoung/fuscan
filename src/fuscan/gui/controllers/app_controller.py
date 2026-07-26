@@ -1,4 +1,4 @@
-﻿"""主控制器工厂：构造并注册所有 controller 到 QML context。
+"""主控制器工厂：构造并注册所有 controller 到 QML context。
 
 单入口构造 :class:`ThemeController`/`ConfigController`/`RulesController`/
 :class:`WorkspaceController`/`AboutController`，供 ``app.py`` 调用
@@ -97,6 +97,33 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._rules = RulesController(self._config, self)
         self._workspace = WorkspaceController(self._config, self._rules, self)
         self._about = AboutController(self)
+        # 从用户配置注入字体设置到 ThemeController（QML 绑定 theme.fontSize* 自动刷新）
+        self._apply_font_config_to_theme()
+        # 监听 ConfigController 字体变更信号，实时同步到 ThemeController
+        self._config.fontConfigChanged.connect(self._apply_font_config_to_theme)  # pyrefly: ignore [missing-attribute]
+
+    def _apply_font_config_to_theme(self) -> None:
+        """将 ConfigController 的字体配置同步到 ThemeController。"""
+        cfg = self._config.config
+        self._theme.setFontConfig(cfg.font_family or "", cfg.font_size, cfg.font_bold)
+        # 同步全局 QGuiApplication 字体（影响 QML 控件默认继承）
+        try:
+            from PySide2.QtGui import QFont, QGuiApplication  # type: ignore[import-not-found]
+        except ImportError:  # pragma: no cover
+            from PySide6.QtGui import QFont, QGuiApplication  # pyrefly: ignore [missing-import]
+        app = QGuiApplication.instance()
+        if app is not None:
+            from fuscan.gui.theme import detect_font_families
+
+            font = QFont()
+            if cfg.font_family:
+                font.setFamily(cfg.font_family)
+            else:
+                font.setFamilies(list(detect_font_families()))
+            font.setPixelSize(cfg.font_size)
+            if cfg.font_bold:
+                font.setBold(True)
+            app.setFont(font)
 
     @property
     def theme(self) -> ThemeController:

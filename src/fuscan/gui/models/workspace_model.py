@@ -75,6 +75,26 @@ _ROLES: dict[int, bytes] = {
     Qt.UserRole + 14: _ROLE_COLLECTED_COUNT,
 }
 
+# 字段名 → 关联 role 列表（含派生属性依赖）
+# iter-105：update_workspace 按字段对比仅 emit 实际变化的 role，
+# 避免扫描进度回调（0.3s 节流）时全量 14 个 role 刷新导致 QML 重新评估所有绑定
+_FIELD_TO_ROLES: dict[str, list[int]] = {
+    "workspace_id": [Qt.UserRole + 1],
+    "name": [Qt.UserRole + 2],
+    "mode_str": [Qt.UserRole + 3],  # mode_text 派生
+    "target": [Qt.UserRole + 4],
+    "rules_paths": [Qt.UserRole + 5, Qt.UserRole + 13],  # rules_text/rules_tags 派生
+    "use_builtin": [Qt.UserRole + 5, Qt.UserRole + 13],
+    "status_text": [Qt.UserRole + 6],
+    "matched_count": [Qt.UserRole + 7],
+    "passed_count": [Qt.UserRole + 8],
+    "skipped_count": [Qt.UserRole + 9],
+    "error_count": [Qt.UserRole + 10],
+    "last_summary": [Qt.UserRole + 11],
+    "collected_count": [Qt.UserRole + 14],
+    # task_overrides 不通过 role 暴露给 QML，无需 emit
+}
+
 
 @dataclass(frozen=True)
 class WorkspaceItem:
@@ -242,16 +262,43 @@ class WorkspaceListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
         :param workspace_id: 工作区 ID
         :param changes: 要更新的字段关键字参数
         :return: 是否成功更新
+
+        iter-105 优化：按字段对比新旧 item，仅 emit 实际变化字段对应的 role，
+        避免扫描进度回调（0.3s 节流）时全量 14 个 role 刷新导致 QML 重新评估
+        所有绑定（statusText/matchedCount/collectedCount 等）。
+        ``task_overrides`` 不通过 role 暴露，变化时不 emit 信号。
         """
         for idx, item in enumerate(self._items):
             if item.workspace_id == workspace_id:
                 new_item = replace(item, **changes)
                 self._items[idx] = new_item
-                # 通知 QML 该行所有 role 变化
-                model_index = self.index(idx, 0)
-                self.dataChanged.emit(model_index, model_index, list(_ROLES.keys()))
+                # 计算变化的 role（去重保序）
+                changed_roles = self._compute_changed_roles(item, new_item)
+                if changed_roles:
+                    model_index = self.index(idx, 0)
+                    self.dataChanged.emit(model_index, model_index, changed_roles)
                 return True
         return False
+
+    @staticmethod
+    def _compute_changed_roles(old: WorkspaceItem, new: WorkspaceItem) -> list[int]:
+        """对比新旧 item，返回变化的 role 列表（去重保序）。
+
+        遍历 :data:`_FIELD_TO_ROLES` 中所有字段，对比 ``getattr`` 值；
+        派生属性（``rules_text``/``rules_tags``/``mode_text``）通过 property
+        计算自动纳入对比。
+        """
+        changed: list[int] = []
+        seen: set[int] = set()
+        for field_name, roles in _FIELD_TO_ROLES.items():
+            if not roles:
+                continue
+            if getattr(old, field_name) != getattr(new, field_name):
+                for role in roles:
+                    if role not in seen:
+                        seen.add(role)
+                        changed.append(role)
+        return changed
 
     def get_workspace(self, workspace_id: str) -> WorkspaceItem | None:
         """按 ID 取工作区，未找到返回 None。"""

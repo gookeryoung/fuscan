@@ -367,6 +367,73 @@ class TestWorkspaceListModel:
         assert item.status_text == "扫描中"
         assert item.matched_count == 3
 
+    def test_update_workspace_emits_only_changed_roles(self) -> None:
+        """iter-105 P1：update_workspace 仅 emit 实际变化字段对应的 role。"""
+        from unittest.mock import MagicMock
+
+        model = WorkspaceListModel()
+        model.add_workspace(_make_item("ws-1", status_text="就绪", matched_count=0))
+        # 用 mock 捕获 dataChanged 信号
+        mock = MagicMock()
+        model.dataChanged.connect(mock)
+
+        # 仅更新 matched_count，其他字段不变
+        model.update_workspace("ws-1", matched_count=5)
+
+        # 应只 emit 一次，且 roles 仅含 matchedCount (UserRole+7)
+        assert mock.call_count == 1
+        args = mock.call_args.args
+        # dataChanged(topLeft, bottomRight, roles)
+        assert args[2] == [Qt.UserRole + 7]
+
+    def test_update_workspace_no_signal_when_no_field_changed(self) -> None:
+        """iter-105 P1：传入与当前值相同的字段时不 emit dataChanged。"""
+        from unittest.mock import MagicMock
+
+        model = WorkspaceListModel()
+        model.add_workspace(_make_item("ws-1", status_text="就绪", matched_count=3))
+        mock = MagicMock()
+        model.dataChanged.connect(mock)
+
+        # 传入与当前值相同的字段
+        model.update_workspace("ws-1", status_text="就绪", matched_count=3)
+
+        # 应不 emit
+        assert mock.call_count == 0
+
+    def test_update_workspace_no_signal_for_task_overrides_only(self) -> None:
+        """iter-105 P1：仅更新 task_overrides（不通过 role 暴露）时不 emit。"""
+        from unittest.mock import MagicMock
+
+        model = WorkspaceListModel()
+        model.add_workspace(_make_item("ws-1"))
+        mock = MagicMock()
+        model.dataChanged.connect(mock)
+
+        model.update_workspace("ws-1", task_overrides={"max_workers": 8})
+
+        # task_overrides 不通过 role 暴露，不应 emit
+        assert mock.call_count == 0
+        item = model.get_workspace("ws-1")
+        assert item is not None
+        assert item.task_overrides == {"max_workers": 8}
+
+    def test_update_workspace_derived_role_emitted(self) -> None:
+        """iter-105 P1：更新 rules_paths 时应 emit rulesText 与 rulesTags 两个派生 role。"""
+        from unittest.mock import MagicMock
+
+        model = WorkspaceListModel()
+        model.add_workspace(_make_item("ws-1", rules_paths=(), use_builtin=True))
+        mock = MagicMock()
+        model.dataChanged.connect(mock)
+
+        # 更新 rules_paths，应同时触发 rulesText (UserRole+5) 与 rulesTags (UserRole+13)
+        model.update_workspace("ws-1", rules_paths=("a.yaml",))
+
+        assert mock.call_count == 1
+        args = mock.call_args.args
+        assert set(args[2]) == {Qt.UserRole + 5, Qt.UserRole + 13}
+
     def test_update_workspace_not_found(self) -> None:
         model = WorkspaceListModel()
         assert model.update_workspace("ws-missing", status_text="x") is False

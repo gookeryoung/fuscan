@@ -141,21 +141,21 @@ Item {
                         IconButton {
                             text:"↑"
                             tooltip: "上移"
-                            accent: "secondary"
+                            accent: "ghost"
                             enabled: rulesController.canMoveUp
                             onClicked: rulesController.moveUp()
                         }
                         IconButton {
                             text:"↓"
                             tooltip: "下移"
-                            accent: "secondary"
+                            accent: "ghost"
                             enabled: rulesController.canMoveDown
                             onClicked: rulesController.moveDown()
                         }
                         IconButton {
                             text:"−"
                             tooltip: "移除选中规则文件"
-                            accent: "secondary"
+                            accent: "ghost"
                             enabled: rulesController.canRemove
                             onClicked: rulesController.removeSelected()
                         }
@@ -163,7 +163,7 @@ Item {
                         IconButton {
                             text:"📂 加载"
                             tooltip: "加载规则文件"
-                            accent: "secondary"
+                            accent: "ghost"
                             onClicked: rulesFileDialog.open()
                         }
                     }

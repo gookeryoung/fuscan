@@ -429,6 +429,8 @@ Item {
                                     // 速度档次 1-5，T1 最快（5 格满），T5 最慢（1 格）
                                     property int tier: parseInt(model.speedTierText.charAt(1))
                                     property color speedColor: model.speedTierColor
+                                    // 缓存 formatTags 列表，避免 Repeater 内 model 关键字遮蔽
+                                    property var formatTagsList: model.formatTags
                                     RowLayout {
                                         anchors.fill: parent
                                         anchors.leftMargin: 32
@@ -443,21 +445,25 @@ Item {
                                         }
                                         // 蓝色格式 tag 列表：扩展名较多的提取器显示多个代表性 tag
                                         // （如源代码显示 HTML/C/CPP/PY），其余显示单个 formatLabel
-                                        Repeater {
-                                            model: model.formatTags
-                                            Rectangle {
-                                                radius: theme.radiusSm
-                                                color: theme.colorPrimary
-                                                Layout.leftMargin: 6
-                                                implicitWidth: formatTagLabel.implicitWidth + 12
-                                                implicitHeight: formatTagLabel.implicitHeight + 4
-                                                Label {
-                                                    id: formatTagLabel
-                                                    anchors.centerIn: parent
-                                                    text: modelData
-                                                    font.pixelSize: 10
-                                                    font.bold: true
-                                                    color: theme.colorTextOnPrimary
+                                        // 用 Row + spacing 控制多 tag 间距，Repeater model 用 id 引用避免遮蔽
+                                        Row {
+                                            Layout.leftMargin: 6
+                                            spacing: 4
+                                            Repeater {
+                                                model: extractorDelegate.formatTagsList
+                                                Rectangle {
+                                                    radius: theme.radiusSm
+                                                    color: theme.colorPrimary
+                                                    width: formatTagLabel.implicitWidth + 12
+                                                    height: formatTagLabel.implicitHeight + 4
+                                                    Label {
+                                                        id: formatTagLabel
+                                                        anchors.centerIn: parent
+                                                        text: modelData
+                                                        font.pixelSize: 10
+                                                        font.bold: true
+                                                        color: theme.colorTextOnPrimary
+                                                    }
                                                 }
                                             }
                                         }

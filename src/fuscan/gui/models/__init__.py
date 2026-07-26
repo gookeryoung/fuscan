@@ -1,4 +1,4 @@
-﻿"""QML 模型层：``QAbstractListModel`` 子类，大数据量列表绑定。
+"""QML 模型层：``QAbstractListModel`` 子类，大数据量列表绑定。
 
 按 rule-12-pyside-dev.md，结果/规则/文件类型列表必须用 Model，
 禁止 QML 侧 ``ListModel`` 动态 append 大量元素。子模块：

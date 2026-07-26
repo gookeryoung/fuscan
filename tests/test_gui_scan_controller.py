@@ -1,4 +1,4 @@
-﻿"""``ScanController`` 单元测试。
+"""``ScanController`` 单元测试。
 
 验证扫描状态机（setup/scanning/results）、扫描模式、进度属性、
 结果模型与选中结果管理。耗时操作（真实 ScanWorker）通过 monkeypatch

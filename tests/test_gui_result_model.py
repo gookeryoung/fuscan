@@ -1,4 +1,4 @@
-﻿"""``ResultListModel`` 单元测试。
+"""``ResultListModel`` 单元测试。
 
 覆盖 ``set_results``/``clear``/``get_result``/``data()``/``roleNames()``/``rowCount()``。
 """

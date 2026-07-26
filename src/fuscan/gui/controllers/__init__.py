@@ -1,4 +1,4 @@
-﻿"""QML 控制层：``QObject`` 子类，通过 ``Property``/``Signal``/``Slot`` 暴露状态与操作给 QML。
+"""QML 控制层：``QObject`` 子类，通过 ``Property``/``Signal``/``Slot`` 暴露状态与操作给 QML。
 
 按 rule-12-pyside-dev.md 三层 MVC 分层，控制器不持有 QML 控件引用，仅通过
 信号槽与 QML 通信。子模块：

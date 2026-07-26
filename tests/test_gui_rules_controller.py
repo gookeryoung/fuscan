@@ -1,4 +1,4 @@
-﻿"""``RulesController`` 单元测试。
+"""``RulesController`` 单元测试。
 
 验证规则文件管理（加载/上移/下移/移除）、内置规则勾选、规则集合并与
 ``rulesetChanged`` 信号触发。使用 ``tmp_path`` 隔离配置与规则文件。

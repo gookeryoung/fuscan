@@ -1,4 +1,4 @@
-﻿"""``RuleListModel`` 单元测试。
+"""``RuleListModel`` 单元测试。
 
 覆盖 ``set_ruleset``/``clear``/``data()``/``roleNames()``/``rowCount()`` 接口。
 """

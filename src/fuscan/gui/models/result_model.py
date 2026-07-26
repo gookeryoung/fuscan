@@ -1,4 +1,4 @@
-﻿"""扫描结果列表模型（QAbstractListModel）。
+"""扫描结果列表模型（QAbstractListModel）。
 
 供 QML ``ListView`` 直接绑定，按 role 返回每个 :class:`ScanResult` 的
 展示字段（文件路径、命中规则名、严重度文本/色值、命中数等）。大数据量

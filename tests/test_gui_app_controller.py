@@ -1,4 +1,4 @@
-﻿"""``AppController`` 与 ``fuscan.gui`` 包入口单元测试。
+"""``AppController`` 与 ``fuscan.gui`` 包入口单元测试。
 
 覆盖：
 

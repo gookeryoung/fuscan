@@ -1,4 +1,4 @@
-﻿"""``AboutController`` 单元测试。
+"""``AboutController`` 单元测试。
 
 验证版本号/描述/作者/License/依赖列表等只读 ``@Property``。
 """

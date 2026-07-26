@@ -83,7 +83,11 @@ Pane {
     Component {
         id: rulesPage
         RulesPage {
-            onBackRequested: contentArea.sidebarRef.currentPage = "home"
+            // iter-107：返回前解除工作区绑定，恢复 RulesController 全局模式
+            onBackRequested: {
+                WorkspaceController.unbindRulesController()
+                contentArea.sidebarRef.currentPage = "home"
+            }
         }
     }
 

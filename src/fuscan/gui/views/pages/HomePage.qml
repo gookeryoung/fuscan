@@ -147,10 +147,8 @@ Item {
                     lastSummary: model.lastSummary
 
                     onDefineRulesRequested: function(wsId) {
-                        // 切换到规则页：通过 sidebar 引用
-                        // 由于 HomePage 无法直接访问 sidebar，用全局 currentPage 切换
-                        // 这里通过 root.currentPage 间接切换（root 为 ApplicationWindow）
-                        // 实际实现：依赖父级组件传递 currentPage 属性
+                        // iter-107：进入规则页前绑定工作区，使规则编辑仅作用于该工作区
+                        workspaceController.bindRulesController(wsId)
                         homePage.defineRulesRequested(wsId)
                     }
                     onViewResultsRequested: function(wsId) {

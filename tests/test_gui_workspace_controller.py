@@ -1268,6 +1268,120 @@ class TestUpdateWorkspaceTarget:
         ctrl2.cleanup()
 
 
+class TestUpdateWorkspaceRules:
+    """iter-107 规则与工作区绑定测试。"""
+
+    def test_update_workspace_rules_writes_item(
+        self,
+        controller: WorkspaceController,
+        tmp_path: Path,
+    ) -> None:
+        """updateWorkspaceRules 应更新 WorkspaceItem 的 rules_paths/use_builtin。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        rules_file = tmp_path / "r.yaml"
+        rules_file.write_text(
+            'version: "1.0"\nrules:\n  - name: "r"\n    severity: info\n    match:\n'
+            '      target: content\n      mode: contains\n      pattern: "x"\n',
+            encoding="utf-8",
+        )
+        controller.updateWorkspaceRules(ws_id, [str(rules_file)], False)
+        item = controller.get_workspace(ws_id)
+        assert item is not None
+        assert item.rules_paths == (str(rules_file),)
+        assert item.use_builtin is False
+
+    def test_update_workspace_rules_injects_scan_controller_ruleset(
+        self,
+        controller: WorkspaceController,
+        tmp_path: Path,
+    ) -> None:
+        """updateWorkspaceRules 应注入新 ruleset 到对应 ScanController。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        sc = controller._scan_controllers[ws_id]
+        # 初始：仅内置规则
+        assert sc._workspace_use_builtin is True
+        assert sc._ruleset is not None
+        # 更新为：无内置 + 无规则文件
+        controller.updateWorkspaceRules(ws_id, [], False)
+        assert sc._workspace_use_builtin is False
+        assert sc._ruleset is None
+        assert sc._workspace_rules_paths == ()
+
+    def test_update_workspace_rules_rejects_when_scanning(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """扫描中状态拒绝修改规则。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # 模拟扫描中状态
+        controller._model.update_workspace(ws_id, status_text="扫描中")
+        controller.updateWorkspaceRules(ws_id, ["/nonexistent.yaml"], False)
+        # 规则未变更
+        item = controller.get_workspace(ws_id)
+        assert item is not None
+        assert item.rules_paths == ()
+        assert item.use_builtin is True
+
+    def test_update_workspace_rules_nonexistent_ws_noop(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """不存在的工作区 ID 应静默跳过。"""
+        controller.updateWorkspaceRules("ws-not-exist", [], False)
+        # 工作区数量未变
+        assert controller.workspaceCount == 0
+
+    def test_update_workspace_rules_persists_to_disk(
+        self,
+        controller: WorkspaceController,
+        tmp_path: Path,
+    ) -> None:
+        """updateWorkspaceRules 应将新规则持久化到 workspaces.json。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.updateWorkspaceRules(ws_id, ["/tmp/x.yaml"], False)
+        # 持久化文件应存在且包含新规则
+        persist_file = controller._persist_file
+        assert persist_file.exists()
+        import json
+
+        payload = json.loads(persist_file.read_text(encoding="utf-8"))
+        ws_data = next(ws for ws in payload["workspaces"] if ws["id"] == ws_id)
+        assert ws_data["rules_paths"] == ["/tmp/x.yaml"]
+        assert ws_data["use_builtin"] is False
+
+
+class TestBindRulesController:
+    """iter-107 规则控制器绑定/解绑测试。"""
+
+    def test_bind_rules_controller_succeeds(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """bindRulesController 应使 RulesController 进入绑定模式。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        assert controller.bindRulesController(ws_id) is True
+        assert controller._rules_controller.isBound is True
+        assert controller._rules_controller.boundWorkspaceId == ws_id
+
+    def test_bind_rules_controller_empty_id_returns_false(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """空工作区 ID 应返回 False。"""
+        assert controller.bindRulesController("") is False
+
+    def test_unbind_rules_controller_restores_global(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """unbindRulesController 应解除绑定恢复全局模式。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.bindRulesController(ws_id)
+        assert controller._rules_controller.isBound is True
+        controller.unbindRulesController()
+        assert controller._rules_controller.isBound is False
+
+
 class TestTaskOverrides:
     """iter-104 任务级配置覆盖测试。"""
 

@@ -366,23 +366,26 @@ class TestRulesetChange:
         config_controller: ConfigController,
         rules_controller: RulesController,
     ) -> None:
-        """构造时应从 rules_controller 加载初始 ruleset。"""
+        """构造时应从 rules_controller 加载初始 ruleset（一次性快照）。"""
         controller = ScanController(config_controller, rules_controller)
         # 默认启用内置规则，ruleset 应非 None
         assert controller._ruleset is not None
 
-    def test_ruleset_change_updates_controller(
+    def test_set_workspace_ruleset_updates_controller(
         self,
         config_controller: ConfigController,
         rules_controller: RulesController,
     ) -> None:
-        """rules_controller 触发 rulesetChanged 时 scan_controller 应更新。"""
+        """iter-107：setWorkspaceRuleset 注入新 ruleset 后 controller 应更新。"""
         controller = ScanController(config_controller, rules_controller)
         assert controller._ruleset is not None
-        # 关闭内置规则
-        rules_controller.setUseBuiltin(False)
+        # 注入 None 规则集（模拟工作区无规则）
+        controller.setWorkspaceRuleset(None, [], False)
         # ruleset 应变为 None
         assert controller._ruleset is None
+        # 工作区规则路径与内置开关也应同步
+        assert controller._workspace_rules_paths == ()
+        assert controller._workspace_use_builtin is False
 
 
 class TestOpenLocation:
@@ -481,7 +484,8 @@ class TestStartScan:
     ) -> None:
         """无规则集时 startScan 应被忽略。"""
         stats_instances, _ = fake_workers
-        rules_controller.setUseBuiltin(False)
+        # iter-107：通过 setWorkspaceRuleset 注入空规则集（取代旧 setUseBuiltin 监听）
+        controller.setWorkspaceRuleset(None, [], False)
         controller.setScanModeIndex(2)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()

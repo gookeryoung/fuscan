@@ -43,7 +43,10 @@ Item {
                 onClicked: rulesPage.backRequested()
             }
             Label {
-                text: "规则"
+                // iter-107：绑定工作区时显示「规则 — 任务名」，否则显示「全局规则」
+                text: rulesController.isBound
+                    ? "规则 — " + rulesController.boundWorkspaceName
+                    : "全局规则"
                 font.pixelSize: 22
                 font.bold: true
                 color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
@@ -51,9 +54,17 @@ Item {
             }
             Item { Layout.fillWidth: true }
             Label {
+                // 绑定工作区时提示「仅对该任务生效」
+                visible: rulesController.isBound
+                text: "仅对该任务生效"
+                font.pixelSize: 11
+                color: theme.colorPrimary
+            }
+            Label {
                 text: "共 " + rulesController.ruleCount + " 条规则"
                 font.pixelSize: 12
                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                Layout.leftMargin: 8
             }
         }
 

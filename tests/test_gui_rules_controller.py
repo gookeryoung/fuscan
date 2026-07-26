@@ -271,3 +271,212 @@ class TestRulesetChangedSignal:
         emitted.clear()
         controller_with_file.removeSelected()
         assert len(emitted) == 1
+
+
+class TestWorkspaceBinding:
+    """iter-107 规则与工作区绑定测试。"""
+
+    def test_unbound_by_default(self, config_controller: ConfigController) -> None:
+        """构造后默认未绑定工作区。"""
+        controller = RulesController(config_controller)
+        assert controller.isBound is False
+        assert controller.boundWorkspaceId == ""
+        assert controller.boundWorkspaceName == ""
+
+    def test_bind_workspace_without_workspace_controller_returns_false(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """未注入 WorkspaceController 时 bindWorkspace 返回 False。"""
+        controller = RulesController(config_controller)
+        assert controller.bindWorkspace("ws-1234") is False
+
+    def test_bind_workspace_loads_local_copy(
+        self,
+        config_controller: ConfigController,
+        tmp_path: Path,
+    ) -> None:
+        """绑定工作区后 useBuiltin/rulesFileModel 应从工作区副本读取。"""
+        from fuscan.gui.controllers.workspace_controller import WorkspaceController
+        from fuscan.gui.models.workspace_model import WorkspaceItem
+
+        rules_file = _write_rules_file(tmp_path, "ws_rule.yaml")
+        ws_controller = WorkspaceController(config_controller, RulesController(config_controller))
+        ws_id = "ws-test123"
+        item = WorkspaceItem(
+            workspace_id=ws_id,
+            name="绑定测试",
+            rules_paths=(str(rules_file),),
+            use_builtin=False,
+        )
+        ws_controller.workspaceModel.add_workspace(item)
+        # RulesController 注入 ws_controller 引用
+        controller = ws_controller._rules_controller
+        controller.set_workspace_controller(ws_controller)
+
+        assert controller.bindWorkspace(ws_id) is True
+        assert controller.isBound is True
+        assert controller.boundWorkspaceId == ws_id
+        assert controller.boundWorkspaceName == "绑定测试"
+        assert controller.useBuiltin is False
+        assert len(controller.rulesFileModel) == 1
+        assert controller.rulesFileModel[0]["fileName"] == "ws_rule.yaml"
+
+    def test_unbind_restores_global_state(
+        self,
+        config_controller: ConfigController,
+        tmp_path: Path,
+    ) -> None:
+        """解除绑定后恢复全局模式。"""
+        from fuscan.gui.controllers.workspace_controller import WorkspaceController
+        from fuscan.gui.models.workspace_model import WorkspaceItem
+
+        rules_file = _write_rules_file(tmp_path, "ws_rule.yaml")
+        ws_controller = WorkspaceController(config_controller, RulesController(config_controller))
+        ws_id = "ws-test456"
+        item = WorkspaceItem(
+            workspace_id=ws_id,
+            name="绑定测试",
+            rules_paths=(str(rules_file),),
+            use_builtin=False,
+        )
+        ws_controller.workspaceModel.add_workspace(item)
+        controller = ws_controller._rules_controller
+        controller.set_workspace_controller(ws_controller)
+        controller.bindWorkspace(ws_id)
+        assert controller.isBound is True
+
+        controller.unbindWorkspace()
+        assert controller.isBound is False
+        assert controller.boundWorkspaceId == ""
+        # 恢复全局 use_builtin（默认 True）
+        assert controller.useBuiltin is True
+        # 全局规则文件列表应为空（config_dir 默认无规则文件）
+        assert controller.rulesFileModel == []
+
+    def test_bound_load_file_persists_to_workspace(
+        self,
+        config_controller: ConfigController,
+        tmp_path: Path,
+    ) -> None:
+        """绑定模式下 loadFileFromPath 仅写入工作区副本，不影响全局 Config。"""
+        from fuscan.gui.controllers.workspace_controller import WorkspaceController
+        from fuscan.gui.models.workspace_model import WorkspaceItem
+
+        ws_controller = WorkspaceController(config_controller, RulesController(config_controller))
+        ws_id = "ws-test789"
+        item = WorkspaceItem(workspace_id=ws_id, name="t", rules_paths=(), use_builtin=False)
+        ws_controller.workspaceModel.add_workspace(item)
+        controller = ws_controller._rules_controller
+        controller.set_workspace_controller(ws_controller)
+        controller.bindWorkspace(ws_id)
+
+        rules_file = _write_rules_file(tmp_path, "new_rule.yaml")
+        assert controller.loadFileFromPath(str(rules_file)) is True
+        # 全局 Config 不受影响
+        assert config_controller.config.rules_paths == []
+        # 工作区 WorkspaceItem 已写入新规则
+        updated = ws_controller.get_workspace(ws_id)
+        assert updated is not None
+        assert str(rules_file) in updated.rules_paths
+
+    def test_bound_set_use_builtin_persists_to_workspace(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """绑定模式下 setUseBuiltin 仅写入工作区副本。"""
+        from fuscan.gui.controllers.workspace_controller import WorkspaceController
+        from fuscan.gui.models.workspace_model import WorkspaceItem
+
+        ws_controller = WorkspaceController(config_controller, RulesController(config_controller))
+        ws_id = "ws-toggle"
+        item = WorkspaceItem(workspace_id=ws_id, name="t", rules_paths=(), use_builtin=True)
+        ws_controller.workspaceModel.add_workspace(item)
+        controller = ws_controller._rules_controller
+        controller.set_workspace_controller(ws_controller)
+        controller.bindWorkspace(ws_id)
+
+        controller.setUseBuiltin(False)
+        # 全局 Config 不受影响
+        assert config_controller.config.use_builtin is True
+        # 工作区已写入
+        updated = ws_controller.get_workspace(ws_id)
+        assert updated is not None
+        assert updated.use_builtin is False
+
+    def test_bound_move_up_persists_to_workspace(
+        self,
+        config_controller: ConfigController,
+        tmp_path: Path,
+    ) -> None:
+        """绑定模式下 moveUp 仅调整工作区副本顺序。"""
+        from fuscan.gui.controllers.workspace_controller import WorkspaceController
+        from fuscan.gui.models.workspace_model import WorkspaceItem
+
+        f1 = _write_rules_file(tmp_path, "r1.yaml", "password")
+        f2 = _write_rules_file(tmp_path, "r2.yaml", "secret")
+        ws_controller = WorkspaceController(config_controller, RulesController(config_controller))
+        ws_id = "ws-move"
+        item = WorkspaceItem(
+            workspace_id=ws_id,
+            name="t",
+            rules_paths=(str(f1), str(f2)),
+            use_builtin=False,
+        )
+        ws_controller.workspaceModel.add_workspace(item)
+        controller = ws_controller._rules_controller
+        controller.set_workspace_controller(ws_controller)
+        controller.bindWorkspace(ws_id)
+
+        controller.setSelectedFileIndex(1)
+        controller.moveUp()
+        # 工作区副本顺序调整
+        updated = ws_controller.get_workspace(ws_id)
+        assert updated is not None
+        assert updated.rules_paths[0] == str(f2)
+        assert updated.rules_paths[1] == str(f1)
+        # 全局 Config 不受影响
+        assert config_controller.config.rules_paths == []
+
+    def test_bound_remove_selected_persists_to_workspace(
+        self,
+        config_controller: ConfigController,
+        tmp_path: Path,
+    ) -> None:
+        """绑定模式下 removeSelected 仅从工作区副本移除。"""
+        from fuscan.gui.controllers.workspace_controller import WorkspaceController
+        from fuscan.gui.models.workspace_model import WorkspaceItem
+
+        f1 = _write_rules_file(tmp_path, "r1.yaml", "password")
+        ws_controller = WorkspaceController(config_controller, RulesController(config_controller))
+        ws_id = "ws-rm"
+        item = WorkspaceItem(
+            workspace_id=ws_id,
+            name="t",
+            rules_paths=(str(f1),),
+            use_builtin=False,
+        )
+        ws_controller.workspaceModel.add_workspace(item)
+        controller = ws_controller._rules_controller
+        controller.set_workspace_controller(ws_controller)
+        controller.bindWorkspace(ws_id)
+
+        controller.setSelectedFileIndex(0)
+        controller.removeSelected()
+        # 工作区副本为空
+        updated = ws_controller.get_workspace(ws_id)
+        assert updated is not None
+        assert updated.rules_paths == ()
+
+    def test_bind_nonexistent_workspace_returns_false(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """绑定不存在的工作区 ID 返回 False。"""
+        from fuscan.gui.controllers.workspace_controller import WorkspaceController
+
+        ws_controller = WorkspaceController(config_controller, RulesController(config_controller))
+        controller = ws_controller._rules_controller
+        controller.set_workspace_controller(ws_controller)
+        assert controller.bindWorkspace("ws-not-exist") is False
+        assert controller.isBound is False

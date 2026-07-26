@@ -111,6 +111,16 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._matched_count: int = 0
         self._skipped_count: int = 0
         self._error_count: int = 0
+        # 阶段独立进度（iter-105 双进度条）：
+        # walk 阶段：discovered 持续增长，skipped/user_skipped 反映白名单与用户标记跳过
+        # scan 阶段：scanned/total 反映解析进度，与上方 progressScanned/progressTotal 同步
+        self._scan_phase: str = "setup"  # setup / walk / scan / archive / done
+        self._walk_discovered: int = 0
+        self._walk_skipped: int = 0
+        self._walk_user_skipped: int = 0
+        self._walk_indeterminate: bool = False
+        self._walk_done: bool = False
+        self._scan_done: bool = False
 
         # 扫描目标
         self._scan_mode_index: int = _SCAN_MODE_STR_TO_INDEX.get(self._config.scan_mode, 2)
@@ -238,6 +248,64 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def errorCount(self) -> int:
         """错误文件数。"""
         return self._error_count
+
+    # ----------------------------- 阶段与收集进度（iter-105 双进度条） -----------------------------
+
+    @Property(str, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def scanPhase(self) -> str:
+        """当前扫描阶段。
+
+        - ``"setup"``：未开始
+        - ``"walk"``：收集文件清单（FileStatsWorker 运行中）
+        - ``"scan"``：解析文件内容（ScanWorker 主阶段）
+        - ``"archive"``：扫描压缩包内条目
+        - ``"done"``：全部完成
+        """
+        return self._scan_phase
+
+    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def walkDiscovered(self) -> int:
+        """walk 阶段已发现的文件总数（持续增长，含跳过项）。"""
+        return self._walk_discovered
+
+    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def walkSkipped(self) -> int:
+        """walk 阶段按白名单跳过的文件数（未勾选的扩展名）。"""
+        return self._walk_skipped
+
+    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def walkUserSkipped(self) -> int:
+        """walk 阶段用户标记跳过的文件数。"""
+        return self._walk_user_skipped
+
+    @Property(bool, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def walkIndeterminate(self) -> bool:
+        """walk 阶段进度条是否为不确定模式（刚启动尚未收到首个进度）。"""
+        return self._walk_indeterminate
+
+    @Property(bool, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def walkDone(self) -> bool:
+        """walk 阶段是否已完成（用于 UI 标记收集进度条为完成态）。"""
+        return self._walk_done
+
+    @Property(bool, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def scanDone(self) -> bool:
+        """scan 阶段是否已完成（用于 UI 标记解析进度条为完成态）。"""
+        return self._scan_done
+
+    @Property(float, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def walkProgress(self) -> float:
+        """walk 阶段进度百分比（0-100）。
+
+        walk 阶段无确定的 ``total``（文件随遍历持续发现），用 ``discovered`` 自身
+        作为分母计算"已发现并分类"的占比：``(discovered - skipped - user_skipped) / discovered``。
+        ``discovered == 0`` 时返回 0（避免除零）。
+        """
+        if self._walk_discovered <= 0:
+            return 0.0
+        # 已分类文件占比 = (发现 - 跳过 - 用户跳过) / 发现
+        classified = self._walk_discovered - self._walk_skipped - self._walk_user_skipped
+        return min(100.0, max(0.0, classified * 100.0 / self._walk_discovered))
 
     # ----------------------------- 扫描模式与目标 -----------------------------
 
@@ -513,6 +581,15 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._is_paused = False
         self._set_scan_state("scanning")
         self._set_status("扫描中...", "准备统计...")
+        # 阶段重置：进入 walk 阶段（iter-105 双进度条）
+        self._scan_phase = "walk"
+        self._walk_indeterminate = True
+        self._walk_done = False
+        self._scan_done = False
+        self._walk_discovered = 0
+        self._walk_skipped = 0
+        self._walk_user_skipped = 0
+        # scan 阶段进度字段重置
         self._progress_indeterminate = True
         self._progress_scanned = 0
         self._progress_total = 0
@@ -625,16 +702,35 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(object)  # pyrefly: ignore [not-callable]
     def _on_scan_progress(self, info: ProgressInfo) -> None:
-        """扫描实时进度回调（节流由 worker 内部完成）。"""
+        """扫描实时进度回调（节流由 worker 内部完成）。
+
+        根据 ``info.phase`` 分别更新 walk / scan / archive 阶段的独立字段，
+        使 QML 双进度条能分别反映收集与解析进度。
+        """
         if self._cancelling:
             return
-        self._progress_indeterminate = False
-        self._progress_scanned = info.scanned
-        self._progress_total = info.total
-        self._matched_count = info.matched
-        self._skipped_count = info.skipped
-        self._error_count = info.errors
-        self._passed_count = max(info.scanned - info.matched - info.errors, 0)
+        # 阶段切换：phase 变化时同步 _scan_phase
+        if info.phase != self._scan_phase:
+            self._scan_phase = info.phase
+            # walk → scan/archive 切换时标记 walk 阶段完成
+            if info.phase in ("scan", "archive") and not self._walk_done:
+                self._walk_done = True
+                self._walk_indeterminate = False
+        # walk 阶段：仅 discovered/skipped/user_skipped 增长，scanned/matched/errors 恒为 0
+        if info.phase == "walk":
+            self._walk_indeterminate = False
+            self._walk_discovered = info.total
+            self._walk_skipped = info.skipped
+            self._walk_user_skipped = info.user_skipped
+        else:
+            # scan/archive 阶段：更新解析进度
+            self._progress_indeterminate = False
+            self._progress_scanned = info.scanned
+            self._progress_total = info.total
+            self._matched_count = info.matched
+            self._skipped_count = info.skipped
+            self._error_count = info.errors
+            self._passed_count = max(info.scanned - info.matched - info.errors, 0)
         # 当前文件截断显示
         if info.current_file:
             path_text = info.current_file
@@ -646,8 +742,22 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(object)  # pyrefly: ignore [not-callable]
     def _on_stats_finished(self, results: list[WalkResult]) -> None:
-        """stats worker 完成：构造带 precollected 的 ScanWorker 启动 scan 阶段。"""
+        """stats worker 完成：标记 walk 阶段完成，构造带 precollected 的 ScanWorker 启动 scan 阶段。"""
         self._cleanup_stats_worker()
+        # walk 阶段完成：从最终 WalkResult 同步收集统计（iter-105 双进度条）
+        total_discovered = sum(wr.total for wr in results)
+        total_skipped = sum(wr.skipped for wr in results)
+        total_user_skipped = sum(wr.user_skipped for wr in results)
+        self._walk_discovered = total_discovered
+        self._walk_skipped = total_skipped
+        self._walk_user_skipped = total_user_skipped
+        self._walk_done = True
+        self._walk_indeterminate = False
+        # scan 阶段总文件数 = walk 收集的 entries 总数（不含跳过项）
+        self._progress_total = sum(len(wr.entries) for wr in results)
+        self._progress_indeterminate = False
+        self._scan_phase = "scan"
+        self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
         cache, source_files = self._build_cache_context()
         assert self._ruleset is not None
         self._worker = ScanWorker(
@@ -691,6 +801,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._result_model.set_results(report.hits)
         # 从 report.stats 同步最终统计，确保扫描完成后统计页展示正确数值
         self._sync_stats_from_report(report)
+        # 标记 scan 阶段完成（iter-105 双进度条）
+        self._scan_done = True
+        self._scan_phase = "done"
         self._reset_scan_ui()
         summary = report.summary()
         speed = report.stats.speed
@@ -712,6 +825,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._last_report = report
         self._result_model.set_results(report.hits)
         self._sync_stats_from_report(report)
+        # 取消时标记 scan 阶段完成（避免进度条卡在中间）
+        self._scan_done = True
+        self._scan_phase = "done"
         self._reset_scan_ui()
         self._set_status("已完成[用户取消]", report.summary())
         self._set_scan_state("results" if report.hits else "setup")

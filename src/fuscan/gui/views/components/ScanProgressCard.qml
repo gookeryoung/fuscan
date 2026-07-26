@@ -134,47 +134,139 @@ Rectangle {
             }
         }
 
-        // ---------- 第四行：进度条 ----------
+        // ---------- 第四行：双进度条（收集 + 解析，iter-105） ----------
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: 4
+            spacing: 8
 
-            RowLayout {
+            // ----- 阶段 1：收集文件清单（walk） -----
+            ColumnLayout {
                 Layout.fillWidth: true
-                Label {
-                    text: "进度"
-                    font.pixelSize: 11
-                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                spacing: 4
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    // 阶段标识圆点：进行中=主色脉冲，完成=成功色，未开始=灰
+                    Rectangle {
+                        width: 8
+                        height: 8
+                        radius: 4
+                        color: workspaceController.activeScanController.walkDone
+                            ? theme.colorSuccess
+                            : (workspaceController.activeScanController.scanPhase === "walk"
+                               ? theme.colorPrimary : theme.colorBorder)
+                    }
+                    Label {
+                        text: "收集文件清单"
+                        font.pixelSize: 11
+                        font.bold: workspaceController.activeScanController.scanPhase === "walk"
+                        color: workspaceController.activeScanController.walkDone
+                            ? theme.colorSuccess
+                            : (workspaceController.activeScanController.scanPhase === "walk"
+                               ? theme.colorPrimary
+                               : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary))
+                    }
+                    Item { Layout.fillWidth: true }
+                    Label {
+                        text: workspaceController.activeScanController.walkIndeterminate
+                            ? "统计中..."
+                            : (workspaceController.activeScanController.walkDiscovered + " 个文件 | 跳过 "
+                               + workspaceController.activeScanController.walkSkipped + " | 用户跳过 "
+                               + workspaceController.activeScanController.walkUserSkipped)
+                        font.pixelSize: 11
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    }
                 }
-                Item { Layout.fillWidth: true }
-                Label {
-                    text: workspaceController.activeScanController.progressIndeterminate
-                        ? "统计中..."
-                        : (workspaceController.activeScanController.progressScanned + " / " + workspaceController.activeScanController.progressTotal)
-                    font.pixelSize: 11
-                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                ProgressBar {
+                    id: walkProgressBar
+                    Layout.fillWidth: true
+                    // walk 阶段无确定 total：刚启动 indeterminate，收到首个进度后按"已分类占比"显示
+                    indeterminate: workspaceController.activeScanController.walkIndeterminate
+                    from: 0.0
+                    to: 100.0
+                    value: workspaceController.activeScanController.walkProgress
+                    background: Rectangle {
+                        implicitHeight: 6
+                        color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                        radius: 3
+                    }
+                    contentItem: Item {
+                        implicitHeight: 6
+                        Rectangle {
+                            width: walkProgressBar.visualPosition * parent.width
+                            height: parent.height
+                            radius: 3
+                            color: workspaceController.activeScanController.walkDone
+                                ? theme.colorSuccess : theme.colorPrimary
+                        }
+                    }
                 }
             }
-            ProgressBar {
-                id: progressBar
+
+            // ----- 阶段 2：解析文件内容（scan） -----
+            ColumnLayout {
                 Layout.fillWidth: true
-                // 不确定模式（统计阶段）走 ProgressBar 默认动画
-                indeterminate: workspaceController.activeScanController.progressIndeterminate
-                from: 0.0
-                to: Math.max(workspaceController.activeScanController.progressTotal, 1)
-                value: workspaceController.activeScanController.progressScanned
-                background: Rectangle {
-                    implicitHeight: 6
-                    color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                    radius: 3
-                }
-                contentItem: Item {
-                    implicitHeight: 6
+                spacing: 4
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
                     Rectangle {
-                        width: progressBar.visualPosition * parent.width
-                        height: parent.height
+                        width: 8
+                        height: 8
+                        radius: 4
+                        color: workspaceController.activeScanController.scanDone
+                            ? theme.colorSuccess
+                            : (workspaceController.activeScanController.scanPhase === "scan"
+                               || workspaceController.activeScanController.scanPhase === "archive"
+                               ? card.statusColor()
+                               : theme.colorBorder)
+                    }
+                    Label {
+                        text: "解析文件内容"
+                        font.pixelSize: 11
+                        font.bold: workspaceController.activeScanController.scanPhase === "scan"
+                            || workspaceController.activeScanController.scanPhase === "archive"
+                        color: (workspaceController.activeScanController.scanPhase === "scan"
+                                || workspaceController.activeScanController.scanPhase === "archive")
+                            ? card.statusColor()
+                            : (workspaceController.activeScanController.scanDone
+                               ? theme.colorSuccess
+                               : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary))
+                    }
+                    Item { Layout.fillWidth: true }
+                    Label {
+                        text: workspaceController.activeScanController.progressIndeterminate
+                            ? "等待中..."
+                            : (workspaceController.activeScanController.progressScanned + " / "
+                               + workspaceController.activeScanController.progressTotal)
+                        font.pixelSize: 11
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    }
+                }
+                ProgressBar {
+                    id: scanProgressBar
+                    Layout.fillWidth: true
+                    // scan 阶段未开始时 indeterminate（walk 进行中）
+                    indeterminate: workspaceController.activeScanController.progressIndeterminate
+                    from: 0.0
+                    to: Math.max(workspaceController.activeScanController.progressTotal, 1)
+                    value: workspaceController.activeScanController.progressScanned
+                    background: Rectangle {
+                        implicitHeight: 6
+                        color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                         radius: 3
-                        color: card.statusColor()
+                    }
+                    contentItem: Item {
+                        implicitHeight: 6
+                        Rectangle {
+                            width: scanProgressBar.visualPosition * parent.width
+                            height: parent.height
+                            radius: 3
+                            color: workspaceController.activeScanController.scanDone
+                                ? theme.colorSuccess : card.statusColor()
+                        }
                     }
                 }
             }

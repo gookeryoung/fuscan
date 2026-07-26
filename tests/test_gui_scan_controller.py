@@ -726,6 +726,208 @@ class TestProgressCallback:
         assert controller.progressScanned == 0
 
 
+class TestScanPhaseProgress:
+    """iter-105 双进度条：测试扫描阶段独立进度字段与切换。"""
+
+    def test_initial_phase_is_setup(self, controller: ScanController) -> None:
+        """初始 scanPhase 应为 setup，所有阶段计数为零。"""
+        assert controller.scanPhase == "setup"
+        assert controller.walkDiscovered == 0
+        assert controller.walkSkipped == 0
+        assert controller.walkUserSkipped == 0
+        assert controller.walkDone is False
+        assert controller.scanDone is False
+        assert controller.walkProgress == 0.0
+
+    def test_start_scan_enters_walk_phase(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """startScan 应将 scanPhase 切换为 walk，并标记 walk 阶段为 indeterminate。"""
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+
+        assert controller.scanPhase == "walk"
+        assert controller.walkIndeterminate is True
+        assert controller.walkDone is False
+        assert controller.scanDone is False
+
+    def test_walk_progress_updates_walk_fields(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """walk 阶段进度回调应仅更新 walk_* 字段，scan 字段保持零。"""
+        stats_instances, _ = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+
+        # walk 阶段进度：发现 100，跳过 30，用户跳过 5
+        info = ProgressInfo(
+            current_file="/tmp/x.txt",
+            scanned=0,
+            total=100,
+            skipped=30,
+            matched=0,
+            errors=0,
+            elapsed=1.0,
+            matches=0,
+            phase="walk",
+            user_skipped=5,
+        )
+        stats_instances[0].emit_progress(info)
+
+        assert controller.scanPhase == "walk"
+        assert controller.walkIndeterminate is False
+        assert controller.walkDiscovered == 100
+        assert controller.walkSkipped == 30
+        assert controller.walkUserSkipped == 5
+        # walk 阶段 scan 字段不更新
+        assert controller.progressScanned == 0
+        assert controller.progressTotal == 0
+        assert controller.matchedCount == 0
+        # walkProgress = (100 - 30 - 5) / 100 = 65%
+        assert controller.walkProgress == 65.0
+
+    def test_walk_phase_to_scan_phase_marks_walk_done(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """phase 从 walk 切换到 scan 时应标记 walk_done=True。"""
+        stats_instances, _ = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+
+        # walk 进度
+        walk_info = ProgressInfo(current_file="/tmp/x.txt", total=50, skipped=10, phase="walk")
+        stats_instances[0].emit_progress(walk_info)
+        assert controller.walkDone is False
+
+        # 切换到 scan 阶段
+        scan_info = ProgressInfo(
+            current_file="/tmp/y.txt",
+            scanned=5,
+            total=40,
+            skipped=10,
+            matched=2,
+            errors=0,
+            matches=2,
+            phase="scan",
+        )
+        stats_instances[0].emit_progress(scan_info)
+
+        assert controller.scanPhase == "scan"
+        assert controller.walkDone is True
+        assert controller.walkIndeterminate is False
+        # walk 字段保留 walk 阶段最终值
+        assert controller.walkDiscovered == 50
+        assert controller.walkSkipped == 10
+        # scan 字段被更新
+        assert controller.progressScanned == 5
+        assert controller.progressTotal == 40
+        assert controller.matchedCount == 2
+
+    def test_walk_progress_zero_when_discovered_zero(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """walkDiscovered=0 时 walkProgress 应返回 0（避免除零）。"""
+        stats_instances, _ = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+
+        info = ProgressInfo(current_file="", total=0, skipped=0, phase="walk")
+        stats_instances[0].emit_progress(info)
+
+        assert controller.walkDiscovered == 0
+        assert controller.walkProgress == 0.0
+
+    def test_stats_finished_syncs_walk_totals(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """stats 完成时应从 WalkResult 同步 walk 阶段最终统计。"""
+        stats_instances, scan_instances = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+
+        walk_results = [
+            WalkResult(
+                root=tmp_path,
+                entries=(),
+                total=200,
+                skipped=50,
+                user_skipped=10,
+            )
+        ]
+        stats_instances[0].emit_finished(walk_results)
+
+        # walk 阶段最终统计应同步
+        assert controller.walkDiscovered == 200
+        assert controller.walkSkipped == 50
+        assert controller.walkUserSkipped == 10
+        assert controller.walkDone is True
+        assert controller.walkIndeterminate is False
+        # scan 阶段切换
+        assert controller.scanPhase == "scan"
+        # scan 总数为 entries 总数（这里 entries 为空）
+        assert controller.progressTotal == 0
+        assert len(scan_instances) == 1
+
+    def test_scan_finished_marks_scan_done(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """scan 完成 应标记 scanDone=True 且 scanPhase=done。"""
+        stats_instances, scan_instances = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+        stats_instances[0].emit_finished([_make_walk_result(tmp_path)])
+
+        report = _make_scan_report(results=())
+        scan_instances[0].emit_finished(report)
+
+        assert controller.scanPhase == "done"
+        assert controller.scanDone is True
+        assert controller.walkDone is True
+
+    def test_scan_cancelled_marks_scan_done(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """scan 取消 也应标记 scanDone=True 避免进度条卡住。"""
+        stats_instances, scan_instances = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+        stats_instances[0].emit_finished([_make_walk_result(tmp_path)])
+
+        report = _make_scan_report(results=(), cancelled=True)
+        scan_instances[0].emit_cancelled(report)
+
+        assert controller.scanPhase == "done"
+        assert controller.scanDone is True
+
+
 class TestTogglePause:
     """测试 togglePause 暂停/继续。"""
 

@@ -84,20 +84,186 @@ Item {
                     }
                 }
 
-                // ---------- 进度信息 ----------
+                // ---------- 收集阶段（walk）进度 ----------
                 GroupBox {
                     Layout.fillWidth: true
-                    title: "进度"
+                    title: "收集文件清单"
+                    visible: workspaceController.currentScanController.scanPhase !== "setup"
                     ColumnLayout {
                         anchors.fill: parent
                         spacing: 8
 
-                        // 进度条
+                        // 阶段状态行
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+                            Rectangle {
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: workspaceController.currentScanController.walkDone
+                                    ? theme.colorSuccess
+                                    : (workspaceController.currentScanController.scanPhase === "walk"
+                                       ? theme.colorPrimary : theme.colorBorder)
+                            }
+                            Label {
+                                text: workspaceController.currentScanController.walkDone
+                                    ? "已完成"
+                                    : (workspaceController.currentScanController.walkIndeterminate
+                                       ? "统计中..." : "进行中")
+                                font.pixelSize: 12
+                                font.bold: true
+                                color: workspaceController.currentScanController.walkDone
+                                    ? theme.colorSuccess
+                                    : (workspaceController.currentScanController.scanPhase === "walk"
+                                       ? theme.colorPrimary
+                                       : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary))
+                            }
+                            Item { Layout.fillWidth: true }
+                            Label {
+                                text: Math.round(workspaceController.currentScanController.walkProgress) + "%"
+                                font.pixelSize: 13
+                                font.bold: true
+                                color: theme.isDark ? theme.colorPrimary : theme.colorPrimary
+                            }
+                        }
+
+                        // 收集进度条
                         ProgressBar {
                             Layout.fillWidth: true
+                            indeterminate: workspaceController.currentScanController.walkIndeterminate
                             from: 0
                             to: 100
-                            value: workspaceController.currentScanController.progress
+                            value: workspaceController.currentScanController.walkProgress
+                            background: Rectangle {
+                                implicitHeight: 6
+                                color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                radius: 3
+                            }
+                            contentItem: Item {
+                                implicitHeight: 6
+                                Rectangle {
+                                    width: parent.visualPosition * parent.width
+                                    height: parent.height
+                                    radius: 3
+                                    color: workspaceController.currentScanController.walkDone
+                                        ? theme.colorSuccess : theme.colorPrimary
+                                }
+                            }
+                        }
+
+                        // 收集统计网格
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 3
+                            columnSpacing: 12
+                            rowSpacing: 4
+
+                            Label {
+                                text: "已发现"
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            }
+                            Label {
+                                text: "白名单跳过"
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            }
+                            Label {
+                                text: "用户标记跳过"
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            }
+                            Label {
+                                text: workspaceController.currentScanController.walkDiscovered
+                                font.pixelSize: 14
+                                font.bold: true
+                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                            }
+                            Label {
+                                text: workspaceController.currentScanController.walkSkipped
+                                font.pixelSize: 14
+                                font.bold: true
+                                color: theme.colorWarning
+                            }
+                            Label {
+                                text: workspaceController.currentScanController.walkUserSkipped
+                                font.pixelSize: 14
+                                font.bold: true
+                                color: theme.colorDanger
+                            }
+                        }
+                    }
+                }
+
+                // ---------- 解析阶段（scan）进度 ----------
+                GroupBox {
+                    Layout.fillWidth: true
+                    title: "解析文件内容"
+                    visible: workspaceController.currentScanController.scanPhase !== "setup"
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 8
+
+                        // 阶段状态行
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+                            Rectangle {
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: workspaceController.currentScanController.scanDone
+                                    ? theme.colorSuccess
+                                    : (workspaceController.currentScanController.scanPhase === "scan"
+                                       || workspaceController.currentScanController.scanPhase === "archive"
+                                       ? theme.colorWarning : theme.colorBorder)
+                            }
+                            Label {
+                                text: workspaceController.currentScanController.scanDone
+                                    ? "已完成"
+                                    : (workspaceController.currentScanController.progressIndeterminate
+                                       ? "等待中..." : "进行中")
+                                font.pixelSize: 12
+                                font.bold: true
+                                color: workspaceController.currentScanController.scanDone
+                                    ? theme.colorSuccess
+                                    : ((workspaceController.currentScanController.scanPhase === "scan"
+                                        || workspaceController.currentScanController.scanPhase === "archive")
+                                       ? theme.colorWarning
+                                       : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary))
+                            }
+                            Item { Layout.fillWidth: true }
+                            Label {
+                                text: Math.round(workspaceController.currentScanController.progress) + "%"
+                                font.pixelSize: 13
+                                font.bold: true
+                                color: theme.isDark ? theme.colorPrimary : theme.colorPrimary
+                            }
+                        }
+
+                        // 解析进度条
+                        ProgressBar {
+                            Layout.fillWidth: true
+                            indeterminate: workspaceController.currentScanController.progressIndeterminate
+                            from: 0
+                            to: Math.max(workspaceController.currentScanController.progressTotal, 1)
+                            value: workspaceController.currentScanController.progressScanned
+                            background: Rectangle {
+                                implicitHeight: 6
+                                color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                radius: 3
+                            }
+                            contentItem: Item {
+                                implicitHeight: 6
+                                Rectangle {
+                                    width: parent.visualPosition * parent.width
+                                    height: parent.height
+                                    radius: 3
+                                    color: workspaceController.currentScanController.scanDone
+                                        ? theme.colorSuccess : theme.colorWarning
+                                }
+                            }
                         }
 
                         RowLayout {
@@ -107,12 +273,6 @@ Item {
                                 font.pixelSize: 12
                                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                 Layout.fillWidth: true
-                            }
-                            Label {
-                                text: Math.round(workspaceController.currentScanController.progress) + "%"
-                                font.pixelSize: 13
-                                font.bold: true
-                                color: theme.isDark ? theme.colorPrimary : theme.colorPrimary
                             }
                         }
                     }

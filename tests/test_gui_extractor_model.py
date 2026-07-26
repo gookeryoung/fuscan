@@ -68,6 +68,7 @@ class TestRoleNames:
         assert roles[Qt.UserRole + 6] == b"enabled"
         assert roles[Qt.UserRole + 7] == b"formatLabel"
         assert roles[Qt.UserRole + 8] == b"category"
+        assert roles[Qt.UserRole + 9] == b"formatTags"
 
 
 class TestData:
@@ -143,6 +144,37 @@ class TestData:
         assert target_idx >= 0, "PdfExtractor 应在默认注册表中"
         # PdfExtractor.display_name = "PDF"（无括号），supported_extensions = ("pdf",)
         assert model.data(model.index(target_idx), Qt.UserRole + 7) == "PDF"
+
+    def test_data_returns_format_tags_default_single(self, model: ExtractorListModel) -> None:
+        """formatTags role 默认返回单元素列表 [formatLabel]（iter-103）。"""
+        # PdfExtractor 扩展名仅 1 个，formatTags 应回退到 (format_label,)
+        for i in range(model.rowCount()):
+            if model.data(model.index(i), Qt.UserRole + 1) == "PdfExtractor":
+                tags = model.data(model.index(i), Qt.UserRole + 9)
+                assert tags == ["PDF"]
+                return
+        pytest.fail("PdfExtractor 应在默认注册表中")
+
+    def test_data_returns_format_tags_for_source_code(self, model: ExtractorListModel) -> None:
+        """SourceCodeExtractor 应返回代表性多标签 [HTML, C, CPP, PY]（iter-103）。"""
+        for i in range(model.rowCount()):
+            if model.data(model.index(i), Qt.UserRole + 1) == "SourceCodeExtractor":
+                tags = model.data(model.index(i), Qt.UserRole + 9)
+                assert tags == ["HTML", "C", "CPP", "PY"]
+                return
+        pytest.fail("SourceCodeExtractor 应在默认注册表中")
+
+    def test_data_returns_format_tags_non_empty_for_all(self, model: ExtractorListModel) -> None:
+        """所有提取器 formatTags 应为非空列表。"""
+        for i in range(model.rowCount()):
+            tags = model.data(model.index(i), Qt.UserRole + 9)
+            assert isinstance(tags, list)
+            assert len(tags) >= 1
+            for tag in tags:
+                assert isinstance(tag, str)
+                assert tag
+                # 应为大写
+                assert tag == tag.upper()
 
     def test_data_returns_category_for_known_class(self, model: ExtractorListModel) -> None:
         """category role 应返回类别名字符串（如 DocxExtractor → "Office 文档"）。"""

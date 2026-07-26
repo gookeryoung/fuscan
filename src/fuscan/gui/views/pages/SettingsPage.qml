@@ -441,20 +441,24 @@ Item {
                                             font.pixelSize: 12
                                             color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                         }
-                                        // 蓝色格式 tag：显示 formatLabel（如 DOCX/PDF/XLSX）
-                                        Rectangle {
-                                            radius: theme.radiusSm
-                                            color: theme.colorPrimary
-                                            Layout.leftMargin: 6
-                                            implicitWidth: formatTagLabel.implicitWidth + 12
-                                            implicitHeight: formatTagLabel.implicitHeight + 4
-                                            Label {
-                                                id: formatTagLabel
-                                                anchors.centerIn: parent
-                                                text: model.formatLabel
-                                                font.pixelSize: 10
-                                                font.bold: true
-                                                color: theme.colorTextOnPrimary
+                                        // 蓝色格式 tag 列表：扩展名较多的提取器显示多个代表性 tag
+                                        // （如源代码显示 HTML/C/CPP/PY），其余显示单个 formatLabel
+                                        Repeater {
+                                            model: model.formatTags
+                                            Rectangle {
+                                                radius: theme.radiusSm
+                                                color: theme.colorPrimary
+                                                Layout.leftMargin: 6
+                                                implicitWidth: formatTagLabel.implicitWidth + 12
+                                                implicitHeight: formatTagLabel.implicitHeight + 4
+                                                Label {
+                                                    id: formatTagLabel
+                                                    anchors.centerIn: parent
+                                                    text: modelData
+                                                    font.pixelSize: 10
+                                                    font.bold: true
+                                                    color: theme.colorTextOnPrimary
+                                                }
                                             }
                                         }
                                         Item { Layout.fillWidth: true }

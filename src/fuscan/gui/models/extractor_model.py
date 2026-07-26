@@ -42,6 +42,7 @@ _ROLE_SPEED_TIER_COLOR = b"speedTierColor"
 _ROLE_ENABLED = b"enabled"
 _ROLE_FORMAT_LABEL = b"formatLabel"
 _ROLE_CATEGORY = b"category"
+_ROLE_FORMAT_TAGS = b"formatTags"
 
 _ROLES: dict[int, bytes] = {
     Qt.UserRole + 1: _ROLE_CLASS_NAME,
@@ -52,6 +53,7 @@ _ROLES: dict[int, bytes] = {
     Qt.UserRole + 6: _ROLE_ENABLED,
     Qt.UserRole + 7: _ROLE_FORMAT_LABEL,
     Qt.UserRole + 8: _ROLE_CATEGORY,
+    Qt.UserRole + 9: _ROLE_FORMAT_TAGS,
 }
 
 # 提取 display_name 中全角括号内的格式标签（如 "Word（DOCX）" → "DOCX"）
@@ -91,6 +93,14 @@ _ARCHIVE_VIRTUAL_ROWS: tuple[tuple[str, str, str], ...] = (
     ("SevenZArchiveExtractor", "7z 压缩包", "7z"),
 )
 
+# 扩展名较多的提取器代表性格式标签（iter-103）：
+# 当提取器支持的扩展名超过 4 个时，formatLabel（如 "CODE"）不足以体现覆盖范围，
+# 因此在文件类型树中以多个代表性 tag 展示（如 HTML/C/CPP/PY）。
+# 未在此映射中的提取器默认使用 ``(format_label,)`` 单标签。
+_FORMAT_TAGS_BY_CLASS: dict[str, tuple[str, ...]] = {
+    "SourceCodeExtractor": ("HTML", "C", "CPP", "PY"),
+}
+
 
 def _classify(class_name: str) -> str:
     """按 class_name 返回类别名，未映射的归到「其他」。"""
@@ -126,7 +136,16 @@ _SPEED_TIER_COLOR: dict[SpeedTier, str] = {
 class _ExtractorRow:
     """提取器行数据（内部可变容器）。"""
 
-    __slots__ = ("category", "class_name", "display_name", "enabled", "extensions", "format_label", "speed_tier")
+    __slots__ = (
+        "category",
+        "class_name",
+        "display_name",
+        "enabled",
+        "extensions",
+        "format_label",
+        "format_tags",
+        "speed_tier",
+    )
 
     def __init__(
         self,
@@ -152,6 +171,9 @@ class _ExtractorRow:
         self.speed_tier = speed_tier
         self.enabled = enabled
         self.category = _classify(class_name)
+        # 代表性格式标签列表：扩展名较多的提取器使用预设多标签（如 HTML/C/CPP/PY），
+        # 其余默认为 ``(format_label,)`` 单标签（iter-103）
+        self.format_tags: tuple[str, ...] = _FORMAT_TAGS_BY_CLASS.get(class_name, (self.format_label,))
 
 
 class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritance]
@@ -194,6 +216,9 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
             return row.format_label
         if role == Qt.UserRole + 8:
             return row.category
+        if role == Qt.UserRole + 9:
+            # 返回 list（QML 端 Repeater 可直接用 modelData 访问）
+            return list(row.format_tags)
         return ""
 
     # ----------------------------- 公共 API -----------------------------

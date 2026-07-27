@@ -12,6 +12,7 @@ from __future__ import annotations
 import io
 import logging
 from pathlib import Path
+from typing import Any
 
 from typing_extensions import override
 
@@ -98,13 +99,20 @@ class DocxExtractor(Extractor):
                 row_texts = [cell.text.strip() for cell in row.cells if cell.text.strip()]
                 if row_texts:
                     parts.append("\t".join(row_texts))
-        for section in doc.sections:
+        parts.extend(self._extract_docx_sections(doc.sections))
+        return "\n".join(parts)
+
+    @staticmethod
+    def _extract_docx_sections(sections: Any) -> list[str]:
+        """从 DOCX 节的页眉页脚提取文本。"""
+        texts: list[str] = []
+        for section in sections:
             for header_footer in (section.header, section.footer):
                 for para in header_footer.paragraphs:
                     text = para.text.strip()
                     if text:
-                        parts.append(text)
-        return "\n".join(parts)
+                        texts.append(text)
+        return texts
 
 
 class PptxExtractor(Extractor):

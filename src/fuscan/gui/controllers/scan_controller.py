@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
 import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -26,7 +25,21 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
-from fuscan.config import Config, default_backup_dir, detect_default_staging_dir
+from fuscan.config import Config
+from fuscan.gui.controllers._result_detail import (
+    build_detail_hits_model,
+    can_replace_result,
+    move_to_staging,
+    replace_selected,
+)
+from fuscan.gui.controllers._scan_roots import build_scan_roots, can_build_roots
+from fuscan.gui.controllers._task_overrides import (
+    effective_ignore_dirs,
+    effective_max_depth,
+    effective_max_file_size,
+    effective_max_workers,
+    effective_scan_archives,
+)
 from fuscan.gui.explorer import open_path_in_explorer
 from fuscan.gui.models.result_model import ResultListModel
 from fuscan.gui.models.workspace_model import (
@@ -40,8 +53,6 @@ from fuscan.gui.scan_mode import (
     SCAN_MODE_STR_TO_INDEX,
     scan_mode_index_to_str,
 )
-from fuscan.gui.severity_utils import severity_color_hex, severity_text
-from fuscan.replacer import ReplaceStatus, replace_in_file
 from fuscan.scanner import ScanReport
 from fuscan.scanner.result import ProgressInfo, ScanResult, WalkResult, format_size
 from fuscan.skip_store import SkipStore
@@ -385,24 +396,15 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     def _effective_scan_archives(self) -> bool:
         """任务级覆盖优先的 scan_archives。"""
-        value = self._task_overrides.get("scan_archives")
-        if isinstance(value, bool):
-            return value
-        return self._config.scan_archives
+        return effective_scan_archives(self._task_overrides, self._config)
 
     def _effective_max_workers(self) -> int:
         """任务级覆盖优先的 max_workers。"""
-        value = self._task_overrides.get("max_workers")
-        if isinstance(value, int):
-            return value
-        return self._config.max_workers
+        return effective_max_workers(self._task_overrides, self._config)
 
     def _effective_max_file_size(self) -> int:
         """任务级覆盖优先的 max_file_size。"""
-        value = self._task_overrides.get("max_file_size")
-        if isinstance(value, int):
-            return value
-        return self._config.max_file_size
+        return effective_max_file_size(self._task_overrides, self._config)
 
     def _effective_max_depth(self) -> int | None:
         """任务级覆盖优先的 max_depth（None 表示不限深度）。
@@ -411,17 +413,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         保持语义一致：``0`` 归一化为 ``None``（无限深度），避免 walker 把 ``0``
         误解为「仅根目录直接子项」。
         """
-        value = self._task_overrides.get("max_depth")
-        if isinstance(value, int):
-            return value if value > 0 else None
-        return self._config.max_depth
+        return effective_max_depth(self._task_overrides, self._config)
 
     def _effective_ignore_dirs(self) -> tuple[str, ...]:
         """任务级覆盖优先的 ignore_dirs。"""
-        value = self._task_overrides.get("ignore_dirs")
-        if isinstance(value, tuple):
-            return value
-        return tuple(self._config.ignore_dirs)
+        return effective_ignore_dirs(self._task_overrides, self._config)
 
     @Property(int, notify=rulesCountChanged)  # pyrefly: ignore [not-callable]
     def rulesCount(self) -> int:
@@ -470,22 +466,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         每条命中包含：规则名、严重度文本/色值、上下文（detail）、匹配文本、
         匹配条数、匹配目标（filename/content/path）、规则描述（供详情面板展示）。
         """
-        result = self._get_selected_result()
-        if result is None:
-            return []
-        return [
-            {
-                "ruleName": hit.rule_name,
-                "severityText": severity_text(hit.severity),
-                "severityColor": severity_color_hex(hit.severity),
-                "context": hit.detail,
-                "matchText": hit.match_text,
-                "matchCount": hit.match_count,
-                "target": hit.target,
-                "description": hit.match_description,
-            }
-            for hit in result.hits
-        ]
+        return build_detail_hits_model(self._get_selected_result())
 
     @Property(str, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
     def detailFileSize(self) -> str:
@@ -519,11 +500,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         条件：已选中结果、规则集已加载、非压缩包内部条目、命中规则中存在
         ``replace=True`` 的规则（否则按钮无意义）。
         """
-        result = self._get_selected_result()
-        if result is None or self._ruleset is None or result.archive_path is not None:
-            return False
-        rule_map = {r.name: r for r in self._ruleset.rules}
-        return any(rule_map.get(h.rule_name) is not None and rule_map[h.rule_name].replace for h in result.hits)
+        return can_replace_result(self._get_selected_result(), self._ruleset)
 
     @Slot()  # pyrefly: ignore [not-callable]
     def selectNextResult(self) -> None:
@@ -550,35 +527,14 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         - 无 ``replace=True`` 规则 → ``未启用替换的规则``
         - 其他状态 → ``ReplaceResult.message``
         """
-        result = self._get_selected_result()
-        if result is None:
-            return "未选中结果"
-        if self._ruleset is None:
-            return "规则集未加载"
-        if result.archive_path is not None:
-            return "压缩包内部条目不支持替换"
-
-        backup_dir = Path(self._config.backup_dir) if self._config.backup_dir else default_backup_dir()
-        scan_root = self._last_report.root if self._last_report is not None else result.path.parent
-
-        replace_result = replace_in_file(
-            src=result.path,
-            hits=result.hits,
+        last_root = self._last_report.root if self._last_report is not None else None
+        return replace_selected(
+            result=self._get_selected_result(),
             ruleset=self._ruleset,
-            backup_root=backup_dir,
-            scan_root=scan_root,
-            preserve_relative=self._config.backup_preserve_relative_path,
+            backup_dir_str=self._config.backup_dir,
+            backup_preserve_relative=self._config.backup_preserve_relative_path,
+            last_report_root=last_root,
         )
-        if replace_result.status == ReplaceStatus.SUCCESS:
-            logger.info(
-                "已替换 %s 中 %d 条规则命中，备份: %s",
-                result.path,
-                replace_result.replaced_count,
-                replace_result.backup_path,
-            )
-            return replace_result.message or f"替换成功（{replace_result.replaced_count} 条）"
-        logger.warning("替换失败: %s", replace_result.message)
-        return replace_result.message or "替换失败"
 
     @Slot(result=str)  # pyrefly: ignore [not-callable]
     def moveSelectedToStaging(self) -> str:
@@ -598,36 +554,13 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         - 复制成功 → ``已移至暂存: <隔离路径>`` 并标记跳过
         - 复制失败 → ``移至暂存失败: <错误>``
         """
-        result = self._get_selected_result()
-        if result is None:
-            return "未选中结果"
-        if result.archive_path is not None:
-            return "压缩包内部条目不支持移至暂存"
-
-        # 计算暂存区隔离目录
-        staging_root = Path(self._config.staging_dir) if self._config.staging_dir else detect_default_staging_dir()
-        quarantine_dir = staging_root / "quarantine"
-        scan_root = self._last_report.root if self._last_report is not None else result.path.parent
-
-        # 保留相对扫描根目录的目录结构
-        try:
-            rel_path = result.path.relative_to(scan_root)
-        except ValueError:
-            # 不在扫描根下（如绝对路径跨盘符），仅保留文件名
-            rel_path = Path(result.path.name)
-
-        dest = quarantine_dir / rel_path
-        try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(result.path, dest)
-        except OSError as exc:
-            logger.warning("移至暂存失败: %s -> %s", result.path, dest, exc_info=True)
-            return f"移至暂存失败: {exc}"
-
-        # 标记为跳过，后续扫描自动跳过该文件
-        self._skip_store.add(str(result.path))
-        logger.info("已移至暂存: %s -> %s（已标记跳过）", result.path, dest)
-        return f"已移至暂存: {dest}（已标记跳过）"
+        last_root = self._last_report.root if self._last_report is not None else None
+        return move_to_staging(
+            result=self._get_selected_result(),
+            staging_dir_str=self._config.staging_dir,
+            last_report_root=last_root,
+            skip_store=self._skip_store,
+        )
 
     # ----------------------------- QML 调用槽 -----------------------------
 
@@ -945,22 +878,16 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     def _can_build_roots(self) -> bool:
         """判断当前是否可构建扫描根路径列表。"""
-        if self._scan_mode_index == 0:  # full
-            return True
-        if self._scan_mode_index == 1:  # drive
-            return bool(self._selected_drive)
-        return bool(self._folder_root)  # folder
+        return can_build_roots(self._scan_mode_index, self._selected_drive, self._folder_root)
 
     def _build_scan_roots(self) -> list[Path]:
         """构建扫描根路径列表。"""
-        if self._scan_mode_index == 0:  # full
-            from fuscan.scanner.walker import list_drives
-
-            return list_drives(include_network=self._config.include_network_drives)
-        if self._scan_mode_index == 1:  # drive
-            return [Path(self._selected_drive)] if self._selected_drive else []
-        # folder
-        return [Path(self._folder_root)] if self._folder_root else []
+        return build_scan_roots(
+            scan_mode_index=self._scan_mode_index,
+            selected_drive=self._selected_drive,
+            folder_root=self._folder_root,
+            config=self._config,
+        )
 
     def _build_cache_context(self) -> tuple[CacheStore | None, dict[Path, str] | None]:
         """构造扫描缓存上下文（iter-107：使用工作区专属规则路径与内置开关）。"""

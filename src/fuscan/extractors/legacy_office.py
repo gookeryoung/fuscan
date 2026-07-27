@@ -28,9 +28,7 @@ logger = logging.getLogger(__name__)
 # - CJK 统一汉字（U+4E00-U+9FFF）：低字节任意，高字节 [\x4E-\x9F]
 # - 全角标点（U+3000-U+30FF）：低字节任意，高字节 \x30
 # 连续 2 个以上可打印字符构成一个文本片段
-_UTF16LE_RUN = re.compile(
-    rb"(?:[\x20-\x7E]\x00|[\x00-\xFF][\x4E-\x9F]|[\x00-\xFF]\x30){2,}"
-)
+_UTF16LE_RUN = re.compile(rb"(?:[\x20-\x7E]\x00|[\x00-\xFF][\x4E-\x9F]|[\x00-\xFF]\x30){2,}")
 
 
 def _extract_utf16le_text(data: bytes) -> str:

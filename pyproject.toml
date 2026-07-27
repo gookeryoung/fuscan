@@ -37,6 +37,7 @@ dependencies = [
     "pyzstd==0.15.0",
     # iter-126：迁移 Python 3.10 后统一使用 python-calamine 0.8.2（更高性能）
     "python-calamine==0.8.2",
+    "kreuzberg>=4.10.2",
 ]
 
 description     = "极速通用文件扫描器."
@@ -75,6 +76,10 @@ fuscan = "fuscan.gui.app:launch"
 [build-system]
 build-backend = "hatchling.build"
 requires      = ["hatchling"]
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fuscan"]

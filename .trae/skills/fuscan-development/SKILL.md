@@ -54,11 +54,6 @@ src/fuscan/
 │   ├── *.ui / *_ui.py      # 对应 .ui 源与 uic 产物
 │   ├── styles.qss          # QSS 样式表（用 ${TOKEN} 引用 theme.py 令牌）
 │   └── resources_rc.py     # pyside2-rcc 编译产物（勿手改）
-├── watcher/        # 文件监控（功能代码保留，UI 后续单独设计）
-│   ├── monitor.py      # FileMonitor（watchdog）
-│   ├── incremental.py  # IncrementalScanner（mtime 跟踪）
-│   ├── ignore_dirs.py  # 平台默认忽略目录
-│   └── __init__.py     # 导出 FileMonitor/IncrementalScanner/default_ignore_dirs
 ├── config.py        # 配置持久化 + 内置规则加载（load_with_builtin/load_builtin_ruleset）
 └── cli.py          # CLI 入口（scan/rules/gui/cache/version）
 ```
@@ -170,18 +165,12 @@ extract() 方法内惰性导入，未安装时优雅降级。
 用户明确要求 PySide2（尽管 PySide6 是推荐选择）。PySide2 仅支持 Python 3.8-3.10，
 需创建专用 conda 环境。
 
-### 3. watchdog 文件监控
+### 3. 状态持久化位置
 
-选择 watchdog 库进行文件系统监控，跨平台支持、API 简洁。
-Observer 异步监控不阻塞主线程，watcher 模块当前仅保留 FileMonitor/IncrementalScanner
-功能代码，UI 集成方案后续单独设计。
-
-### 4. 状态持久化位置
-
-IncrementalScanner 的状态文件应保存在扫描目录外，避免被当作新文件扫描。
+状态文件应保存在扫描目录外，避免被当作新文件扫描。
 测试中用 `tmp_path.parent / f"state_{tmp_path.name}.json"`。
 
-### 5. 多线程扫描用 ThreadPoolExecutor
+### 4. 多线程扫描用 ThreadPoolExecutor
 
 文件扫描为 I/O 密集型任务，`ThreadPoolExecutor` 可有效并发读取文件。
 `_scan_entry` 每个文件创建独立 `MatchContext`，无共享可变状态，线程安全。

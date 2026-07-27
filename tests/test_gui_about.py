@@ -58,9 +58,9 @@ class TestDependencies:
         joined = " ".join(deps)
         assert "PySide" in joined
         assert "PyYAML" in joined
-        assert "watchdog" in joined
         assert "pdf" in joined.lower()
         assert "calamine" in joined.lower()
+        assert "7z" in joined.lower()
 
     def test_dependencies_returns_fresh_copy(self, about: AboutController) -> None:
         """每次返回应是新列表（避免外部修改内部状态）。"""

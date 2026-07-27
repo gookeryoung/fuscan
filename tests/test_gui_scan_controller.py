@@ -1260,6 +1260,229 @@ class TestIter112ResultFilterSort:
         assert len(names) == 2  # 去重
 
 
+class TestIter113BatchReplaceUndo:
+    """iter-113：ScanController 批量替换与撤销 Slot 测试。"""
+
+    def _populate_replaceable_results(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> tuple[Path, ...]:
+        """构造 2 条可替换的结果填入 resultModel。
+
+        规则集需包含 replace=True 规则，使得 canReplaceAllFiltered 为 True。
+        """
+        # 注入含 replace 规则的 ruleset 到 controller
+        from fuscan.rules.model import (
+            LeafMatch,
+            MatchMode,
+            MatchTarget,
+            Rule,
+            RuleSet,
+        )
+
+        rule = Rule(
+            name="可替换规则",
+            severity=Severity.WARNING,
+            match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="password"),
+            replace=True,
+            replace_with="***",
+        )
+        controller._ruleset = RuleSet(version="1.0", rules=(rule,))
+
+        # 写入两个真实文件（含 password 关键词）
+        src1 = tmp_path / "scan" / "a.txt"
+        src1.parent.mkdir(parents=True)
+        src1.write_text("password=abc\n", encoding="utf-8")
+        src2 = tmp_path / "scan" / "b.txt"
+        src2.write_text("password=def\n", encoding="utf-8")
+
+        # 构造 ScanResult
+        hit = RuleHit(
+            rule_name="可替换规则",
+            severity=Severity.WARNING,
+            detail="匹配",
+            match_texts=("password",),
+        )
+        results = (
+            ScanResult(path=src1, size=src1.stat().st_size, hits=(hit,)),
+            ScanResult(path=src2, size=src2.stat().st_size, hits=(hit,)),
+        )
+        controller._result_model.set_results(results)
+        # 设置 last_report.root 以便 resolve_scan_root 计算
+        controller._last_report = ScanReport(
+            root=tmp_path / "scan",
+            results=results,
+            stats=ScanStats(),
+        )
+        return (src1, src2)
+
+    def test_replace_all_filtered_results_success(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> None:
+        """replaceAllFilteredResults：成功批量替换返回聚合消息。"""
+        src1, src2 = self._populate_replaceable_results(controller, tmp_path)
+
+        msg = controller.replaceAllFilteredResults()
+
+        assert "成功 2/2" in msg
+        # 源文件应被替换
+        assert src1.read_text(encoding="utf-8") == "***=abc\n"
+        assert src2.read_text(encoding="utf-8") == "***=def\n"
+        # canUndoLastBatchReplace 应为 True
+        assert controller.canUndoLastBatchReplace is True
+
+    def test_replace_all_filtered_results_no_ruleset(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """未加载规则集 → 返回提示消息。"""
+        controller._ruleset = None
+        msg = controller.replaceAllFilteredResults()
+        assert msg == "规则集未加载"
+
+    def test_replace_all_filtered_results_no_results(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """无过滤后结果 → 返回提示消息。"""
+        # ruleset 非 None 但 result_model 为空
+        from fuscan.rules.model import LeafMatch, MatchMode, MatchTarget, Rule, RuleSet
+
+        controller._ruleset = RuleSet(
+            version="1.0",
+            rules=(
+                Rule(
+                    name="r",
+                    severity=Severity.WARNING,
+                    match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="x"),
+                ),
+            ),
+        )
+        msg = controller.replaceAllFilteredResults()
+        assert msg == "无待替换的结果"
+
+    def test_undo_last_batch_replace_success(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> None:
+        """undoLastBatchReplace：从 .bak 恢复所有文件。"""
+        src1, src2 = self._populate_replaceable_results(controller, tmp_path)
+        # 先批量替换
+        controller.replaceAllFilteredResults()
+        assert src1.read_text(encoding="utf-8") == "***=abc\n"
+        # 撤销
+        msg = controller.undoLastBatchReplace()
+
+        assert "恢复 2" in msg
+        # 源文件应恢复为原始内容
+        assert src1.read_text(encoding="utf-8") == "password=abc\n"
+        assert src2.read_text(encoding="utf-8") == "password=def\n"
+        # 撤销记录已清除
+        assert controller.canUndoLastBatchReplace is False
+
+    def test_undo_last_batch_replace_no_record(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """无可撤销记录 → 返回提示消息。"""
+        msg = controller.undoLastBatchReplace()
+        assert msg == "无可撤销的批量替换"
+
+    def test_undo_last_batch_replace_partial_failure(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """撤销时备份文件丢失 → 部分失败消息。"""
+        self._populate_replaceable_results(controller, tmp_path)
+        controller.replaceAllFilteredResults()
+        # 删除其中一个备份文件，模拟撤销失败
+        # 找到第一个备份并删除
+        for _src_path, backup_path in controller._last_batch_backup_paths:
+            backup_path.unlink()
+            break
+        msg = controller.undoLastBatchReplace()
+
+        assert "恢复 1" in msg
+        assert "1 个失败" in msg
+        # 撤销记录已清除
+        assert controller.canUndoLastBatchReplace is False
+
+    def test_undo_selected_replace_no_selection(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """未选中结果 → 返回提示消息。"""
+        msg = controller.undoSelectedReplace()
+        assert msg == "未选中结果"
+
+    def test_undo_selected_replace_success(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> None:
+        """undoSelectedReplace：成功从 .bak 恢复当前选中结果。"""
+        src1, _src2 = self._populate_replaceable_results(controller, tmp_path)
+        # 先单文件替换（构造备份）
+        controller.setSelectedResultIndex(0)
+        controller.replaceSelectedResult()
+        assert src1.read_text(encoding="utf-8") == "***=abc\n"
+        # 撤销当前选中
+        msg = controller.undoSelectedReplace()
+
+        assert msg.startswith("已从备份恢复")
+        # 源文件应恢复为原始内容
+        assert src1.read_text(encoding="utf-8") == "password=abc\n"
+
+    def test_can_replace_all_filtered_false_when_no_ruleset(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """无规则集 → canReplaceAllFiltered=False。"""
+        controller._ruleset = None
+        assert controller.canReplaceAllFiltered is False
+
+    def test_can_replace_all_filtered_false_when_no_results(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """有规则集但无结果 → canReplaceAllFiltered=False。"""
+        from fuscan.rules.model import LeafMatch, MatchMode, MatchTarget, Rule, RuleSet
+
+        controller._ruleset = RuleSet(
+            version="1.0",
+            rules=(
+                Rule(
+                    name="r",
+                    severity=Severity.WARNING,
+                    match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="x"),
+                ),
+            ),
+        )
+        assert controller.canReplaceAllFiltered is False
+
+    def test_can_replace_all_filtered_true(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> None:
+        """有规则集 + 可替换结果 → canReplaceAllFiltered=True。"""
+        self._populate_replaceable_results(controller, tmp_path)
+        assert controller.canReplaceAllFiltered is True
+
+    def test_can_undo_last_batch_replace_default_false(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """初始状态 canUndoLastBatchReplace=False。"""
+        assert controller.canUndoLastBatchReplace is False
+
+
 class TestBuildScanRoots:
     """测试 _build_scan_roots 构建扫描根路径。"""
 

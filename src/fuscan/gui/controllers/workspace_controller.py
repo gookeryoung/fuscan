@@ -35,6 +35,9 @@ from fuscan.gui.controllers._persistence import (
     PERSIST_FILENAME,
     TASK_OVERRIDE_KEYS,
     clamp_task_override_int,
+    coerce_int,
+    coerce_str,
+    coerce_str_tuple,
     deserialize_task_overrides,
     load_persisted_workspaces,
     save_persisted_workspaces,
@@ -708,26 +711,27 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """
         workspaces = load_persisted_workspaces(self._persist_file)
         for ws in workspaces:
-            ws_id = ws.get("id", "")
+            # iter-113：dict 反序列化返回 object，通过 coerce_* 辅助函数做类型守卫
+            ws_id = coerce_str(ws.get("id", ""))
             if not ws_id or self._model.get_workspace(ws_id) is not None:
                 continue
             try:
                 self._create_workspace(
                     ws_id=ws_id,
-                    name=str(ws.get("name", "任务")),
-                    mode_str=str(ws.get("mode", "folder")),
-                    target=str(ws.get("target", "")),
-                    rules_paths=ws.get("rules_paths", []),
+                    name=coerce_str(ws.get("name", "任务")),
+                    mode_str=coerce_str(ws.get("mode", "folder")),
+                    target=coerce_str(ws.get("target", "")),
+                    rules_paths=coerce_str_tuple(ws.get("rules_paths", [])),
                     use_builtin=bool(ws.get("use_builtin", True)),
                     # 恢复上次扫描状态（iter-102 起持久化）
-                    status_text=str(ws.get("status_text", STR_STATUS_READY)),
-                    matched_count=int(ws.get("matched_count", 0)),
-                    passed_count=int(ws.get("passed_count", 0)),
-                    skipped_count=int(ws.get("skipped_count", 0)),
-                    error_count=int(ws.get("error_count", 0)),
-                    last_summary=str(ws.get("last_summary", "")),
+                    status_text=coerce_str(ws.get("status_text", STR_STATUS_READY)),
+                    matched_count=coerce_int(ws.get("matched_count", 0)),
+                    passed_count=coerce_int(ws.get("passed_count", 0)),
+                    skipped_count=coerce_int(ws.get("skipped_count", 0)),
+                    error_count=coerce_int(ws.get("error_count", 0)),
+                    last_summary=coerce_str(ws.get("last_summary", "")),
                     # 恢复收集到的符合文件类型文件数（iter-105 起持久化）
-                    collected_count=int(ws.get("collected_count", 0)),
+                    collected_count=coerce_int(ws.get("collected_count", 0)),
                     # 恢复任务级配置覆盖（iter-104 起持久化）
                     task_overrides=deserialize_task_overrides(ws.get("task_overrides", {})),
                 )

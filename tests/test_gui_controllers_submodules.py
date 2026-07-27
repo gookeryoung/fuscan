@@ -21,6 +21,13 @@ pytestmark = pytest.mark.gui
 
 try:
     from fuscan.config import Config
+    from fuscan.gui.controllers._persistence import (
+        coerce_int,
+        coerce_str,
+        coerce_str_tuple,
+        deserialize_task_overrides,
+        serialize_task_overrides,
+    )
     from fuscan.gui.controllers._result_detail import (
         build_detail_hits_model,
         can_replace_result,
@@ -469,3 +476,236 @@ class TestMoveToStaging:
             skip_store=skip_store,
         )
         assert "移至暂存失败" in msg
+
+
+# ----------------------------- _persistence（iter-113 coerce_* 辅助函数） -----------------------------
+
+
+class TestCoerceStr:
+    """coerce_str 安全字符串转换。"""
+
+    def test_str_value_passthrough(self) -> None:
+        assert coerce_str("hello") == "hello"
+
+    def test_none_returns_default(self) -> None:
+        assert coerce_str(None) == ""
+        assert coerce_str(None, default="fallback") == "fallback"
+
+    def test_int_converted_to_str(self) -> None:
+        assert coerce_int(42) == 42  # sanity check coerce_int 行为
+        assert coerce_str(42) == "42"
+
+    def test_list_converted_to_str(self) -> None:
+        assert coerce_str([1, 2]) == "[1, 2]"
+
+
+class TestCoerceInt:
+    """coerce_int 安全整数转换。"""
+
+    def test_int_value_passthrough(self) -> None:
+        assert coerce_int(42) == 42
+
+    def test_none_returns_default(self) -> None:
+        assert coerce_int(None) == 0
+        assert coerce_int(None, default=-1) == -1
+
+    def test_bool_returns_default(self) -> None:
+        """bool 是 int 子类，但 coerce_int 视为非数字返回 default。"""
+        assert coerce_int(True) == 0
+        assert coerce_int(False, default=99) == 99
+
+    def test_numeric_str_parsed(self) -> None:
+        assert coerce_int("123") == 123
+
+    def test_invalid_str_returns_default(self) -> None:
+        assert coerce_int("abc") == 0
+        assert coerce_int("abc", default=-5) == -5
+
+    def test_float_returns_default(self) -> None:
+        assert coerce_int(3.14) == 0
+
+    def test_list_returns_default(self) -> None:
+        assert coerce_int([1, 2]) == 0
+
+
+class TestCoerceStrTuple:
+    """coerce_str_tuple 安全字符串元组转换。"""
+
+    def test_list_of_str(self) -> None:
+        assert coerce_str_tuple(["a", "b"]) == ("a", "b")
+
+    def test_tuple_of_str(self) -> None:
+        assert coerce_str_tuple(("x", "y")) == ("x", "y")
+
+    def test_mixed_types_converted_to_str(self) -> None:
+        assert coerce_str_tuple([1, 2, 3]) == ("1", "2", "3")
+
+    def test_none_returns_empty(self) -> None:
+        assert coerce_str_tuple(None) == ()
+
+    def test_str_returns_empty(self) -> None:
+        """单个 str 不是 list/tuple → 返回空元组。"""
+        assert coerce_str_tuple("abc") == ()
+
+    def test_int_returns_empty(self) -> None:
+        assert coerce_str_tuple(42) == ()
+
+    def test_empty_list_returns_empty(self) -> None:
+        assert coerce_str_tuple([]) == ()
+
+
+class TestSerializeTaskOverridesRoundtrip:
+    """iter-113：serialize/deserialize task_overrides 往返一致性。"""
+
+    def test_roundtrip_basic(self) -> None:
+        """基本字段往返保持一致（ignore_dirs tuple <-> list）。"""
+        original: dict[str, object] = {
+            "scan_archives": True,
+            "max_workers": 5,
+            "max_file_size": 1024,
+            "max_depth": 10,
+            "ignore_dirs": ("/path/a", "/path/b"),
+        }
+        serialized = serialize_task_overrides(original)
+        # ignore_dirs 应转为 list
+        assert serialized["ignore_dirs"] == ["/path/a", "/path/b"]
+        # 反序列化后应回到 tuple
+        restored = deserialize_task_overrides(serialized)
+        assert restored["ignore_dirs"] == ("/path/a", "/path/b")
+        assert restored["max_workers"] == 5
+        assert restored["scan_archives"] is True
+
+    def test_roundtrip_drops_unknown_keys(self) -> None:
+        """非白名单字段在序列化时被剔除。"""
+        original: dict[str, object] = {"max_workers": 3, "unknown_field": "should be dropped"}
+        serialized = serialize_task_overrides(original)
+        assert "unknown_field" not in serialized
+        assert serialized == {"max_workers": 3}
+
+
+class TestDeserializeTaskOverridesFaultTolerance:
+    """iter-113：deserialize_task_overrides 容错路径。"""
+
+    def test_non_dict_input_returns_empty(self) -> None:
+        """非 dict 输入返回空 dict。"""
+        assert deserialize_task_overrides(None) == {}  # type: ignore[arg-type]
+        assert deserialize_task_overrides("not a dict") == {}  # type: ignore[arg-type]
+        assert deserialize_task_overrides([1, 2]) == {}  # type: ignore[arg-type]
+
+    def test_unknown_key_skipped(self) -> None:
+        """未知字段被跳过（不写入输出）。"""
+        raw: dict[str, object] = {"unknown_field": "value", "max_workers": 5}
+        result = deserialize_task_overrides(raw)
+        assert "unknown_field" not in result
+        assert result == {"max_workers": 5}
+
+    def test_ignore_dirs_wrong_element_type_skipped(self) -> None:
+        """ignore_dirs 含非 str 元素 → 跳过该字段。"""
+        raw: dict[str, object] = {"ignore_dirs": [1, 2, 3]}
+        result = deserialize_task_overrides(raw)
+        assert "ignore_dirs" not in result
+
+    def test_ignore_dirs_not_list_skipped(self) -> None:
+        """ignore_dirs 非 list → 跳过该字段。"""
+        raw: dict[str, object] = {"ignore_dirs": "not a list"}
+        result = deserialize_task_overrides(raw)
+        assert "ignore_dirs" not in result
+
+    def test_int_field_wrong_type_skipped(self) -> None:
+        """int 字段传入 str → 跳过该字段。"""
+        raw: dict[str, object] = {"max_workers": "not a number"}
+        result = deserialize_task_overrides(raw)
+        assert "max_workers" not in result
+
+    def test_bool_field_wrong_type_skipped(self) -> None:
+        """bool 字段传入 str → 跳过该字段。"""
+        raw: dict[str, object] = {"scan_archives": "yes"}
+        result = deserialize_task_overrides(raw)
+        assert "scan_archives" not in result
+
+
+class TestSavePersistedWorkspacesFaultTolerance:
+    """iter-113：save_persisted_workspaces 容错路径。"""
+
+    def test_save_oserror_logged_not_raised(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """OSError 时记录 warning 不抛异常。"""
+        from fuscan.gui.controllers._persistence import save_persisted_workspaces
+
+        persist_file = tmp_path / "workspaces.json"
+
+        def _raise_oserror(self: Path, *args: object, **kwargs: object) -> None:
+            raise OSError("permission denied")
+
+        monkeypatch.setattr(Path, "mkdir", _raise_oserror)
+        # 不应抛异常
+        save_persisted_workspaces(persist_file, {"version": 1, "workspaces": []}, tmp_path)
+        # 文件不应被创建
+        assert not persist_file.exists()
+
+
+class TestLoadPersistedWorkspacesFaultTolerance:
+    """iter-113：load_persisted_workspaces 容错路径。"""
+
+    def test_file_not_exist_returns_empty(self, tmp_path: Path) -> None:
+        """文件不存在 → 返回空列表。"""
+        from fuscan.gui.controllers._persistence import load_persisted_workspaces
+
+        result = load_persisted_workspaces(tmp_path / "missing.json")
+        assert result == []
+
+    def test_invalid_json_returns_empty(self, tmp_path: Path) -> None:
+        """JSON 解析失败 → 返回空列表。"""
+        from fuscan.gui.controllers._persistence import load_persisted_workspaces
+
+        persist_file = tmp_path / "workspaces.json"
+        persist_file.write_text("not a valid json {", encoding="utf-8")
+        result = load_persisted_workspaces(persist_file)
+        assert result == []
+
+    def test_version_mismatch_returns_empty(self, tmp_path: Path) -> None:
+        """版本不匹配 → 返回空列表。"""
+        from fuscan.gui.controllers._persistence import PERSIST_VERSION, load_persisted_workspaces
+
+        persist_file = tmp_path / "workspaces.json"
+        persist_file.write_text(
+            '{"version": %d, "workspaces": []}' % (PERSIST_VERSION + 100),
+            encoding="utf-8",
+        )
+        result = load_persisted_workspaces(persist_file)
+        assert result == []
+
+    def test_payload_not_dict_returns_empty(self, tmp_path: Path) -> None:
+        """payload 非 dict → 返回空列表。"""
+        from fuscan.gui.controllers._persistence import load_persisted_workspaces
+
+        persist_file = tmp_path / "workspaces.json"
+        persist_file.write_text('"just a string"', encoding="utf-8")
+        result = load_persisted_workspaces(persist_file)
+        assert result == []
+
+    def test_workspaces_not_list_returns_empty(self, tmp_path: Path) -> None:
+        """workspaces 字段非 list → 返回空列表。"""
+        from fuscan.gui.controllers._persistence import load_persisted_workspaces
+
+        persist_file = tmp_path / "workspaces.json"
+        persist_file.write_text('{"version": 1, "workspaces": "not a list"}', encoding="utf-8")
+        result = load_persisted_workspaces(persist_file)
+        assert result == []
+
+    def test_workspaces_filter_non_dict_items(self, tmp_path: Path) -> None:
+        """workspaces 含非 dict 元素 → 仅保留 dict 项。"""
+        from fuscan.gui.controllers._persistence import load_persisted_workspaces
+
+        persist_file = tmp_path / "workspaces.json"
+        persist_file.write_text(
+            '{"version": 1, "workspaces": [{"id": "ws1"}, "not a dict", 42, {"id": "ws2"}]}',
+            encoding="utf-8",
+        )
+        result = load_persisted_workspaces(persist_file)
+        assert len(result) == 2
+        assert result[0] == {"id": "ws1"}
+        assert result[1] == {"id": "ws2"}

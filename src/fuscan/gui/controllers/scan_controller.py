@@ -53,6 +53,7 @@ from fuscan.gui.scan_mode import (
     SCAN_MODE_STR_TO_INDEX,
     scan_mode_index_to_str,
 )
+from fuscan.replacer import ReplaceStatus
 from fuscan.rules.model import Severity
 from fuscan.scanner import ScanReport
 from fuscan.scanner.result import ProgressInfo, ScanResult, WalkResult, format_size
@@ -133,6 +134,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 全局 RulesController.ruleset，避免工作区之间规则相互污染
         self._workspace_rules_paths: tuple[str, ...] = ()
         self._workspace_use_builtin: bool = True
+        # iter-113：最近一次批量替换的 (源文件路径, 备份文件路径) 配对元组，供 undoLastBatchReplace 撤销。
+        # 初始为空元组表示无可撤销记录；每次批量替换后由 replaceAllFilteredResults 更新。
+        # 存储 (src, backup) 配对而非仅 backup_path，因为 backup_path 与 src 不在同一目录，
+        # 直接 with_suffix('') 会得到备份区下的路径而非源文件路径。
+        self._last_batch_backup_paths: tuple[tuple[Path, Path], ...] = ()
 
         # 扫描状态
         self._scan_state: str = STATE_SETUP  # setup / scanning / results
@@ -617,6 +623,142 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             backup_preserve_relative=self._config.backup_preserve_relative_path,
             last_report_root=last_root,
         )
+
+    # ----------------------------- iter-113 批量替换与撤销 -----------------------------
+
+    def _resolve_backup_dir(self) -> Path:
+        """解析当前生效的备份目录 Path。"""
+        from fuscan.config import default_backup_dir
+
+        return Path(self._config.backup_dir) if self._config.backup_dir else default_backup_dir()
+
+    def _resolve_scan_root(self) -> Path:
+        """解析当前生效的扫描根目录（用于相对路径计算）。"""
+        if self._last_report is not None and self._last_report.root is not None:
+            return self._last_report.root
+        # 回退到选中结果的父目录（防御性）
+        selected = self._get_selected_result()
+        return selected.path.parent if selected is not None else Path.cwd()
+
+    @Slot(result=str)  # pyrefly: ignore [not-callable]
+    def replaceAllFilteredResults(self) -> str:
+        """对当前过滤后的所有结果执行批量替换。
+
+        调用 :func:`fuscan.replacer.replace_batch`，传入
+        ``ResultListModel.filtered_results``。返回 :class:`BatchReplaceResult.message`
+        供 QML 显示。规则集未加载或无结果时返回提示消息。
+
+        - 规则集未加载 → ``规则集未加载``
+        - 无过滤后结果 → ``无待替换的结果``
+        - 其他状态 → :class:`BatchReplaceResult.message`
+        """
+        if self._ruleset is None:
+            return "规则集未加载"
+        filtered = self._result_model.filtered_results
+        if not filtered:
+            return "无待替换的结果"
+
+        backup_dir = self._resolve_backup_dir()
+        scan_root = self._resolve_scan_root()
+
+        from fuscan.replacer import replace_batch
+
+        batch_result = replace_batch(
+            results=filtered,
+            ruleset=self._ruleset,
+            backup_root=backup_dir,
+            scan_root=scan_root,
+            preserve_relative=self._config.backup_preserve_relative_path,
+        )
+        logger.info(
+            "批量替换完成: 成功 %d/%d, 跳过 %d, 失败 %d",
+            batch_result.succeeded,
+            batch_result.total,
+            batch_result.skipped,
+            batch_result.failed,
+        )
+        # 记录最近一次批量替换的 (src, backup) 配对，供 undoLastBatchReplace 撤销。
+        # 从 batch_result.details 提取成功项的 (path, backup_path) 配对。
+        self._last_batch_backup_paths = tuple(
+            (src, result.backup_path)
+            for src, result in batch_result.details
+            if result.status == ReplaceStatus.SUCCESS and result.backup_path is not None
+        )
+        return batch_result.message
+
+    @Slot(result=str)  # pyrefly: ignore [not-callable]
+    def undoLastBatchReplace(self) -> str:
+        """撤销最近一次批量替换，从 ``.bak`` 备份恢复所有文件。
+
+        逐个调用 :func:`fuscan.replacer.restore_from_backup`，按 (src, backup) 配对
+        从备份恢复到原源文件路径。无可撤销操作时返回提示。
+
+        :return: 操作消息字符串
+        """
+        if not self._last_batch_backup_paths:
+            return "无可撤销的批量替换"
+
+        from fuscan.replacer import restore_from_backup
+
+        succeeded = 0
+        failed = 0
+        for src_path, backup_path in self._last_batch_backup_paths:
+            msg = restore_from_backup(backup_path, src_path)
+            if msg.startswith("已从备份恢复"):
+                succeeded += 1
+            else:
+                failed += 1
+                logger.warning("撤销失败: %s", msg)
+
+        # 清除撤销记录，避免重复撤销
+        self._last_batch_backup_paths = ()
+        summary = f"批量撤销完成：恢复 {succeeded} 个文件"
+        if failed:
+            summary += f"，{failed} 个失败"
+        return summary
+
+    @Slot(result=str)  # pyrefly: ignore [not-callable]
+    def undoSelectedReplace(self) -> str:
+        """撤销当前选中结果的最近一次替换（从 .bak 恢复）。
+
+        根据选中结果路径反推备份路径（``{src}.bak``），调用
+        :func:`fuscan.replacer.restore_from_backup` 恢复。
+
+        :return: 操作消息字符串
+        """
+        result = self._get_selected_result()
+        if result is None:
+            return "未选中结果"
+        backup_dir = self._resolve_backup_dir()
+        scan_root = self._resolve_scan_root()
+        # 复用 _resolve_backup_path 计算备份路径
+        from fuscan.replacer import _resolve_backup_path, restore_from_backup
+
+        backup_path = _resolve_backup_path(
+            src=result.path,
+            backup_root=backup_dir,
+            scan_root=scan_root,
+            preserve_relative=self._config.backup_preserve_relative_path,
+        )
+        return restore_from_backup(backup_path, result.path)
+
+    @Property(bool, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
+    def canReplaceAllFiltered(self) -> bool:
+        """是否可对过滤后结果执行批量替换。
+
+        条件：规则集已加载、过滤后结果非空、至少一个结果可替换（含 replace=True 规则）。
+        """
+        if self._ruleset is None:
+            return False
+        filtered = self._result_model.filtered_results
+        if not filtered:
+            return False
+        return any(can_replace_result(r, self._ruleset) for r in filtered)
+
+    @Property(bool, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
+    def canUndoLastBatchReplace(self) -> bool:
+        """是否有可撤销的批量替换记录。"""
+        return bool(self._last_batch_backup_paths)
 
     @Slot(result=str)  # pyrefly: ignore [not-callable]
     def moveSelectedToStaging(self) -> str:

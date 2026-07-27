@@ -14,10 +14,19 @@
 仅支持纯文本文件。二进制格式（PDF/DOCX 等）在 :func:`replace_in_file` 入口
 通过扩展名白名单拒绝，避免破坏文件结构。
 
+iter-113 起支持批量替换与撤销：
+
+- :func:`replace_batch`：对一组 :class:`ScanResult` 批量执行替换，聚合结果
+- :func:`restore_from_backup`：从 ``.bak`` 备份恢复源文件，支持撤销最近替换
+- :class:`BatchReplaceResult`：批量替换聚合结果（成功/失败计数 + 详情列表）
+
 公共 API：
 
-- :class:`ReplaceResult`：替换操作结果（成功/失败/提示三类状态）
+- :class:`ReplaceResult`：单文件替换结果（成功/失败/提示三类状态）
+- :class:`BatchReplaceResult`：批量替换聚合结果（iter-113）
 - :func:`replace_in_file`：单文件备份+替换的原子操作
+- :func:`replace_batch`：批量替换（iter-113）
+- :func:`restore_from_backup`：从备份撤销替换（iter-113）
 - :func:`is_text_file`：判断文件扩展名是否在可替换的纯文本白名单内
 """
 
@@ -27,15 +36,22 @@ import logging
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fuscan.rules.model import Rule, RuleSet
 from fuscan.scanner.result import RuleHit
 
+if TYPE_CHECKING:
+    from fuscan.scanner.result import ScanResult
+
 __all__ = [
+    "BatchReplaceResult",
     "ReplaceResult",
     "ReplaceStatus",
     "is_text_file",
+    "replace_batch",
     "replace_in_file",
+    "restore_from_backup",
 ]
 
 logger = logging.getLogger(__name__)
@@ -264,6 +280,140 @@ def replace_in_file(
         backup_path=backup_path,
         replaced_count=count,
     )
+
+
+# ----------------------------- iter-113 批量替换与撤销 -----------------------------
+
+
+@dataclass(frozen=True)
+class BatchReplaceResult:
+    """批量替换聚合结果。
+
+    - ``total``：传入的结果总数
+    - ``succeeded``：实际执行替换且成功的文件数（``status == SUCCESS``）
+    - ``skipped``：跳过的文件数（无 replace=True 规则 / 非文本文件 / 缺 replace_with）
+    - ``failed``：失败的文件数（备份/替换 OSError）
+    - ``total_replaced_count``：所有成功文件的实际替换规则条数总和
+    - ``details``：每个文件的 ``(path, ReplaceResult)`` 元组列表，便于 UI 展示
+    - ``backup_paths``：所有成功替换的备份路径列表，供 :func:`restore_from_backup` 撤销
+    """
+
+    total: int
+    succeeded: int
+    skipped: int
+    failed: int
+    total_replaced_count: int
+    details: tuple[tuple[Path, ReplaceResult], ...] = field(default_factory=tuple)
+    backup_paths: tuple[Path, ...] = field(default_factory=tuple)
+
+    @property
+    def message(self) -> str:
+        """聚合消息供 UI 显示。"""
+        return (
+            f"批量替换完成：成功 {self.succeeded}/{self.total}，"
+            f"跳过 {self.skipped}，失败 {self.failed}，"
+            f"共替换 {self.total_replaced_count} 条规则"
+        )
+
+
+def replace_batch(
+    results: tuple[ScanResult, ...],
+    ruleset: RuleSet,
+    backup_root: Path,
+    scan_root: Path,
+    preserve_relative: bool = True,
+) -> BatchReplaceResult:
+    """对一组 :class:`ScanResult` 批量执行备份+替换，返回聚合结果。
+
+    单个文件失败不影响其他文件，最终汇总为 :class:`BatchReplaceResult`。
+    适合 UI「全部替换」按钮调用，传入过滤后的结果列表。
+
+    :param results: 待替换的结果元组（通常来自 ``ResultListModel.filtered_results``）
+    :param ruleset: 当前规则集
+    :param backup_root: 备份区根目录
+    :param scan_root: 扫描根目录（用于相对路径计算）
+    :param preserve_relative: ``True`` 在备份区保留相对目录结构
+    :return: :class:`BatchReplaceResult` 含每个文件的详情
+    """
+    details: list[tuple[Path, ReplaceResult]] = []
+    backup_paths: list[Path] = []
+    succeeded = 0
+    skipped = 0
+    failed = 0
+    total_replaced = 0
+
+    for result in results:
+        # 压缩包内部条目不支持替换
+        if result.archive_path is not None:
+            skipped += 1
+            details.append(
+                (
+                    result.path,
+                    ReplaceResult(
+                        status=ReplaceStatus.UNSUPPORTED_FILE_TYPE,
+                        message="压缩包内部条目不支持替换",
+                    ),
+                )
+            )
+            continue
+
+        replace_result = replace_in_file(
+            src=result.path,
+            hits=result.hits,
+            ruleset=ruleset,
+            backup_root=backup_root,
+            scan_root=scan_root,
+            preserve_relative=preserve_relative,
+        )
+        details.append((result.path, replace_result))
+
+        if replace_result.status == ReplaceStatus.SUCCESS:
+            succeeded += 1
+            total_replaced += replace_result.replaced_count
+            if replace_result.backup_path is not None:
+                backup_paths.append(replace_result.backup_path)
+        elif replace_result.status in (
+            ReplaceStatus.NO_REPLACE_RULES,
+            ReplaceStatus.MISSING_REPLACE_WITH,
+            ReplaceStatus.UNSUPPORTED_FILE_TYPE,
+        ):
+            skipped += 1
+        else:
+            failed += 1
+
+    return BatchReplaceResult(
+        total=len(results),
+        succeeded=succeeded,
+        skipped=skipped,
+        failed=failed,
+        total_replaced_count=total_replaced,
+        details=tuple(details),
+        backup_paths=tuple(backup_paths),
+    )
+
+
+def restore_from_backup(backup_path: Path, dest: Path) -> str:
+    """从 ``.bak`` 备份恢复源文件，撤销最近一次替换。
+
+    流程：
+
+    1. 校验备份文件存在
+    2. ``shutil.copy2`` 覆盖源文件（保留备份文件本身，便于多次撤销）
+    3. 返回操作消息供 UI 显示
+
+    :param backup_path: ``.bak`` 备份文件路径
+    :param dest: 源文件路径（被恢复的目标）
+    :return: 操作消息字符串
+    """
+    if not backup_path.exists():
+        return f"备份文件不存在: {backup_path}"
+    try:
+        shutil.copy2(backup_path, dest)
+    except OSError as exc:
+        logger.error("从备份恢复失败: %s -> %s", backup_path, dest, exc_info=True)
+        return f"恢复失败: {exc}"
+    logger.info("已从备份恢复: %s -> %s", backup_path, dest)
+    return f"已从备份恢复: {dest}"
 
 
 def _resolve_backup_path(

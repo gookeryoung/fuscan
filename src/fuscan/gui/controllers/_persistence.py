@@ -35,6 +35,9 @@ __all__ = [
     "TASK_OVERRIDE_KEYS",
     "TASK_OVERRIDE_RANGES",
     "clamp_task_override_int",
+    "coerce_int",
+    "coerce_str",
+    "coerce_str_tuple",
     "deserialize_task_overrides",
     "load_persisted_workspaces",
     "save_persisted_workspaces",
@@ -44,6 +47,58 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+def coerce_str(value: object, default: str = "") -> str:
+    """将任意值安全转换为 ``str``。
+
+    ``None`` 返回 ``default``；非字符串值调用 ``str()`` 转换。
+    用于从 JSON 反序列化的 ``dict[str, object]`` 中提取字符串字段。
+
+    :param value: 原始值（可能是 str/int/None 等）
+    :param default: ``None`` 或转换失败时的默认值
+    :return: 类型安全的字符串
+    """
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def coerce_int(value: object, default: int = 0) -> int:
+    """将任意值安全转换为 ``int``。
+
+    ``None`` 或非数字值返回 ``default``；``bool`` 视为非数字以避免 ``True→1`` 的语义混淆。
+
+    :param value: 原始值（可能是 int/str/None 等）
+    :param default: 转换失败时的默认值
+    :return: 类型安全的整数
+    """
+    if isinstance(value, bool):  # bool 是 int 的子类，单独拦截
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
+def coerce_str_tuple(value: object) -> tuple[str, ...]:
+    """将任意值安全转换为 ``tuple[str, ...]``。
+
+    ``list[str]`` / ``tuple[str, ...]`` 直接转换；其他类型返回空元组。
+
+    :param value: 原始值（可能是 list/tuple/None 等）
+    :return: 类型安全的字符串元组
+    """
+    if isinstance(value, (list, tuple)):
+        return tuple(str(x) for x in value)
+    return ()
+
 
 # 持久化文件名（路径在运行时计算，跟随 CONFIG_DIR monkeypatch）
 PERSIST_FILENAME = "workspaces.json"

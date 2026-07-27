@@ -174,7 +174,7 @@ class TestBuildHitsFromCache:
             (rule_c, build_matcher(rule_c.match), "rc"),
         ]
         # 字典顺序故意打乱
-        cached = {
+        cached: dict[str, RuleHit | None] = {
             "rc": RuleHit(
                 rule_name="",
                 severity=Severity.WARNING,

@@ -531,9 +531,7 @@ class Scanner:
                 cancel_all_futures(future_to_entry)
                 pool.shutdown(wait=False)
                 return scanned, matched, errors, matches
-            scanned, matched, errors, matches = self._collect_concurrent_results(
-                future_to_entry, results, pool
-            )
+            scanned, matched, errors, matches = self._collect_concurrent_results(future_to_entry, results, pool)
         finally:
             # 正常完成时等待所有 future；取消时已 shutdown(wait=False)，此处幂等
             pool.shutdown(wait=True)

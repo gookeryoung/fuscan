@@ -374,5 +374,51 @@ Rectangle {
                 }
             }
         }
+
+        // iter-113：第三行 - 批量替换与撤销（针对过滤后的全部结果）
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+            Label {
+                text: "批量操作"
+                font.pixelSize: 10
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                visible: scanController.canReplaceAllFiltered || scanController.canUndoLastBatchReplace
+            }
+            Item { Layout.fillWidth: true }
+            IconButton {
+                iconSource: "qrc:/icons/rescan.svg"
+                text: "全部替换"
+                tooltip: "对当前过滤后的所有命中结果执行批量替换（按规则 replace_with）"
+                accent: "primary"
+                enabled: scanController.canReplaceAllFiltered
+                onClicked: {
+                    var msg = scanController.replaceAllFilteredResults()
+                    opMsgLabel.text = msg
+                }
+            }
+            IconButton {
+                iconSource: "qrc:/icons/history.svg"
+                text: "撤销批量"
+                tooltip: "撤销最近一次批量替换，从 .bak 备份恢复所有文件"
+                accent: "secondary"
+                enabled: scanController.canUndoLastBatchReplace
+                onClicked: {
+                    var msg = scanController.undoLastBatchReplace()
+                    opMsgLabel.text = msg
+                }
+            }
+            IconButton {
+                iconSource: "qrc:/icons/history.svg"
+                text: "撤销当前"
+                tooltip: "撤销当前选中结果的最近一次替换（从 .bak 恢复）"
+                accent: "secondary"
+                enabled: scanController.canReplaceSelected
+                onClicked: {
+                    var msg = scanController.undoSelectedReplace()
+                    opMsgLabel.text = msg
+                }
+            }
+        }
     }
 }

@@ -18,9 +18,13 @@ from pathlib import Path
 import pytest
 
 from fuscan.replacer import (
+    BatchReplaceResult,
+    ReplaceResult,
     ReplaceStatus,
     is_text_file,
+    replace_batch,
     replace_in_file,
+    restore_from_backup,
 )
 from fuscan.rules.model import (
     LeafMatch,
@@ -503,6 +507,229 @@ class TestReplaceInFileNonUtf8:
         assert r3.backup_path is not None
         assert r3.backup_path == backup_root / "a.2.txt.bak"
         assert r3.backup_path.exists()
+
+
+# ----------------------------- iter-113 批量替换与撤销 -----------------------------
+
+
+from fuscan.scanner.result import ScanResult  # noqa: E402
+
+
+def _make_scan_result(
+    src: Path,
+    rule: Rule,
+    match_texts: tuple[str, ...],
+    *,
+    archive_path: Path | None = None,
+) -> ScanResult:
+    """构造测试用 ScanResult（携带单条命中）。"""
+    hit = _make_hit(rule, match_texts)
+    return ScanResult(
+        path=src,
+        size=src.stat().st_size if src.exists() else 0,
+        hits=(hit,),
+        archive_path=archive_path,
+    )
+
+
+class TestReplaceBatch:
+    """iter-113 批量替换聚合结果。"""
+
+    def test_batch_all_success(self, tmp_path: Path) -> None:
+        """全部成功：succeeded=total，backup_paths 非空。"""
+        rule = _make_rule("token", "token", replace=True, replace_with="***")
+        ruleset = RuleSet(version="1.0", rules=(rule,))
+        src1 = tmp_path / "scan" / "a.txt"
+        src1.parent.mkdir(parents=True)
+        src1.write_text("token=abc\n", encoding="utf-8")
+        src2 = tmp_path / "scan" / "b.txt"
+        src2.write_text("token=def\n", encoding="utf-8")
+        results = (
+            _make_scan_result(src1, rule, ("token",)),
+            _make_scan_result(src2, rule, ("token",)),
+        )
+        backup_root = tmp_path / "backup"
+
+        batch = replace_batch(results, ruleset, backup_root, tmp_path / "scan", preserve_relative=True)
+
+        assert batch.total == 2
+        assert batch.succeeded == 2
+        assert batch.skipped == 0
+        assert batch.failed == 0
+        assert batch.total_replaced_count == 2
+        assert len(batch.backup_paths) == 2
+        # 源文件已被替换
+        assert src1.read_text(encoding="utf-8") == "***=abc\n"
+        assert src2.read_text(encoding="utf-8") == "***=def\n"
+        # message 含聚合信息
+        assert "成功 2/2" in batch.message
+
+    def test_batch_mixed_results(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """混合结果：成功 + 跳过（无 replace=True 规则）+ 失败（备份失败）。"""
+        # 规则1：启用替换
+        rule_replace = _make_rule("token", "token", replace=True, replace_with="***")
+        # 规则2：未启用替换
+        rule_no_replace = _make_rule("foo", "foo", replace=False)
+        ruleset = RuleSet(version="1.0", rules=(rule_replace, rule_no_replace))
+        # src1：成功替换
+        src1 = tmp_path / "scan" / "a.txt"
+        src1.parent.mkdir(parents=True)
+        src1.write_text("token=abc\n", encoding="utf-8")
+        # src2：跳过（命中的规则未启用 replace）
+        src2 = tmp_path / "scan" / "b.txt"
+        src2.write_text("foo=bar\n", encoding="utf-8")
+        # src3：失败（备份失败，通过 monkeypatch 注入）
+        src3 = tmp_path / "scan" / "c.txt"
+        src3.write_text("token=xyz\n", encoding="utf-8")
+        results = (
+            _make_scan_result(src1, rule_replace, ("token",)),
+            _make_scan_result(src2, rule_no_replace, ("foo",)),
+            _make_scan_result(src3, rule_replace, ("token",)),
+        )
+
+        # 拦截 replace_in_file：仅 src3 失败，其他放行
+        from fuscan import replacer as replacer_module
+
+        original_replace = replacer_module.replace_in_file
+
+        def _fake_replace(
+            src: Path,
+            hits: tuple[RuleHit, ...],
+            ruleset: RuleSet,
+            backup_root: Path,
+            scan_root: Path,
+            preserve_relative: bool = True,
+        ) -> ReplaceResult:
+            if src == src3:
+                return ReplaceResult(
+                    status=ReplaceStatus.BACKUP_FAILED,
+                    message="备份文件失败: simulated",
+                )
+            return original_replace(src, hits, ruleset, backup_root, scan_root, preserve_relative)
+
+        monkeypatch.setattr(replacer_module, "replace_in_file", _fake_replace)
+
+        batch = replace_batch(
+            results,
+            ruleset,
+            tmp_path / "backup",
+            tmp_path / "scan",
+            preserve_relative=True,
+        )
+
+        assert batch.total == 3
+        assert batch.succeeded == 1
+        assert batch.skipped == 1
+        assert batch.failed == 1
+        assert batch.total_replaced_count == 1
+        # backup_paths 只含成功项
+        assert len(batch.backup_paths) == 1
+        # details 含每条结果
+        assert len(batch.details) == 3
+
+    def test_batch_archive_entry_skipped(self, tmp_path: Path) -> None:
+        """压缩包内部条目被跳过（status=UNSUPPORTED_FILE_TYPE）。"""
+        rule = _make_rule("token", "token", replace=True, replace_with="***")
+        ruleset = RuleSet(version="1.0", rules=(rule,))
+        archive = tmp_path / "archive.zip"
+        archive.write_bytes(b"fake archive")
+        # 构造压缩包内部条目路径
+        inner_path = tmp_path / "archive.zip!inner/file.txt"
+        results = (_make_scan_result(inner_path, rule, ("token",), archive_path=archive),)
+
+        batch = replace_batch(results, ruleset, tmp_path / "backup", tmp_path)
+
+        assert batch.total == 1
+        assert batch.succeeded == 0
+        assert batch.skipped == 1
+        assert batch.failed == 0
+        assert batch.backup_paths == ()
+        # details 中记录 UNSUPPORTED_FILE_TYPE
+        _, detail_result = batch.details[0]
+        assert detail_result.status == ReplaceStatus.UNSUPPORTED_FILE_TYPE
+
+    def test_batch_empty_results(self, tmp_path: Path) -> None:
+        """空结果列表：返回零值聚合结果。"""
+        rule = _make_rule("token", "token", replace=True, replace_with="***")
+        ruleset = RuleSet(version="1.0", rules=(rule,))
+
+        batch = replace_batch((), ruleset, tmp_path / "backup", tmp_path)
+
+        assert batch.total == 0
+        assert batch.succeeded == 0
+        assert batch.skipped == 0
+        assert batch.failed == 0
+        assert batch.total_replaced_count == 0
+        assert batch.backup_paths == ()
+        assert batch.details == ()
+
+
+class TestRestoreFromBackup:
+    """iter-113 从备份撤销替换。"""
+
+    def test_restore_success(self, tmp_path: Path) -> None:
+        """备份文件存在 → 成功恢复源文件。"""
+        backup = tmp_path / "a.txt.bak"
+        backup.write_text("original\n", encoding="utf-8")
+        dest = tmp_path / "a.txt"
+        dest.write_text("modified\n", encoding="utf-8")
+
+        msg = restore_from_backup(backup, dest)
+
+        assert msg.startswith("已从备份恢复")
+        assert dest.read_text(encoding="utf-8") == "original\n"
+        # 备份文件仍保留（便于多次撤销）
+        assert backup.exists()
+
+    def test_restore_backup_not_exist(self, tmp_path: Path) -> None:
+        """备份文件不存在 → 返回提示消息。"""
+        backup = tmp_path / "missing.txt.bak"
+        dest = tmp_path / "dest.txt"
+
+        msg = restore_from_backup(backup, dest)
+
+        assert msg.startswith("备份文件不存在")
+        assert "missing.txt.bak" in msg
+
+    def test_restore_oserror(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """恢复过程 OSError → 返回失败消息。"""
+        backup = tmp_path / "a.txt.bak"
+        backup.write_text("original\n", encoding="utf-8")
+        dest = tmp_path / "a.txt"
+
+        from fuscan import replacer as replacer_module
+
+        def _raise_oserror(src: Path, dst: Path) -> None:
+            raise OSError("permission denied")
+
+        monkeypatch.setattr(replacer_module.shutil, "copy2", _raise_oserror)
+
+        msg = restore_from_backup(backup, dest)
+
+        assert msg.startswith("恢复失败")
+        assert "permission denied" in msg
+
+
+class TestBatchReplaceResult:
+    """BatchReplaceResult dataclass 行为。"""
+
+    def test_message_with_zero_results(self) -> None:
+        """空批量结果的 message 含 0/0。"""
+        result = BatchReplaceResult(total=0, succeeded=0, skipped=0, failed=0, total_replaced_count=0)
+        assert "成功 0/0" in result.message
+        assert "共替换 0 条" in result.message
+
+    def test_message_with_failures(self) -> None:
+        """含失败时 message 含失败数。"""
+        result = BatchReplaceResult(total=3, succeeded=2, skipped=0, failed=1, total_replaced_count=5)
+        assert "失败 1" in result.message
+        assert "共替换 5 条" in result.message
+
+    def test_default_details_and_backup_paths_empty(self) -> None:
+        """未提供 details/backup_paths 时默认为空元组。"""
+        result = BatchReplaceResult(total=0, succeeded=0, skipped=0, failed=0, total_replaced_count=0)
+        assert result.details == ()
+        assert result.backup_paths == ()
 
 
 if __name__ == "__main__":

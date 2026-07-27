@@ -12,6 +12,8 @@
 
 - :mod:`fuscan.scanner._helpers`：纯函数与模块级常量（内容提供器、规则求值辅助等）
 - :mod:`fuscan.scanner._archive_phase`：archive 阶段并行扫描子流程
+- :mod:`fuscan.scanner._pipeline_phase`：scan 阶段顺序/并发扫描子流程
+- :mod:`fuscan.scanner._cache_phase`：缓存模式扫描辅助（BatchBuffer/缓存命中重建）
 - 本模块：:class:`Scanner` 主类，串联 walk → scan → archive 三阶段
 """
 
@@ -21,7 +23,6 @@ import logging
 import threading
 import time
 from collections import deque
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Mapping
 
@@ -37,13 +38,13 @@ from fuscan.scanner._cache_phase import (
 from fuscan.scanner._helpers import (
     GIL_YIELD_INTERVAL,
     PROGRESS_LIST_MAX,
-    cancel_all_futures,
     default_extract_content,
     default_extract_content_with_hash,
     empty_content_provider,
     normalize_max_file_size,
     spec_needs_content,
 )
+from fuscan.scanner._pipeline_phase import run_pipeline_phase
 from fuscan.scanner.context import ContentProvider, FileEntry, MatchContext
 from fuscan.scanner.matchers import Matcher, build_matcher
 from fuscan.scanner.result import ProgressInfo, RuleHit, ScanReport, ScanResult, ScanStats, WalkResult
@@ -353,10 +354,9 @@ class Scanner:
         try:
             if not cancelled:
                 # 阶段 2：并发扫描（max_workers > 1）或顺序扫描
-                if self._max_workers and self._max_workers > 1:
-                    scanned, matched, errors, matches = self._scan_concurrent(entries, results)
-                else:
-                    scanned, matched, errors, matches = self._scan_sequential(entries, results)
+                # iter-117：_scan_sequential/_scan_concurrent/_collect_concurrent_results
+                # 抽离到 _pipeline_phase.py，本类仅做分派调用
+                scanned, matched, errors, matches = run_pipeline_phase(self, entries, results)  # pyrefly: ignore [bad-argument-type]
 
             # 阶段 3：顺序扫描压缩包内条目（避免 ArchiveScanner 线程安全问题）
             # 用 cancelled 而非 self.is_cancelled：collect_entries 已清除 _cancel_event，
@@ -448,156 +448,6 @@ class Scanner:
                 user_skipped=self._progress_user_skipped,
             )
         )
-
-    def _scan_sequential(
-        self,
-        entries: list[FileEntry],
-        results: list[ScanResult],
-    ) -> tuple[int, int, int, int]:
-        """单线程顺序扫描，返回 (scanned, matched, errors, matches)。"""
-        scanned = 0
-        matched = 0
-        errors = 0
-        matches = 0
-        yield_counter = 0
-        for entry in entries:
-            if self._check_control():
-                break
-            try:
-                result = self._scan_entry(entry)
-                scanned += 1
-                if result.has_hit:
-                    matched += 1
-                    matches += result.total_match_count
-                    if self._on_progress is not None:
-                        for hit in result.hits:
-                            self._matched_files.append((str(entry.path), hit.rule_name))
-                errors += result.errors
-                results.append(result)
-            except Exception:
-                errors += 1
-                scanned += 1
-                logger.warning("扫描文件失败 %s", entry.path, exc_info=True)
-            self._emit_progress(str(entry.path), scanned, matched, errors, matches)
-            # GIL 让步：单线程扫描时也定期让出 GIL，避免长时间独占导致 UI 卡死
-            # iter-111：使用实例级 _gil_yield_interval（顺序扫描为 20）
-            yield_counter += 1
-            if yield_counter >= self._gil_yield_interval:
-                yield_counter = 0
-                time.sleep(0)
-        return scanned, matched, errors, matches
-
-    def _scan_concurrent(
-        self,
-        entries: list[FileEntry],
-        results: list[ScanResult],
-    ) -> tuple[int, int, int, int]:
-        """并发扫描文件清单，返回 ``(scanned, matched, errors, matches)``。
-
-        iter-71 两阶段架构：阶段 1 已单线程收集 ``entries``，本方法将所有
-        entry 提交到 ``ThreadPoolExecutor`` 并用 :func:`as_completed` 收集结果。
-        相比原流水线模式，先收集再扫描避免了 walk 线程与 worker 线程争抢
-        磁盘 I/O，且可对完整清单做全局后缀过滤后再提交，减少无效 future。
-
-        取消加速（需求 req-13）：提交或收集阶段检测到取消时，立即对全部未启动
-        future 调 ``f.cancel()`` 并 ``break`` 跳出 ``as_completed`` 阻塞等待。
-        ``ThreadPoolExecutor`` 上下文退出时仍会等待已运行 future（最多
-        ``max_workers`` 个）完成，配合 ``max_file_size`` 大文件跳过可将单 worker
-        阻塞上限控制在百毫秒级。
-
-        命中结果同步收集到 ``_matched_files`` 供进度回调上报。
-        """
-        scanned = 0
-        matched = 0
-        errors = 0
-        matches = 0
-        future_to_entry: dict[Future[ScanResult], FileEntry] = {}
-        # 不使用 with 语句：取消时需要 shutdown(wait=False) 立即返回，
-        # 避免某个 worker 卡在 read_bytes() 上导致 with 退出时无限阻塞。
-        # 已运行 worker 在后台完成（_scan_entry 入口已检查取消标志会快速返回），
-        # 不影响下次扫描（Scanner 每次扫描重新构造，不复用线程池）。
-        pool = ThreadPoolExecutor(max_workers=self._max_workers)
-        try:
-            cancelled_in_submit = False
-            # 一次性提交所有 entries：阶段 1 已完成遍历，entries 内存可见且可索引
-            for entry in entries:
-                if self._check_control():
-                    cancelled_in_submit = True
-                    break
-                future = pool.submit(self._scan_entry, entry)
-                future_to_entry[future] = entry
-            if cancelled_in_submit:
-                # 取消全部未启动 future，shutdown(wait=False) 不等待已运行 future
-                cancel_all_futures(future_to_entry)
-                pool.shutdown(wait=False)
-                return scanned, matched, errors, matches
-            scanned, matched, errors, matches = self._collect_concurrent_results(future_to_entry, results, pool)
-        finally:
-            # 正常完成时等待所有 future；取消时已 shutdown(wait=False)，此处幂等
-            pool.shutdown(wait=True)
-        return scanned, matched, errors, matches
-
-    def _collect_concurrent_results(
-        self,
-        future_to_entry: dict[Future[ScanResult], FileEntry],
-        results: list[ScanResult],
-        pool: ThreadPoolExecutor,
-    ) -> tuple[int, int, int, int]:
-        """阻塞收集 future 结果，返回 ``(scanned, matched, errors, matches)``。
-
-        iter-111 从 :meth:`_scan_concurrent` 抽离的子流程，职责单一便于分支数控制。
-        内含 GIL 让步（``_gil_yield_interval``）与进度 emit 批处理
-        （``_progress_emit_batch``）逻辑：
-
-        - **GIL 让步**：并发模式下 PyO3 提取器在 Rust 层释放 GIL，worker I/O 期间
-          主线程自然获得调度，让步间隔提高到 50 减少 sleep(0) 调用开销。
-        - **emit 批处理**：每 N 个 future 完成才调用一次 :meth:`_emit_progress`
-          （内部仍有 150ms 节流），减少 ``time.perf_counter()`` 与 deque tuple
-          拷贝开销；尾部不足一批的剩余进度补发一次。
-
-        :param future_to_entry: future → entry 映射，由 :meth:`_scan_concurrent` 提交
-        :param results: 共享结果列表，本方法将 future 结果 append 到此列表
-        :param pool: 所属线程池，取消时调 ``shutdown(wait=False)`` 立即返回
-        """
-        scanned = 0
-        matched = 0
-        errors = 0
-        matches = 0
-        yield_counter = 0
-        emit_counter = 0
-        for future in as_completed(future_to_entry):
-            if self._check_control():
-                cancel_all_futures(future_to_entry)
-                pool.shutdown(wait=False)
-                break
-            entry = future_to_entry[future]
-            scanned += 1
-            try:
-                result = future.result()
-                if result.has_hit:
-                    matched += 1
-                    matches += result.total_match_count
-                    if self._on_progress is not None:
-                        for hit in result.hits:
-                            self._matched_files.append((str(entry.path), hit.rule_name))
-                errors += result.errors
-                results.append(result)
-            except Exception:
-                errors += 1
-                logger.warning("扫描文件失败 %s", entry.path, exc_info=True)
-            # iter-111：批处理 emit，减少并发高吞吐场景下的进度回调开销
-            emit_counter += 1
-            if emit_counter >= self._progress_emit_batch:
-                self._emit_progress(str(entry.path), scanned, matched, errors, matches)
-                emit_counter = 0
-            yield_counter += 1
-            if yield_counter >= self._gil_yield_interval:
-                yield_counter = 0
-                time.sleep(0)
-        # 批处理尾部：剩余未 emit 的进度补发一次（避免最后几个文件状态丢失）
-        if emit_counter > 0 and self._on_progress is not None:
-            self._emit_progress("", scanned, matched, errors, matches)
-        return scanned, matched, errors, matches
 
     def scan_file(self, path: Path) -> ScanResult:
         """扫描单个文件。"""

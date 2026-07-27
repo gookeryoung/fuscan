@@ -111,18 +111,28 @@ Item {
                     spacing: 8
                     Button {
                         text: "取消"
-                        flat: true
+                        implicitWidth: 80
                         implicitHeight: theme.btnHeightSecondary
                         font.pixelSize: theme.fontSizeBody
+                        palette.buttonText: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        background: Rectangle {
+                            color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                            border.width: 1
+                            radius: theme.radiusSm
+                        }
                         onClicked: clearConfirmDialog.reject()
                     }
                     Button {
                         text: "清空"
-                        implicitHeight: theme.btnHeightPrimary
+                        implicitWidth: 80
+                        implicitHeight: theme.btnHeightSecondary
                         font.pixelSize: theme.fontSizeBody
                         palette.buttonText: theme.colorTextOnPrimary
                         background: Rectangle {
                             color: theme.colorDanger
+                            border.color: theme.colorDanger
+                            border.width: 1
                             radius: theme.radiusSm
                         }
                         onClicked: {

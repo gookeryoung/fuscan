@@ -291,8 +291,8 @@ Item {
                             Layout.fillWidth: true
                             indeterminate: workspaceController.currentScanController.progressIndeterminate
                             from: 0
-                            to: Math.max(workspaceController.currentScanController.progressTotal, 1)
-                            value: workspaceController.currentScanController.progressScanned
+                            to: 100
+                            value: workspaceController.currentScanController.progress
                             background: Rectangle {
                                 implicitHeight: 6
                                 color: theme.isDark ? theme.colorBorderDark : theme.colorBorder

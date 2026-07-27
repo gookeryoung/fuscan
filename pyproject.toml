@@ -2,8 +2,6 @@
 authors = [{ name = "gooker_young", email = "gooker_young@qq.com" }]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -30,22 +28,22 @@ dependencies = [
     "striprtf>=0.0.26",
     "olefile>=0.46",
     "extract-msg>=0.48.0,<0.56",
-    # py7zr 1.x 移除了 readall()/read() API（改用 extract 写入磁盘）且要求 Python>=3.10，
-    # 与 fuscan 的 requires-python>=3.8 冲突；SevenZReader 依赖 readall() 一次性预读字节到内存缓存，
-    # 故锁定 0.x 直到迁移到 extract+临时目录方案。
+    # py7zr 1.x 移除了 readall()/read() API（改用 extract 写入磁盘），
+    # 与 SevenZReader 的 read(targets) 惰性读取方案冲突；
+    # iter-126 已将 readall() 预读改为 read(targets) 按需读取，但 1.x 完全移除 read，
+    # 故仍锁定 0.x 直到迁移到 extract+临时目录方案。
     "py7zr>=0.20.0,<1.0.0",
-    "reportlab>=3.6.13,<4.0; python_version < '3.9'",
-    "reportlab>=4.0.0; python_version >= '3.9'",
+    "reportlab>=4.0.0",
     "pyzstd==0.15.0",
-    "python-calamine==0.3.2; python_version < '3.10'",
-    "python-calamine==0.8.2; python_version >= '3.10'",
+    # iter-126：迁移 Python 3.10 后统一使用 python-calamine 0.8.2（更高性能）
+    "python-calamine==0.8.2",
 ]
 
 description     = "极速通用文件扫描器."
 license         = "MIT"
 name            = "fuscan"
 readme          = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 version         = "0.2.2"
 
 [project.optional-dependencies]
@@ -55,6 +53,9 @@ dev = [
     "tox-uv>=1.13.1",
     "tox>=4.25.0",
 ]
+# iter-126：kreuzberg 加速后端（Rust 核心，支持 DOC/PPT/RTF/MSG 等 91+ 格式）
+# pip install fuscan[fast] 启用；未安装时自动回退到纯 Python 实现
+fast = ["kreuzberg>=4.10.0"]
 docs = ["myst-parser>=3.0", "sphinx-rtd-theme>=2.0", "sphinx>=7.0"]
 lint = ["pyrefly>=1.1.1", "ruff>=0.8.0"]
 test = [

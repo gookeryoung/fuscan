@@ -776,7 +776,7 @@ Rectangle {
                 // ---------- 对比摘要区 ----------
                 Rectangle {
                     Layout.fillWidth: true
-                    visible: historyDialog.comparison && historyDialog.comparison.summary
+                    visible: !!(historyDialog.comparison && historyDialog.comparison.summary)
                     color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
                     border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                     border.width: 1
@@ -804,7 +804,7 @@ Rectangle {
                         }
                         // 趋势标签
                         Rectangle {
-                            visible: historyDialog.comparison && historyDialog.comparison.trend
+                            visible: !!(historyDialog.comparison && historyDialog.comparison.trend)
                             radius: 8
                             height: 18
                             width: trendLabel.width + 12

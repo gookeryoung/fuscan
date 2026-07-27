@@ -894,11 +894,15 @@ class TestSyncWorkspaceState:
 class TestCleanup:
     """``cleanup`` 资源释放。"""
 
-    def test_cleanup_clears_model(self, controller: WorkspaceController) -> None:
+    def test_cleanup_clears_scan_controllers(self, controller: WorkspaceController) -> None:
+        """iter-124：cleanup 清理 ScanController 资源，但不清空 model（避免 QML binding null）。"""
         controller.addWorkspace("t1", "folder", "/tmp", "[]", True)
         controller.addWorkspace("t2", "folder", "/tmp", "[]", True)
         controller.cleanup()
-        assert controller.workspaceCount == 0
+        # model 保留（进程即将退出，清空会触发 QML binding null 错误）
+        assert controller.workspaceCount == 2
+        # ScanController 字典已清空
+        assert len(controller._scan_controllers) == 0
 
     def test_cleanup_calls_scan_controller_cleanup(
         self,
@@ -918,11 +922,14 @@ class TestCleanup:
         controller.cleanup()
         assert called is True
 
-    def test_cleanup_clears_current_workspace(self, controller: WorkspaceController) -> None:
+    def test_cleanup_preserves_current_workspace(self, controller: WorkspaceController) -> None:
+        """iter-124：cleanup 不清空 currentWorkspaceId（避免 QML binding 求值 null）。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
         controller.setCurrentWorkspaceId(ws_id)
         controller.cleanup()
-        assert controller.currentWorkspaceId == ""
+        # ID 保留（进程即将退出，清空会触发 QML binding null 错误）
+        assert controller.currentWorkspaceId == ws_id
+        # hasCurrentWorkspace 依赖 _scan_controllers 字典，已清空 → False
         assert controller.hasCurrentWorkspace is False
 
     def test_cleanup_no_workspaces_noop(self, controller: WorkspaceController) -> None:
@@ -1129,8 +1136,8 @@ class TestActiveScan:
         assert controller.hasActiveScan is False
         assert controller.activeScanWorkspaceId == ""
 
-    def test_cleanup_clears_active(self, controller: WorkspaceController) -> None:
-        """cleanup 应清空 active 状态。"""
+    def test_cleanup_preserves_active(self, controller: WorkspaceController) -> None:
+        """iter-124：cleanup 不清空 active 状态（避免 QML binding 求值 null）。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
@@ -1140,8 +1147,10 @@ class TestActiveScan:
         assert controller.hasActiveScan is True
 
         controller.cleanup()
+        # ID 保留（进程即将退出，清空会触发 QML binding null 错误）
+        assert controller.activeScanWorkspaceId == ws_id
+        # hasActiveScan 依赖 _scan_controllers 字典，已清空 → False
         assert controller.hasActiveScan is False
-        assert controller.activeScanWorkspaceId == ""
 
 
 class TestUpdateWorkspaceTarget:

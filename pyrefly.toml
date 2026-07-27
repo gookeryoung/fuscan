@@ -1,5 +1,5 @@
 preset           = "strict"
-project-excludes = [".venv/**", "template/**", "ref/**", "**/*_ui.py"]
+project-excludes = [".venv/**", "template/**", "ref/**", "**/*_ui.py", "**/resources_rc.py"]
 project-includes = ["**/*.ipynb", "**/*.py*"]
-python-version   = "3.8"
+python-version   = "3.10"
 search-path      = ["."]

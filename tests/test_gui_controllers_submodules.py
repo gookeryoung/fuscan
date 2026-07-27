@@ -607,7 +607,7 @@ class TestExtractContext:
 
         model = build_detail_hits_model(result)
         assert len(model) == 1
-        context = model[0]["context"]
+        context: str = str(model[0]["context"])
         # 应包含前后各 2 行 + 匹配行（共 5 行）：line1, line2, password=secret, line4, line5
         assert ">>> password=secret" in context
         assert "    line1" in context
@@ -740,7 +740,7 @@ class TestExtractContext:
         result = _make_result(src, hits=(hit,))
 
         model = build_detail_hits_model(result)
-        context = model[0]["context"]
+        context: str = str(model[0]["context"])
         # 匹配行在开头，start=max(0, -2)=0，end=min(3, 3)=3
         assert ">>> password=123" in context
         assert "    line2" in context

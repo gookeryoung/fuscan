@@ -4,6 +4,10 @@ XLS 通过 calamine（Rust + PyO3）读取 Excel 97-2003 工作簿，与 XLSX
 共用同一 Rust 后端（``_extract_calamine_workbook``）。DOC/PPT 仍使用 olefile
 读取 OLE 复合文档，从文本流中提取 UTF-16LE 编码内容。
 
+iter-126：DOC/PPT 在 kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
+不可用时回退到 olefile + UTF-16LE 正则扫描（T3 中速）。kreuzberg 仅支持
+文件路径提取，``extract_from_bytes``（压缩包内条目）仍走 olefile。
+
 注意：DOC/PPT 为二进制格式，本提取器仅做简单文本提取，不支持复杂格式
 （如修订、嵌入对象等）。如需完整提取，建议先转换为 DOCX/PPTX。
 """
@@ -17,6 +21,8 @@ from pathlib import Path
 
 from typing_extensions import override
 
+from fuscan.extractors._kreuzberg import extract_text as kreuzberg_extract
+from fuscan.extractors._kreuzberg import is_available as kreuzberg_available
 from fuscan.extractors.base import Extractor, ExtractorError, SpeedTier
 
 __all__ = ["DocExtractor", "PptExtractor", "XlsExtractor"]
@@ -103,6 +109,9 @@ class DocExtractor(Extractor):
 
     通过 olefile 读取 OLE 复合文档中的 WordDocument 流，提取 UTF-16LE
     编码的文本。仅做简单文本提取，不解析复杂格式。
+
+    iter-126：kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
+    不可用时回退到 olefile + UTF-16LE 正则扫描（T3 中速）。
     """
 
     @property
@@ -114,7 +123,9 @@ class DocExtractor(Extractor):
     @property
     @override
     def speed_tier(self) -> SpeedTier:
-        """DOC OLE 复合文档 + 正则 UTF-16LE 扫描为 T3 中速。"""
+        """kreuzberg 可用时 T2 快速（Rust 核心），否则 T3 中速（olefile）。"""
+        if kreuzberg_available():
+            return SpeedTier.FAST
         return SpeedTier.MEDIUM
 
     @override
@@ -125,7 +136,16 @@ class DocExtractor(Extractor):
 
     @override
     def extract(self, path: Path) -> str:
-        """提取 DOC 文档文本。"""
+        """提取 DOC 文档文本。
+
+        kreuzberg 可用时优先使用 Rust 核心加速提取；不可用时回退到 olefile。
+        """
+        if kreuzberg_available():
+            try:
+                return kreuzberg_extract(path)
+            except RuntimeError as exc:
+                logger.debug("kreuzberg DOC 提取失败，回退到 olefile: %s: %s", path, exc)
+        # 回退：olefile + UTF-16LE 正则扫描
         try:
             data = path.read_bytes()
         except OSError as exc:
@@ -134,7 +154,12 @@ class DocExtractor(Extractor):
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:
-        """从内存字节解析 DOC 文档。"""
+        """从内存字节解析 DOC 文档（olefile 回退路径）。
+
+        .. note::
+           kreuzberg 仅支持文件路径提取，``extract_from_bytes`` 始终走 olefile。
+           压缩包内条目通过临时文件走 :meth:`extract` 时才会用 kreuzberg。
+        """
         try:
             import olefile
         except ImportError as exc:
@@ -160,6 +185,9 @@ class PptExtractor(Extractor):
 
     通过 olefile 读取 OLE 复合文档中的 PowerPoint Document 流，提取
     UTF-16LE 编码的文本。仅做简单文本提取，不解析幻灯片结构。
+
+    iter-126：kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
+    不可用时回退到 olefile + UTF-16LE 正则扫描（T3 中速）。
     """
 
     @property
@@ -171,7 +199,9 @@ class PptExtractor(Extractor):
     @property
     @override
     def speed_tier(self) -> SpeedTier:
-        """PPT OLE 复合文档 + 正则 UTF-16LE 扫描为 T3 中速。"""
+        """kreuzberg 可用时 T2 快速（Rust 核心），否则 T3 中速（olefile）。"""
+        if kreuzberg_available():
+            return SpeedTier.FAST
         return SpeedTier.MEDIUM
 
     @override
@@ -182,7 +212,16 @@ class PptExtractor(Extractor):
 
     @override
     def extract(self, path: Path) -> str:
-        """提取 PPT 演示文稿文本。"""
+        """提取 PPT 演示文稿文本。
+
+        kreuzberg 可用时优先使用 Rust 核心加速提取；不可用时回退到 olefile。
+        """
+        if kreuzberg_available():
+            try:
+                return kreuzberg_extract(path)
+            except RuntimeError as exc:
+                logger.debug("kreuzberg PPT 提取失败，回退到 olefile: %s: %s", path, exc)
+        # 回退：olefile + UTF-16LE 正则扫描
         try:
             data = path.read_bytes()
         except OSError as exc:
@@ -191,7 +230,12 @@ class PptExtractor(Extractor):
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:
-        """从内存字节解析 PPT 演示文稿。"""
+        """从内存字节解析 PPT 演示文稿（olefile 回退路径）。
+
+        .. note::
+           kreuzberg 仅支持文件路径提取，``extract_from_bytes`` 始终走 olefile。
+           压缩包内条目通过临时文件走 :meth:`extract` 时才会用 kreuzberg。
+        """
         try:
             import olefile
         except ImportError as exc:

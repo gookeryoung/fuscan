@@ -1,6 +1,9 @@
 """RTF 富文本提取器。
 
 使用 striprtf 库将 RTF 转换为纯文本，保留可见文字内容。
+
+iter-126：kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
+不可用时回退到 striprtf 纯 Python 实现（T3 中速）。
 """
 
 from __future__ import annotations
@@ -10,6 +13,8 @@ from pathlib import Path
 
 from typing_extensions import override
 
+from fuscan.extractors._kreuzberg import extract_text as kreuzberg_extract
+from fuscan.extractors._kreuzberg import is_available as kreuzberg_available
 from fuscan.extractors.base import Extractor, ExtractorError, SpeedTier
 
 __all__ = ["RtfExtractor"]
@@ -29,7 +34,9 @@ class RtfExtractor(Extractor):
     @property
     @override
     def speed_tier(self) -> SpeedTier:
-        """RTF striprtf 库正则/栈式解析为 T3 中速。"""
+        """kreuzberg 可用时 T2 快速（Rust 核心），否则 T3 中速（striprtf）。"""
+        if kreuzberg_available():
+            return SpeedTier.FAST
         return SpeedTier.MEDIUM
 
     @override
@@ -40,7 +47,16 @@ class RtfExtractor(Extractor):
 
     @override
     def extract(self, path: Path) -> str:
-        """提取 RTF 文件纯文本内容。"""
+        """提取 RTF 文件纯文本内容。
+
+        kreuzberg 可用时优先使用 Rust 核心加速提取；不可用时回退到 striprtf。
+        """
+        if kreuzberg_available():
+            try:
+                return kreuzberg_extract(path)
+            except RuntimeError as exc:
+                logger.debug("kreuzberg RTF 提取失败，回退到 striprtf: %s: %s", path, exc)
+        # 回退：striprtf 纯 Python 实现
         try:
             data = path.read_bytes()
         except OSError as exc:
@@ -49,7 +65,12 @@ class RtfExtractor(Extractor):
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:
-        """从内存字节提取 RTF 纯文本。"""
+        """从内存字节提取 RTF 纯文本（striprtf 回退路径）。
+
+        .. note::
+           kreuzberg 仅支持文件路径提取，``extract_from_bytes`` 始终走 striprtf。
+           压缩包内条目通过临时文件走 :meth:`extract` 时才会用 kreuzberg。
+        """
         try:
             from striprtf.striprtf import rtf_to_text
         except ImportError as exc:

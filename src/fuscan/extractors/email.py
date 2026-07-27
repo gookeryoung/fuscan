@@ -2,6 +2,9 @@
 
 EML 使用标准库 email 解析，提取主题、发件人与正文。
 MSG 使用 extract-msg 库解析 Outlook 邮件格式。
+
+iter-126：MSG 在 kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
+不可用时回退到 extract-msg 纯 Python 实现（T3 中速）。
 """
 
 from __future__ import annotations
@@ -16,6 +19,8 @@ from pathlib import Path
 
 from typing_extensions import override
 
+from fuscan.extractors._kreuzberg import extract_text as kreuzberg_extract
+from fuscan.extractors._kreuzberg import is_available as kreuzberg_available
 from fuscan.extractors.base import Extractor, ExtractorError, SpeedTier
 
 __all__ = ["EmlExtractor", "MsgExtractor"]
@@ -126,7 +131,11 @@ class EmlExtractor(Extractor):
 
 
 class MsgExtractor(Extractor):
-    """Outlook MSG 邮件文件文本提取器。"""
+    """Outlook MSG 邮件文件文本提取器。
+
+    iter-126：kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
+    不可用时回退到 extract-msg 纯 Python 实现（T3 中速）。
+    """
 
     @property
     @override
@@ -137,7 +146,9 @@ class MsgExtractor(Extractor):
     @property
     @override
     def speed_tier(self) -> SpeedTier:
-        """MSG 二进制解析（extract-msg 库读取 OLE 结构）为 T3 中速。"""
+        """kreuzberg 可用时 T2 快速（Rust 核心），否则 T3 中速（extract-msg）。"""
+        if kreuzberg_available():
+            return SpeedTier.FAST
         return SpeedTier.MEDIUM
 
     @override
@@ -148,7 +159,16 @@ class MsgExtractor(Extractor):
 
     @override
     def extract(self, path: Path) -> str:
-        """提取 MSG 邮件主题、发件人与正文。"""
+        """提取 MSG 邮件主题、发件人与正文。
+
+        kreuzberg 可用时优先使用 Rust 核心加速提取；不可用时回退到 extract-msg。
+        """
+        if kreuzberg_available():
+            try:
+                return kreuzberg_extract(path)
+            except RuntimeError as exc:
+                logger.debug("kreuzberg MSG 提取失败，回退到 extract-msg: %s: %s", path, exc)
+        # 回退：extract-msg 纯 Python 实现
         try:
             from extract_msg import Message
         except ImportError as exc:

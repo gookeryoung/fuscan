@@ -289,7 +289,7 @@ Rectangle {
                                 wrapMode: Text.WordWrap
                                 readOnly: true
                                 background: Rectangle {
-                                    color: theme.isDark ? theme.colorBgMuted : theme.colorBgMuted
+                                    color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
                                     border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                                     border.width: 1
                                     radius: 2

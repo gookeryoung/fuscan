@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import zipfile
 from pathlib import Path
+from typing import Callable
 
 import pytest
 from typing_extensions import override
@@ -1275,11 +1276,9 @@ class TestSevenZReader:
 class TestSevenZReaderMocked:
     """通过 mock py7zr 模块覆盖 SevenZReader 各异常分支。
 
-    使用与 TestRarReaderMocked 一致的 mock 模式：通过 ``__new__`` 绕过 __init__，
-    注入 mock _sevenz 与 _info_map，直接测试 read_entry / _preload_bytes / close 等分支。
-
-    新实现要点：``__init__`` 中 ``_preload_bytes`` 用 ``readall()`` 一次性预读所有非目录条目字节到
-    ``_bytes_cache``，``read_entry`` 直接返回缓存字节；加密条目记录到 ``_encrypted_entries``。
+    iter-126：惰性读取实现，``__init__`` 仅解析元数据（list），
+    ``read_entry`` 按需创建新 ``SevenZipFile`` 实例读取单个条目。
+    测试通过 monkeypatch ``py7zr.SevenZipFile`` 构造函数注入 mock。
     """
 
     def _make_mocked_reader(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sz_mock: object) -> SevenZReader:
@@ -1292,6 +1291,30 @@ class TestSevenZReaderMocked:
         reader._bytes_cache = {}  # type: ignore[attr-defined]
         reader._encrypted_entries = set()  # type: ignore[attr-defined]
         return reader
+
+    def _patch_sevenzipfile(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        read_fn: Callable[[list[str] | None], dict[str, object]],
+    ) -> None:
+        """patch py7zr.SevenZipFile，使其返回的实例 read() 调用 read_fn。"""
+
+        class _CtxSevenZ:
+            def __init__(self, path: str, mode: str = "r", password: str | None = None) -> None:
+                self._read_fn: Callable[[list[str] | None], dict[str, object]] = read_fn
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                pass
+
+            def read(self, targets: list[str] | None = None) -> dict[str, object]:
+                return self._read_fn(targets)
+
+        import py7zr
+
+        monkeypatch.setattr(py7zr, "SevenZipFile", _CtxSevenZ)
 
     # --------------------- read_entry 分支测试 ---------------------
 
@@ -1308,12 +1331,12 @@ class TestSevenZReaderMocked:
 
         reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
         reader._info_map = {"secret.txt": FakeInfo()}
-        reader._encrypted_entries.add("secret.txt")  # 模拟 _preload_bytes 标记为加密
+        reader._encrypted_entries.add("secret.txt")
         with pytest.raises(ArchiveError, match="加密条目未提供密码"):
             reader.read_entry("secret.txt")
 
     def test_read_entry_encrypted_with_password_failed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """加密条目有密码但预读失败时抛 ArchiveError。"""
+        """已标记加密 + 有密码时尝试重试，重试失败抛 ArchiveError。"""
 
         class FakeInfo:
             filename = "secret.txt"
@@ -1323,11 +1346,15 @@ class TestSevenZReaderMocked:
             def close(self) -> None:
                 pass
 
+        def read_fn(targets: list[str] | None) -> dict[str, object]:
+            raise OSError("密码错误")
+
+        self._patch_sevenzipfile(monkeypatch, read_fn)
         reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
         reader._password = "wrong"  # type: ignore[attr-defined]
         reader._info_map = {"secret.txt": FakeInfo()}
-        reader._encrypted_entries.add("secret.txt")  # 模拟密码错误导致预读失败
-        with pytest.raises(ArchiveError, match="加密条目读取失败"):
+        reader._encrypted_entries.add("secret.txt")
+        with pytest.raises(ArchiveError, match="条目读取失败"):
             reader.read_entry("secret.txt")
 
     def test_read_entry_cache_hit_returns_bytes(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1346,8 +1373,9 @@ class TestSevenZReaderMocked:
         reader._bytes_cache["a.txt"] = b"cached content"
         assert reader.read_entry("a.txt") == b"cached content"
 
-    def test_read_entry_cache_miss_returns_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """缓存缺失且非加密时返回空字节。"""
+    def test_read_entry_cache_miss_lazy_read(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """缓存缺失时惰性读取：创建新 SevenZipFile 实例解压单个条目并缓存。"""
+        import io
 
         class FakeInfo:
             filename = "a.txt"
@@ -1357,37 +1385,41 @@ class TestSevenZReaderMocked:
             def close(self) -> None:
                 pass
 
+        def read_fn(targets: list[str] | None) -> dict[str, object]:
+            assert targets == ["a.txt"]
+            return {"a.txt": io.BytesIO(b"lazy content")}
+
+        self._patch_sevenzipfile(monkeypatch, read_fn)
         reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
         reader._info_map = {"a.txt": FakeInfo()}
-        # 既不在 _bytes_cache 也不在 _encrypted_entries
-        assert reader.read_entry("a.txt") == b""
+        assert reader.read_entry("a.txt") == b"lazy content"
+        # 读取后应缓存
+        assert reader._bytes_cache == {"a.txt": b"lazy content"}
 
-    # --------------------- _preload_bytes 分支测试 ---------------------
-
-    def test_preload_bytes_password_required(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """readall() 抛 PasswordRequired 时全部非目录条目标记为加密。"""
+    def test_read_entry_password_required(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """read() 抛 PasswordRequired 时标记加密并抛 ArchiveError。"""
         import py7zr
 
         class FakeInfo:
-            def __init__(self, name: str) -> None:
-                self.filename = name
-                self.is_directory = False
+            filename = "secret.txt"
+            is_directory = False
 
         class FakeSevenZ:
-            def readall(self):
-                raise py7zr.PasswordRequired("需要密码")
-
             def close(self) -> None:
                 pass
 
-        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
-        reader._info_map = {"a.txt": FakeInfo("a.txt"), "b.txt": FakeInfo("b.txt")}
-        reader._preload_bytes()
-        assert reader._encrypted_entries == {"a.txt", "b.txt"}
-        assert reader._bytes_cache == {}
+        def read_fn(targets: list[str] | None) -> dict[str, object]:
+            raise py7zr.PasswordRequired("需要密码")
 
-    def test_preload_bytes_bad_7z_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """readall() 抛 Bad7zFile 时抛 ArchiveError。"""
+        self._patch_sevenzipfile(monkeypatch, read_fn)
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
+        reader._info_map = {"secret.txt": FakeInfo()}
+        with pytest.raises(ArchiveError, match="加密条目未提供密码"):
+            reader.read_entry("secret.txt")
+        assert "secret.txt" in reader._encrypted_entries
+
+    def test_read_entry_bad_7z_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """read() 抛 Bad7zFile 时抛 ArchiveError。"""
         import py7zr
 
         class FakeInfo:
@@ -1395,38 +1427,43 @@ class TestSevenZReaderMocked:
             is_directory = False
 
         class FakeSevenZ:
-            def readall(self):
-                raise py7zr.Bad7zFile("损坏")
-
             def close(self) -> None:
                 pass
 
+        def read_fn(targets: list[str] | None) -> dict[str, object]:
+            raise py7zr.Bad7zFile("损坏")
+
+        self._patch_sevenzipfile(monkeypatch, read_fn)
         reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
         reader._info_map = {"a.txt": FakeInfo()}
-        with pytest.raises(ArchiveError, match="7Z 文件损坏"):
-            reader._preload_bytes()
+        with pytest.raises(ArchiveError, match="7Z 条目损坏"):
+            reader.read_entry("a.txt")
 
-    def test_preload_bytes_generic_exception(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """readall() 抛其他异常时全部条目降级为加密标记。"""
+    def test_read_entry_generic_exception_marks_encrypted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """read() 抛其他异常时标记为加密避免重试，并抛 ArchiveError。"""
 
         class FakeInfo:
             filename = "a.txt"
             is_directory = False
 
         class FakeSevenZ:
-            def readall(self):
-                raise OSError("模拟 IO 错误")
-
             def close(self) -> None:
                 pass
 
+        def read_fn(targets: list[str] | None) -> dict[str, object]:
+            raise OSError("模拟 IO 错误")
+
+        self._patch_sevenzipfile(monkeypatch, read_fn)
         reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
         reader._info_map = {"a.txt": FakeInfo()}
-        reader._preload_bytes()
-        assert reader._encrypted_entries == {"a.txt"}
+        with pytest.raises(ArchiveError, match="条目读取失败"):
+            reader.read_entry("a.txt")
+        assert "a.txt" in reader._encrypted_entries
 
-    def test_preload_bytes_bio_read_failure(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """BytesIO.read() 抛异常时该条目标记为加密。"""
+    def test_read_entry_bio_read_failure(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """BytesIO.read() 抛异常时抛 ArchiveError。"""
 
         class FakeInfo:
             filename = "a.txt"
@@ -1440,60 +1477,82 @@ class TestSevenZReaderMocked:
                 pass
 
         class FakeSevenZ:
-            def readall(self):
-                return {"a.txt": FailingBio()}
-
             def close(self) -> None:
                 pass
 
+        def read_fn(targets: list[str] | None) -> dict[str, object]:
+            return {"a.txt": FailingBio()}
+
+        self._patch_sevenzipfile(monkeypatch, read_fn)
         reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
         reader._info_map = {"a.txt": FakeInfo()}
-        reader._preload_bytes()
-        assert "a.txt" in reader._encrypted_entries
-        assert "a.txt" not in reader._bytes_cache
+        with pytest.raises(RuntimeError, match="读取流失败"):
+            reader.read_entry("a.txt")
 
-    def test_preload_bytes_normal(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """readall() 正常返回时缓存全部条目字节。"""
-        import io
+    def test_read_entry_bio_none_returns_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """read() 返回的 bio 为 None 时返回空字节。"""
 
         class FakeInfo:
             filename = "a.txt"
             is_directory = False
 
         class FakeSevenZ:
-            def readall(self):
-                return {"a.txt": io.BytesIO(b"hello")}
-
             def close(self) -> None:
                 pass
 
+        def read_fn(targets: list[str] | None) -> dict[str, object]:
+            return {"a.txt": None}
+
+        self._patch_sevenzipfile(monkeypatch, read_fn)
         reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
         reader._info_map = {"a.txt": FakeInfo()}
-        reader._preload_bytes()
-        assert reader._bytes_cache == {"a.txt": b"hello"}
-        assert reader._encrypted_entries == set()
+        assert reader.read_entry("a.txt") == b""
 
-    def test_preload_bytes_skips_directory_entries(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """目录条目应被 _preload_bytes 跳过。"""
-        import io
+    def test_read_entry_data_missing_key_returns_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """read() 返回的 dict 不含 entry_name 时返回空字节。"""
 
         class FakeInfo:
-            def __init__(self, name: str, is_dir: bool) -> None:
-                self.filename = name
-                self.is_directory = is_dir
+            filename = "a.txt"
+            is_directory = False
 
         class FakeSevenZ:
-            def readall(self):
-                # 只返回非目录条目（实现预期）
-                return {"a.txt": io.BytesIO(b"data")}
+            def close(self) -> None:
+                pass
 
+        def read_fn(targets: list[str] | None) -> dict[str, object]:
+            return {}  # 不含 a.txt
+
+        self._patch_sevenzipfile(monkeypatch, read_fn)
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
+        reader._info_map = {"a.txt": FakeInfo()}
+        assert reader.read_entry("a.txt") == b""
+
+    def test_read_entry_directory_returns_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """目录条目直接返回空字节，不解压。"""
+
+        class FakeInfo:
+            filename = "dir/"
+            is_directory = True
+
+        class FakeSevenZ:
             def close(self) -> None:
                 pass
 
         reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
-        reader._info_map = {"a.txt": FakeInfo("a.txt", False), "dir/": FakeInfo("dir/", True)}
-        reader._preload_bytes()
-        assert reader._bytes_cache == {"a.txt": b"data"}
+        reader._info_map = {"dir/": FakeInfo()}
+        assert reader.read_entry("dir/") == b""
+
+    def test_read_entry_not_found_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """条目不存在时抛 ArchiveError。"""
+
+        class FakeSevenZ:
+            def close(self) -> None:
+                pass
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
+        reader._info_map = {}
+        with pytest.raises(ArchiveError, match="7Z 条目不存在"):
+            reader.read_entry("missing.txt")
 
     # --------------------- close / list_entries 测试 ---------------------
 
@@ -1523,52 +1582,34 @@ class TestSevenZReaderMocked:
         # 不应抛异常
         reader.close()
 
-    def test_preload_bytes_empty_non_dir_entries(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """所有条目均为目录时应直接 return，不调用 readall()。"""
-        readall_called = {"count": 0}
+    def test_list_entries_returns_all(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """list_entries 应返回 _info_map 中所有条目（含目录）。"""
 
         class FakeInfo:
-            def __init__(self, name: str) -> None:
+            def __init__(self, name: str, is_dir: bool, uncompressed: int = 100, compressed: int = 50) -> None:
                 self.filename = name
-                self.is_directory = True
+                self.is_directory = is_dir
+                self.uncompressed = uncompressed
+                self.compressed = compressed
 
         class FakeSevenZ:
-            def readall(self) -> dict[str, object]:
-                readall_called["count"] += 1
-                return {}
-
             def close(self) -> None:
                 pass
 
         reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
-        # 仅含目录条目
-        reader._info_map = {"dir1/": FakeInfo("dir1/"), "dir2/": FakeInfo("dir2/")}
-        reader._preload_bytes()
-        # 不应调用 readall
-        assert readall_called["count"] == 0
-        assert reader._bytes_cache == {}
-        assert reader._encrypted_entries == set()
-
-    def test_preload_bytes_bio_none_skipped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """readall() 返回的 bio 为 None 时应跳过该条目（不写入缓存）。"""
-
-        class FakeInfo:
-            filename = "a.txt"
-            is_directory = False
-
-        class FakeSevenZ:
-            def readall(self) -> dict[str, object]:
-                return {"a.txt": None}
-
-            def close(self) -> None:
-                pass
-
-        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
-        reader._info_map = {"a.txt": FakeInfo()}
-        reader._preload_bytes()
-        # bio 为 None 应跳过：不写缓存、不标记加密
-        assert reader._bytes_cache == {}
-        assert reader._encrypted_entries == set()
+        reader._info_map = {
+            "a.txt": FakeInfo("a.txt", False),
+            "dir/": FakeInfo("dir/", True),
+        }
+        entries = reader.list_entries()
+        assert len(entries) == 2
+        non_dir = [e for e in entries if not e.is_dir]
+        dirs = [e for e in entries if e.is_dir]
+        assert len(non_dir) == 1
+        assert non_dir[0].entry_name == "a.txt"
+        assert non_dir[0].size == 100
+        assert len(dirs) == 1
+        assert dirs[0].entry_name == "dir/"
 
 
 # ---------------------------------------------------------------------------

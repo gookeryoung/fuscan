@@ -278,14 +278,24 @@ Rectangle {
                                 wrapMode: Text.WrapAnywhere
                             }
 
-                            // 上下文
-                            Label {
+                            // 上下文（iter-124：实时读取文件内容，匹配行用 >>> 标记）
+                            TextArea {
                                 visible: modelData.context !== ""
                                 Layout.fillWidth: true
                                 text: modelData.context
                                 font.pixelSize: 11
+                                font.family: "Consolas, Monaco, monospace"
                                 color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                 wrapMode: Text.WordWrap
+                                readOnly: true
+                                background: Rectangle {
+                                    color: theme.isDark ? theme.colorBgMuted : theme.colorBgMuted
+                                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                    border.width: 1
+                                    radius: 2
+                                }
+                                // 匹配行（>>> 开头）用加粗显示
+                                // TextArea 不支持多色，靠 >>> 前缀视觉区分
                             }
                         }
                     }
@@ -347,11 +357,42 @@ Rectangle {
             Item { Layout.fillWidth: true }
         }
 
-        // 第二行：移至暂存 + 替换内容（右对齐，移至暂存在替换内容左侧）
+        // 第二行：替换为输入框 + 替换内容按钮（iter-124：自定义替换文本，默认 ...）
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
-            Item { Layout.fillWidth: true }
+            Label {
+                text: "替换为:"
+                font.pixelSize: 11
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+            }
+            TextField {
+                id: replaceWithInput
+                Layout.fillWidth: true
+                text: "..."
+                placeholderText: "输入替换文本（默认 ...）"
+                font.pixelSize: 11
+                font.family: "Consolas, Monaco, monospace"
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                selectByMouse: true
+                background: Rectangle {
+                    color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                    border.width: 1
+                    radius: 2
+                }
+            }
+            IconButton {
+                iconSource: "qrc:/icons/rescan.svg"
+                text: "替换内容"
+                tooltip: "备份源文件并替换命中内容（用输入框文本替换）"
+                accent: "primary"
+                enabled: workspaceController.currentScanController.canReplaceSelected
+                onClicked: {
+                    var msg = workspaceController.currentScanController.replaceSelectedResult(replaceWithInput.text)
+                    opMsgLabel.text = msg
+                }
+            }
             IconButton {
                 iconSource: "qrc:/icons/export.svg"
                 text: "移至暂存"
@@ -360,17 +401,6 @@ Rectangle {
                 enabled: !workspaceController.currentScanController.detailIsArchiveEntry && workspaceController.currentScanController.selectedResultIndex >= 0
                 onClicked: {
                     var msg = workspaceController.currentScanController.moveSelectedToStaging()
-                    opMsgLabel.text = msg
-                }
-            }
-            IconButton {
-                iconSource: "qrc:/icons/rescan.svg"
-                text: "替换内容"
-                tooltip: "备份源文件并替换命中内容（按规则 replace_with）"
-                accent: "primary"
-                enabled: workspaceController.currentScanController.canReplaceSelected
-                onClicked: {
-                    var msg = workspaceController.currentScanController.replaceSelectedResult()
                     opMsgLabel.text = msg
                 }
             }
@@ -390,11 +420,11 @@ Rectangle {
             IconButton {
                 iconSource: "qrc:/icons/rescan.svg"
                 text: "全部替换"
-                tooltip: "对当前过滤后的所有命中结果执行批量替换（按规则 replace_with）"
+                tooltip: "对当前过滤后的所有命中结果执行批量替换（用上方输入框文本）"
                 accent: "primary"
                 enabled: workspaceController.currentScanController.canReplaceAllFiltered
                 onClicked: {
-                    var msg = workspaceController.currentScanController.replaceAllFilteredResults()
+                    var msg = workspaceController.currentScanController.replaceAllFilteredResults(replaceWithInput.text)
                     opMsgLabel.text = msg
                 }
             }

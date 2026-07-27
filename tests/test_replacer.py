@@ -599,13 +599,22 @@ class TestReplaceBatch:
             backup_root: Path,
             scan_root: Path,
             preserve_relative: bool = True,
+            override_replace_with: str | None = None,
         ) -> ReplaceResult:
             if src == src3:
                 return ReplaceResult(
                     status=ReplaceStatus.BACKUP_FAILED,
                     message="备份文件失败: simulated",
                 )
-            return original_replace(src, hits, ruleset, backup_root, scan_root, preserve_relative)
+            return original_replace(
+                src,
+                hits,
+                ruleset,
+                backup_root,
+                scan_root,
+                preserve_relative,
+                override_replace_with=override_replace_with,
+            )
 
         monkeypatch.setattr(replacer_module, "replace_in_file", _fake_replace)
 

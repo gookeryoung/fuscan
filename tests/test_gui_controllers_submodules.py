@@ -284,17 +284,33 @@ class TestCanReplaceResult:
         """None 结果不可替换。"""
         assert can_replace_result(None, _make_ruleset_with_replace()) is False
 
-    def test_none_ruleset_returns_false(self, tmp_path: Path) -> None:
-        """规则集未加载不可替换。"""
+    def test_none_ruleset_with_match_texts_returns_true(self, tmp_path: Path) -> None:
+        """iter-124：规则集未加载但命中含 match_texts 仍可替换（用户自定义模式）。"""
+        hit = RuleHit(
+            rule_name="可替换规则",
+            severity=Severity.WARNING,
+            detail="匹配",
+            match_texts=("password",),
+        )
+        result = _make_result(tmp_path / "a.txt", hits=(hit,))
+        assert can_replace_result(result, None) is True
+
+    def test_no_hits_returns_false(self, tmp_path: Path) -> None:
+        """无命中的结果不可替换。"""
         result = _make_result(tmp_path / "a.txt")
-        assert can_replace_result(result, None) is False
+        assert can_replace_result(result, _make_ruleset_with_replace()) is False
 
     def test_archive_entry_returns_false(
         self,
         tmp_path: Path,
     ) -> None:
         """压缩包内部条目不可替换。"""
-        hit = RuleHit(rule_name="可替换规则", severity=Severity.WARNING, detail="匹配")
+        hit = RuleHit(
+            rule_name="可替换规则",
+            severity=Severity.WARNING,
+            detail="匹配",
+            match_texts=("password",),
+        )
         result = _make_result(
             tmp_path / "a.zip!inner.txt",
             hits=(hit,),
@@ -302,15 +318,20 @@ class TestCanReplaceResult:
         )
         assert can_replace_result(result, _make_ruleset_with_replace()) is False
 
-    def test_no_replace_rule_returns_false(self, tmp_path: Path) -> None:
-        """命中规则中无 replace=True 的规则不可替换。"""
+    def test_hits_without_match_texts_returns_false(self, tmp_path: Path) -> None:
+        """iter-124：命中规则无 match_texts 不可替换（无文本可替换）。"""
         hit = RuleHit(rule_name="只检测规则", severity=Severity.CRITICAL, detail="匹配")
         result = _make_result(tmp_path / "a.txt", hits=(hit,))
         assert can_replace_result(result, _make_ruleset_no_replace()) is False
 
-    def test_replace_rule_returns_true(self, tmp_path: Path) -> None:
-        """命中 replace=True 规则可替换。"""
-        hit = RuleHit(rule_name="可替换规则", severity=Severity.WARNING, detail="匹配")
+    def test_replace_rule_with_match_texts_returns_true(self, tmp_path: Path) -> None:
+        """iter-124：命中含 match_texts 的规则可替换（用户自定义模式不要求 replace=True）。"""
+        hit = RuleHit(
+            rule_name="可替换规则",
+            severity=Severity.WARNING,
+            detail="匹配",
+            match_texts=("password",),
+        )
         result = _make_result(tmp_path / "a.txt", hits=(hit,))
         assert can_replace_result(result, _make_ruleset_with_replace()) is True
 
@@ -392,6 +413,338 @@ class TestReplaceSelected:
         assert "替换成功" in msg
         # 源文件应被替换
         assert src.read_text(encoding="utf-8") == "***=123"
+
+
+class TestReplaceSelectedOverride:
+    """iter-124：测试 replace_selected 的 override_replace_with 参数（用户自定义替换文本）。"""
+
+    def test_override_replaces_all_match_texts(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """override_replace_with 非空时不检查 replace 标志，对所有 match_texts 替换。"""
+        # 准备源文件
+        src = tmp_path / "a.txt"
+        src.write_text("password=123\nsecret=abc\n", encoding="utf-8")
+
+        # 命中规则无 replace=True，但 override 模式不要求
+        hit = RuleHit(
+            rule_name="只检测规则",
+            severity=Severity.CRITICAL,
+            detail="匹配",
+            match_texts=("password", "secret"),
+        )
+        result = _make_result(src, hits=(hit,))
+
+        msg = replace_selected(
+            result=result,
+            ruleset=None,  # override 模式 ruleset 可为 None
+            backup_dir_str=str(tmp_path / "backup"),
+            backup_preserve_relative=False,
+            last_report_root=tmp_path,
+            override_replace_with="[REDACTED]",
+        )
+        assert "替换成功" in msg
+        # 两个 match_texts 都应被替换为 [REDACTED]
+        assert src.read_text(encoding="utf-8") == "[REDACTED]=123\n[REDACTED]=abc\n"
+
+    def test_override_with_default_ellipsis(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """默认替换文本 ... 替换命中内容。"""
+        src = tmp_path / "a.txt"
+        src.write_text("password=123", encoding="utf-8")
+
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.CRITICAL,
+            detail="匹配",
+            match_texts=("password",),
+        )
+        result = _make_result(src, hits=(hit,))
+
+        msg = replace_selected(
+            result=result,
+            ruleset=None,
+            backup_dir_str=str(tmp_path / "backup"),
+            backup_preserve_relative=False,
+            last_report_root=tmp_path,
+            override_replace_with="...",
+        )
+        assert "替换成功" in msg
+        assert src.read_text(encoding="utf-8") == "...=123"
+
+    def test_override_skips_hits_without_match_texts(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """override 模式下无 match_texts 的命中被跳过。"""
+        src = tmp_path / "a.txt"
+        src.write_text("password=123", encoding="utf-8")
+
+        # 第一条命中无 match_texts，第二条有
+        hit1 = RuleHit(rule_name="无文本命中", severity=Severity.INFO, detail="文件名匹配")
+        hit2 = RuleHit(
+            rule_name="内容命中",
+            severity=Severity.WARNING,
+            detail="匹配",
+            match_texts=("password",),
+        )
+        result = _make_result(src, hits=(hit1, hit2))
+
+        msg = replace_selected(
+            result=result,
+            ruleset=None,
+            backup_dir_str=str(tmp_path / "backup"),
+            backup_preserve_relative=False,
+            last_report_root=tmp_path,
+            override_replace_with="***",
+        )
+        assert "替换成功" in msg
+        assert src.read_text(encoding="utf-8") == "***=123"
+
+    def test_override_no_match_texts_returns_no_replace_message(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """override 模式下所有命中均无 match_texts → 返回 NO_REPLACE_RULES 消息。"""
+        src = tmp_path / "a.txt"
+        src.write_text("content", encoding="utf-8")
+
+        hit = RuleHit(rule_name="无文本命中", severity=Severity.INFO, detail="文件名匹配")
+        result = _make_result(src, hits=(hit,))
+
+        msg = replace_selected(
+            result=result,
+            ruleset=None,
+            backup_dir_str=str(tmp_path / "backup"),
+            backup_preserve_relative=False,
+            last_report_root=tmp_path,
+            override_replace_with="...",
+        )
+        assert "无匹配文本可替换" in msg
+
+    def test_override_empty_string_falls_back_to_rule_driven(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """override_replace_with="" 等价于 None，走规则驱动模式。"""
+        src = tmp_path / "a.txt"
+        src.write_text("password=123", encoding="utf-8")
+
+        hit = RuleHit(
+            rule_name="可替换规则",
+            severity=Severity.WARNING,
+            detail="匹配",
+            match_texts=("password",),
+        )
+        result = _make_result(src, hits=(hit,))
+
+        # 传空字符串等价于不传，走规则驱动模式
+        msg = replace_selected(
+            result=result,
+            ruleset=_make_ruleset_with_replace(),
+            backup_dir_str=str(tmp_path / "backup"),
+            backup_preserve_relative=False,
+            last_report_root=tmp_path,
+            override_replace_with="",
+        )
+        assert "替换成功" in msg
+        # 规则驱动模式用 replace_with="***"
+        assert src.read_text(encoding="utf-8") == "***=123"
+
+    def test_override_creates_backup_file(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """override 模式成功替换后应创建 .bak 备份文件。"""
+        src = tmp_path / "a.txt"
+        src.write_text("password=123", encoding="utf-8")
+        backup_dir = tmp_path / "backup"
+
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.CRITICAL,
+            detail="匹配",
+            match_texts=("password",),
+        )
+        result = _make_result(src, hits=(hit,))
+
+        replace_selected(
+            result=result,
+            ruleset=None,
+            backup_dir_str=str(backup_dir),
+            backup_preserve_relative=False,
+            last_report_root=tmp_path,
+            override_replace_with="***",
+        )
+        # 备份文件应存在且保留原始内容
+        backup_path = backup_dir / "a.txt.bak"
+        assert backup_path.exists()
+        assert backup_path.read_text(encoding="utf-8") == "password=123"
+
+
+class TestExtractContext:
+    """iter-124：测试 build_detail_hits_model 实时读取文件上下文。"""
+
+    def test_context_from_file_content(self, tmp_path: Path) -> None:
+        """命中详情应从文件内容提取上下文（前后各 2 行，匹配行用 >>> 标记）。"""
+        src = tmp_path / "a.txt"
+        src.write_text(
+            "line0\nline1\nline2\npassword=secret\nline4\nline5\nline6\n",
+            encoding="utf-8",
+        )
+
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.CRITICAL,
+            detail="line 3: password=secret",
+            match_text="password",
+            match_texts=("password",),
+        )
+        result = _make_result(src, hits=(hit,))
+
+        model = build_detail_hits_model(result)
+        assert len(model) == 1
+        context = model[0]["context"]
+        # 应包含前后各 2 行 + 匹配行（共 5 行）：line1, line2, password=secret, line4, line5
+        assert ">>> password=secret" in context
+        assert "    line1" in context
+        assert "    line2" in context
+        assert "    line4" in context
+        assert "    line5" in context
+        # 应不包含 line0 和 line6（超出 _CONTEXT_LINES=2 范围）
+        assert "line0" not in context
+        assert "line6" not in context
+
+    def test_context_falls_back_to_detail_when_file_missing(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """文件不存在时 context 回退到 hit.detail。"""
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.CRITICAL,
+            detail="line 3: password=secret",
+            match_text="password",
+        )
+        result = _make_result(tmp_path / "missing.txt", hits=(hit,))
+
+        model = build_detail_hits_model(result)
+        assert len(model) == 1
+        # 文件不存在 → context 回退到 hit.detail
+        assert model[0]["context"] == "line 3: password=secret"
+
+    def test_context_falls_back_to_detail_for_archive_entry(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """压缩包内部条目无法读取文件，context 用 hit.detail 兜底。"""
+        # 创建压缩包文件（仅用于测试 archive_path 标记，不实际读取）
+        archive = tmp_path / "a.zip"
+        archive.write_bytes(b"PK\x03\x04")  # 最小 ZIP 头
+
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.CRITICAL,
+            detail="内部条目命中: password",
+            match_text="password",
+        )
+        result = _make_result(
+            tmp_path / "a.zip!inner.txt",
+            hits=(hit,),
+            archive_path=archive,
+        )
+
+        model = build_detail_hits_model(result)
+        assert len(model) == 1
+        # 压缩包条目 → context 用 hit.detail
+        assert model[0]["context"] == "内部条目命中: password"
+
+    def test_context_falls_back_when_file_too_large(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """文件超过 _MAX_CONTEXT_FILE_SIZE (1MB) 时跳过上下文提取。"""
+        src = tmp_path / "large.txt"
+        # 写入 1.5MB 内容（超过 1MB 限制）
+        src.write_text("a" * (1024 * 1024 + 512), encoding="utf-8")
+
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.CRITICAL,
+            detail="detail fallback",
+            match_text="a",
+        )
+        result = _make_result(src, hits=(hit,))
+
+        model = build_detail_hits_model(result)
+        assert len(model) == 1
+        # 文件过大 → context 回退到 hit.detail
+        assert model[0]["context"] == "detail fallback"
+
+    def test_context_falls_back_when_match_text_not_in_file(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """match_text 不在文件中时 context 回退到 hit.detail。"""
+        src = tmp_path / "a.txt"
+        src.write_text("hello world\n", encoding="utf-8")
+
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.CRITICAL,
+            detail="detail fallback",
+            match_text="password",  # 文件中不存在
+        )
+        result = _make_result(src, hits=(hit,))
+
+        model = build_detail_hits_model(result)
+        assert len(model) == 1
+        # match_text 不在文件中 → context 回退到 hit.detail
+        assert model[0]["context"] == "detail fallback"
+
+    def test_context_skipped_for_non_text_file(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """非文本文件扩展名 → 跳过上下文提取。"""
+        src = tmp_path / "a.pdf"
+        src.write_bytes(b"%PDF-1.4 password")
+
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.CRITICAL,
+            detail="detail fallback",
+            match_text="password",
+        )
+        result = _make_result(src, hits=(hit,))
+
+        model = build_detail_hits_model(result)
+        assert len(model) == 1
+        # PDF 不是文本文件 → context 回退到 hit.detail
+        assert model[0]["context"] == "detail fallback"
+
+    def test_context_at_file_start(self, tmp_path: Path) -> None:
+        """匹配行在文件开头时上下文仅包含后续行。"""
+        src = tmp_path / "a.txt"
+        src.write_text("password=123\nline2\nline3\n", encoding="utf-8")
+
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.CRITICAL,
+            detail="detail",
+            match_text="password",
+        )
+        result = _make_result(src, hits=(hit,))
+
+        model = build_detail_hits_model(result)
+        context = model[0]["context"]
+        # 匹配行在开头，start=max(0, -2)=0，end=min(3, 3)=3
+        assert ">>> password=123" in context
+        assert "    line2" in context
+        assert "    line3" in context
 
 
 class TestMoveToStaging:

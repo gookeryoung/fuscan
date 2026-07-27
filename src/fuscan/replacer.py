@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fuscan.rules.model import Rule, RuleSet
+from fuscan.rules.model import LeafMatch, MatchMode, MatchTarget, Rule, RuleSet
 from fuscan.scanner.result import RuleHit
 
 if TYPE_CHECKING:
@@ -164,31 +164,42 @@ class ReplaceResult:
     message: str = ""
 
 
-def replace_in_file(
+def replace_in_file(  # noqa: PLR0912
     src: Path,
     hits: tuple[RuleHit, ...],
-    ruleset: RuleSet,
+    ruleset: RuleSet | None,
     backup_root: Path,
     scan_root: Path,
     preserve_relative: bool = True,
+    override_replace_with: str | None = None,
 ) -> ReplaceResult:
     """对单文件执行备份 + 命中内容替换的原子操作。
 
     流程：
 
     1. 扩展名白名单校验（二进制格式直接拒绝）
-    2. 从 ``hits`` 与 ``ruleset`` 中筛选 ``replace=True`` 的规则
-    3. 若任何 ``replace=True`` 规则的 ``replace_with`` 为空 → 返回提示
-    4. 计算备份路径（保留相对路径或仅文件名）并复制源文件为 ``.bak``
-    5. 读取源文件 → 按规则逐条替换 → 原子写回
+    2. 从 ``hits`` 与 ``ruleset`` 中筛选可替换规则：
+
+       - ``override_replace_with`` 非空（用户自定义替换文本，iter-124）：
+         不检查 ``replace`` 标志，对所有有 ``match_texts`` 的命中执行替换，
+         统一使用 ``override_replace_with`` 作为替换文本
+       - ``override_replace_with`` 为空（规则驱动模式）：仅替换 ``replace=True``
+         的规则，使用规则的 ``replace_with`` 字段
+
+    3. 计算备份路径（保留相对路径或仅文件名）并复制源文件为 ``.bak``
+    4. 读取源文件 → 按规则逐条替换 → 原子写回
 
     :param src: 源文件路径
     :param hits: 该文件的规则命中记录
-    :param ruleset: 当前生效的规则集（用于反查 ``replace`` / ``replace_with``）
+    :param ruleset: 当前规则集（``override_replace_with`` 为空时用于反查
+        ``replace`` / ``replace_with``；非空时仅用于规则名查找，可为 ``None``）
     :param backup_root: 备份区根目录（已存在或可创建）
     :param scan_root: 扫描根目录（用于计算相对路径）
     :param preserve_relative: ``True`` 在备份区保留相对扫描根目录的目录结构；
         ``False`` 仅保留文件名，冲突时追加序号
+    :param override_replace_with: 用户自定义替换文本（iter-124）。非空时覆盖
+        所有规则的 ``replace_with``，且不要求规则 ``replace=True``。默认 ``None``
+        走规则驱动模式
     :return: :class:`ReplaceResult` 描述操作结果
     """
     if not is_text_file(src):
@@ -197,27 +208,56 @@ def replace_in_file(
             message=f"不支持的文件类型: {src.suffix or '(无扩展名)'}，仅支持纯文本文件",
         )
 
-    # 按 rule_name 索引规则集，便于从 RuleHit 反查 Rule.replace / replace_with
-    rule_map: dict[str, Rule] = {r.name: r for r in ruleset.rules}
-    replace_specs: list[tuple[Rule, RuleHit]] = []
-    for hit in hits:
-        rule = rule_map.get(hit.rule_name)
-        if rule is not None and rule.replace:
-            replace_specs.append((rule, hit))
+    if override_replace_with is not None and override_replace_with != "":
+        # 用户自定义替换模式（iter-124）：不检查 replace 标志，对所有命中执行替换
+        # 规则集可为 None（仅用于规则名查找，此处构造占位 Rule 供 _apply_replace_text 使用）
+        replace_specs: list[tuple[Rule, RuleHit]] = []
+        for hit in hits:
+            # 仅要求命中规则有 match_texts（无匹配文本则无法替换）
+            if not hit.match_texts:
+                continue
+            # 构造占位 Rule（replace_with 由 override 覆盖，实际不读取 match）
+            # LeafMatch pattern 不能为空（__post_init__ 校验），用占位符 " "
+            placeholder = Rule(
+                name=hit.rule_name,
+                match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern=" "),
+                replace=True,
+                replace_with=override_replace_with,
+            )
+            replace_specs.append((placeholder, hit))
+        if not replace_specs:
+            return ReplaceResult(
+                status=ReplaceStatus.NO_REPLACE_RULES,
+                message="当前文件无匹配文本可替换",
+            )
+    else:
+        # 规则驱动模式：仅替换 replace=True 的规则
+        if ruleset is None:
+            return ReplaceResult(
+                status=ReplaceStatus.NO_REPLACE_RULES,
+                message="规则集未加载",
+            )
+        # 按 rule_name 索引规则集，便于从 RuleHit 反查 Rule.replace / replace_with
+        rule_map: dict[str, Rule] = {r.name: r for r in ruleset.rules}
+        replace_specs = []
+        for hit in hits:
+            rule = rule_map.get(hit.rule_name)
+            if rule is not None and rule.replace:
+                replace_specs.append((rule, hit))
 
-    if not replace_specs:
-        return ReplaceResult(
-            status=ReplaceStatus.NO_REPLACE_RULES,
-            message="当前文件命中的规则均未启用替换（replace: true）",
-        )
+        if not replace_specs:
+            return ReplaceResult(
+                status=ReplaceStatus.NO_REPLACE_RULES,
+                message="当前文件命中的规则均未启用替换（replace: true）",
+            )
 
-    missing = [rule.name for rule, _ in replace_specs if not rule.replace_with]
-    if missing:
-        return ReplaceResult(
-            status=ReplaceStatus.MISSING_REPLACE_WITH,
-            missing_rules=tuple(missing),
-            message=f"规则 {', '.join(missing)} 未定义替换内容（replace_with 为空）",
-        )
+        missing = [rule.name for rule, _ in replace_specs if not rule.replace_with]
+        if missing:
+            return ReplaceResult(
+                status=ReplaceStatus.MISSING_REPLACE_WITH,
+                missing_rules=tuple(missing),
+                message=f"规则 {', '.join(missing)} 未定义替换内容（replace_with 为空）",
+            )
 
     # 计算备份路径
     backup_path = _resolve_backup_path(src, backup_root, scan_root, preserve_relative)
@@ -318,10 +358,11 @@ class BatchReplaceResult:
 
 def replace_batch(
     results: tuple[ScanResult, ...],
-    ruleset: RuleSet,
+    ruleset: RuleSet | None,
     backup_root: Path,
     scan_root: Path,
     preserve_relative: bool = True,
+    override_replace_with: str | None = None,
 ) -> BatchReplaceResult:
     """对一组 :class:`ScanResult` 批量执行备份+替换，返回聚合结果。
 
@@ -329,10 +370,12 @@ def replace_batch(
     适合 UI「全部替换」按钮调用，传入过滤后的结果列表。
 
     :param results: 待替换的结果元组（通常来自 ``ResultListModel.filtered_results``）
-    :param ruleset: 当前规则集
+    :param ruleset: 当前规则集（``override_replace_with`` 非空时可为 ``None``）
     :param backup_root: 备份区根目录
     :param scan_root: 扫描根目录（用于相对路径计算）
     :param preserve_relative: ``True`` 在备份区保留相对目录结构
+    :param override_replace_with: 用户自定义替换文本（iter-124）。非空时覆盖
+        所有规则的 ``replace_with``，不要求规则 ``replace=True``。默认 ``None``
     :return: :class:`BatchReplaceResult` 含每个文件的详情
     """
     details: list[tuple[Path, ReplaceResult]] = []
@@ -364,6 +407,7 @@ def replace_batch(
             backup_root=backup_root,
             scan_root=scan_root,
             preserve_relative=preserve_relative,
+            override_replace_with=override_replace_with,
         )
         details.append((result.path, replace_result))
 

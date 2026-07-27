@@ -10,8 +10,8 @@ ListView 绑定的命中详情 dict 列表，``can_replace_result`` 判断当前
 
 - :func:`build_detail_hits_model`：构造命中详情 dict 列表
 - :func:`can_replace_result`：判断结果是否可执行替换
-- :func:`replace_selected`：执行替换并返回消息
 - :func:`move_to_staging`：复制到暂存区隔离目录并标记跳过
+- :func:`replace_selected`：执行替换并返回消息
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 from fuscan.config import default_backup_dir, detect_default_staging_dir
 from fuscan.gui.severity_utils import severity_color_hex, severity_text
-from fuscan.replacer import ReplaceStatus, replace_in_file
+from fuscan.replacer import ReplaceStatus, is_text_file, replace_in_file
 
 if TYPE_CHECKING:
     from fuscan.rules.model import RuleSet
@@ -39,47 +39,106 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+# 上下文提取：匹配行前后各保留的行数
+_CONTEXT_LINES = 2
+# 上下文读取的文件大小上限（1MB），超过则跳过上下文提取
+_MAX_CONTEXT_FILE_SIZE = 1024 * 1024
+
+
+def _extract_context(path: Path, match_text: str) -> str:
+    """从文件中提取匹配文本的上下文（前后各 ``_CONTEXT_LINES`` 行）。
+
+    匹配行用 ``>>> `` 前缀标记，便于 QML 高亮显示。文件过大或非文本文件
+    时返回空字符串。
+
+    :param path: 文件路径
+    :param match_text: 匹配文本（在文件中搜索该文本所在行）
+    :return: 上下文文本（多行），无匹配或读取失败返回空字符串
+    """
+    if not match_text:
+        return ""
+    try:
+        if not path.exists() or not is_text_file(path):
+            return ""
+        size = path.stat().st_size
+        if size > _MAX_CONTEXT_FILE_SIZE:
+            return ""
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+    lines = content.splitlines()
+    # 找到第一个包含 match_text 的行
+    match_idx = -1
+    for i, line in enumerate(lines):
+        if match_text in line:
+            match_idx = i
+            break
+    if match_idx < 0:
+        return ""
+
+    start = max(0, match_idx - _CONTEXT_LINES)
+    end = min(len(lines), match_idx + _CONTEXT_LINES + 1)
+    parts = []
+    for i in range(start, end):
+        prefix = ">>> " if i == match_idx else "    "
+        parts.append(f"{prefix}{lines[i]}")
+    return "\n".join(parts)
+
 
 def build_detail_hits_model(result: ScanResult | None) -> list[dict[str, object]]:
     """构造选中结果的命中详情列表（QML 直接 ListView 绑定）。
 
-    每条命中包含：规则名、严重度文本/色值、上下文（detail）、匹配文本、
-    匹配条数、匹配目标（filename/content/path）、规则描述（供详情面板展示）。
+    每条命中包含：规则名、严重度文本/色值、上下文（iter-124 起为文件内容
+    上下文，前后各 2 行，匹配行用 ``>>>`` 标记）、匹配文本、匹配条数、
+    匹配目标（filename/content/path）、规则描述（供详情面板展示）。
 
     :param result: 选中结果；``None`` 返回空列表
     :return: 命中详情 dict 列表
     """
     if result is None:
         return []
-    return [
-        {
-            "ruleName": hit.rule_name,
-            "severityText": severity_text(hit.severity),
-            "severityColor": severity_color_hex(hit.severity),
-            "context": hit.detail,
-            "matchText": hit.match_text,
-            "matchCount": hit.match_count,
-            "target": hit.target,
-            "description": hit.match_description,
-        }
-        for hit in result.hits
-    ]
+    # 压缩包内部条目无法读取文件内容，context 用 hit.detail 兜底
+    is_archive = result.archive_path is not None
+    file_path = result.path
+    model: list[dict[str, object]] = []
+    for hit in result.hits:
+        # iter-124：实时读取文件内容上下文（非压缩包条目）
+        if is_archive:
+            context = hit.detail
+        else:
+            context = _extract_context(file_path, hit.match_text) or hit.detail
+        model.append(
+            {
+                "ruleName": hit.rule_name,
+                "severityText": severity_text(hit.severity),
+                "severityColor": severity_color_hex(hit.severity),
+                "context": context,
+                "matchText": hit.match_text,
+                "matchCount": hit.match_count,
+                "target": hit.target,
+                "description": hit.match_description,
+            }
+        )
+    return model
 
 
-def can_replace_result(result: ScanResult | None, ruleset: RuleSet | None) -> bool:
+def can_replace_result(result: ScanResult | None, ruleset: RuleSet | None) -> bool:  # noqa: ARG001
     """判断当前结果是否可执行替换。
 
-    条件：已选中结果、规则集已加载、非压缩包内部条目、命中规则中存在
-    ``replace=True`` 的规则（否则按钮无意义）。
+    iter-124：放宽条件——只要选中结果且非压缩包内部条目即可替换
+    （用户自定义替换文本 ``override_replace_with`` 模式不要求规则
+    ``replace=True``）。``ruleset`` 参数保留向后兼容，实际不再要求规则集加载。
 
     :param result: 选中结果
-    :param ruleset: 当前规则集
+    :param ruleset: 当前规则集（iter-124 起可为 ``None``，不影响判断）
     :return: 可替换返回 ``True``
     """
-    if result is None or ruleset is None or result.archive_path is not None:
+    if result is None or result.archive_path is not None:
         return False
-    rule_map = {r.name: r for r in ruleset.rules}
-    return any(rule_map.get(h.rule_name) is not None and rule_map[h.rule_name].replace for h in result.hits)
+    # iter-124：用户自定义替换模式不要求规则 replace=True，
+    # 只要命中规则有 match_texts 即可替换（无匹配文本则无法替换）
+    return any(hit.match_texts for hit in result.hits)
 
 
 def replace_selected(
@@ -88,6 +147,7 @@ def replace_selected(
     backup_dir_str: str | None,
     backup_preserve_relative: bool,
     last_report_root: Path | None,
+    override_replace_with: str | None = None,
 ) -> str:
     """替换当前选中结果的命中内容。
 
@@ -95,24 +155,23 @@ def replace_selected(
     返回操作消息供 QML 显示（成功/失败原因）。
 
     :param result: 选中结果；``None`` 返回 ``未选中结果``
-    :param ruleset: 当前规则集；``None`` 返回 ``规则集未加载``
+    :param ruleset: 当前规则集；``override_replace_with`` 非空时可为 ``None``
     :param backup_dir_str: 备份目录字符串（``None`` 或空字符串用默认目录）
     :param backup_preserve_relative: 是否保留相对路径备份
     :param last_report_root: 上次扫描报告根路径（用于相对路径计算）
+    :param override_replace_with: 用户自定义替换文本（iter-124）。非空时覆盖
+        所有规则的 ``replace_with``，不要求规则 ``replace=True``。默认 ``None``
+        走规则驱动模式（要求 ``replace=True`` + ``replace_with``）
     :return: 操作消息字符串
 
     返回值语义：
 
     - 未选中结果 → ``未选中结果``
-    - 规则集未加载 → ``规则集未加载``
     - 压缩包内部条目 → ``压缩包内部条目不支持替换``
-    - 无 ``replace=True`` 规则 → ``未启用替换的规则``
     - 其他状态 → :class:`ReplaceResult.message`
     """
     if result is None:
         return "未选中结果"
-    if ruleset is None:
-        return "规则集未加载"
     if result.archive_path is not None:
         return "压缩包内部条目不支持替换"
 
@@ -126,6 +185,7 @@ def replace_selected(
         backup_root=backup_dir,
         scan_root=scan_root,
         preserve_relative=backup_preserve_relative,
+        override_replace_with=override_replace_with,
     )
     if replace_result.status == ReplaceStatus.SUCCESS:
         logger.info(

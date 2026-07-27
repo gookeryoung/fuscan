@@ -69,10 +69,43 @@ Item {
                         anchors.fill: parent
                         spacing: 8
 
-                        Label {
-                            text: "当前状态：" + workspaceController.currentScanController.statusText
-                            font.pixelSize: 13
-                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+                            // 状态色点：与状态文字同色
+                            Rectangle {
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: {
+                                    var s = workspaceController.currentScanController.statusText
+                                    if (s === "扫描中") return theme.colorWarning
+                                    if (s === "已暂停") return theme.colorTextSecondary
+                                    if (s === "已完成") return (workspaceController.currentScanController.matchedCount > 0
+                                        ? theme.colorDanger : theme.colorSuccess)
+                                    if (s.indexOf("取消") >= 0 || s === "失败") return theme.colorWarning
+                                    return theme.colorPrimary
+                                }
+                            }
+                            Label {
+                                text: "当前状态："
+                                font.pixelSize: 13
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            }
+                            Label {
+                                text: workspaceController.currentScanController.statusText
+                                font.pixelSize: 13
+                                font.bold: true
+                                color: {
+                                    var s = workspaceController.currentScanController.statusText
+                                    if (s === "扫描中") return theme.colorWarning
+                                    if (s === "已暂停") return theme.colorTextSecondary
+                                    if (s === "已完成") return (workspaceController.currentScanController.matchedCount > 0
+                                        ? theme.colorDanger : theme.colorSuccess)
+                                    if (s.indexOf("取消") >= 0 || s === "失败") return theme.colorWarning
+                                    return theme.colorPrimary
+                                }
+                            }
                         }
                         Label {
                             text: workspaceController.currentScanController.statusSummary || "暂无摘要"
@@ -183,13 +216,13 @@ Item {
                                 text: workspaceController.currentScanController.walkDiscovered
                                 font.pixelSize: 14
                                 font.bold: true
-                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                color: theme.isDark ? theme.colorPrimary : theme.colorPrimary
                             }
                             Label {
                                 text: workspaceController.currentScanController.walkClassified
                                 font.pixelSize: 14
                                 font.bold: true
-                                color: theme.isDark ? theme.colorPrimary : theme.colorPrimary
+                                color: theme.colorSuccess
                             }
                             Label {
                                 text: workspaceController.currentScanController.walkSkipped
@@ -301,7 +334,7 @@ Item {
                         Layout.fillWidth: true
                         height: 80
                         radius: theme.radiusMd
-                        color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                        color: theme.isDark ? Qt.rgba(0.15, 0.62, 0.38, 0.15) : Qt.rgba(0.15, 0.62, 0.38, 0.08)
                         border.color: theme.colorSuccess
                         border.width: 1
                         ColumnLayout {
@@ -329,7 +362,7 @@ Item {
                         Layout.fillWidth: true
                         height: 80
                         radius: theme.radiusMd
-                        color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                        color: theme.isDark ? Qt.rgba(0.91, 0.30, 0.24, 0.15) : Qt.rgba(0.91, 0.30, 0.24, 0.08)
                         border.color: theme.colorDanger
                         border.width: 1
                         ColumnLayout {
@@ -357,7 +390,7 @@ Item {
                         Layout.fillWidth: true
                         height: 80
                         radius: theme.radiusMd
-                        color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                        color: theme.isDark ? Qt.rgba(0.95, 0.62, 0.07, 0.15) : Qt.rgba(0.95, 0.62, 0.07, 0.08)
                         border.color: theme.colorWarning
                         border.width: 1
                         ColumnLayout {
@@ -385,7 +418,7 @@ Item {
                         Layout.fillWidth: true
                         height: 80
                         radius: theme.radiusMd
-                        color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                        color: theme.isDark ? Qt.rgba(0.91, 0.30, 0.24, 0.15) : Qt.rgba(0.91, 0.30, 0.24, 0.08)
                         border.color: theme.colorDanger
                         border.width: 1
                         ColumnLayout {

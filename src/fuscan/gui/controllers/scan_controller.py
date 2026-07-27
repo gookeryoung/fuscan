@@ -231,8 +231,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         ``progressTotal <= 0`` 时返回 0（避免除零导致 NaN）。
         扫描进行中按 ``progressScanned / progressTotal * 100`` 计算；
-        扫描完成后保留最终值（``_reset_scan_ui`` 不重置 ``_progress_scanned``）。
+        扫描完成后（``scanDone=True``）固定返回 100，确保进度条与
+        「已完成」状态文字对应（iter-125 修复：scan 阶段完成后 ``progressScanned``
+        可能因错误文件未计入而小于 ``progressTotal``，导致进度条未满）。
         """
+        if self._scan_done:
+            return 100.0
         if self._progress_total <= 0:
             return 0.0
         return min(100.0, self._progress_scanned * 100.0 / self._progress_total)
@@ -333,7 +337,13 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         walk 阶段无确定的 ``total``（文件随遍历持续发现），用 ``discovered`` 自身
         作为分母计算"已发现并分类"的占比：``(discovered - skipped - user_skipped) / discovered``。
         ``discovered == 0`` 时返回 0（避免除零）。
+
+        walk 完成后（``walkDone=True``）固定返回 100，确保进度条与「已完成」
+        状态文字对应（iter-125 修复：walk 完成后若有白名单跳过文件，
+        ``classified < discovered`` 导致进度条未满）。
         """
+        if self._walk_done:
+            return 100.0
         if self._walk_discovered <= 0:
             return 0.0
         # 已分类文件占比 = (发现 - 跳过 - 用户跳过) / 发现
@@ -603,18 +613,19 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     seen.append(name)
         return seen
 
-    @Slot(result=str)  # pyrefly: ignore [not-callable]
-    def replaceSelectedResult(self) -> str:
+    @Slot(str, result=str)  # pyrefly: ignore [not-callable]
+    def replaceSelectedResult(self, replace_with: str = "") -> str:
         """替换当前选中结果的命中内容。
+
+        iter-124：接受用户自定义替换文本 ``replace_with``（QML 输入框提供，
+        默认 ``...``）。非空时覆盖所有规则的 ``replace_with``，且不要求规则
+        ``replace=True``，实现「默认用 ... 替换被命中内容，支持设置自定义」。
 
         调用 :func:`fuscan.replacer.replace_in_file` 执行备份 + 原子替换。
         返回操作消息供 QML 显示（成功/失败原因）。
 
-        - 未选中结果 → ``未选中结果``
-        - 规则集未加载 → ``规则集未加载``
-        - 压缩包内部条目 → ``压缩包内部条目不支持替换``
-        - 无 ``replace=True`` 规则 → ``未启用替换的规则``
-        - 其他状态 → ``ReplaceResult.message``
+        :param replace_with: 用户自定义替换文本（空字符串走规则驱动模式）
+        :return: 操作消息字符串
         """
         last_root = self._last_report.root if self._last_report is not None else None
         return replace_selected(
@@ -623,6 +634,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             backup_dir_str=self._config.backup_dir,
             backup_preserve_relative=self._config.backup_preserve_relative_path,
             last_report_root=last_root,
+            override_replace_with=replace_with if replace_with else None,
         )
 
     # ----------------------------- iter-113 批量替换与撤销 -----------------------------
@@ -641,19 +653,22 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         selected = self._get_selected_result()
         return selected.path.parent if selected is not None else Path.cwd()
 
-    @Slot(result=str)  # pyrefly: ignore [not-callable]
-    def replaceAllFilteredResults(self) -> str:
+    @Slot(str, result=str)  # pyrefly: ignore [not-callable]
+    def replaceAllFilteredResults(self, replace_with: str = "") -> str:
         """对当前过滤后的所有结果执行批量替换。
+
+        iter-124：接受用户自定义替换文本 ``replace_with``（QML 输入框提供，
+        默认 ``...``）。非空时覆盖所有规则的 ``replace_with``，且不要求规则
+        ``replace=True``。
 
         调用 :func:`fuscan.replacer.replace_batch`，传入
         ``ResultListModel.filtered_results``。返回 :class:`BatchReplaceResult.message`
-        供 QML 显示。规则集未加载或无结果时返回提示消息。
+        供 QML 显示。
 
-        - 规则集未加载 → ``规则集未加载``
-        - 无过滤后结果 → ``无待替换的结果``
-        - 其他状态 → :class:`BatchReplaceResult.message`
+        :param replace_with: 用户自定义替换文本（空字符串走规则驱动模式）
+        :return: 操作消息字符串
         """
-        if self._ruleset is None:
+        if self._ruleset is None and not replace_with:
             return "规则集未加载"
         filtered = self._result_model.filtered_results
         if not filtered:
@@ -670,6 +685,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             backup_root=backup_dir,
             scan_root=scan_root,
             preserve_relative=self._config.backup_preserve_relative_path,
+            override_replace_with=replace_with if replace_with else None,
         )
         logger.info(
             "批量替换完成: 成功 %d/%d, 跳过 %d, 失败 %d",
@@ -747,10 +763,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def canReplaceAllFiltered(self) -> bool:
         """是否可对过滤后结果执行批量替换。
 
-        条件：规则集已加载、过滤后结果非空、至少一个结果可替换（含 replace=True 规则）。
+        iter-124：放宽条件——过滤后结果非空且至少一个结果可替换即可
+        （不要求规则 ``replace=True``，用户自定义替换文本模式）。
         """
-        if self._ruleset is None:
-            return False
         filtered = self._result_model.filtered_results
         if not filtered:
             return False
@@ -1254,13 +1269,18 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._cleanup_stats_worker()
 
     def cleanup(self) -> None:
-        """窗口关闭时清理资源（worker + cache）。"""
+        """窗口关闭时清理资源（worker + cache）。
+
+        iter-124：worker wait 超时从 3000ms 降至 500ms，避免多工作区关闭时
+        累计等待过久（10 个工作区 6s → 1s）。超时后 worker 线程随进程退出
+        自然终止，不阻塞用户。
+        """
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
-            self._worker.wait(3000)
+            self._worker.wait(500)
         if self._stats_worker is not None and self._stats_worker.isRunning():
             self._stats_worker.cancel()
-            self._stats_worker.wait(3000)
+            self._stats_worker.wait(500)
         self._cleanup_workers()
         if self._cache is not None:
             try:

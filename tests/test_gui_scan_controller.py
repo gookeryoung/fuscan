@@ -966,6 +966,52 @@ class TestScanPhaseProgress:
         assert controller.scanPhase == "done"
         assert controller.scanDone is True
 
+    def test_walk_progress_returns_100_when_walk_done(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """iter-125：walkDone=True 时 walkProgress 固定返回 100，与进度条对应。"""
+        stats_instances, _ = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+        # 模拟 walk 阶段：发现 100，跳过 80（classified=20，占比 20%）
+        info = ProgressInfo(current_file="", total=100, skipped=80, phase="walk")
+        stats_instances[0].emit_progress(info)
+        assert controller.walkDone is False
+        assert controller.walkProgress == 20.0  # 进行中按占比
+        # walk 完成
+        stats_instances[0].emit_finished([_make_walk_result(tmp_path)])
+        assert controller.walkDone is True
+        # 完成后 walkProgress 固定 100，即使 classified < discovered
+        assert controller.walkProgress == 100.0
+
+    def test_progress_returns_100_when_scan_done(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """iter-125：scanDone=True 时 progress 固定返回 100，与进度条对应。"""
+        stats_instances, scan_instances = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+        stats_instances[0].emit_finished([_make_walk_result(tmp_path)])
+        # 模拟 scan 阶段：scanned=30, total=40（75%）
+        info = ProgressInfo(current_file="/tmp/x", scanned=30, total=40, phase="scan")
+        scan_instances[0].emit_progress(info)
+        assert controller.scanDone is False
+        assert controller.progress == 75.0
+        # scan 完成
+        report = _make_scan_report(results=())
+        scan_instances[0].emit_finished(report)
+        assert controller.scanDone is True
+        # 完成后 progress 固定 100，即使 scanned < total
+        assert controller.progress == 100.0
+
 
 class TestTogglePause:
     """测试 togglePause 暂停/继续。"""
@@ -1177,7 +1223,11 @@ class TestOpenLocationWithResult:
                 return FakeClipboard()
 
         # copyPath 内部 from PySide2.QtGui import QGuiApplication，需 patch 源模块
-        import PySide2.QtGui as qt_gui_module
+        # 双兼容：PySide2 优先，缺失时回退 PySide6
+        try:
+            import PySide2.QtGui as qt_gui_module
+        except ImportError:
+            import PySide6.QtGui as qt_gui_module  # type: ignore[no-redef]
 
         monkeypatch.setattr(qt_gui_module, "QGuiApplication", FakeGuiApp)
         controller.copyPath()
@@ -1481,6 +1531,187 @@ class TestIter113BatchReplaceUndo:
     ) -> None:
         """初始状态 canUndoLastBatchReplace=False。"""
         assert controller.canUndoLastBatchReplace is False
+
+
+class TestIter124CustomReplaceWith:
+    """iter-124：ScanController 自定义替换文本 replace_with 参数测试。"""
+
+    def _populate_no_replace_results(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> Path:
+        """构造命中规则无 replace=True 的结果（验证 override 模式不要求 replace=True）。"""
+        # 注入无 replace 标志的规则集
+        from fuscan.rules.model import (
+            LeafMatch,
+            MatchMode,
+            MatchTarget,
+            Rule,
+            RuleSet,
+        )
+
+        rule = Rule(
+            name="只检测规则",
+            severity=Severity.CRITICAL,
+            match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="password"),
+            # replace 默认 False
+        )
+        controller._ruleset = RuleSet(version="1.0", rules=(rule,))
+
+        # 写入真实文件（含 password 关键词）
+        src = tmp_path / "scan" / "secret.txt"
+        src.parent.mkdir(parents=True)
+        src.write_text("password=sensitive\n", encoding="utf-8")
+
+        # 构造 ScanResult（命中含 match_texts）
+        hit = RuleHit(
+            rule_name="只检测规则",
+            severity=Severity.CRITICAL,
+            detail="匹配",
+            match_texts=("password",),
+        )
+        results = (ScanResult(path=src, size=src.stat().st_size, hits=(hit,)),)
+        controller._result_model.set_results(results)
+        controller._last_report = ScanReport(
+            root=tmp_path / "scan",
+            results=results,
+            stats=ScanStats(),
+        )
+        return src
+
+    def test_replace_selected_with_custom_text(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> None:
+        """replaceSelectedResult(replace_with) 用自定义文本替换，不要求规则 replace=True。"""
+        src = self._populate_no_replace_results(controller, tmp_path)
+        controller.setSelectedResultIndex(0)
+
+        # 用自定义文本 [REDACTED] 替换
+        msg = controller.replaceSelectedResult("[REDACTED]")
+
+        assert "替换成功" in msg
+        assert src.read_text(encoding="utf-8") == "[REDACTED]=sensitive\n"
+
+    def test_replace_selected_with_ellipsis_default(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> None:
+        """replaceSelectedResult("...") 用默认省略号替换命中内容。"""
+        src = self._populate_no_replace_results(controller, tmp_path)
+        controller.setSelectedResultIndex(0)
+
+        msg = controller.replaceSelectedResult("...")
+
+        assert "替换成功" in msg
+        assert src.read_text(encoding="utf-8") == "...=sensitive\n"
+
+    def test_replace_selected_empty_string_uses_rule_driven(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> None:
+        """replaceSelectedResult("") 走规则驱动模式（无 replace=True 规则 → 提示消息）。"""
+        self._populate_no_replace_results(controller, tmp_path)
+        controller.setSelectedResultIndex(0)
+
+        # 空字符串走规则驱动模式，规则无 replace=True → 返回 NO_REPLACE_RULES 消息
+        msg = controller.replaceSelectedResult("")
+
+        assert "未启用替换" in msg or "无匹配文本" in msg
+
+    def test_replace_all_filtered_with_custom_text(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> None:
+        """replaceAllFilteredResults(replace_with) 用自定义文本批量替换。"""
+        src = self._populate_no_replace_results(controller, tmp_path)
+        # 再加一个文件
+        src2 = tmp_path / "scan" / "another.txt"
+        src2.write_text("password=another\n", encoding="utf-8")
+        hit = RuleHit(
+            rule_name="只检测规则",
+            severity=Severity.CRITICAL,
+            detail="匹配",
+            match_texts=("password",),
+        )
+        results = (
+            ScanResult(path=src, size=src.stat().st_size, hits=(hit,)),
+            ScanResult(path=src2, size=src2.stat().st_size, hits=(hit,)),
+        )
+        controller._result_model.set_results(results)
+        controller._last_report = ScanReport(
+            root=tmp_path / "scan",
+            results=results,
+            stats=ScanStats(),
+        )
+
+        msg = controller.replaceAllFilteredResults("***")
+
+        assert "成功 2/2" in msg
+        assert src.read_text(encoding="utf-8") == "***=sensitive\n"
+        assert src2.read_text(encoding="utf-8") == "***=another\n"
+        # 撤销记录应可用
+        assert controller.canUndoLastBatchReplace is True
+
+    def test_replace_all_filtered_no_ruleset_with_override_succeeds(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> None:
+        """replaceAllFilteredResults(override) 在 ruleset=None 时仍可执行（override 模式不依赖规则集）。"""
+        # 不注入任何规则集
+        controller._ruleset = None
+
+        # 写入文件与命中
+        src = tmp_path / "scan" / "a.txt"
+        src.parent.mkdir(parents=True)
+        src.write_text("password=abc\n", encoding="utf-8")
+        hit = RuleHit(
+            rule_name="任意规则",
+            severity=Severity.CRITICAL,
+            detail="匹配",
+            match_texts=("password",),
+        )
+        results = (ScanResult(path=src, size=src.stat().st_size, hits=(hit,)),)
+        controller._result_model.set_results(results)
+        controller._last_report = ScanReport(
+            root=tmp_path / "scan",
+            results=results,
+            stats=ScanStats(),
+        )
+
+        msg = controller.replaceAllFilteredResults("...")
+
+        assert "成功 1/1" in msg
+        assert src.read_text(encoding="utf-8") == "...=abc\n"
+
+    def test_can_replace_selected_with_match_texts_no_ruleset(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> None:
+        """canReplaceSelected：规则集为 None 但命中含 match_texts → True（用户自定义模式）。"""
+        controller._ruleset = None
+        # 写入文件
+        src = tmp_path / "scan" / "a.txt"
+        src.parent.mkdir(parents=True)
+        src.write_text("password=abc\n", encoding="utf-8")
+        hit = RuleHit(
+            rule_name="任意规则",
+            severity=Severity.CRITICAL,
+            detail="匹配",
+            match_texts=("password",),
+        )
+        results = (ScanResult(path=src, size=src.stat().st_size, hits=(hit,)),)
+        controller._result_model.set_results(results)
+        controller.setSelectedResultIndex(0)
+
+        assert controller.canReplaceSelected is True
 
 
 class TestBuildScanRoots:

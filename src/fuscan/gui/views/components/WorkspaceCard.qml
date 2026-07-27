@@ -372,21 +372,25 @@ Rectangle {
                         editTargetDialog.open()
                     }
                 }
+                // iter-125：CSV/JSON 合并为「导出」按钮 + Menu 格式选择
                 IconButton {
                     iconSource: "qrc:/icons/export_csv.svg"
-                    text: "CSV"
-                    tooltip: "导出为 CSV"
+                    text: "导出"
+                    tooltip: "导出扫描结果（选择格式）"
                     accent: "ghost"
                     enabled: matchedCount > 0
-                    onClicked: exportCsvRequested(card.workspaceId)
-                }
-                IconButton {
-                    iconSource: "qrc:/icons/export_json.svg"
-                    text: "JSON"
-                    tooltip: "导出为 JSON"
-                    accent: "ghost"
-                    enabled: matchedCount > 0
-                    onClicked: exportJsonRequested(card.workspaceId)
+                    onClicked: exportFormatMenu.open()
+                    Menu {
+                        id: exportFormatMenu
+                        MenuItem {
+                            text: "CSV (*.csv)"
+                            onTriggered: card.exportCsvRequested(card.workspaceId)
+                        }
+                        MenuItem {
+                            text: "JSON (*.json)"
+                            onTriggered: card.exportJsonRequested(card.workspaceId)
+                        }
+                    }
                 }
                 IconButton {
                     iconSource: "qrc:/icons/settings.svg"
@@ -639,10 +643,12 @@ Rectangle {
                     font.pixelSize: theme.fontSizeCaption
                     color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                 }
+                // iter-125：上限改为 cpuCount（与提示一致）
                 SpinBox {
+                    id: taskMaxWorkersSpin
                     from: 1
-                    to: 16
-                    value: taskSettingsDialog.editMaxWorkers
+                    to: Math.max(ConfigController.cpuCount, 1)
+                    value: Math.min(taskSettingsDialog.editMaxWorkers, ConfigController.cpuCount)
                     editable: true
                     onValueChanged: taskSettingsDialog.editMaxWorkers = value
                 }
@@ -657,11 +663,19 @@ Rectangle {
                     font.pixelSize: theme.fontSizeBody
                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                 }
+                // iter-125：动态步进 <50 步 10，50-100 步 25，>100 步 100
                 SpinBox {
+                    id: taskMaxFileSizeSpin
                     from: 1
                     to: 1024
                     value: taskSettingsDialog.editMaxFileSizeMB
                     editable: true
+                    stepSize: {
+                        var v = taskMaxFileSizeSpin.value
+                        if (v < 50) return 10
+                        if (v < 100) return 25
+                        return 100
+                    }
                     onValueChanged: taskSettingsDialog.editMaxFileSizeMB = value
                 }
             }

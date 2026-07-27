@@ -684,24 +684,28 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._save_cached_results(ws_id, controller)
 
     def cleanup(self) -> None:
-        """窗口关闭时清理所有 ScanController 资源。"""
+        """窗口关闭时清理所有 ScanController 资源。
+
+        iter-124：关闭时不再 emit ``currentWorkspaceChanged``/``activeScanChanged``
+        信号，避免 QML 在组件销毁过程中重新求值 ``currentScanController`` binding
+        访问到已被 ``deleteLater`` 的对象（Terminal#4-17 null 错误根因）。
+        同时保留 ``_fallback_controller`` 不删除——Python 进程即将退出，由系统
+        回收即可；删除会触发 QML 重新求值访问 null。
+
+        仍清理 worker/cache 等资源（QThread 等待退出、SQLite 连接关闭），
+        避免「关闭卡住太久」与文件句柄泄漏。worker 等待超时由各 ScanController
+        自身 :meth:`ScanController.cleanup` 控制。
+        """
         for controller in self._scan_controllers.values():
             controller.cleanup()
             controller.deleteLater()
         self._scan_controllers.clear()
+        # fallback 仅清理 worker 资源，不 deleteLater（避免 QML binding 访问 null）
         if hasattr(self, "_fallback_controller"):
             self._fallback_controller.cleanup()
-            self._fallback_controller.deleteLater()
-            del self._fallback_controller
-        self._model.clear()
-        # 清理当前工作区 ID，使状态与空模型一致
-        if self._current_workspace_id:
-            self._current_workspace_id = ""
-            self.currentWorkspaceChanged.emit()  # pyrefly: ignore [missing-attribute]
-        # 清理 active scan 工作区 ID
-        if self._active_scan_workspace_id:
-            self._active_scan_workspace_id = ""
-            self.activeScanChanged.emit()  # pyrefly: ignore [missing-attribute]
+        # 不清空 _current_workspace_id / _active_scan_workspace_id，不 emit 信号：
+        # 应用退出阶段 QML 组件正在销毁，重新求值 binding 会触发 null TypeError。
+        # 状态清空无意义（进程即将退出），保留原值让 QML binding 求值稳定。
 
     # ----------------------------- 持久化 -----------------------------
 

@@ -283,10 +283,12 @@ Item {
                                     font.pixelSize: theme.fontSizeCaption
                                     color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                 }
+                                // iter-125：上限改为 cpuCount（与提示一致），editable 支持手输入
                                 SpinBox {
+                                    id: maxWorkersSpin
                                     from: 1
-                                    to: 16
-                                    value: configController.maxWorkers
+                                    to: Math.max(configController.cpuCount, 1)
+                                    value: Math.min(configController.maxWorkers, configController.cpuCount)
                                     editable: true
                                     onValueChanged: configController.setMaxWorkers(value)
                                 }
@@ -298,11 +300,19 @@ Item {
                                     Layout.fillWidth: true
                                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                 }
+                                // iter-125：动态步进 <50 步 10，50-100 步 25，>100 步 100
                                 SpinBox {
+                                    id: maxFileSizeSpin
                                     from: 1
-                                    to: 500
+                                    to: 1024
                                     value: configController.maxFileSizeMB
                                     editable: true
+                                    stepSize: {
+                                        var v = maxFileSizeSpin.value
+                                        if (v < 50) return 10
+                                        if (v < 100) return 25
+                                        return 100
+                                    }
                                     onValueChanged: configController.setMaxFileSizeMB(value)
                                 }
                             }
@@ -313,10 +323,12 @@ Item {
                                     Layout.fillWidth: true
                                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                 }
+                                // iter-125：editable 支持手输入
                                 SpinBox {
                                     from: 0
                                     to: 50
                                     value: configController.maxDepth
+                                    editable: true
                                     onValueChanged: configController.setMaxDepth(value)
                                 }
                             }

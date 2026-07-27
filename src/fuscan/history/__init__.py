@@ -10,15 +10,19 @@
 - :class:`HistoryStore`：JSON 持久化存储，线程安全
 - :class:`ScanComparison`：两次扫描对比结果
 - :func:`compare_scans`：对比两次扫描，生成 :class:`ScanComparison`
+- :data:`STATUS_COMPLETED` / :data:`STATUS_CANCELLED` / :data:`STATUS_FAILED`：状态常量
 """
 
 from __future__ import annotations
 
 from fuscan.history.comparator import ScanComparison, compare_scans
-from fuscan.history.model import ScanHistoryEntry
+from fuscan.history.model import STATUS_CANCELLED, STATUS_COMPLETED, STATUS_FAILED, ScanHistoryEntry
 from fuscan.history.store import HistoryStore, default_history_store_path
 
 __all__ = [
+    "STATUS_CANCELLED",
+    "STATUS_COMPLETED",
+    "STATUS_FAILED",
     "HistoryStore",
     "ScanComparison",
     "ScanHistoryEntry",

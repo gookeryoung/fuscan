@@ -81,7 +81,7 @@ class TestScanHistoryEntry:
 
     def test_from_dict_non_dict_returns_default(self) -> None:
         # 非 dict 输入返回默认实例（不抛异常）
-        restored = ScanHistoryEntry.from_dict("not a dict")  # pyrefly: ignore [wrong-argument-type]
+        restored = ScanHistoryEntry.from_dict("not a dict")  # type: ignore[arg-type]
         assert restored.workspace_id == ""
         assert restored.matched_files == 0
         assert restored.status == STATUS_COMPLETED
@@ -114,7 +114,7 @@ class TestScanHistoryEntry:
     def test_frozen_dataclass(self) -> None:
         entry = _make_entry()
         with pytest.raises(AttributeError):
-            entry.matched_files = 100  # pyrefly: ignore [misc]
+            entry.matched_files = 100  # pyrefly: ignore [read-only]
 
 
 class TestHistoryStore:
@@ -148,9 +148,13 @@ class TestHistoryStore:
         store.add(entry1)
         store.add(entry2)
 
-        assert store.latest_entry("ws-1").scan_id == "s2"
+        latest = store.latest_entry("ws-1")
+        assert latest is not None
+        assert latest.scan_id == "s2"
         # previous_entry 排除当前 scan_id 后返回最新一条
-        assert store.previous_entry("ws-1", "s2").scan_id == "s1"
+        previous = store.previous_entry("ws-1", "s2")
+        assert previous is not None
+        assert previous.scan_id == "s1"
         # 无更早历史返回 None
         assert store.previous_entry("ws-1", "s1") is None
         # 无任何历史返回 None
@@ -379,7 +383,7 @@ class TestCompareScans:
         current = _make_entry(scan_id="s1")
         comparison = compare_scans(current, None)
         with pytest.raises(AttributeError):
-            comparison.matched_delta = 100  # pyrefly: ignore [misc]
+            comparison.matched_delta = 100  # pyrefly: ignore [read-only]
 
 
 class TestHistoryStoreIntegration:

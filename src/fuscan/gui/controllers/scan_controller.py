@@ -64,6 +64,7 @@ if TYPE_CHECKING:
     from fuscan.cache import CacheStore
     from fuscan.gui.controllers.config_controller import ConfigController
     from fuscan.gui.controllers.rules_controller import RulesController
+    from fuscan.history.model import ScanHistoryEntry
     from fuscan.rules.model import RuleSet
 
 __all__ = ["ScanController"]
@@ -1136,7 +1137,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """获取当前选中的 :class:`ScanResult`。"""
         return self._result_model.get_result(self._selected_result_index)
 
-    def build_history_entry(self, workspace_id: str, workspace_name: str) -> object | None:
+    def build_history_entry(self, workspace_id: str, workspace_name: str) -> ScanHistoryEntry | None:
         """从最近一次 :class:`ScanReport` 构建扫描历史条目（iter-115）。
 
         在扫描完成/取消后由 :class:`WorkspaceController` 调用，将本次扫描

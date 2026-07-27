@@ -766,7 +766,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         except Exception as exc:  # 归档失败不影响主流程
             logger.warning("工作区 %s 扫描历史归档失败: %s", ws_id, exc)
 
-    @Slot(str, result=str)
+    @Slot(str, result=str)  # pyrefly: ignore [not-callable]
     def workspaceHistoryJson(self, ws_id: str) -> str:
         """返回指定工作区的历史记录 JSON 字符串（供 QML 解析展示）。
 
@@ -797,7 +797,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         ]
         return _json.dumps(payload, ensure_ascii=False)
 
-    @Slot(str, result=str)
+    @Slot(str, result=str)  # pyrefly: ignore [not-callable]
     def compareWithPreviousScan(self, ws_id: str) -> str:
         """对比指定工作区最近一次扫描与上上次扫描，返回对比结果 JSON。
 
@@ -846,7 +846,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         }
         return _json.dumps(payload, ensure_ascii=False)
 
-    @Slot(str, result=int)
+    @Slot(str, result=int)  # pyrefly: ignore [not-callable]
     def clearWorkspaceHistory(self, ws_id: str) -> int:
         """清空指定工作区的扫描历史，返回被清除的条目数。"""
         return self._history_store.clear_workspace(ws_id)

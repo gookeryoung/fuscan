@@ -1523,6 +1523,158 @@ class TestSevenZReaderMocked:
         # 不应抛异常
         reader.close()
 
+    def test_preload_bytes_empty_non_dir_entries(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """所有条目均为目录时应直接 return，不调用 readall()。"""
+        readall_called = {"count": 0}
+
+        class FakeInfo:
+            def __init__(self, name: str) -> None:
+                self.filename = name
+                self.is_directory = True
+
+        class FakeSevenZ:
+            def readall(self) -> dict[str, object]:
+                readall_called["count"] += 1
+                return {}
+
+            def close(self) -> None:
+                pass
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
+        # 仅含目录条目
+        reader._info_map = {"dir1/": FakeInfo("dir1/"), "dir2/": FakeInfo("dir2/")}
+        reader._preload_bytes()
+        # 不应调用 readall
+        assert readall_called["count"] == 0
+        assert reader._bytes_cache == {}
+        assert reader._encrypted_entries == set()
+
+    def test_preload_bytes_bio_none_skipped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """readall() 返回的 bio 为 None 时应跳过该条目（不写入缓存）。"""
+
+        class FakeInfo:
+            filename = "a.txt"
+            is_directory = False
+
+        class FakeSevenZ:
+            def readall(self) -> dict[str, object]:
+                return {"a.txt": None}
+
+            def close(self) -> None:
+                pass
+
+        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
+        reader._info_map = {"a.txt": FakeInfo()}
+        reader._preload_bytes()
+        # bio 为 None 应跳过：不写缓存、不标记加密
+        assert reader._bytes_cache == {}
+        assert reader._encrypted_entries == set()
+
+
+# ---------------------------------------------------------------------------
+# iter-116：SevenZReader 初始化异常分支补测
+# ---------------------------------------------------------------------------
+
+
+class TestSevenZReaderInitErrors:
+    """覆盖 ``SevenZReader.__init__`` 中 py7zr 异常分支（line 46-62）。
+
+    现有 ``test_open_bad_7z`` 仅触发 generic Exception 分支（line 61-62），
+    以下测试通过 mock py7zr 模块模拟各类型异常，覆盖 ImportError / Bad7zFile /
+    PasswordRequired / UnsupportedCompressionMethodError / OSError 分支。
+    """
+
+    def _patch_py7zr(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        exception_to_raise: Exception | type[Exception],
+    ) -> None:
+        """mock py7zr 模块，让 ``SevenZipFile`` 构造抛指定异常。"""
+        import sys
+
+        import py7zr
+
+        class FakeSevenZipFile:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                raise exception_to_raise
+
+        class FakePy7zrModule:
+            SevenZipFile = FakeSevenZipFile
+            Bad7zFile = py7zr.Bad7zFile
+            PasswordRequired = py7zr.PasswordRequired
+            UnsupportedCompressionMethodError = py7zr.UnsupportedCompressionMethodError
+
+        # 让 `import py7zr` 在 sevenz_reader.py 内返回我们的 fake 模块
+        monkeypatch.setitem(sys.modules, "py7zr", FakePy7zrModule())
+
+    def test_init_import_error_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """py7zr 未安装时应抛 ArchiveError。"""
+        import builtins
+        import sys
+
+        # 临时移除 py7zr 模块缓存，让 import 真正执行
+        original_module = sys.modules.pop("py7zr", None)
+        original_import = builtins.__import__
+
+        def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if name == "py7zr":
+                raise ImportError("No module named 'py7zr'")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        path = tmp_path / "fake.7z"
+        path.write_bytes(b"fake")
+        try:
+            with pytest.raises(ArchiveError, match="py7zr 库未安装"):
+                SevenZReader(path)
+        finally:
+            if original_module is not None:
+                sys.modules["py7zr"] = original_module
+
+    def test_init_bad_7z_file_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """py7zr.Bad7zFile 异常应包装为 ArchiveError。"""
+        import py7zr
+
+        self._patch_py7zr(monkeypatch, py7zr.Bad7zFile("corrupted"))
+        path = tmp_path / "fake.7z"
+        path.write_bytes(b"fake")
+        with pytest.raises(ArchiveError, match="损坏的 7Z 文件"):
+            SevenZReader(path)
+
+    def test_init_password_required_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """py7zr.PasswordRequired 异常应包装为 ArchiveError。"""
+        import py7zr
+
+        self._patch_py7zr(monkeypatch, py7zr.PasswordRequired("need password"))
+        path = tmp_path / "fake.7z"
+        path.write_bytes(b"fake")
+        with pytest.raises(ArchiveError, match="7Z 文件需要密码"):
+            SevenZReader(path)
+
+    def test_init_unsupported_compression_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """py7zr.UnsupportedCompressionMethodError 异常应包装为 ArchiveError。"""
+        import py7zr
+
+        # UnsupportedCompressionMethodError 签名要求 (data, message)
+        self._patch_py7zr(monkeypatch, py7zr.UnsupportedCompressionMethodError(b"data", "unsupported"))
+        path = tmp_path / "fake.7z"
+        path.write_bytes(b"fake")
+        with pytest.raises(ArchiveError, match="不支持的 7Z 压缩方法"):
+            SevenZReader(path)
+
+    def test_init_os_error_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """OSError 异常应包装为 ArchiveError。"""
+        self._patch_py7zr(monkeypatch, OSError("permission denied"))
+        path = tmp_path / "fake.7z"
+        path.write_bytes(b"fake")
+        with pytest.raises(ArchiveError, match="无法打开 7Z 文件"):
+            SevenZReader(path)
+
+
+class TestSevenZReaderListEntriesExtra:
+    """``list_entries`` 目录识别测试（独立类，避免与 mocked reader fixture 干扰）。"""
+
     def test_list_entries_with_directory(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """list_entries 应正确识别目录条目。"""
 
@@ -1540,8 +1692,14 @@ class TestSevenZReaderMocked:
             def close(self) -> None:
                 pass
 
-        reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
+        # 复用 TestSevenZReaderMocked._make_mocked_reader 的构造方式
+        reader = SevenZReader.__new__(SevenZReader)
+        reader._path = tmp_path / "a.7z"  # type: ignore[attr-defined]
+        reader._password = None  # type: ignore[attr-defined]
+        reader._sevenz = FakeSevenZ()  # type: ignore[attr-defined]
         reader._info_map = {"a.txt": FakeInfo("a.txt", False, 100), "dir/": FakeInfo("dir/", True)}
+        reader._bytes_cache = {}  # type: ignore[attr-defined]
+        reader._encrypted_entries = set()  # type: ignore[attr-defined]
         entries = reader.list_entries()
         assert len(entries) == 2
         entry_map = {e.entry_name: e for e in entries}

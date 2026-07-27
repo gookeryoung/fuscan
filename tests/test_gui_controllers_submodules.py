@@ -672,7 +672,7 @@ class TestLoadPersistedWorkspacesFaultTolerance:
 
         persist_file = tmp_path / "workspaces.json"
         persist_file.write_text(
-            '{"version": %d, "workspaces": []}' % (PERSIST_VERSION + 100),
+            f'{{"version": {PERSIST_VERSION + 100}, "workspaces": []}}',
             encoding="utf-8",
         )
         result = load_persisted_workspaces(persist_file)

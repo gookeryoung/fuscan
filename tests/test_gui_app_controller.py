@@ -148,9 +148,93 @@ class TestGuiPackageGetattr:
         cls = gui_pkg.AppController
         assert cls is AppController
 
+    def test_getattr_scan_controller(self) -> None:
+        """``from fuscan.gui import ScanController`` 应惰性导入类。"""
+        import fuscan.gui as gui_pkg
+        from fuscan.gui.controllers.scan_controller import ScanController as Impl
+
+        cls = gui_pkg.ScanController
+        assert cls is Impl
+
+    def test_getattr_config_controller(self) -> None:
+        """``from fuscan.gui import ConfigController`` 应惰性导入类。"""
+        import fuscan.gui as gui_pkg
+
+        cls = gui_pkg.ConfigController
+        assert cls is ConfigController
+
+    def test_getattr_rules_controller(self) -> None:
+        """``from fuscan.gui import RulesController`` 应惰性导入类。"""
+        import fuscan.gui as gui_pkg
+
+        cls = gui_pkg.RulesController
+        assert cls is RulesController
+
+    def test_getattr_about_controller(self) -> None:
+        """``from fuscan.gui import AboutController`` 应惰性导入类。"""
+        import fuscan.gui as gui_pkg
+
+        cls = gui_pkg.AboutController
+        assert cls is AboutController
+
+    def test_getattr_theme_controller(self) -> None:
+        """``from fuscan.gui import ThemeController`` 应惰性导入类。"""
+        import fuscan.gui as gui_pkg
+
+        cls = gui_pkg.ThemeController
+        assert cls is ThemeController
+
+    def test_getattr_result_list_model(self) -> None:
+        """``from fuscan.gui import ResultListModel`` 应惰性导入类。"""
+        import fuscan.gui as gui_pkg
+        from fuscan.gui.models.result_model import ResultListModel as Impl
+
+        cls = gui_pkg.ResultListModel
+        assert cls is Impl
+
+    def test_getattr_rule_list_model(self) -> None:
+        """``from fuscan.gui import RuleListModel`` 应惰性导入类。"""
+        import fuscan.gui as gui_pkg
+        from fuscan.gui.models.rule_model import RuleListModel as Impl
+
+        cls = gui_pkg.RuleListModel
+        assert cls is Impl
+
+    def test_getattr_extractor_list_model(self) -> None:
+        """``from fuscan.gui import ExtractorListModel`` 应惰性导入类。"""
+        import fuscan.gui as gui_pkg
+        from fuscan.gui.models.extractor_model import ExtractorListModel as Impl
+
+        cls = gui_pkg.ExtractorListModel
+        assert cls is Impl
+
     def test_getattr_unknown_attribute_raises(self) -> None:
         """访问不存在的属性应抛 AttributeError。"""
         import fuscan.gui as gui_pkg
 
         with pytest.raises(AttributeError, match="nonexistent_attribute"):
             _ = gui_pkg.nonexistent_attribute  # type: ignore[attr-defined]
+
+
+class TestGuiMainModule:
+    """``fuscan.gui.__main__`` 模块入口测试。
+
+    覆盖 ``python -m fuscan.gui`` 入口的 import 段（PySide2/PySide6 探测）
+    与 ``launch`` 引用，不实际启动 GUI（避免阻塞测试进程）。
+    """
+
+    def test_main_module_imports_launch(self) -> None:
+        """``fuscan.gui.__main__`` 模块应能成功导入并暴露 ``launch`` 引用。"""
+        import fuscan.gui.__main__ as main_mod
+
+        # launch 应为模块级可调用对象
+        assert callable(main_mod.launch)
+        assert main_mod.launch.__name__ == "launch"
+
+    def test_main_module_pyside_detection(self) -> None:
+        """模块加载时应成功探测到 PySide2 或 PySide6 之一。"""
+        # 间接验证：若 PySide 探测失败，模块 import 时即抛 ImportError，
+        # test_main_module_imports_launch 无法通过。这里再断言 PySide2 可用。
+        import PySide2
+
+        assert PySide2 is not None

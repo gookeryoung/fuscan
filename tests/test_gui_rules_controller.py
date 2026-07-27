@@ -480,3 +480,256 @@ class TestWorkspaceBinding:
         controller.set_workspace_controller(ws_controller)
         assert controller.bindWorkspace("ws-not-exist") is False
         assert controller.isBound is False
+
+
+# ============================= iter-116 边界补充 =============================
+
+
+class TestLoadFileFromPathEdgeCases:
+    """``loadFileFromPath`` 边界场景补充（iter-116）。"""
+
+    def test_load_nonexistent_path_returns_false(
+        self,
+        controller_with_file: RulesController,
+        tmp_path: Path,
+    ) -> None:
+        """加载不存在的路径返回 False，不抛异常。"""
+        target = tmp_path / "missing.yaml"
+        assert controller_with_file.loadFileFromPath(str(target)) is False
+
+    def test_load_already_loaded_global_skips(
+        self,
+        controller_with_file: RulesController,
+        rules_file: Path,
+    ) -> None:
+        """全局模式下重复加载已存在的路径返回 False。"""
+        # rules_file 已在 controller_with_file fixture 中加载
+        assert controller_with_file.loadFileFromPath(str(rules_file)) is False
+
+    def test_load_already_loaded_bound_skips(
+        self,
+        config_controller: ConfigController,
+        tmp_path: Path,
+    ) -> None:
+        """绑定模式下重复加载已存在的路径返回 False。"""
+        import json as _json
+
+        from fuscan.gui.controllers.workspace_controller import WorkspaceController
+
+        ws_controller = WorkspaceController(config_controller, RulesController(config_controller))
+        controller = ws_controller._rules_controller
+        controller.set_workspace_controller(ws_controller)
+
+        # 添加工作区并绑定（用 json.dumps 避免路径反斜杠转义问题）
+        rules_file = _write_rules_file(tmp_path, "bound.yaml")
+        ws_id = ws_controller.addWorkspace("t", "folder", "/tmp", _json.dumps([str(rules_file)]), True)
+        assert controller.bindWorkspace(ws_id) is True
+        assert str(rules_file) in controller._local_rules_paths  # type: ignore[attr-defined]
+
+        # 重复加载已绑定路径
+        assert controller.loadFileFromPath(str(rules_file)) is False
+
+    def test_load_global_mode_invalid_yaml_returns_true_but_ruleset_none(
+        self,
+        config_controller: ConfigController,
+        tmp_path: Path,
+    ) -> None:
+        """全局模式下加载非法 YAML 时返回 True（``_reload_ruleset`` 已吞 ``RuleError``）。
+
+        注意：``_reload_ruleset`` 内部捕获 ``RuleError`` 并设 ruleset=None，
+        ``loadFileFromPath`` 的 try 块因此不抛异常，返回 True。
+        ``rules_paths`` 中已追加非法路径（设计遗留，见 iter-116 笔记）。
+        """
+        bad_yaml = tmp_path / "bad.yaml"
+        bad_yaml.write_text("not: valid: yaml: - -", encoding="utf-8")
+        controller = RulesController(config_controller)
+        # 加载返回 True，但 ruleset 因解析失败变 None
+        assert controller.loadFileFromPath(str(bad_yaml)) is True
+        assert controller.ruleset is None
+        # 非法路径已追加到 config
+        assert str(bad_yaml) in config_controller.config.rules_paths
+
+    def test_load_bound_mode_invalid_yaml_returns_true_but_ruleset_none(
+        self,
+        config_controller: ConfigController,
+        tmp_path: Path,
+    ) -> None:
+        """绑定模式下加载非法 YAML 时返回 True（``_reload_ruleset`` 已吞 ``RuleError``）。"""
+        import json as _json
+
+        from fuscan.gui.controllers.workspace_controller import WorkspaceController
+
+        ws_controller = WorkspaceController(config_controller, RulesController(config_controller))
+        controller = ws_controller._rules_controller
+        controller.set_workspace_controller(ws_controller)
+
+        good_yaml = _write_rules_file(tmp_path, "good.yaml")
+        ws_id = ws_controller.addWorkspace("t", "folder", "/tmp", _json.dumps([str(good_yaml)]), True)
+        assert controller.bindWorkspace(ws_id) is True
+
+        bad_yaml = tmp_path / "bad.yaml"
+        bad_yaml.write_text("not: valid: yaml: - -", encoding="utf-8")
+
+        # 加载返回 True，但 ruleset 因解析失败变 None
+        assert controller.loadFileFromPath(str(bad_yaml)) is True
+        assert controller.ruleset is None
+        # 本地副本已追加非法路径
+        assert str(bad_yaml) in controller._local_rules_paths  # type: ignore[attr-defined]
+
+
+class TestUnbindNoopWhenNotBound:
+    """``unbindWorkspace`` 无绑定时为 no-op（iter-116）。"""
+
+    def test_unbind_when_not_bound_no_emit(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """未绑定时调用 ``unbindWorkspace`` 不抛异常、不 emit 信号。"""
+        controller = RulesController(config_controller)
+        # 直接调用，不应抛异常
+        controller.unbindWorkspace()
+        assert controller.isBound is False
+        assert controller.boundWorkspaceId == ""
+
+
+class TestBoundWorkspaceMoveDown:
+    """绑定模式下 ``moveDown`` 写回工作区（iter-116）。"""
+
+    def test_bound_move_down_persists(
+        self,
+        config_controller: ConfigController,
+        tmp_path: Path,
+    ) -> None:
+        """绑定模式下 ``moveDown`` 应同步到工作区。"""
+        import json as _json
+
+        from fuscan.gui.controllers.workspace_controller import WorkspaceController
+
+        ws_controller = WorkspaceController(config_controller, RulesController(config_controller))
+        controller = ws_controller._rules_controller
+        controller.set_workspace_controller(ws_controller)
+
+        file_a = _write_rules_file(tmp_path, "a.yaml", "alpha")
+        file_b = _write_rules_file(tmp_path, "b.yaml", "beta")
+        ws_id = ws_controller.addWorkspace(
+            "t",
+            "folder",
+            "/tmp",
+            _json.dumps([str(file_a), str(file_b)]),
+            True,
+        )
+        assert controller.bindWorkspace(ws_id) is True
+        assert len(controller._local_rules_paths) == 2  # type: ignore[attr-defined]
+
+        # 选中第 0 个并下移
+        controller.setSelectedFileIndex(0)  # type: ignore[attr-defined]
+        assert controller.canMoveDown is True
+        controller.moveDown()  # type: ignore[attr-defined]
+
+        # 工作区项的 rules_paths 顺序应交换
+        item = ws_controller.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+        assert item.rules_paths[0] == str(file_b)
+        assert item.rules_paths[1] == str(file_a)
+
+
+class TestReloadRulesetBranches:
+    """``_reload_ruleset`` 内部分支覆盖（iter-116）。"""
+
+    def test_reload_with_use_builtin_false_and_no_paths(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """禁用内置规则且无规则文件时 ruleset 应为 None。"""
+        cfg = config_controller.config
+        cfg.use_builtin = False
+        cfg.rules_paths = []
+        controller = RulesController(config_controller)
+        controller._reload_ruleset()  # type: ignore[attr-defined]
+        assert controller.ruleset is None
+
+    def test_reload_with_use_builtin_false_and_paths(
+        self,
+        config_controller: ConfigController,
+        tmp_path: Path,
+    ) -> None:
+        """禁用内置规则但有规则文件时应加载用户规则。"""
+        # 写入带 type 字段的合法规则文件
+        rules_file = tmp_path / "valid_rule.yaml"
+        rules_file.write_text(
+            """version: "1.0"
+rules:
+  - name: "敏感内容"
+    severity: critical
+    match:
+      type: content
+      target: content
+      mode: contains
+      pattern: "secret_pattern"
+""",
+            encoding="utf-8",
+        )
+        cfg = config_controller.config
+        cfg.use_builtin = False
+        cfg.rules_paths = [str(rules_file)]
+        controller = RulesController(config_controller)
+        controller._reload_ruleset()  # type: ignore[attr-defined]
+        # ruleset 应非空，且包含 "敏感内容" 规则
+        assert controller.ruleset is not None
+        assert len(controller.ruleset.rules) >= 1
+
+
+class TestBoundWorkspaceName:
+    """``boundWorkspaceName`` Property 分支覆盖（iter-116）。"""
+
+    def test_bound_workspace_name_empty_when_no_controller(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """``_workspace_controller`` 为 ``None`` 时返回空串。"""
+        controller = RulesController(config_controller)
+        # 默认 _workspace_controller 为 None（未注入）
+        assert controller.boundWorkspaceName == ""
+
+    def test_bound_workspace_name_empty_when_not_bound(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """未绑定时返回空串。"""
+        from fuscan.gui.controllers.workspace_controller import WorkspaceController
+
+        ws_controller = WorkspaceController(config_controller, RulesController(config_controller))
+        controller = ws_controller._rules_controller
+        controller.set_workspace_controller(ws_controller)
+        assert controller.boundWorkspaceName == ""
+
+    def test_bound_workspace_name_returns_workspace_name(
+        self,
+        config_controller: ConfigController,
+        tmp_path: Path,
+    ) -> None:
+        """绑定时返回工作区名称。"""
+        from fuscan.gui.controllers.workspace_controller import WorkspaceController
+
+        ws_controller = WorkspaceController(config_controller, RulesController(config_controller))
+        controller = ws_controller._rules_controller
+        controller.set_workspace_controller(ws_controller)
+
+        rules_file = _write_rules_file(tmp_path, "x.yaml")
+        ws_id = ws_controller.addWorkspace("我的任务", "folder", "/tmp", f'["{rules_file}"]', True)
+        assert controller.bindWorkspace(ws_id) is True
+        assert controller.boundWorkspaceName == "我的任务"
+
+
+class TestPersistToBoundWorkspaceNoop:
+    """``_persist_to_bound_workspace`` 无绑定时为 no-op（iter-116）。"""
+
+    def test_persist_noop_when_not_bound(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """未绑定时调用 ``_persist_to_bound_workspace`` 不抛异常。"""
+        controller = RulesController(config_controller)
+        # 默认未绑定，_workspace_controller 为 None
+        controller._persist_to_bound_workspace()  # type: ignore[attr-defined]
+        # 无副作用即可

@@ -394,6 +394,118 @@ class TestDocxExtractorExtra:
         assert "页眉内容 secret" in content
         assert "页脚信息" in content
 
+    def test_docx_extract_oserror_raises(self, tmp_path: Path) -> None:
+        """读取不存在文件时应抛 ``ExtractorError``。"""
+        path = tmp_path / "missing.docx"
+        with pytest.raises(ExtractorError, match="文件读取失败"):
+            DocxExtractor().extract(path)
+
+    def test_docx_fallback_to_python_docx_when_lxml_unavailable(
+        self,
+        docx_file: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """lxml 不可用时应回退到 python-docx 提取。"""
+        monkeypatch.setattr("fuscan.extractors.office._lxml_available", lambda: False)
+        content = DocxExtractor().extract(docx_file)
+        # python-docx 回退路径应能正确提取段落
+        assert "段落一 含 password" in content
+        assert "段落二 正常内容" in content
+
+    def test_docx_lxml_failure_falls_back_to_python_docx(
+        self,
+        docx_file: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """lxml 解析失败（非 ZIP 错误）时应回退到 python-docx。"""
+
+        # 让 extract_docx_text 抛出普通异常（非 BadZipFile），触发回退
+        def _raise_value_error(_data: bytes) -> str:
+            raise ValueError("lxml 解析临时失败")
+
+        monkeypatch.setattr("fuscan.extractors._ooxml_xml.extract_docx_text", _raise_value_error)
+        content = DocxExtractor().extract(docx_file)
+        # 回退到 python-docx 后仍能提取
+        assert "段落一 含 password" in content
+
+    def test_docx_lxml_bad_zipfile_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """lxml 抛 ``BadZipFile`` 时不应回退，直接抛 ``ExtractorError``。"""
+        path = tmp_path / "bad.docx"
+        path.write_bytes(b"not a zip")
+
+        import zipfile
+
+        def _raise_bad_zip(_data: bytes) -> str:
+            raise zipfile.BadZipFile("invalid zip")
+
+        monkeypatch.setattr("fuscan.extractors._ooxml_xml.extract_docx_text", _raise_bad_zip)
+        with pytest.raises(ExtractorError, match="DOCX 解析失败"):
+            DocxExtractor().extract(path)
+
+    def test_docx_speed_tier_changes_with_lxml(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``speed_tier`` 在 lxml 不可用时降级到 MEDIUM。"""
+        extractor = DocxExtractor()
+        # lxml 可用（默认环境）
+        assert extractor.speed_tier.name == "FAST"
+        # lxml 不可用
+        monkeypatch.setattr("fuscan.extractors.office._lxml_available", lambda: False)
+        assert extractor.speed_tier.name == "MEDIUM"
+
+    def test_pptx_speed_tier_changes_with_lxml(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``speed_tier`` 在 lxml 不可用时降级到 SLOW。"""
+        extractor = PptxExtractor()
+        assert extractor.speed_tier.name == "FAST"
+        monkeypatch.setattr("fuscan.extractors.office._lxml_available", lambda: False)
+        assert extractor.speed_tier.name == "SLOW"
+
+    def test_pptx_extract_oserror_raises(self, tmp_path: Path) -> None:
+        """读取不存在文件时应抛 ``ExtractorError``。"""
+        path = tmp_path / "missing.pptx"
+        with pytest.raises(ExtractorError, match="文件读取失败"):
+            PptxExtractor().extract(path)
+
+    def test_pptx_fallback_to_python_pptx_when_lxml_unavailable(
+        self,
+        pptx_file: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """lxml 不可用时应回退到 python-pptx 提取。"""
+        monkeypatch.setattr("fuscan.extractors.office._lxml_available", lambda: False)
+        content = PptxExtractor().extract(pptx_file)
+        assert "标题 含 secret" in content
+
+    def test_pptx_lxml_failure_falls_back_to_python_pptx(
+        self,
+        pptx_file: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """lxml 解析失败（非 ZIP 错误）时应回退到 python-pptx。"""
+
+        def _raise_value_error(_data: bytes) -> str:
+            raise ValueError("lxml 解析临时失败")
+
+        monkeypatch.setattr("fuscan.extractors._ooxml_xml.extract_pptx_text", _raise_value_error)
+        content = PptxExtractor().extract(pptx_file)
+        assert "标题 含 secret" in content
+
+    def test_pptx_lxml_bad_zipfile_raises(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """lxml 抛 ``BadZipFile`` 时不应回退，直接抛 ``ExtractorError``。"""
+        path = tmp_path / "bad.pptx"
+        path.write_bytes(b"not a zip")
+
+        import zipfile
+
+        def _raise_bad_zip(_data: bytes) -> str:
+            raise zipfile.BadZipFile("invalid zip")
+
+        monkeypatch.setattr("fuscan.extractors._ooxml_xml.extract_pptx_text", _raise_bad_zip)
+        with pytest.raises(ExtractorError, match="PPTX 解析失败"):
+            PptxExtractor().extract(path)
+
 
 # ---------------------------------------------------------------------------
 # XlsxExtractor
@@ -2499,3 +2611,188 @@ class TestContentCache:
 
         # 缓存数不应超过上限
         assert len(_CONTENT_CACHE) <= _CONTENT_CACHE_MAX
+
+
+# ---------------------------------------------------------------------------
+# iter-116：WpsExtractor python-docx/python-pptx 回退路径补测
+# ---------------------------------------------------------------------------
+
+
+class TestWpsExtractorFallbacks:
+    """覆盖 WpsExtractor 在 lxml 不可用时的 python-docx/python-pptx 回退路径。
+
+    wps.py 原生测试 ``test_ooxml_wps_text`` 等依赖 lxml 默认可用，仅触发 lxml 主路径；
+    回退路径（``_extract_as_docx`` line 125-135、``_extract_as_pptx`` line 174-186）
+    需 mock ``_lxml_available=False`` 才能走到。同时覆盖 ``extract()`` OSError
+    与 ``BadZipFile`` 直接抛 ``ExtractorError`` 分支。
+    """
+
+    def test_extract_oserror_raises(self, tmp_path: Path) -> None:
+        """``extract()`` 读取文件抛 OSError 时应包装为 ``ExtractorError``。"""
+        path = tmp_path / "missing.wps"
+        # 文件不存在触发 OSError（read_bytes 内部抛 FileNotFoundError）
+        with pytest.raises(ExtractorError, match="文件读取失败"):
+            WpsExtractor().extract(path)
+
+    def test_extract_as_docx_lxml_unavailable_uses_python_docx(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """lxml 不可用时 ``_extract_as_docx`` 应回退到 python-docx 提取。"""
+        from docx import Document
+
+        doc = Document()
+        doc.add_paragraph("wps fallback password")
+        path = tmp_path / "test.wps"
+        doc.save(str(path))
+
+        # mock lxml 不可用，强制走 python-docx 回退路径
+        monkeypatch.setattr("fuscan.extractors.office._lxml_available", lambda: False)
+        content = WpsExtractor().extract(path)
+        assert "wps fallback password" in content
+
+    def test_extract_as_docx_lxml_badzipfile_raises(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """lxml 抛 ``BadZipFile`` 时不应回退，直接抛 ``ExtractorError``。"""
+        path = tmp_path / "bad.wps"
+        path.write_bytes(_make_ooxml_zip("word/document.xml", "corrupt"))
+
+        import zipfile
+
+        def _raise_bad_zip(_data: bytes) -> str:
+            raise zipfile.BadZipFile("invalid zip")
+
+        monkeypatch.setattr("fuscan.extractors._ooxml_xml.extract_docx_text", _raise_bad_zip)
+        with pytest.raises(ExtractorError, match="WPS 文字文档解析失败"):
+            WpsExtractor().extract(path)
+
+    def test_extract_as_docx_python_docx_parse_failure_raises(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """lxml 不可用且 python-docx 解析失败时应抛 ``ExtractorError``。"""
+        path = tmp_path / "bad.wps"
+        # 有效 ZIP 但内容非 DOCX，python-docx 解析会失败
+        path.write_bytes(_make_ooxml_zip("word/document.xml", "not a real docx"))
+
+        monkeypatch.setattr("fuscan.extractors.office._lxml_available", lambda: False)
+        with pytest.raises(ExtractorError, match="WPS 文字文档解析失败"):
+            WpsExtractor().extract(path)
+
+    def test_extract_as_pptx_lxml_unavailable_uses_python_pptx(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """lxml 不可用时 ``_extract_as_pptx`` 应回退到 python-pptx 提取。"""
+        from pptx import Presentation
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[1])
+        slide.shapes.title.text = "dps fallback password"  # pyrefly: ignore [missing-attribute]
+        path = tmp_path / "test.dps"
+        prs.save(str(path))
+
+        monkeypatch.setattr("fuscan.extractors.office._lxml_available", lambda: False)
+        content = WpsExtractor().extract(path)
+        assert "dps fallback password" in content
+
+    def test_extract_as_pptx_lxml_badzipfile_raises(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """lxml 抛 ``BadZipFile`` 时不应回退，直接抛 ``ExtractorError``。"""
+        path = tmp_path / "bad.dps"
+        path.write_bytes(_make_ooxml_zip("ppt/presentation.xml", "corrupt"))
+
+        import zipfile
+
+        def _raise_bad_zip(_data: bytes) -> str:
+            raise zipfile.BadZipFile("invalid zip")
+
+        monkeypatch.setattr("fuscan.extractors._ooxml_xml.extract_pptx_text", _raise_bad_zip)
+        with pytest.raises(ExtractorError, match="WPS 演示解析失败"):
+            WpsExtractor().extract(path)
+
+    def test_extract_as_pptx_python_pptx_parse_failure_raises(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """lxml 不可用且 python-pptx 解析失败时应抛 ``ExtractorError``。"""
+        path = tmp_path / "bad.dps"
+        # 含 presentation.xml（类型识别为 pptx）但 slide 内容损坏
+        path.write_bytes(_make_ooxml_zip("ppt/presentation.xml", "corrupt"))
+
+        monkeypatch.setattr("fuscan.extractors.office._lxml_available", lambda: False)
+        with pytest.raises(ExtractorError, match="WPS 演示解析失败"):
+            WpsExtractor().extract(path)
+
+
+# ---------------------------------------------------------------------------
+# iter-116：DocxExtractor / PptxExtractor python-docx/python-pptx 解析失败路径
+# ---------------------------------------------------------------------------
+
+
+class TestOfficeExtractorParseFailure:
+    """覆盖 ``DocxExtractor`` / ``PptxExtractor`` 在 python-docx/python-pptx
+    构造对象时抛异常的分支（``office.py`` line 89-90 / 170-171）。"""
+
+    def test_docx_python_docx_constructor_failure_raises(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """lxml 不可用且 python-docx ``Document`` 构造抛异常时应抛 ``ExtractorError``。"""
+        path = tmp_path / "bad.docx"
+        path.write_bytes(b"fake but valid zip")
+
+        # 写入有效 ZIP 头让 python-docx 真正尝试解析
+        path.write_bytes(_make_ooxml_zip("word/document.xml", "corrupt"))
+
+        monkeypatch.setattr("fuscan.extractors.office._lxml_available", lambda: False)
+        with pytest.raises(ExtractorError, match="DOCX 解析失败"):
+            DocxExtractor().extract(path)
+
+    def test_pptx_python_pptx_constructor_failure_raises(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """lxml 不可用且 python-pptx ``Presentation`` 构造抛异常时应抛 ``ExtractorError``。"""
+        path = tmp_path / "bad.pptx"
+        path.write_bytes(_make_ooxml_zip("ppt/presentation.xml", "corrupt"))
+
+        monkeypatch.setattr("fuscan.extractors.office._lxml_available", lambda: False)
+        with pytest.raises(ExtractorError, match="PPTX 解析失败"):
+            PptxExtractor().extract(path)
+
+
+# ---------------------------------------------------------------------------
+# iter-116：_is_zip_error 辅助函数
+# ---------------------------------------------------------------------------
+
+
+class TestIsZipError:
+    """``fuscan.extractors.office._is_zip_error`` 异常分类辅助函数测试。"""
+
+    def test_bad_zip_file_returns_true(self) -> None:
+        """``zipfile.BadZipFile`` 异常应返回 True（不回退）。"""
+        import zipfile
+
+        from fuscan.extractors.office import _is_zip_error
+
+        assert _is_zip_error(zipfile.BadZipFile("bad")) is True
+
+    def test_other_exception_returns_false(self) -> None:
+        """其他异常应返回 False（允许回退到 python-docx/pptx）。"""
+        from fuscan.extractors.office import _is_zip_error
+
+        assert _is_zip_error(ValueError("other")) is False
+        assert _is_zip_error(RuntimeError("other")) is False

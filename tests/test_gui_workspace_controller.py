@@ -1921,3 +1921,214 @@ class TestScanControllerOverrideSyncContract:
         assert sc._effective_max_workers() == 7  # type: ignore[attr-defined]
         # 但 WorkspaceItem.task_overrides 不应被回写
         assert "max_workers" not in item.task_overrides
+
+
+# ============================= iter-115 扫描历史 =============================
+
+
+class TestWorkspaceHistorySlots:
+    """iter-115：``WorkspaceController`` 扫描历史 QML 槽测试。"""
+
+    def test_workspace_history_json_empty(self, controller: WorkspaceController) -> None:
+        """无历史时返回 ``"[]"``。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        result = controller.workspaceHistoryJson(ws_id)
+        assert result == "[]"
+
+    def test_compare_with_previous_scan_empty(self, controller: WorkspaceController) -> None:
+        """无历史时对比槽返回 ``"{}"``。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        result = controller.compareWithPreviousScan(ws_id)
+        assert result == "{}"
+
+    def test_clear_workspace_history_no_op_when_empty(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """无历史时清空返回 0。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        assert controller.clearWorkspaceHistory(ws_id) == 0
+
+    def test_workspace_history_json_after_manual_archive(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """手动注入历史条目后 ``workspaceHistoryJson`` 应返回 JSON 数组。"""
+        ws_id = controller.addWorkspace("任务A", "folder", "/tmp", "[]", True)
+        # 直接通过底层 store 注入两条历史
+        from fuscan.history import ScanHistoryEntry
+
+        controller._history_store.add(  # type: ignore[attr-defined]
+            ScanHistoryEntry(
+                scan_id="s1",
+                workspace_id=ws_id,
+                workspace_name="任务A",
+                finished_at="2026-07-27T10:00:00Z",
+                matched_files=3,
+                hit_paths=("/a", "/b", "/c"),
+                rule_names=("rule1",),
+                summary="命中 3 个文件",
+            )
+        )
+        controller._history_store.add(  # type: ignore[attr-defined]
+            ScanHistoryEntry(
+                scan_id="s2",
+                workspace_id=ws_id,
+                workspace_name="任务A",
+                finished_at="2026-07-27T11:00:00Z",
+                matched_files=2,
+                hit_paths=("/a", "/d"),
+                rule_names=("rule1", "rule2"),
+                summary="命中 2 个文件",
+            )
+        )
+
+        payload = json.loads(controller.workspaceHistoryJson(ws_id))
+        assert len(payload) == 2
+        # 最新在前
+        assert payload[0]["scan_id"] == "s2"
+        assert payload[0]["matched_files"] == 2
+        assert payload[0]["workspace_name"] == "任务A"
+        assert payload[0]["rule_names"] == ["rule1", "rule2"]
+        assert payload[1]["scan_id"] == "s1"
+
+    def test_compare_with_previous_scan_returns_delta(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """两次扫描后对比槽应返回 trend/summary/new_hits 等字段。"""
+        ws_id = controller.addWorkspace("任务B", "folder", "/tmp", "[]", True)
+        from fuscan.history import ScanHistoryEntry
+
+        controller._history_store.add(  # type: ignore[attr-defined]
+            ScanHistoryEntry(
+                scan_id="s1",
+                workspace_id=ws_id,
+                workspace_name="任务B",
+                finished_at="2026-07-27T10:00:00Z",
+                matched_files=3,
+                hit_paths=("/a", "/b", "/c"),
+                rule_names=("rule1",),
+            )
+        )
+        controller._history_store.add(  # type: ignore[attr-defined]
+            ScanHistoryEntry(
+                scan_id="s2",
+                workspace_id=ws_id,
+                workspace_name="任务B",
+                finished_at="2026-07-27T11:00:00Z",
+                matched_files=2,
+                hit_paths=("/a", "/d"),
+                rule_names=("rule1", "rule2"),
+            )
+        )
+
+        payload = json.loads(controller.compareWithPreviousScan(ws_id))
+        assert payload["trend"] == "改善"  # 3 → 2
+        assert payload["matched_delta"] == -1
+        assert payload["new_hits_count"] == 1  # /d
+        assert payload["resolved_hits_count"] == 2  # /b /c
+        assert payload["persistent_hits_count"] == 1  # /a
+        assert payload["current"]["scan_id"] == "s2"
+        assert payload["previous"]["scan_id"] == "s1"
+        # new_rules 包含 rule2
+        assert "rule2" in payload["new_rules"]
+        assert payload["dropped_rules"] == []
+
+    def test_compare_with_previous_scan_first_scan_only(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """仅一次扫描时 previous 为 ``None``，trend 为「首次」。"""
+        ws_id = controller.addWorkspace("任务C", "folder", "/tmp", "[]", True)
+        from fuscan.history import ScanHistoryEntry
+
+        controller._history_store.add(  # type: ignore[attr-defined]
+            ScanHistoryEntry(
+                scan_id="s1",
+                workspace_id=ws_id,
+                workspace_name="任务C",
+                matched_files=5,
+                hit_paths=("/x",),
+                rule_names=("r1",),
+            )
+        )
+
+        payload = json.loads(controller.compareWithPreviousScan(ws_id))
+        assert payload["previous"] is None
+        assert payload["trend"] == "首次"
+        assert payload["matched_delta"] == 5
+        assert payload["new_hits_count"] == 1
+
+    def test_clear_workspace_history_removes_entries(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """清空历史后 ``workspaceHistoryJson`` 返回 ``"[]"``。"""
+        ws_id = controller.addWorkspace("任务D", "folder", "/tmp", "[]", True)
+        from fuscan.history import ScanHistoryEntry
+
+        controller._history_store.add(  # type: ignore[attr-defined]
+            ScanHistoryEntry(
+                scan_id="s1",
+                workspace_id=ws_id,
+                workspace_name="任务D",
+                matched_files=1,
+            )
+        )
+        controller._history_store.add(  # type: ignore[attr-defined]
+            ScanHistoryEntry(
+                scan_id="s2",
+                workspace_id=ws_id,
+                workspace_name="任务D",
+                matched_files=2,
+            )
+        )
+
+        removed = controller.clearWorkspaceHistory(ws_id)
+        assert removed == 2
+        assert controller.workspaceHistoryJson(ws_id) == "[]"
+
+    def test_remove_workspace_clears_history(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """移除工作区应同时清理对应历史。"""
+        ws_id = controller.addWorkspace("任务E", "folder", "/tmp", "[]", True)
+        from fuscan.history import ScanHistoryEntry
+
+        controller._history_store.add(  # type: ignore[attr-defined]
+            ScanHistoryEntry(
+                scan_id="s1",
+                workspace_id=ws_id,
+                workspace_name="任务E",
+            )
+        )
+        # 验证历史已存在
+        assert json.loads(controller.workspaceHistoryJson(ws_id))
+
+        controller.removeWorkspace(ws_id)
+        # 工作区被删除后历史也应清空
+        assert controller.workspaceHistoryJson(ws_id) == "[]"
+
+    def test_archive_scan_history_handles_missing_workspace(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """``_archive_scan_history`` 对不存在的工作区应静默返回。"""
+        # 直接调用内部方法，传入不存在的 ws_id
+        sc = controller.currentScanController
+        # 不应抛异常
+        controller._archive_scan_history("ws-nonexistent", sc)  # type: ignore[attr-defined]
+
+    def test_archive_scan_history_handles_none_report(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """ScanController 无 ``_last_report`` 时归档跳过（不抛异常）。"""
+        ws_id = controller.addWorkspace("任务F", "folder", "/tmp", "[]", True)
+        sc = controller.currentScanController
+        # ScanController._last_report 默认 None
+        controller._archive_scan_history(ws_id, sc)  # type: ignore[attr-defined]
+        # 无历史被添加
+        assert controller.workspaceHistoryJson(ws_id) == "[]"

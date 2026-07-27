@@ -30,6 +30,7 @@ from fuscan.cache import (
     serialize_match,
     serialize_rule,
 )
+from fuscan.cache._helpers import iso_days_ago, now_iso
 from fuscan.cache.schema import CURRENT_VERSION, migrate
 from fuscan.config import BUILTIN_RULES_PATH
 from fuscan.rules.model import (
@@ -1712,10 +1713,121 @@ class TestExtractedContent:
             store.register_file(file_hash, 100)
             store.put_extracted_content(file_hash, "内容", "docx")
             assert store.get_extracted_content(file_hash) is not None
+            # 失效内存 LRU 后直接查 SQLite 验证写入成功
+            with store._lru_lock:
+                store._extract_cache_invalidate(file_hash)
+            row = (
+                store._get_read_conn()
+                .execute(
+                    "SELECT content FROM extracted_contents WHERE file_hash = ?",
+                    (file_hash,),
+                )
+                .fetchone()
+            )
+            assert row is not None
             # 直接删除 scanned_files 记录（模拟 prune_stale_files）
             store._conn.execute("DELETE FROM scanned_files WHERE file_hash = ?", (file_hash,))
-            # extracted_contents 应被级联删除
-            assert store.get_extracted_content(file_hash) is None
+            # extracted_contents 应被级联删除：直接查 SQLite 表验证（绕过内存 LRU）
+            row = (
+                store._get_read_conn()
+                .execute(
+                    "SELECT content FROM extracted_contents WHERE file_hash = ?",
+                    (file_hash,),
+                )
+                .fetchone()
+            )
+            assert row is None
+
+
+class TestExtractCacheLru:
+    """``_extract_cache`` 内存 LRU 缓存测试（iter-118）。"""
+
+    def test_put_then_get_hits_lru(self, tmp_path: Path) -> None:
+        """``put_extracted_content`` 后 ``get_extracted_content`` 命中内存 LRU。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            fh = hash_bytes(b"content-1")
+            store.register_file(fh, 100)
+            store.put_extracted_content(fh, "缓存内容", "docx")
+            # extract_cache 应有 1 条
+            assert store.extract_cache_size() == 1
+            # get 应命中 LRU（不查 SQLite）
+            assert store.get_extracted_content(fh) == "缓存内容"
+
+    def test_get_miss_then_backfill_lru(self, tmp_path: Path) -> None:
+        """``get_extracted_content`` 未命中 LRU 时走 SQLite，命中后回填 LRU。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            fh = hash_bytes(b"content-2")
+            store.register_file(fh, 100)
+            # 直接 SQL 写入 extracted_contents（绕过 put_extracted_content 不填充 LRU）
+            store._conn.execute(
+                "INSERT INTO extracted_contents (file_hash, content, extension, cached_at) VALUES (?, ?, ?, ?)",
+                (fh, "直接写入", "txt", now_iso()),
+            )
+            # LRU 应为空
+            assert store.extract_cache_size() == 0
+            # get 应走 SQLite 并回填 LRU
+            assert store.get_extracted_content(fh) == "直接写入"
+            assert store.extract_cache_size() == 1
+            # 再次 get 命中 LRU
+            assert store.get_extracted_content(fh) == "直接写入"
+
+    def test_empty_content_not_cached(self, tmp_path: Path) -> None:
+        """``put_extracted_content`` 空内容不写入 LRU 也不写 SQLite。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            fh = hash_bytes(b"empty")
+            store.register_file(fh, 0)
+            store.put_extracted_content(fh, "", "txt")
+            assert store.extract_cache_size() == 0
+            assert store.get_extracted_content(fh) is None
+
+    def test_prune_stale_files_clears_lru(self, tmp_path: Path) -> None:
+        """``prune_stale_files`` 清理过期文件后 LRU 整体失效。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            fh = hash_bytes(b"to-expire")
+            store.register_file(fh, 100)
+            store.put_extracted_content(fh, "将过期", "docx")
+            assert store.extract_cache_size() == 1
+            # 将 last_scanned_at 改为 31 天前，确保 prune_stale_files(max_age_days=30) 命中
+            old_time = iso_days_ago(31)
+            store._conn.execute(
+                "UPDATE scanned_files SET last_scanned_at = ? WHERE file_hash = ?",
+                (old_time, fh),
+            )
+            deleted = store.prune_stale_files(max_age_days=30)
+            assert deleted == 1
+            assert store.extract_cache_size() == 0
+
+    def test_prune_orphan_rules_clears_lru(self, tmp_path: Path) -> None:
+        """``prune_orphan_rules`` 清理规则后 LRU 整体失效。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            fh = hash_bytes(b"orphan")
+            store.register_file(fh, 100)
+            store.put_extracted_content(fh, "规则清理", "docx")
+            assert store.extract_cache_size() == 1
+            # 先登记一条规则，再用空活跃规则集清理，确保 deleted > 0
+            rule = Rule(
+                name="r1",
+                description="d",
+                severity=Severity.WARNING,
+                match=LeafMatch(mode=MatchMode.CONTAINS, target=MatchTarget.FILENAME, pattern="x"),
+            )
+            store.register_ruleset(RuleSet(version="1.0", rules=(rule,), ignore_paths=()))
+            deleted = store.prune_orphan_rules(active_rule_hashes=())
+            assert deleted == 1
+            assert store.extract_cache_size() == 0
+
+    def test_lru_capacity_eviction(self, tmp_path: Path) -> None:
+        """LRU 超容量时弹出最旧条目。"""
+        from fuscan.cache._helpers import EXTRACT_CACHE_MAX
+
+        with CacheStore(tmp_path / "c.db") as store:
+            # 填充超过容量的条目
+            for i in range(EXTRACT_CACHE_MAX + 10):
+                fh = hash_bytes(f"evict-{i}".encode())
+                store.register_file(fh, 1)
+                store.put_extracted_content(fh, f"内容{i}", "txt")
+            # 容量应被限制在 EXTRACT_CACHE_MAX
+            assert store.extract_cache_size() == EXTRACT_CACHE_MAX
 
 
 # ---------------------------------------------------------------- 批量写入

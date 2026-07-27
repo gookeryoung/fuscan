@@ -380,6 +380,9 @@ def put_extracted_content(store: CacheStore, file_hash: str, content: str, exten
     ``scanned_files`` 中须已存在该 ``file_hash``（外键约束），
     调用方通常先 :func:`register_file` 再调本方法。
 
+    写入后主动填充进程内 LRU（iter-118），使下次 ``get_extracted_content``
+    命中内存跳过 SQLite 查询。
+
     :param store: 所属 CacheStore 实例
     :param file_hash: 文件内容哈希
     :param content: 提取后的纯文本内容
@@ -402,3 +405,6 @@ def put_extracted_content(store: CacheStore, file_hash: str, content: str, exten
             "  cached_at = excluded.cached_at",
             (file_hash, content, extension, now),
         )
+        # 主动填充 LRU（iter-118）：COMMIT 成功后使下次查询命中内存
+        with store._lru_lock:
+            store._extract_cache_put(file_hash, content)

@@ -58,6 +58,7 @@ def prune_orphan_rules(store: CacheStore, active_rule_hashes: Collection[str]) -
             with store._lru_lock:
                 store._hit_cache.clear()
                 store._path_cache.clear()
+                store._extract_cache.clear()
         return deleted
 
 
@@ -87,6 +88,7 @@ def prune_stale_files(store: CacheStore, max_age_days: int = 30) -> int:
             with store._lru_lock:
                 store._hit_cache.clear()
                 store._path_cache.clear()
+                store._extract_cache.clear()
         return deleted
 
 

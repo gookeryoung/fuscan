@@ -180,11 +180,20 @@ def get_extracted_content(store: CacheStore, file_hash: str) -> str | None:
     通过 ``file_hash`` 复用提取结果，跳过 ``extract_content_from_bytes``。
 
     线程安全：使用线程本地只读连接，无锁并行（iter-68）。
+    内存缓存（iter-118）：先查进程内 LRU，命中跳过 SQLite 查询；
+    ``put_extracted_content`` 写入后主动填充 LRU，使重复内容查询
+    完全命中内存。
 
     :param store: 所属 CacheStore 实例
     :param file_hash: 文件内容哈希
     :return: 命中时返回提取后的纯文本；未命中返回 None
     """
+    # 先查进程内 LRU（iter-118）：node_modules 重复依赖场景下，
+    # 同一 file_hash 的内容会被查询多次，内存 LRU 跳过 SQLite 查询
+    with store._lru_lock:
+        cached = store._extract_cache_get(file_hash)
+    if cached is not None:
+        return cached
     row = (
         store._get_read_conn()
         .execute(
@@ -193,4 +202,11 @@ def get_extracted_content(store: CacheStore, file_hash: str) -> str | None:
         )
         .fetchone()
     )
-    return row["content"] if row else None
+    if row is None:
+        # 未命中 SQLite 不缓存（None 不写入 LRU），避免污染缓存
+        return None
+    content = row["content"]
+    # 命中 SQLite 后回填 LRU，下次同一 file_hash 直接命中内存
+    with store._lru_lock:
+        store._extract_cache_put(file_hash, content)
+    return content

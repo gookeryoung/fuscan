@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from fuscan.scanner.result import RuleHit
 
 __all__ = [
+    "EXTRACT_CACHE_MAX",
     "HIT_CACHE_MAX",
     "BatchWriteItem",
     "CacheStats",
@@ -35,6 +36,12 @@ __all__ = [
 # 进程内 LRU 命中缓存容量上限（条目数）。
 # 每条平均 ~1KB（含 rule_hash 元组与 RuleHit），4096 条约占 4MB 内存。
 HIT_CACHE_MAX: int = 4096
+
+# 提取内容内存 LRU 缓存容量上限（条目数，iter-118）。
+# 提取后的纯文本内容较大（docx/pptx 平均 20KB），512 条约占 10MB 内存。
+# node_modules 重复依赖场景下，同一 file_hash 的内容会被查询多次，
+# 内存 LRU 使二次及后续查询完全命中内存，跳过 SQLite 查询。
+EXTRACT_CACHE_MAX: int = 512
 
 
 def default_cache_path() -> Path:

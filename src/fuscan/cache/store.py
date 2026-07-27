@@ -21,6 +21,10 @@
   查询 ``file_paths`` 索引，结果在内存中再缓存一份；``register_path`` /
   ``batch_put_results`` 写入后主动填充对应条目，使热缓存二次扫描完全命中内存，
   消除 SQLite 查询开销。文件 ``mtime`` 变化时 LRU 键自然不同，自动失效
+- **提取内容 LRU 缓存**（iter-118）：``get_extracted_content`` 结果在内存中
+  再缓存一份；node_modules 重复依赖等场景下，同一 ``file_hash`` 的内容查询
+  二次及后续完全命中内存，跳过 SQLite 查询。``put_extracted_content`` 写入后
+  主动填充 LRU
 
 模块结构（iter-108 拆分）：
 
@@ -43,6 +47,7 @@ from typing import TYPE_CHECKING, Collection, Mapping
 
 from fuscan.cache._cleanup import prune_orphan_rules, prune_stale_files, stats
 from fuscan.cache._helpers import (
+    EXTRACT_CACHE_MAX,
     HIT_CACHE_MAX,
     BatchWriteItem,
     CacheStats,
@@ -156,6 +161,10 @@ class CacheStore:
         # lookup_file_hash 命中时跳过 SQLite 查询；register_path / batch_put_results
         # 写入后主动填充，使热缓存二次扫描完全命中内存。文件 mtime 变化时键不同，自动失效
         self._path_cache: OrderedDict[tuple[str, float, int], str] = OrderedDict()
+        # 提取内容 LRU 缓存（iter-118）：file_hash -> content
+        # get_extracted_content 命中时跳过 SQLite 查询；put_extracted_content
+        # 写入后主动填充。node_modules 重复依赖场景下显著减少 SQLite 查询次数
+        self._extract_cache: OrderedDict[str, str] = OrderedDict()
         # 线程本地只读连接：每线程一个，WAL 模式下读完全并行
         self._read_local: threading.local = threading.local()
         # 已创建的读连接列表（close 时统一关闭，用 _lru_lock 保护追加）
@@ -282,6 +291,34 @@ class CacheStore:
         while len(self._path_cache) > HIT_CACHE_MAX:
             self._path_cache.popitem(last=False)
 
+    def _extract_cache_get(self, file_hash: str) -> str | None:
+        """查询提取内容 LRU 缓存（已持 ``_lru_lock``）。
+
+        命中时移动到队尾（LRU 语义），返回内容字符串；未命中返回 None。
+        注意：``None`` 与空字符串语义不同——``None`` 表示未缓存（需走 SQLite），
+        空字符串表示已缓存但提取结果为空（不应写入 LRU，由 ``put_extracted_content`` 保证）。
+        """
+        content = self._extract_cache.get(file_hash)
+        if content is not None:
+            self._extract_cache.move_to_end(file_hash)
+        return content
+
+    def _extract_cache_put(self, file_hash: str, content: str) -> None:
+        """写入提取内容 LRU 缓存（已持 ``_lru_lock``）。
+
+        超容量时弹出最旧条目。空内容不写入（与 ``put_extracted_content`` 一致）。
+        """
+        if not content:
+            return
+        self._extract_cache[file_hash] = content
+        self._extract_cache.move_to_end(file_hash)
+        while len(self._extract_cache) > EXTRACT_CACHE_MAX:
+            self._extract_cache.popitem(last=False)
+
+    def _extract_cache_invalidate(self, file_hash: str) -> None:
+        """失效指定 ``file_hash`` 的提取内容内存缓存条目（已持锁）。"""
+        self._extract_cache.pop(file_hash, None)
+
     def hit_cache_size(self) -> int:
         """返回进程内 LRU 命中缓存当前条目数（诊断用）。"""
         with self._lru_lock:
@@ -291,6 +328,11 @@ class CacheStore:
         """返回路径预筛 LRU 缓存当前条目数（诊断用，iter-73）。"""
         with self._lru_lock:
             return len(self._path_cache)
+
+    def extract_cache_size(self) -> int:
+        """返回提取内容 LRU 缓存当前条目数（诊断用，iter-118）。"""
+        with self._lru_lock:
+            return len(self._extract_cache)
 
     # ------------------------------------------------------------------ 规则登记
 
@@ -384,6 +426,7 @@ class CacheStore:
             with self._lru_lock:
                 self._hit_cache.clear()
                 self._path_cache.clear()
+                self._extract_cache.clear()
                 read_conns = list(self._read_conns)
                 self._read_conns.clear()
             # 关闭所有读连接

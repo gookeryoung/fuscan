@@ -354,6 +354,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self.activeScanChanged.emit()  # pyrefly: ignore [missing-attribute]
         # iter-115：清理该工作区的扫描历史
         self._history_store.clear_workspace(ws_id)
+        # iter-123：清理该工作区的缓存扫描结果
+        self._delete_cached_results(ws_id)
         self._persist()
         self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -608,6 +610,9 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             controller.cleanup()
             controller.deleteLater()
         self._scan_controllers.clear()
+        # iter-123：清理所有工作区的缓存扫描结果
+        for ws_item in list(self._model.all_workspaces()):
+            self._delete_cached_results(ws_item.workspace_id)
         self._model.clear()
         # 重置当前/活动工作区 ID
         if self._current_workspace_id:
@@ -674,6 +679,9 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._persist()
             # iter-115：扫描结束自动归档到历史存储
             self._archive_scan_history(ws_id, controller)
+            # iter-123：扫描结果持久化到 ~/.fuscan/results/<ws_id>.json，
+            # 重启后通过 restoreFromReport 恢复，避免用户被迫重新扫描
+            self._save_cached_results(ws_id, controller)
 
     def cleanup(self) -> None:
         """窗口关闭时清理所有 ScanController 资源。"""
@@ -743,10 +751,71 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     # 恢复任务级配置覆盖（iter-104 起持久化）
                     task_overrides=deserialize_task_overrides(ws.get("task_overrides", {})),
                 )
+                # iter-123：恢复扫描结果到 ScanController（避免重启后被迫重新扫描）
+                self._load_cached_results(ws_id)
             except Exception as exc:  # 持久化恢复容错：单条失败不阻塞其余
                 logger.warning("工作区 %s 恢复失败: %s", ws_id, exc)
         if self._model.rowCount() > 0:
             self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    # ----------------------------- 扫描结果缓存（iter-123） -----------------------------
+
+    @property
+    def _cached_results_dir(self) -> Path:
+        """扫描结果缓存目录：``~/.fuscan/results/``。"""
+        return config_module.CONFIG_DIR / "results"
+
+    def _cached_results_path(self, ws_id: str) -> Path:
+        """指定工作区的缓存结果文件路径。"""
+        return self._cached_results_dir / f"{ws_id}.json"
+
+    def _save_cached_results(self, ws_id: str, controller: ScanController) -> None:
+        """将 ScanController 的 ``_last_report`` 持久化到 ``~/.fuscan/results/<ws_id>.json``。
+
+        扫描结束（含取消）后调用，重启后通过 :meth:`_load_cached_results` 恢复。
+        持久化失败仅记录日志，不影响主流程。
+        """
+        report = controller._last_report  # 同包私有访问
+        if report is None:
+            return
+        try:
+            self._cached_results_dir.mkdir(parents=True, exist_ok=True)
+            json_str = report.to_json()
+            self._cached_results_path(ws_id).write_text(json_str, encoding="utf-8")
+            logger.debug("工作区 %s 扫描结果已缓存（%d 条命中）", ws_id, len(report.hits))
+        except (OSError, ValueError) as exc:
+            logger.warning("工作区 %s 扫描结果缓存失败: %s", ws_id, exc)
+
+    def _load_cached_results(self, ws_id: str) -> None:
+        """从 ``~/.fuscan/results/<ws_id>.json`` 加载扫描结果到对应 ScanController。
+
+        工作区恢复时调用，加载失败静默跳过（首次启动或文件损坏）。
+        """
+        from fuscan.scanner import ScanReport
+
+        cache_file = self._cached_results_path(ws_id)
+        if not cache_file.exists():
+            return
+        controller = self._scan_controllers.get(ws_id)
+        if controller is None:
+            return
+        try:
+            json_str = cache_file.read_text(encoding="utf-8")
+            report = ScanReport.from_json(json_str)
+            controller.restoreFromReport(report)
+            logger.debug("工作区 %s 扫描结果已恢复（%d 条命中）", ws_id, len(report.hits))
+        except (OSError, ValueError, KeyError) as exc:
+            logger.warning("工作区 %s 扫描结果恢复失败: %s", ws_id, exc)
+
+    def _delete_cached_results(self, ws_id: str) -> None:
+        """删除指定工作区的缓存扫描结果文件。"""
+        cache_file = self._cached_results_path(ws_id)
+        try:
+            if cache_file.exists():
+                cache_file.unlink()
+                logger.debug("工作区 %s 缓存结果已删除", ws_id)
+        except OSError as exc:
+            logger.warning("工作区 %s 缓存结果删除失败: %s", ws_id, exc)
 
     # ----------------------------- 扫描历史（iter-115） -----------------------------
 

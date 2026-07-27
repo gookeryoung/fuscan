@@ -216,6 +216,32 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.save()
         self.ignoreDirsChanged.emit()  # pyrefly: ignore [missing-attribute]
 
+    @Slot()  # pyrefly: ignore [not-callable]
+    def selectAllIgnoreDirs(self) -> None:
+        """全选所有预设分类下的忽略目录（自定义目录不动）。"""
+        existing_lower = {d.lower() for d in self._config.ignore_dirs}
+        changed = False
+        for _, dirs in IGNORE_DIR_CATEGORIES:
+            for d in dirs:
+                if d.lower() not in existing_lower:
+                    self._config.ignore_dirs.append(d)
+                    existing_lower.add(d.lower())
+                    changed = True
+        if changed:
+            self.save()
+            self.ignoreDirsChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    @Slot()  # pyrefly: ignore [not-callable]
+    def unselectAllIgnoreDirs(self) -> None:
+        """全不选所有预设分类下的忽略目录（自定义目录不动）。"""
+        preset_lower = {d.lower() for _, dirs in IGNORE_DIR_CATEGORIES for d in dirs}
+        before = len(self._config.ignore_dirs)
+        # 仅移除预设目录，保留自定义目录
+        self._config.ignore_dirs = [d for d in self._config.ignore_dirs if d.lower() not in preset_lower]
+        if len(self._config.ignore_dirs) != before:
+            self.save()
+            self.ignoreDirsChanged.emit()  # pyrefly: ignore [missing-attribute]
+
     @Slot(str)  # pyrefly: ignore [not-callable]
     def addCustomIgnoreDir(self, dir_name: str) -> None:
         """添加自定义忽略目录名。

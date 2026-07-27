@@ -1174,6 +1174,36 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             summary=self._status_summary,
         )
 
+    @Slot(object)  # pyrefly: ignore [not-callable]
+    def restoreFromReport(self, report: ScanReport) -> None:
+        """从持久化的 :class:`ScanReport` 恢复扫描结果（iter-123）。
+
+        重启后由 :class:`WorkspaceController` 调用，从 ``~/.fuscan/results/<ws_id>.json``
+        加载上次扫描结果并恢复到 ``_result_model`` 与 ``_last_report``，
+        使用户无需重新扫描即可查看历史命中。
+
+        恢复后扫描状态切到 ``results``（有命中）或保持 ``setup``（无命中），
+        ``statusText`` 恢复为「已完成」或「已取消」。
+
+        :param report: 持久化的 :class:`ScanReport` 实例
+        """
+        self._last_report = report
+        self._result_model.set_results(report.hits)
+        self._sync_stats_from_report(report)
+        # 标记 scan 阶段完成（恢复后的状态与正常扫描完成一致）
+        self._scan_done = True
+        self._scan_phase = PHASE_DONE
+        self._reset_scan_ui()
+        summary = report.summary()
+        speed = report.stats.speed
+        if speed > 0:
+            summary += f" | 速度 {speed:.0f} 文件/s"
+        self._set_status(
+            STR_STATUS_DONE if not report.cancelled else STR_STATUS_CANCELLED,
+            summary,
+        )
+        self._set_scan_state(STATE_RESULTS if report.hits else STATE_SETUP)
+
     def _set_scan_state(self, state: str) -> None:
         """设置扫描状态并 emit 信号。
 

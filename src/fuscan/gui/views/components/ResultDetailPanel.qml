@@ -14,9 +14,6 @@ Rectangle {
     property ThemeController theme: Theme
     property WorkspaceControllerType workspaceController: WorkspaceController
 
-    // 便捷别名：当前扫描控制器（链式访问避免本地 property null 问题，见 iter-101）
-    readonly property var scanController: workspaceController.currentScanController
-
     // 命中详情展开状态：true 显示完整详情，false 仅显示规则名标题
     property bool detailsExpanded: true
 
@@ -26,9 +23,13 @@ Rectangle {
     radius: theme.radiusLg
 
     // 空态：未选中结果时提示
+    // 注意：ScanController 一律通过 workspaceController.currentScanController.xxx 链式访问，
+    // 不绑定到本地 property。PySide2 5.15 中将 @Property(ScanController) 返回的 QObject
+    // 绑定到本地 property var/ScanControllerType 时类型推断失败会识别为 null（iter-101），
+    // 链式访问每次 binding 求值都重新读取 Property，与 ScanProgressCard 稳定模式一致。
     Label {
         anchors.centerIn: parent
-        visible: scanController.selectedResultIndex < 0
+        visible: workspaceController.currentScanController.selectedResultIndex < 0
         text: "请从左侧选择命中结果\n查看详情与操作"
         font.pixelSize: 12
         color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
@@ -41,7 +42,7 @@ Rectangle {
         anchors.margins: 16
         anchors.bottomMargin: 100  // 给底部操作栏留空间
         clip: true
-        visible: scanController.selectedResultIndex >= 0
+        visible: workspaceController.currentScanController.selectedResultIndex >= 0
         contentWidth: availableWidth
 
         ColumnLayout {
@@ -95,7 +96,7 @@ Rectangle {
                         Item { Layout.fillWidth: true }
                         // 压缩包内部条目标记
                         Rectangle {
-                            visible: scanController.detailIsArchiveEntry
+                            visible: workspaceController.currentScanController.detailIsArchiveEntry
                             radius: 8
                             height: 18
                             width: archiveLabel.width + 12
@@ -116,20 +117,20 @@ Rectangle {
                         spacing: 6
                         Label {
                             Layout.fillWidth: true
-                            text: scanController.detailFilePath
+                            text: workspaceController.currentScanController.detailFilePath
                             font.pixelSize: 11
                             font.family: "Consolas, Monaco, monospace"
                             color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                             wrapMode: Text.WrapAnywhere
                         }
-                        // 定位文件按钮：调用 scanController.openLocation()（无参 Slot）
+                        // 定位文件按钮：调用 workspaceController.currentScanController.openLocation()（无参 Slot）
                         IconButton {
                             iconSource: "qrc:/icons/folder.svg"
                             text: "定位"
                             tooltip: "在文件管理器中打开并选中该文件"
                             accent: "secondary"
-                            enabled: !scanController.detailIsArchiveEntry
-                            onClicked: scanController.openLocation()
+                            enabled: !workspaceController.currentScanController.detailIsArchiveEntry
+                            onClicked: workspaceController.currentScanController.openLocation()
                         }
                     }
 
@@ -146,7 +147,7 @@ Rectangle {
                             color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                         }
                         Label {
-                            text: scanController.detailFileSize || "—"
+                            text: workspaceController.currentScanController.detailFileSize || "—"
                             font.pixelSize: 11
                             color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                         }
@@ -156,7 +157,7 @@ Rectangle {
                             color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                         }
                         Label {
-                            text: scanController.detailHitsCount + " 条"
+                            text: workspaceController.currentScanController.detailHitsCount + " 条"
                             font.pixelSize: 11
                             color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                         }
@@ -187,7 +188,7 @@ Rectangle {
 
             // ---------- 命中详情列表（展开时显示完整内容） ----------
             Repeater {
-                model: scanController.detailHitsModel
+                model: workspaceController.currentScanController.detailHitsModel
                 delegate: Rectangle {
                     Layout.fillWidth: true
                     color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
@@ -302,7 +303,7 @@ Rectangle {
         anchors.bottom: parent.bottom
         anchors.margins: 12
         spacing: 6
-        visible: scanController.selectedResultIndex >= 0
+        visible: workspaceController.currentScanController.selectedResultIndex >= 0
 
         // 操作消息（替换/移至暂存后显示）
         Label {
@@ -327,20 +328,20 @@ Rectangle {
                 text: "◀ 上一条"
                 tooltip: "查看上一条命中结果"
                 accent: "secondary"
-                enabled: scanController.canSelectPrev
+                enabled: workspaceController.currentScanController.canSelectPrev
                 onClicked: {
                     opMsgLabel.text = ""
-                    scanController.selectPrevResult()
+                    workspaceController.currentScanController.selectPrevResult()
                 }
             }
             IconButton {
                 text: "下一条 ▶"
                 tooltip: "查看下一条命中结果"
                 accent: "secondary"
-                enabled: scanController.canSelectNext
+                enabled: workspaceController.currentScanController.canSelectNext
                 onClicked: {
                     opMsgLabel.text = ""
-                    scanController.selectNextResult()
+                    workspaceController.currentScanController.selectNextResult()
                 }
             }
             Item { Layout.fillWidth: true }
@@ -356,9 +357,9 @@ Rectangle {
                 text: "移至暂存"
                 tooltip: "复制到暂存区隔离目录并标记为跳过"
                 accent: "secondary"
-                enabled: !scanController.detailIsArchiveEntry && scanController.selectedResultIndex >= 0
+                enabled: !workspaceController.currentScanController.detailIsArchiveEntry && workspaceController.currentScanController.selectedResultIndex >= 0
                 onClicked: {
-                    var msg = scanController.moveSelectedToStaging()
+                    var msg = workspaceController.currentScanController.moveSelectedToStaging()
                     opMsgLabel.text = msg
                 }
             }
@@ -367,9 +368,9 @@ Rectangle {
                 text: "替换内容"
                 tooltip: "备份源文件并替换命中内容（按规则 replace_with）"
                 accent: "primary"
-                enabled: scanController.canReplaceSelected
+                enabled: workspaceController.currentScanController.canReplaceSelected
                 onClicked: {
-                    var msg = scanController.replaceSelectedResult()
+                    var msg = workspaceController.currentScanController.replaceSelectedResult()
                     opMsgLabel.text = msg
                 }
             }
@@ -383,7 +384,7 @@ Rectangle {
                 text: "批量操作"
                 font.pixelSize: 10
                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                visible: scanController.canReplaceAllFiltered || scanController.canUndoLastBatchReplace
+                visible: workspaceController.currentScanController.canReplaceAllFiltered || workspaceController.currentScanController.canUndoLastBatchReplace
             }
             Item { Layout.fillWidth: true }
             IconButton {
@@ -391,9 +392,9 @@ Rectangle {
                 text: "全部替换"
                 tooltip: "对当前过滤后的所有命中结果执行批量替换（按规则 replace_with）"
                 accent: "primary"
-                enabled: scanController.canReplaceAllFiltered
+                enabled: workspaceController.currentScanController.canReplaceAllFiltered
                 onClicked: {
-                    var msg = scanController.replaceAllFilteredResults()
+                    var msg = workspaceController.currentScanController.replaceAllFilteredResults()
                     opMsgLabel.text = msg
                 }
             }
@@ -402,9 +403,9 @@ Rectangle {
                 text: "撤销批量"
                 tooltip: "撤销最近一次批量替换，从 .bak 备份恢复所有文件"
                 accent: "secondary"
-                enabled: scanController.canUndoLastBatchReplace
+                enabled: workspaceController.currentScanController.canUndoLastBatchReplace
                 onClicked: {
-                    var msg = scanController.undoLastBatchReplace()
+                    var msg = workspaceController.currentScanController.undoLastBatchReplace()
                     opMsgLabel.text = msg
                 }
             }
@@ -413,9 +414,9 @@ Rectangle {
                 text: "撤销当前"
                 tooltip: "撤销当前选中结果的最近一次替换（从 .bak 恢复）"
                 accent: "secondary"
-                enabled: scanController.canReplaceSelected
+                enabled: workspaceController.currentScanController.canReplaceSelected
                 onClicked: {
-                    var msg = scanController.undoSelectedReplace()
+                    var msg = workspaceController.currentScanController.undoSelectedReplace()
                     opMsgLabel.text = msg
                 }
             }

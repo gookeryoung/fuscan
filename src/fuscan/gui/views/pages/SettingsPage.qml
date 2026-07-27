@@ -553,7 +553,7 @@ Item {
                 contentWidth: availableWidth
 
                 ColumnLayout {
-                    Layout.fillWidth: true
+                    width: settingsStack.width
                     spacing: 8
 
                     Label {
@@ -562,6 +562,27 @@ Item {
                         color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
+                    }
+
+                    // ---------- 顶部全选/全不选按钮 ----------
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        IconButton {
+                            iconSource: "qrc:/icons/check_box.svg"
+                            text: "全选"
+                            tooltip: "勾选所有预设分类下的忽略目录（自定义目录不动）"
+                            accent: "secondary"
+                            onClicked: configController.selectAllIgnoreDirs()
+                        }
+                        IconButton {
+                            iconSource: "qrc:/icons/check_box_blank.svg"
+                            text: "全不选"
+                            tooltip: "取消所有预设分类下的忽略目录（自定义目录不动）"
+                            accent: "secondary"
+                            onClicked: configController.unselectAllIgnoreDirs()
+                        }
+                        Item { Layout.fillWidth: true }
                     }
 
                     // ---------- 预设分类列表 ----------

@@ -208,6 +208,76 @@ class TestIgnoreDirs:
         assert "SOLIDWORKS Corp" in dir_names
         assert "Kingsoft" in dir_names
 
+    def test_select_all_ignore_dirs_adds_all_preset(self, controller: ConfigController) -> None:
+        """selectAllIgnoreDirs 应将所有预设分类下的目录加入忽略列表。"""
+        # 先清空所有预设目录
+        controller.unselectAllIgnoreDirs()
+        assert ".git" not in controller.config.ignore_dirs
+        assert "node_modules" not in controller.config.ignore_dirs
+        # 全选
+        controller.selectAllIgnoreDirs()
+        # 各分类代表目录应存在
+        assert ".git" in controller.config.ignore_dirs
+        assert "node_modules" in controller.config.ignore_dirs
+        assert "__pycache__" in controller.config.ignore_dirs
+
+    def test_select_all_ignore_dirs_preserves_custom(self, controller: ConfigController) -> None:
+        """selectAllIgnoreDirs 不影响已存在的自定义目录。"""
+        controller.addCustomIgnoreDir("my_custom_dir")
+        controller.selectAllIgnoreDirs()
+        assert "my_custom_dir" in controller.config.ignore_dirs
+
+    def test_select_all_ignore_dirs_idempotent(self, controller: ConfigController) -> None:
+        """selectAllIgnoreDirs 幂等：重复调用不产生重复条目。"""
+        controller.selectAllIgnoreDirs()
+        before = len(controller.config.ignore_dirs)
+        controller.selectAllIgnoreDirs()
+        after = len(controller.config.ignore_dirs)
+        assert before == after
+
+    def test_select_all_ignore_dirs_case_insensitive_dedup(self, controller: ConfigController) -> None:
+        """selectAllIgnoreDirs 大小写不敏感去重（.GIT 不与 .git 重复）。"""
+        controller.unselectAllIgnoreDirs()
+        # 手动加入大写版本
+        controller.config.ignore_dirs.append(".GIT")
+        controller.selectAllIgnoreDirs()
+        # 应只保留一个 .git（小写版本），大写版本被去重
+        git_entries = [d for d in controller.config.ignore_dirs if d.lower() == ".git"]
+        assert len(git_entries) == 1
+
+    def test_unselect_all_ignore_dirs_removes_all_preset(self, controller: ConfigController) -> None:
+        """unselectAllIgnoreDirs 应移除所有预设分类下的目录。"""
+        # 确保默认有预设目录
+        assert ".git" in controller.config.ignore_dirs
+        controller.unselectAllIgnoreDirs()
+        assert ".git" not in controller.config.ignore_dirs
+        assert "node_modules" not in controller.config.ignore_dirs
+        assert "__pycache__" not in controller.config.ignore_dirs
+
+    def test_unselect_all_ignore_dirs_preserves_custom(self, controller: ConfigController) -> None:
+        """unselectAllIgnoreDirs 保留自定义目录。"""
+        controller.addCustomIgnoreDir("my_custom_dir")
+        controller.unselectAllIgnoreDirs()
+        assert "my_custom_dir" in controller.config.ignore_dirs
+        # 预设目录被移除
+        assert ".git" not in controller.config.ignore_dirs
+
+    def test_unselect_all_ignore_dirs_idempotent(self, controller: ConfigController) -> None:
+        """unselectAllIgnoreDirs 幂等：无预设目录时调用不抛异常。"""
+        controller.unselectAllIgnoreDirs()
+        # 再次调用应无副作用
+        controller.unselectAllIgnoreDirs()
+        assert ".git" not in controller.config.ignore_dirs
+
+    def test_unselect_all_ignore_dirs_case_insensitive(self, controller: ConfigController) -> None:
+        """unselectAllIgnoreDirs 大小写不敏感移除预设目录。"""
+        # 手动加入大写版本
+        controller.config.ignore_dirs.append(".GIT")
+        controller.unselectAllIgnoreDirs()
+        # 大写版本也应被移除
+        git_entries = [d for d in controller.config.ignore_dirs if d.lower() == ".git"]
+        assert len(git_entries) == 0
+
 
 class TestFontSettings:
     """字体配置（通用设置）测试。"""

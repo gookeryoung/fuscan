@@ -487,6 +487,89 @@ class ScanReport:
         }
         return json.dumps(data, ensure_ascii=False, indent=2)
 
+    @classmethod
+    def from_json(cls, json_str: str) -> ScanReport:
+        """从 JSON 字符串反序列化扫描报告（与 :meth:`to_json` 互逆）。
+
+        用于扫描结果持久化：扫描完成后将 ``to_json()`` 输出写入磁盘，
+        重启后通过 ``from_json()`` 恢复结果到 :class:`ScanController`，
+        避免用户重启后被迫重新扫描。
+
+        :param json_str: ``to_json()`` 输出的 JSON 字符串
+        :return: :class:`ScanReport` 实例
+        :raises ValueError: JSON 格式非法或字段缺失
+        """
+        data = json.loads(json_str)
+        if not isinstance(data, dict):
+            raise ValueError("扫描报告 JSON 顶层必须是字典")
+
+        root = Path(data["root"])
+        cancelled = bool(data.get("cancelled", False))
+
+        # 反序列化 stats
+        stats_data = data.get("stats", {})
+        stats = ScanStats(
+            total_files=int(stats_data.get("total_files", 0)),
+            scanned_files=int(stats_data.get("scanned_files", 0)),
+            matched_files=int(stats_data.get("matched_files", 0)),
+            skipped_files=int(stats_data.get("skipped_files", 0)),
+            errors=int(stats_data.get("errors", 0)),
+            duration_seconds=float(stats_data.get("duration_seconds", 0.0)),
+            total_matches=int(stats_data.get("total_matches", 0)),
+            user_skipped=int(stats_data.get("user_skipped", 0)),
+            # perf_summary 不持久化（运行时统计，重启后无意义）
+            perf_summary=None,
+        )
+
+        # 反序列化 hits
+        results: list[ScanResult] = []
+        for hit_data in data.get("hits", []):
+            path = Path(hit_data["path"])
+            archive_path_str = hit_data.get("archive_path")
+            archive_path = Path(archive_path_str) if archive_path_str else None
+            size = int(hit_data.get("size", 0))
+            user_skipped = bool(hit_data.get("user_skipped", False))
+
+            # 反序列化规则命中
+            rule_hits: list[RuleHit] = []
+            for rule_data in hit_data.get("rules", []):
+                # asdict() 将 Severity 枚举序列化为字符串
+                severity_str = rule_data.get("severity", "info")
+                try:
+                    severity = Severity(severity_str)
+                except ValueError:
+                    severity = Severity.INFO
+                rule_hits.append(
+                    RuleHit(
+                        rule_name=str(rule_data.get("rule_name", "")),
+                        severity=severity,
+                        detail=str(rule_data.get("detail", "")),
+                        match_text=str(rule_data.get("match_text", "")),
+                        match_count=int(rule_data.get("match_count", 1)),
+                        target=str(rule_data.get("target", "")),
+                        # tuple 字段 asdict 后变为 list，需转换
+                        match_texts=tuple(rule_data.get("match_texts", [])),
+                        match_description=str(rule_data.get("match_description", "")),
+                    )
+                )
+
+            results.append(
+                ScanResult(
+                    path=path,
+                    size=size,
+                    hits=tuple(rule_hits),
+                    user_skipped=user_skipped,
+                    archive_path=archive_path,
+                )
+            )
+
+        return cls(
+            root=root,
+            results=tuple(results),
+            stats=stats,
+            cancelled=cancelled,
+        )
+
     def to_csv(self) -> str:
         """将扫描报告转换为 CSV 字符串（每行一条规则命中）。"""
         buf = io.StringIO()

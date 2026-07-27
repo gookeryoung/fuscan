@@ -2132,3 +2132,254 @@ class TestWorkspaceHistorySlots:
         controller._archive_scan_history(ws_id, sc)  # type: ignore[attr-defined]
         # 无历史被添加
         assert controller.workspaceHistoryJson(ws_id) == "[]"
+
+
+# ============================= iter-123：扫描结果缓存 =============================
+
+
+class TestCachedResultsPaths:
+    """``_cached_results_dir`` 与 ``_cached_results_path`` 路径计算测试。"""
+
+    def test_cached_results_dir_under_config_dir(
+        self,
+        controller: WorkspaceController,
+        config_dir: Path,
+    ) -> None:
+        """缓存目录应在 ``CONFIG_DIR/results/`` 下。"""
+        assert controller._cached_results_dir == config_dir / "results"  # type: ignore[attr-defined]
+
+    def test_cached_results_path_format(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """缓存文件名格式为 ``<ws_id>.json``。"""
+        path = controller._cached_results_path("ws-abc")  # type: ignore[attr-defined]
+        assert path.name == "ws-abc.json"
+        assert path.parent.name == "results"
+
+
+class TestSaveCachedResults:
+    """``_save_cached_results`` 持久化测试。"""
+
+    def test_save_creates_results_dir(
+        self,
+        controller: WorkspaceController,
+        config_dir: Path,
+    ) -> None:
+        """保存时应自动创建 ``results/`` 目录。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        sc = controller.currentScanController
+        # results 目录不应预先存在
+        assert not (config_dir / "results").exists()
+        # 注入 _last_report 后保存
+        sc._last_report = _build_simple_report()  # type: ignore[attr-defined]
+        controller._save_cached_results(ws_id, sc)  # type: ignore[attr-defined]
+        # 目录与文件均应存在
+        assert (config_dir / "results").is_dir()
+        assert (config_dir / "results" / f"{ws_id}.json").is_file()
+
+    def test_save_skipped_when_no_report(
+        self,
+        controller: WorkspaceController,
+        config_dir: Path,
+    ) -> None:
+        """ScanController 无 _last_report 时跳过保存（不创建文件）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        sc = controller.currentScanController
+        # 默认 _last_report 为 None
+        controller._save_cached_results(ws_id, sc)  # type: ignore[attr-defined]
+        # 不应创建任何文件
+        assert not (config_dir / "results").exists()
+
+    def test_save_persists_json_content(
+        self,
+        controller: WorkspaceController,
+        config_dir: Path,
+    ) -> None:
+        """保存的文件应为合法 JSON，含 root 与 hits 字段。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        sc = controller.currentScanController
+        report = _build_simple_report()
+        sc._last_report = report  # type: ignore[attr-defined]
+        controller._save_cached_results(ws_id, sc)  # type: ignore[attr-defined]
+
+        cache_file = config_dir / "results" / f"{ws_id}.json"
+        data = json.loads(cache_file.read_text(encoding="utf-8"))
+        assert data["root"] == str(report.root)
+        assert "hits" in data
+        assert "stats" in data
+
+
+class TestLoadCachedResults:
+    """``_load_cached_results`` 恢复测试。"""
+
+    def test_load_restores_report_to_scan_controller(
+        self,
+        controller: WorkspaceController,
+        config_dir: Path,
+    ) -> None:
+        """加载缓存后 ScanController 恢复 _last_report 与 result_model。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # 必须切换为当前工作区，currentScanController 才会返回该工作区的 ScanController
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+
+        # 先保存一份缓存
+        report = _build_simple_report()
+        sc._last_report = report  # type: ignore[attr-defined]
+        controller._save_cached_results(ws_id, sc)  # type: ignore[attr-defined]
+
+        # 重置 ScanController 状态模拟重启
+        sc._last_report = None  # type: ignore[attr-defined]
+        sc._result_model.clear()  # type: ignore[attr-defined]
+        assert sc._last_report is None  # type: ignore[attr-defined]
+
+        # 加载缓存
+        controller._load_cached_results(ws_id)  # type: ignore[attr-defined]
+
+        # 验证恢复
+        assert sc._last_report is not None  # type: ignore[attr-defined]
+        assert sc._last_report.root == report.root  # type: ignore[attr-defined]
+        assert sc._result_model.rowCount() == len(report.hits)  # type: ignore[attr-defined]
+
+    def test_load_skipped_when_no_cache_file(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """无缓存文件时静默跳过（不抛异常）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        sc = controller.currentScanController
+        # 不创建缓存文件
+        controller._load_cached_results(ws_id)  # type: ignore[attr-defined]
+        # ScanController 状态不变
+        assert sc._last_report is None  # type: ignore[attr-defined]
+
+    def test_load_skipped_when_corrupted_json(
+        self,
+        controller: WorkspaceController,
+        config_dir: Path,
+    ) -> None:
+        """缓存文件损坏时静默跳过（不抛异常）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # 写入损坏的 JSON
+        results_dir = config_dir / "results"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        (results_dir / f"{ws_id}.json").write_text("{not valid json", encoding="utf-8")
+
+        # 加载不应抛异常
+        controller._load_cached_results(ws_id)  # type: ignore[attr-defined]
+        # ScanController 状态不变
+        sc = controller.currentScanController
+        assert sc._last_report is None  # type: ignore[attr-defined]
+
+    def test_load_after_restart_restores_full_state(
+        self,
+        controller: WorkspaceController,
+        config_controller: ConfigController,
+        rules_controller: RulesController,
+        config_dir: Path,
+    ) -> None:
+        """完整重启场景：保存缓存 → 重建 WorkspaceController → 恢复缓存。"""
+        ws_id = controller.addWorkspace("任务A", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        report = _build_simple_report()
+        sc._last_report = report  # type: ignore[attr-defined]
+        controller._save_cached_results(ws_id, sc)  # type: ignore[attr-defined]
+        controller._persist()  # type: ignore[attr-defined]
+
+        # 模拟重启：创建新的 WorkspaceController
+        new_controller = WorkspaceController(
+            ConfigController(),
+            RulesController(ConfigController()),
+        )
+        # 重启后应自动加载工作区与缓存结果
+        assert new_controller.workspaceModel.rowCount() == 1
+        # 切换为当前工作区，currentScanController 才会返回该工作区的 ScanController
+        new_controller.setCurrentWorkspaceId(ws_id)
+        new_sc = new_controller.currentScanController
+        assert new_sc._last_report is not None  # type: ignore[attr-defined]
+        assert new_sc._last_report.root == report.root  # type: ignore[attr-defined]
+        assert new_sc._result_model.rowCount() == len(report.hits)  # type: ignore[attr-defined]
+
+
+class TestDeleteCachedResults:
+    """``_delete_cached_results`` 清理测试。"""
+
+    def test_delete_removes_cache_file(
+        self,
+        controller: WorkspaceController,
+        config_dir: Path,
+    ) -> None:
+        """删除工作区时应清理对应缓存文件。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        sc = controller.currentScanController
+        sc._last_report = _build_simple_report()  # type: ignore[attr-defined]
+        controller._save_cached_results(ws_id, sc)  # type: ignore[attr-defined]
+
+        cache_file = config_dir / "results" / f"{ws_id}.json"
+        assert cache_file.exists()
+
+        controller._delete_cached_results(ws_id)  # type: ignore[attr-defined]
+        assert not cache_file.exists()
+
+    def test_delete_nonexistent_file_no_error(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """删除不存在的缓存文件不应抛异常。"""
+        # 不应抛异常
+        controller._delete_cached_results("ws-nonexistent")  # type: ignore[attr-defined]
+
+    def test_remove_workspace_cleans_cache(
+        self,
+        controller: WorkspaceController,
+        config_dir: Path,
+    ) -> None:
+        """removeWorkspace 应同时清理缓存结果文件。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        sc = controller.currentScanController
+        sc._last_report = _build_simple_report()  # type: ignore[attr-defined]
+        controller._save_cached_results(ws_id, sc)  # type: ignore[attr-defined]
+
+        cache_file = config_dir / "results" / f"{ws_id}.json"
+        assert cache_file.exists()
+
+        controller.removeWorkspace(ws_id)
+        assert not cache_file.exists()
+
+
+# ============================= 辅助函数 =============================
+
+
+def _build_simple_report():
+    """构造简单的 ScanReport 用于缓存测试。"""
+    from pathlib import Path
+
+    from fuscan.rules.model import Severity
+    from fuscan.scanner import ScanReport, ScanResult
+    from fuscan.scanner.result import RuleHit, ScanStats
+
+    return ScanReport(
+        root=Path("/tmp"),
+        results=(
+            ScanResult(
+                path=Path("/tmp/secret.txt"),
+                size=10,
+                hits=(
+                    RuleHit(
+                        rule_name="敏感文件",
+                        severity=Severity.WARNING,
+                        detail="匹配 password",
+                        match_count=1,
+                    ),
+                ),
+            ),
+        ),
+        stats=ScanStats(
+            total_files=1,
+            scanned_files=1,
+            matched_files=1,
+            total_matches=1,
+        ),
+    )

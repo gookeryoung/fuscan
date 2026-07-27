@@ -285,16 +285,24 @@ class TestExtractWithCache:
         cache.get_extracted_content.assert_not_called()
 
     def test_extract_failure_falls_back_to_utf8(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """extract_content_from_bytes 抛异常时回退到 UTF-8 解码。"""
+        """extract_content_from_bytes_with_retry 抛异常时回退到 UTF-8 解码。"""
         cache = MagicMock()
         cache.get_extracted_content.return_value = None
         perf = PerfStats()
         entry = _make_entry(tmp_path, "f.txt", b"fallback content")
 
-        def boom(data: bytes, extension: str) -> str:
+        def boom(
+            data: bytes,
+            extension: str,
+            *,
+            max_retries: int = 1,
+            backoff_ms: float = 50.0,
+            on_failure: object = None,
+        ) -> str:
             raise RuntimeError("simulated extractor failure")
 
-        monkeypatch.setattr("fuscan.scanner._cache_phase.extract_content_from_bytes", boom)
+        # iter-119：_cache_phase 已切换到 extract_content_from_bytes_with_retry
+        monkeypatch.setattr("fuscan.scanner._cache_phase.extract_content_from_bytes_with_retry", boom)
         content, _ = extract_with_cache(entry, cache, 0, perf)
         assert content == "fallback content"
         # 回退后仍写入缓存

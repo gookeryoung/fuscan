@@ -1875,7 +1875,7 @@ class TestArchiveScannerErrorPaths:
 
     def test_extract_failure_falls_back_to_decode(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """提取器失败时回退到字节解码。"""
-        # 创建一个 .docx 条目但让 extract_content_from_bytes 抛异常
+        # 创建一个 .docx 条目但让 extract_content_from_bytes_with_retry 抛异常
         zip_path = tmp_path / "a.zip"
         with zipfile.ZipFile(str(zip_path), "w") as zf:
             zf.writestr("inner.docx", b"PK\x03\x04 corrupted docx with password")
@@ -1888,7 +1888,8 @@ class TestArchiveScannerErrorPaths:
         def fake_extract(data: bytes, extension: str) -> str:
             raise ExtractorError("模拟提取失败")
 
-        monkeypatch.setattr(scanner_mod, "extract_content_from_bytes", fake_extract)
+        # iter-119：archive.scanner 已切换到 extract_content_from_bytes_with_retry
+        monkeypatch.setattr(scanner_mod, "extract_content_from_bytes_with_retry", fake_extract)
         scanner = ArchiveScanner(rs)
         results = scanner.scan_archive(zip_path)
         # 提取失败回退到解码，password 明文在字节中应被命中

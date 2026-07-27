@@ -18,7 +18,7 @@ from fuscan.archive.base import (
 )
 from fuscan.cache.hashes import hash_bytes
 from fuscan.config import DEFAULT_MAX_FILE_SIZE
-from fuscan.extractors import ExtractorError, extract_content_from_bytes
+from fuscan.extractors import ExtractorError, extract_content_from_bytes_with_retry
 from fuscan.rules.model import Rule, RuleSet
 from fuscan.scanner._helpers import empty_content_provider, spec_needs_content
 from fuscan.scanner.context import FileEntry, MatchContext
@@ -38,7 +38,7 @@ class ArchiveScanner:
 
     - 构造时一次性编译规则集为 Matcher 列表
     - 通过 :func:`get_reader` 工厂分发到 ZipReader/RarReader
-    - 内容提取策略：读取条目字节 → 通过 ``extract_content_from_bytes`` 从内存直接提取
+    - 内容提取策略：读取条目字节 → 通过 ``extract_content_from_bytes_with_retry`` 从内存直接提取
     - 加密条目未提供密码时跳过并记录错误
     """
 
@@ -324,14 +324,19 @@ class ArchiveScanner:
             return b""
 
     def _extract_content_from_bytes(self, data: bytes, entry: ArchiveEntry) -> str:
-        """从字节提取文本内容，复用提取器链或直接解码。"""
+        """从字节提取文本内容，复用提取器链或直接解码。
+
+        iter-119：使用 ``extract_content_from_bytes_with_retry`` 替代
+        ``extract_content_from_bytes``，对瞬时 ``OSError``（解压临时文件锁）
+        重试一次（退避 50ms），避免不必要的纯文本降级。
+        """
         if not data:
             return ""
         if entry.extension in _TEXT_EXTENSIONS:
             return _decode_bytes(data)
         if _has_extractor(entry.extension):
             try:
-                return extract_content_from_bytes(data, entry.extension)
+                return extract_content_from_bytes_with_retry(data, entry.extension)
             except (ExtractorError, OSError, ValueError):
                 logger.warning("提取器提取失败，回退纯文本: %s", entry.display_path, exc_info=True)
                 return _decode_bytes(data)

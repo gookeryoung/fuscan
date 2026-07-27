@@ -24,7 +24,10 @@ from typing import TYPE_CHECKING, Any, Iterable
 
 from fuscan.cache.hashes import hash_bytes
 from fuscan.config import DEFAULT_MAX_FILE_SIZE
-from fuscan.extractors import extract_content_from_bytes, extract_content_with_fallback
+from fuscan.extractors import (
+    extract_content_from_bytes_with_retry,
+    extract_content_with_fallback,
+)
 from fuscan.rules.model import MatchSpec, MatchTarget
 
 if TYPE_CHECKING:
@@ -99,6 +102,10 @@ def default_extract_content_with_hash(entry: FileEntry) -> tuple[str, str]:
     返回空内容与空字节哈希；``Scanner`` 在缓存模式下走自己的
     :meth:`Scanner._extract_with_cache`，使用可配置的 ``max_file_size``。
 
+    iter-119：使用 :func:`extract_content_from_bytes_with_retry` 替代
+    :func:`extract_content_from_bytes`，对瞬时 ``OSError``（Windows AV 文件锁、
+    网络盘抖动）重试一次（退避 50ms），避免不必要的纯文本降级。
+
     :param entry: 文件元信息
     :return: ``(content, file_hash)`` 元组；``file_hash`` 为 64 字符十六进制摘要
     """
@@ -111,7 +118,7 @@ def default_extract_content_with_hash(entry: FileEntry) -> tuple[str, str]:
         return "", hash_bytes(b"")
     file_hash = hash_bytes(data)
     try:
-        content = extract_content_from_bytes(data, entry.extension)
+        content = extract_content_from_bytes_with_retry(data, entry.extension)
     except Exception:
         logger.debug("提取器提取失败，回退到纯文本: %s", entry.path, exc_info=True)
         content = data.decode("utf-8", errors="ignore")

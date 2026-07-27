@@ -9,25 +9,35 @@
 - :func:`get_extractor` 提供默认注册表查询，未注册返回 ``None``（由调用方回退到纯文本）
 - :class:`SpeedTier` 枚举（iter-90）划分 5 档解析速度，GUI 勾选树展示档次
   便于用户按需选择文件类型
+- iter-119：:class:`ExtractorRegistry` 新增 ``extract_from_bytes_with_retry`` /
+  ``extract_with_retry`` 方法，对瞬时 ``OSError``（Windows AV 文件锁、网络盘抖动）
+  执行一次退避重试；:class:`ExtractorFailure` 聚合诊断信息供调用方统计
 """
 
 from __future__ import annotations
 
 import enum
 import logging
+import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 __all__ = [
     "Extractor",
     "ExtractorError",
+    "ExtractorFailure",
     "ExtractorRegistry",
     "SpeedTier",
     "default_registry",
     "extract_content",
     "extract_content_from_bytes",
+    "extract_content_from_bytes_with_retry",
     "extract_content_with_fallback",
+    "extract_content_with_fallback_and_retry",
     "get_extractor",
+    "is_retriable_error",
 ]
 
 logger = logging.getLogger(__name__)
@@ -102,7 +112,51 @@ class SpeedTier(enum.Enum):
 
 
 class ExtractorError(Exception):
-    """提取器相关错误。"""
+    """提取器相关错误。
+
+    子类抛出此异常表示「文件损坏/加密/格式不支持」等不可恢复错误，
+    :func:`is_retriable_error` 视为不可重试，调用方应直接降级到纯文本。
+    """
+
+
+@dataclass(frozen=True)
+class ExtractorFailure:
+    """提取器失败诊断信息（iter-119）。
+
+    由 :meth:`ExtractorRegistry.extract_from_bytes_with_retry` /
+    :meth:`ExtractorRegistry.extract_with_retry` 在每次失败（含重试）时
+    通过 ``on_failure`` 回调上报，调用方（Scanner）可聚合统计「N 个文件
+    提取失败，其中 M 个瞬时错误、K 个格式错误」并展示给用户。
+
+    :ivar extractor_name: 提取器类名（如 ``"PdfExtractor"``）
+    :ivar extension: 文件扩展名（不含点，小写）
+    :ivar error_type: 异常类型名（如 ``"OSError"`` / ``"ExtractorError"``）
+    :ivar error_message: 异常消息前 200 字符（避免大 traceback 撑爆统计）
+    :ivar retried: 是否触发了重试（仅 ``OSError`` 等可重试异常为 True）
+    :ivar succeeded_after_retry: 重试后是否成功（仅在 ``retried=True`` 时有意义）
+    """
+
+    extractor_name: str
+    extension: str
+    error_type: str
+    error_message: str
+    retried: bool
+    succeeded_after_retry: bool
+
+
+def is_retriable_error(exc: Exception) -> bool:
+    """判断异常是否值得重试（iter-119）。
+
+    仅 ``OSError`` 视为可重试瞬时错误：Windows 文件锁（AV 扫描、共享冲突）、
+    网络盘抖动、磁盘瞬时 I/O 错误等。重试一次通常能成功。
+
+    :class:`ExtractorError`（文件损坏/加密）与其他异常（``ValueError``/
+    ``KeyError`` 等数据问题）视为不可重试，重试只会浪费 CPU 时间。
+
+    :param exc: 提取器抛出的异常
+    :return: True 表示可重试，False 表示应直接降级
+    """
+    return isinstance(exc, OSError)
 
 
 class Extractor(ABC):
@@ -235,6 +289,157 @@ class ExtractorRegistry:
             return ""
         return extractor.extract_from_bytes(data)
 
+    def extract_from_bytes_with_retry(
+        self,
+        data: bytes,
+        extension: str,
+        *,
+        max_retries: int = 1,
+        backoff_ms: float = 50.0,
+        on_failure: Callable[[ExtractorFailure], None] | None = None,
+    ) -> str:
+        """按扩展名从内存字节提取，对瞬时 ``OSError`` 执行退避重试（iter-119）。
+
+        与 :meth:`extract_from_bytes` 的区别：
+
+        - ``OSError`` 视为瞬时错误（Windows AV 文件锁、网络盘抖动），重试 ``max_retries`` 次，
+          每次重试前 ``time.sleep(backoff_ms / 1000)`` 秒
+        - :class:`ExtractorError`（文件损坏/加密）与其他异常不重试，直接抛出
+        - 每次失败（含重试）通过 ``on_failure`` 回调上报 :class:`ExtractorFailure`，
+          供调用方聚合统计
+
+        无注册提取器时返回空字符串（与 :meth:`extract_from_bytes` 一致，不触发回调）。
+
+        :param data: 文件完整字节内容
+        :param extension: 扩展名（不含点，小写）
+        :param max_retries: 最大重试次数（默认 1）；0 表示不重试，退化为 :meth:`extract_from_bytes`
+        :param backoff_ms: 重试前退避等待时长（毫秒，默认 50ms）
+        :param on_failure: 失败回调，每次失败（含重试）调用一次；None 表示不回调
+        :return: 提取的文本；无提取器时返回空字符串
+        :raises ExtractorError: 提取失败（不可重试或重试后仍失败）
+        :raises OSError: 重试后仍失败的瞬时 I/O 错误（由调用方降级处理）
+        """
+        normalized = extension.lower().lstrip(".")
+        extractor = self.get(normalized)
+        if extractor is None:
+            logger.debug("扩展名 %s 无注册提取器，返回空内容", normalized)
+            return ""
+        return self._retry_loop(
+            lambda: extractor.extract_from_bytes(data),
+            extractor_name=type(extractor).__name__,
+            extension=normalized,
+            context_label=normalized,
+            max_retries=max_retries,
+            backoff_ms=backoff_ms,
+            on_failure=on_failure,
+        )
+
+    def extract_with_retry(
+        self,
+        path: Path,
+        extension: str | None = None,
+        *,
+        max_retries: int = 1,
+        backoff_ms: float = 50.0,
+        on_failure: Callable[[ExtractorFailure], None] | None = None,
+    ) -> str:
+        """按扩展名从磁盘路径提取，对瞬时 ``OSError`` 执行退避重试（iter-119）。
+
+        与 :meth:`extract` 的区别：同 :meth:`extract_from_bytes_with_retry`，
+        对 ``OSError`` 重试，其他异常直接抛出；通过 ``on_failure`` 回调上报诊断。
+
+        :param path: 文件路径
+        :param extension: 显式指定扩展名（默认从路径推断）
+        :param max_retries: 最大重试次数（默认 1）
+        :param backoff_ms: 重试前退避等待时长（毫秒，默认 50ms）
+        :param on_failure: 失败回调，每次失败（含重试）调用一次；None 表示不回调
+        :return: 提取的文本；无提取器时返回空字符串
+        :raises ExtractorError: 提取失败（不可重试或重试后仍失败）
+        :raises OSError: 重试后仍失败的瞬时 I/O 错误
+        """
+        ext = extension if extension is not None else path.suffix.lower().lstrip(".")
+        extractor = self.get(ext)
+        if extractor is None:
+            logger.debug("扩展名 %s 无注册提取器，返回空内容", ext)
+            return ""
+        return self._retry_loop(
+            lambda: extractor.extract(path),
+            extractor_name=type(extractor).__name__,
+            extension=ext,
+            context_label=str(path),
+            max_retries=max_retries,
+            backoff_ms=backoff_ms,
+            on_failure=on_failure,
+        )
+
+    def _retry_loop(
+        self,
+        action: Callable[[], str],
+        *,
+        extractor_name: str,
+        extension: str,
+        context_label: str,
+        max_retries: int,
+        backoff_ms: float,
+        on_failure: Callable[[ExtractorFailure], None] | None,
+    ) -> str:
+        """重试循环骨架（iter-119 内部复用）。
+
+        :param action: 实际执行提取的可调用对象
+        :param extractor_name: 提取器类名（诊断用）
+        :param extension: 文件扩展名（诊断用）
+        :param context_label: 日志中展示的上下文（扩展名或路径）
+        :param max_retries: 最大重试次数
+        :param backoff_ms: 重试前退避时长（毫秒）
+        :param on_failure: 失败回调
+        :return: 提取的文本
+        :raises Exception: 不可重试或重试后仍失败的原始异常
+        """
+        attempt = 0
+        while True:
+            try:
+                return action()
+            except Exception as exc:
+                retriable = is_retriable_error(exc)
+                # 不可重试或已达重试上限：上报后抛出
+                if not retriable or attempt >= max_retries:
+                    if on_failure is not None:
+                        on_failure(
+                            ExtractorFailure(
+                                extractor_name=extractor_name,
+                                extension=extension,
+                                error_type=type(exc).__name__,
+                                error_message=str(exc)[:200],
+                                retried=attempt > 0,
+                                succeeded_after_retry=False,
+                            )
+                        )
+                    raise
+                # 可重试且未达上限：上报「准备重试」后 sleep 并重试
+                if on_failure is not None:
+                    on_failure(
+                        ExtractorFailure(
+                            extractor_name=extractor_name,
+                            extension=extension,
+                            error_type=type(exc).__name__,
+                            error_message=str(exc)[:200],
+                            retried=False,
+                            succeeded_after_retry=False,
+                        )
+                    )
+                logger.debug(
+                    "提取器 %s 提取 %s 失败（%s），%dms 后重试（第 %d/%d 次）",
+                    extractor_name,
+                    context_label,
+                    type(exc).__name__,
+                    backoff_ms,
+                    attempt + 1,
+                    max_retries,
+                    exc_info=True,
+                )
+                time.sleep(backoff_ms / 1000.0)
+                attempt += 1
+
 
 default_registry = ExtractorRegistry()
 
@@ -275,6 +480,73 @@ def extract_content_with_fallback(path: Path) -> str:
     """
     try:
         return extract_content(path)
+    except Exception:
+        logger.debug("提取器提取失败，回退到纯文本: %s", path, exc_info=True)
+        return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def extract_content_from_bytes_with_retry(
+    data: bytes,
+    extension: str,
+    *,
+    max_retries: int = 1,
+    backoff_ms: float = 50.0,
+    on_failure: Callable[[ExtractorFailure], None] | None = None,
+) -> str:
+    """使用默认注册表从内存字节提取，对瞬时 ``OSError`` 执行退避重试（iter-119）。
+
+    与 :func:`extract_content_from_bytes` 的区别：见
+    :meth:`ExtractorRegistry.extract_from_bytes_with_retry`。
+
+    用于扫描热路径（``default_extract_content_with_hash`` / ``extract_with_cache``）：
+    Windows AV 文件锁或网络盘抖动导致提取器内部 I/O 失败时，重试一次通常能成功，
+    避免不必要的纯文本降级（PDF/DOCX 降级到纯文本会读到乱码）。
+
+    :param data: 文件完整字节内容
+    :param extension: 扩展名（不含点，小写）
+    :param max_retries: 最大重试次数（默认 1）
+    :param backoff_ms: 重试前退避等待时长（毫秒，默认 50ms）
+    :param on_failure: 失败回调，每次失败（含重试）调用一次；None 表示不回调
+    :return: 提取的文本；无提取器时返回空字符串
+    :raises ExtractorError: 提取失败（不可重试或重试后仍失败）
+    :raises OSError: 重试后仍失败的瞬时 I/O 错误
+    """
+    return default_registry.extract_from_bytes_with_retry(
+        data,
+        extension,
+        max_retries=max_retries,
+        backoff_ms=backoff_ms,
+        on_failure=on_failure,
+    )
+
+
+def extract_content_with_fallback_and_retry(
+    path: Path,
+    *,
+    max_retries: int = 1,
+    backoff_ms: float = 50.0,
+    on_failure: Callable[[ExtractorFailure], None] | None = None,
+) -> str:
+    """带重试的提取+纯文本回退（iter-119）。
+
+    与 :func:`extract_content_with_fallback` 的区别：先通过
+    :meth:`ExtractorRegistry.extract_with_retry` 带重试地提取，重试后仍失败
+    才回退到 UTF-8 纯文本读取。失败时通过 ``on_failure`` 回调上报诊断信息。
+
+    :param path: 文件路径
+    :param max_retries: 最大重试次数（默认 1）
+    :param backoff_ms: 重试前退避等待时长（毫秒，默认 50ms）
+    :param on_failure: 失败回调，每次失败（含重试）调用一次；None 表示不回调
+    :return: 提取的文本内容；提取器失败时返回纯文本内容
+    :raises OSError: 纯文本回退读取失败
+    """
+    try:
+        return default_registry.extract_with_retry(
+            path,
+            max_retries=max_retries,
+            backoff_ms=backoff_ms,
+            on_failure=on_failure,
+        )
     except Exception:
         logger.debug("提取器提取失败，回退到纯文本: %s", path, exc_info=True)
         return path.read_text(encoding="utf-8", errors="ignore")

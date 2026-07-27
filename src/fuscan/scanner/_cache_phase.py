@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 from fuscan.cache.hashes import hash_bytes
 from fuscan.cache.store import BatchWriteItem
-from fuscan.extractors import extract_content_from_bytes
+from fuscan.extractors import extract_content_from_bytes_with_retry
 from fuscan.scanner._helpers import BATCH_THRESHOLD
 from fuscan.scanner.result import RuleHit
 
@@ -143,13 +143,17 @@ def extract_with_cache(
     与 :func:`default_extract_content_with_hash` 的区别：
 
     - 一次 ``read_bytes`` 算哈希后，先查 :meth:`CacheStore.get_extracted_content`
-    - 命中则跳过 ``extract_content_from_bytes``（docx/pptx 提取 5-8ms）
+    - 命中则跳过 ``extract_content_from_bytes_with_retry``（docx/pptx 提取 5-8ms）
     - 未命中则提取并写入缓存（非空内容才写）
     - 大文件跳过阈值由调用方传入，0 表示不限制
 
     各阶段接入 ``PerfStats`` 计时：
     ``read_bytes`` / ``hash`` / ``cache_lookup_extract`` / ``extract`` /
     ``cache_put_extract``，便于定位 I/O 与 CPU 瓶颈。
+
+    iter-119：使用 :func:`extract_content_from_bytes_with_retry` 替代
+    :func:`extract_content_from_bytes`，对瞬时 ``OSError`` 重试一次（退避 50ms），
+    避免不必要的纯文本降级。
 
     :param entry: 文件元信息
     :param cache: 缓存存储实例
@@ -175,7 +179,7 @@ def extract_with_cache(
     # 未命中，执行提取
     try:
         with perf.measure("extract"):
-            content = extract_content_from_bytes(data, entry.extension)
+            content = extract_content_from_bytes_with_retry(data, entry.extension)
     except Exception:
         logger.debug("提取器提取失败，回退到纯文本: %s", entry.path, exc_info=True)
         content = data.decode("utf-8", errors="ignore")

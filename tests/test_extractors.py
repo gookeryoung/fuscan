@@ -11,12 +11,15 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from typing_extensions import override
 
 from fuscan.extractors import (
     DocExtractor,
     DocxExtractor,
     EmlExtractor,
+    Extractor,
     ExtractorError,
+    ExtractorFailure,
     ExtractorRegistry,
     MsgExtractor,
     OdtExtractor,
@@ -33,8 +36,11 @@ from fuscan.extractors import (
     extract_content,
     extract_content_cached,
     extract_content_from_bytes,
+    extract_content_from_bytes_with_retry,
     extract_content_with_fallback,
+    extract_content_with_fallback_and_retry,
     get_extractor,
+    is_retriable_error,
 )
 from fuscan.extractors.base import SpeedTier
 from fuscan.extractors.spreadsheet import OdsExtractor
@@ -2796,3 +2802,378 @@ class TestIsZipError:
 
         assert _is_zip_error(ValueError("other")) is False
         assert _is_zip_error(RuntimeError("other")) is False
+
+
+# ---------------------------------------------------------------------------
+# iter-119：失败重试与诊断信息
+# ---------------------------------------------------------------------------
+
+
+class _FlakyExtractor(Extractor):
+    """可编程失败提取器：按 ``failure_sequence`` 抛异常，耗尽后返回 ``success_text``。
+
+    用于测试 :meth:`ExtractorRegistry.extract_from_bytes_with_retry` 的重试与降级行为：
+    - ``failure_sequence``：依次抛出的异常列表，每次调用抛一个
+    - ``success_text``：耗尽 ``failure_sequence`` 后返回的文本
+    - ``call_count``：记录 ``extract_from_bytes`` 被调用的次数
+    """
+
+    def __init__(self, extension: str, failure_sequence: list[Exception], success_text: str = "ok") -> None:
+        self._extension = extension
+        self._failures = list(failure_sequence)
+        self._success_text = success_text
+        self.call_count: int = 0
+
+    @property
+    @override
+    def supported_extensions(self) -> tuple[str, ...]:
+        return (self._extension,)
+
+    @property
+    @override
+    def speed_tier(self) -> SpeedTier:
+        return SpeedTier.VERY_FAST
+
+    @override
+    def extract(self, path: Path) -> str:
+        return self.extract_from_bytes(path.read_bytes())
+
+    @override
+    def extract_from_bytes(self, data: bytes) -> str:
+        self.call_count += 1
+        if self._failures:
+            raise self._failures.pop(0)
+        return self._success_text
+
+
+class TestIsRetriableError:
+    """``is_retriable_error`` 异常分类测试（iter-119）。"""
+
+    def test_os_error_is_retriable(self) -> None:
+        """``OSError`` 及其子类（PermissionError/BlockingIOError 等）可重试。"""
+        assert is_retriable_error(OSError("io")) is True
+        assert is_retriable_error(PermissionError("denied")) is True
+        assert is_retriable_error(BlockingIOError("locked")) is True
+        assert is_retriable_error(FileNotFoundError("missing")) is True
+
+    def test_extractor_error_is_not_retriable(self) -> None:
+        """``ExtractorError``（文件损坏/加密）不可重试。"""
+        assert is_retriable_error(ExtractorError("corrupt")) is False
+
+    def test_other_exception_is_not_retriable(self) -> None:
+        """其他异常（ValueError/RuntimeError 等）不可重试。"""
+        assert is_retriable_error(ValueError("bad data")) is False
+        assert is_retriable_error(RuntimeError("unexpected")) is False
+        assert is_retriable_error(KeyError("missing key")) is False
+
+
+class TestExtractFromBytesWithRetry:
+    """``ExtractorRegistry.extract_from_bytes_with_retry`` 重试逻辑测试（iter-119）。"""
+
+    def test_success_no_retry(self) -> None:
+        """提取成功时不触发重试，``call_count`` 为 1。"""
+        ext = _FlakyExtractor("xyz", failure_sequence=[], success_text="content")
+        registry = ExtractorRegistry()
+        registry.register(ext)
+        result = registry.extract_from_bytes_with_retry(b"data", "xyz", max_retries=1, backoff_ms=0.0)
+        assert result == "content"
+        assert ext.call_count == 1
+
+    def test_retry_succeeds_on_second_attempt(self) -> None:
+        """第一次抛 ``OSError``，重试成功；``call_count`` 为 2。"""
+        ext = _FlakyExtractor(
+            "xyz",
+            failure_sequence=[OSError("temporary lock")],
+            success_text="content",
+        )
+        registry = ExtractorRegistry()
+        registry.register(ext)
+        result = registry.extract_from_bytes_with_retry(b"data", "xyz", max_retries=1, backoff_ms=0.0)
+        assert result == "content"
+        assert ext.call_count == 2
+
+    def test_retry_exhausted_raises_os_error(self) -> None:
+        """``OSError`` 重试后仍失败，抛出原始 ``OSError``。"""
+        ext = _FlakyExtractor(
+            "xyz",
+            failure_sequence=[OSError("first"), OSError("second")],
+            success_text="never",
+        )
+        registry = ExtractorRegistry()
+        registry.register(ext)
+        with pytest.raises(OSError, match="second"):
+            registry.extract_from_bytes_with_retry(b"data", "xyz", max_retries=1, backoff_ms=0.0)
+        # 1 次初次 + 1 次重试 = 2 次
+        assert ext.call_count == 2
+
+    def test_non_retriable_error_no_retry(self) -> None:
+        """``ExtractorError`` 不可重试，直接抛出；``call_count`` 为 1。"""
+        ext = _FlakyExtractor(
+            "xyz",
+            failure_sequence=[ExtractorError("file corrupt")],
+            success_text="never",
+        )
+        registry = ExtractorRegistry()
+        registry.register(ext)
+        with pytest.raises(ExtractorError, match="file corrupt"):
+            registry.extract_from_bytes_with_retry(b"data", "xyz", max_retries=3, backoff_ms=0.0)
+        # 不重试，只调用 1 次
+        assert ext.call_count == 1
+
+    def test_max_retries_zero_means_no_retry(self) -> None:
+        """``max_retries=0`` 退化为不重试，``OSError`` 直接抛出。"""
+        ext = _FlakyExtractor(
+            "xyz",
+            failure_sequence=[OSError("io")],
+            success_text="never",
+        )
+        registry = ExtractorRegistry()
+        registry.register(ext)
+        with pytest.raises(OSError, match="io"):
+            registry.extract_from_bytes_with_retry(b"data", "xyz", max_retries=0, backoff_ms=0.0)
+        assert ext.call_count == 1
+
+    def test_multiple_retries_until_success(self) -> None:
+        """``max_retries=3`` 时可重试 3 次；前 2 次失败、第 3 次成功。"""
+        ext = _FlakyExtractor(
+            "xyz",
+            failure_sequence=[OSError("1"), OSError("2")],
+            success_text="content",
+        )
+        registry = ExtractorRegistry()
+        registry.register(ext)
+        result = registry.extract_from_bytes_with_retry(b"data", "xyz", max_retries=3, backoff_ms=0.0)
+        assert result == "content"
+        assert ext.call_count == 3
+
+    def test_unregistered_extension_returns_empty(self) -> None:
+        """未注册扩展名返回空字符串，不抛异常、不调用回调。"""
+        registry = ExtractorRegistry()
+        failures: list[ExtractorFailure] = []
+        result = registry.extract_from_bytes_with_retry(
+            b"data", "unreg", max_retries=2, backoff_ms=0.0, on_failure=failures.append
+        )
+        assert result == ""
+        assert failures == []
+
+    def test_on_failure_callback_invoked_for_retriable(self) -> None:
+        """可重试错误：``on_failure`` 在准备重试时被调用一次（``retried=False``）。"""
+        ext = _FlakyExtractor(
+            "xyz",
+            failure_sequence=[OSError("temp")],
+            success_text="ok",
+        )
+        registry = ExtractorRegistry()
+        registry.register(ext)
+        failures: list[ExtractorFailure] = []
+        registry.extract_from_bytes_with_retry(
+            b"data", "xyz", max_retries=1, backoff_ms=0.0, on_failure=failures.append
+        )
+        # 1 次「准备重试」回调
+        assert len(failures) == 1
+        failure = failures[0]
+        assert failure.extractor_name == "_FlakyExtractor"
+        assert failure.extension == "xyz"
+        assert failure.error_type == "OSError"
+        assert "temp" in failure.error_message
+        assert failure.retried is False
+        assert failure.succeeded_after_retry is False
+
+    def test_on_failure_callback_invoked_on_exhaustion(self) -> None:
+        """重试耗尽时：``on_failure`` 在准备重试 + 最终失败各调用一次。"""
+        ext = _FlakyExtractor(
+            "xyz",
+            failure_sequence=[OSError("1"), OSError("2")],
+            success_text="never",
+        )
+        registry = ExtractorRegistry()
+        registry.register(ext)
+        failures: list[ExtractorFailure] = []
+        with pytest.raises(OSError):
+            registry.extract_from_bytes_with_retry(
+                b"data", "xyz", max_retries=1, backoff_ms=0.0, on_failure=failures.append
+            )
+        # 第 1 次失败：准备重试（retried=False）
+        # 第 2 次失败：达到上限（retried=True）
+        assert len(failures) == 2
+        assert failures[0].retried is False
+        assert failures[1].retried is True
+        assert failures[1].error_type == "OSError"
+
+    def test_on_failure_callback_invoked_for_non_retriable(self) -> None:
+        """不可重试错误：``on_failure`` 仅在最终失败时调用一次（``retried=False``）。"""
+        ext = _FlakyExtractor(
+            "xyz",
+            failure_sequence=[ExtractorError("corrupt")],
+            success_text="never",
+        )
+        registry = ExtractorRegistry()
+        registry.register(ext)
+        failures: list[ExtractorFailure] = []
+        with pytest.raises(ExtractorError):
+            registry.extract_from_bytes_with_retry(
+                b"data", "xyz", max_retries=3, backoff_ms=0.0, on_failure=failures.append
+            )
+        assert len(failures) == 1
+        assert failures[0].retried is False
+        assert failures[0].error_type == "ExtractorError"
+
+    def test_backoff_delay_applied_between_retries(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """重试前调用 ``time.sleep(backoff_ms / 1000)``，sleep 参数正确传递。"""
+        # max_retries=2 意味着最多 3 次调用（1 初次 + 2 重试），需 3 个失败填满
+        ext = _FlakyExtractor(
+            "xyz",
+            failure_sequence=[OSError("1"), OSError("2"), OSError("3")],
+            success_text="never",
+        )
+        registry = ExtractorRegistry()
+        registry.register(ext)
+        sleeps: list[float] = []
+        monkeypatch.setattr("fuscan.extractors.base.time.sleep", sleeps.append)
+        with pytest.raises(OSError, match="3"):
+            registry.extract_from_bytes_with_retry(b"data", "xyz", max_retries=2, backoff_ms=50.0)
+        # 2 次重试 → 2 次 sleep，每次 0.05 秒
+        assert sleeps == [0.05, 0.05]
+
+
+class TestExtractWithPathRetry:
+    """``ExtractorRegistry.extract_with_retry`` 路径版本测试（iter-119）。"""
+
+    def test_path_retry_succeeds_on_second_attempt(self, tmp_path: Path) -> None:
+        """路径版本：第一次抛 ``OSError``，重试成功。"""
+        ext = _FlakyExtractor(
+            "xyz",
+            failure_sequence=[OSError("lock")],
+            success_text="content",
+        )
+        registry = ExtractorRegistry()
+        registry.register(ext)
+        path = tmp_path / "file.xyz"
+        path.write_bytes(b"data")
+        result = registry.extract_with_retry(path, max_retries=1, backoff_ms=0.0)
+        assert result == "content"
+        assert ext.call_count == 2
+
+    def test_path_uses_extension_inference(self, tmp_path: Path) -> None:
+        """``extension=None`` 时从路径推断扩展名。"""
+        ext = _FlakyExtractor("xyz", failure_sequence=[], success_text="content")
+        registry = ExtractorRegistry()
+        registry.register(ext)
+        path = tmp_path / "file.xyz"
+        path.write_bytes(b"data")
+        result = registry.extract_with_retry(path, max_retries=1, backoff_ms=0.0)
+        assert result == "content"
+        assert ext.call_count == 1
+
+    def test_path_unregistered_extension_returns_empty(self, tmp_path: Path) -> None:
+        """未注册扩展名返回空字符串。"""
+        registry = ExtractorRegistry()
+        path = tmp_path / "file.unreg"
+        path.write_bytes(b"data")
+        result = registry.extract_with_retry(path, max_retries=1, backoff_ms=0.0)
+        assert result == ""
+
+
+class TestModuleLevelRetryFunctions:
+    """模块级便捷函数 ``extract_content_from_bytes_with_retry`` /
+    ``extract_content_with_fallback_and_retry`` 测试（iter-119）。"""
+
+    def test_extract_content_from_bytes_with_retry_uses_default_registry(self) -> None:
+        """模块级函数使用 ``default_registry``，对未注册扩展名返回空字符串。"""
+        result = extract_content_from_bytes_with_retry(b"data", "unregistered_ext_xyz", max_retries=1, backoff_ms=0.0)
+        assert result == ""
+
+    def test_extract_content_with_fallback_and_retry_falls_back_to_plaintext(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """提取器失败且重试耗尽后，回退到 UTF-8 纯文本读取。"""
+        # 注册一个始终抛 ExtractorError 的提取器
+        ext = _FlakyExtractor(
+            "fallback_test_ext",
+            failure_sequence=[ExtractorError("corrupt")],
+            success_text="never",
+        )
+        # 临时注册到 default_registry
+        default_registry.register(ext)
+        try:
+            path = tmp_path / "file.fallback_test_ext"
+            path.write_text("纯文本回退内容", encoding="utf-8")
+            result = extract_content_with_fallback_and_retry(path, max_retries=2, backoff_ms=0.0)
+            assert result == "纯文本回退内容"
+        finally:
+            # 清理：从 default_registry 移除测试用扩展名
+            default_registry._extractors.pop("fallback_test_ext", None)
+
+    def test_extract_content_with_fallback_and_retry_returns_extracted_content(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """提取器成功时返回提取的文本，不走纯文本回退。"""
+        ext = _FlakyExtractor("success_ext", failure_sequence=[], success_text="提取的文本")
+        default_registry.register(ext)
+        try:
+            path = tmp_path / "file.success_ext"
+            path.write_bytes(b"binary data")
+            result = extract_content_with_fallback_and_retry(path, max_retries=1, backoff_ms=0.0)
+            assert result == "提取的文本"
+        finally:
+            default_registry._extractors.pop("success_ext", None)
+
+    def test_extract_content_with_fallback_and_retry_retry_succeeds(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """瞬时 ``OSError`` 经重试后成功，不触发纯文本回退。"""
+        ext = _FlakyExtractor(
+            "retry_success_ext",
+            failure_sequence=[OSError("temp lock")],
+            success_text="提取的文本",
+        )
+        default_registry.register(ext)
+        try:
+            path = tmp_path / "file.retry_success_ext"
+            path.write_bytes(b"binary data")
+            result = extract_content_with_fallback_and_retry(path, max_retries=1, backoff_ms=0.0)
+            assert result == "提取的文本"
+            assert ext.call_count == 2
+        finally:
+            default_registry._extractors.pop("retry_success_ext", None)
+
+
+class TestExtractorFailureDataclass:
+    """``ExtractorFailure`` 诊断数据类测试（iter-119）。"""
+
+    def test_failure_is_frozen(self) -> None:
+        """``ExtractorFailure`` 是 frozen dataclass，不可变。"""
+        failure = ExtractorFailure(
+            extractor_name="PdfExtractor",
+            extension="pdf",
+            error_type="OSError",
+            error_message="io error",
+            retried=True,
+            succeeded_after_retry=False,
+        )
+        with pytest.raises(AttributeError):
+            failure.retried = False  # type: ignore[misc]
+
+    def test_failure_truncates_long_message(self) -> None:
+        """``error_message`` 在 :meth:`_retry_loop` 中被截断到 200 字符（避免撑爆统计）。"""
+        long_message = "x" * 500
+        ext = _FlakyExtractor(
+            "xyz",
+            failure_sequence=[OSError(long_message)],
+            success_text="ok",
+        )
+        registry = ExtractorRegistry()
+        registry.register(ext)
+        failures: list[ExtractorFailure] = []
+        registry.extract_from_bytes_with_retry(
+            b"data", "xyz", max_retries=1, backoff_ms=0.0, on_failure=failures.append
+        )
+        assert len(failures) == 1
+        # _retry_loop 中通过 str(exc)[:200] 截断
+        assert len(failures[0].error_message) == 200

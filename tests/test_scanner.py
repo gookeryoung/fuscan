@@ -10,7 +10,7 @@ import pytest
 
 from fuscan.cache.hashes import hash_bytes
 from fuscan.config import DEFAULT_MAX_FILE_SIZE
-from fuscan.extractors import extract_content_from_bytes
+from fuscan.extractors import extract_content_from_bytes_with_retry
 from fuscan.rules.model import (
     AndMatch,
     LeafMatch,
@@ -2025,22 +2025,30 @@ class TestScannerCache:
             assert cache.get_extracted_content(file_hash) is not None
 
             # 第二次扫描 p2（同内容不同路径）：mtime 预筛不命中（p2 未登记），
-            # 但提取内容缓存应命中，跳过 extract_content_from_bytes
+            # 但提取内容缓存应命中，跳过 extract_content_from_bytes_with_retry
             extract_call_count = 0
-            original_extract = extract_content_from_bytes
+            original_extract = extract_content_from_bytes_with_retry
 
-            def counting_extract(data: bytes, extension: str) -> str:
+            def counting_extract(
+                data: bytes,
+                extension: str,
+                *,
+                max_retries: int = 1,
+                backoff_ms: float = 50.0,
+                on_failure: object = None,
+            ) -> str:
                 nonlocal extract_call_count
                 extract_call_count += 1
-                return original_extract(data, extension)
+                return original_extract(data, extension, max_retries=max_retries, backoff_ms=backoff_ms)
 
             scanner2 = Scanner(rs, cache=cache)
             # 注入计数器：通过 monkeypatch 替换模块级函数
             # iter-109：extract_content_from_bytes 已迁移到 _cache_phase 子模块
+            # iter-119：_cache_phase 已切换到 extract_content_from_bytes_with_retry
             import fuscan.scanner._cache_phase as cache_phase_module
 
             with pytest.MonkeyPatch.context() as mp:
-                mp.setattr(cache_phase_module, "extract_content_from_bytes", counting_extract)
+                mp.setattr(cache_phase_module, "extract_content_from_bytes_with_retry", counting_extract)
                 result2 = scanner2.scan_file(p2)
             # 提取内容缓存应命中，extract 不应被调用
             assert extract_call_count == 0, "提取内容缓存未命中，extract 仍被调用"
@@ -2151,12 +2159,23 @@ class TestScannerCache:
         path.write_bytes(b"password content")
         entry = FileEntry.from_path(path)
 
-        def mock_extract_from_bytes(data: bytes, extension: str) -> str:
+        def mock_extract_from_bytes(
+            data: bytes,
+            extension: str,
+            *,
+            max_retries: int = 1,
+            backoff_ms: float = 50.0,
+            on_failure: object = None,
+        ) -> str:
             raise RuntimeError("模拟提取器失败")
 
         # iter-109：default_extract_content_with_hash 在 _helpers 模块内调用
-        # extract_content_from_bytes，patch 目标须为 _helpers 模块而非 scanner.scanner
-        monkeypatch.setattr("fuscan.scanner._helpers.extract_content_from_bytes", mock_extract_from_bytes)
+        # iter-119：_helpers 已切换到 extract_content_from_bytes_with_retry，
+        # patch 目标须为 _helpers 模块的 extract_content_from_bytes_with_retry
+        monkeypatch.setattr(
+            "fuscan.scanner._helpers.extract_content_from_bytes_with_retry",
+            mock_extract_from_bytes,
+        )
         content, file_hash = default_extract_content_with_hash(entry)
         assert "password content" in content  # 回退到 UTF-8 解码
         assert len(file_hash) == 64  # 哈希仍正确计算

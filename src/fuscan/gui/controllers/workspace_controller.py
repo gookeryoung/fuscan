@@ -31,6 +31,15 @@ except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
 from fuscan import config as config_module
+from fuscan.gui.controllers._persistence import (
+    PERSIST_FILENAME,
+    TASK_OVERRIDE_KEYS,
+    clamp_task_override_int,
+    deserialize_task_overrides,
+    load_persisted_workspaces,
+    save_persisted_workspaces,
+    serialize_workspaces,
+)
 from fuscan.gui.controllers.scan_controller import ScanController
 from fuscan.gui.models.workspace_model import (
     ACTIVE_STATUS_TEXTS,
@@ -76,82 +85,6 @@ def _load_workspace_ruleset(rules_paths: Sequence[str], use_builtin: bool) -> Ru
     except RuleError as exc:
         logger.warning("工作区规则集加载失败: %s", exc)
         return None
-
-
-# 持久化文件名（路径在 _persist_file property 中运行时计算，跟随 CONFIG_DIR monkeypatch）
-_PERSIST_FILENAME = "workspaces.json"
-_PERSIST_VERSION = 1
-
-# 允许任务级覆盖的 Config 字段及类型校验器（iter-104）
-# iter-105：补充范围钳制函数，与 ConfigController.setMax* 语义一致
-_TASK_OVERRIDE_KEYS: dict[str, type] = {
-    "scan_archives": bool,
-    "max_workers": int,
-    "max_file_size": int,
-    "max_depth": int,
-    "ignore_dirs": tuple,
-}
-
-# 任务级覆盖 int 字段范围（与 ConfigController 全局钳制一致）
-_TASK_OVERRIDE_RANGES: dict[str, tuple[int, int]] = {
-    "max_workers": (1, 16),
-    "max_file_size": (1, 500 * 1024 * 1024),  # 1B - 500MB
-}
-
-
-def _clamp_task_override_int(key: str, value: int) -> int | None:
-    """钳制任务级覆盖的 int 字段到合法范围。
-
-    :return: 钳制后的值；越界返回 None 表示拒绝
-    """
-    rng = _TASK_OVERRIDE_RANGES.get(key)
-    if rng is None:
-        return value  # 无范围限制的字段（如 max_depth，由 _effective_max_depth 归一化）
-    lo, hi = rng
-    if value < lo or value > hi:
-        return None
-    return value
-
-
-def _serialize_task_overrides(overrides: dict[str, object]) -> dict[str, object]:
-    """序列化 task_overrides 供 JSON 持久化。
-
-    ``ignore_dirs`` 的 tuple 转为 list（JSON 不支持 tuple），其余字段原样返回。
-    非白名单字段被剔除。
-    """
-    out: dict[str, object] = {}
-    for key, value in overrides.items():
-        if key not in _TASK_OVERRIDE_KEYS:
-            continue
-        if key == "ignore_dirs" and isinstance(value, tuple):
-            out[key] = list(value)
-        else:
-            out[key] = value
-    return out
-
-
-def _deserialize_task_overrides(raw: object) -> dict[str, object]:
-    """反序列化 task_overrides（容错：跳过类型不符字段）。
-
-    ``ignore_dirs`` 的 list 转为 tuple，类型不符字段跳过并 warning。
-    """
-    if not isinstance(raw, dict):
-        return {}
-    out: dict[str, object] = {}
-    for key, value in raw.items():
-        if key not in _TASK_OVERRIDE_KEYS:
-            logger.warning("反序列化 task_overrides：跳过未知字段 %s", key)
-            continue
-        if key == "ignore_dirs":
-            if isinstance(value, list) and all(isinstance(x, str) for x in value):
-                out[key] = tuple(value)
-            else:
-                logger.warning("task_overrides.ignore_dirs 类型不符，跳过: %r", value)
-        elif isinstance(value, _TASK_OVERRIDE_KEYS[key]):
-            out[key] = value
-        else:
-            logger.warning("task_overrides.%s 类型不符，跳过: %r", key, value)
-    return out
 
 
 class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -595,8 +528,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if item is None:
             logger.warning("工作区 %s 不存在，无法设置任务级配置", ws_id)
             return
-        # 白名单校验（iter-105：统一用 _TASK_OVERRIDE_KEYS，避免重复定义）
-        if key not in _TASK_OVERRIDE_KEYS:
+        # 白名单校验（iter-105：统一用 TASK_OVERRIDE_KEYS，避免重复定义）
+        if key not in TASK_OVERRIDE_KEYS:
             logger.warning("不允许覆盖字段: %s", key)
             return
         try:
@@ -605,7 +538,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             logger.warning("任务级配置值 JSON 解析失败: %s", value_json)
             return
         # 类型校验
-        expected_type = _TASK_OVERRIDE_KEYS[key]
+        expected_type = TASK_OVERRIDE_KEYS[key]
         if key == "ignore_dirs":
             # JSON 反序列化为 list，校验后转 tuple
             if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
@@ -617,7 +550,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return
         # iter-105：int 字段范围钳制（max_workers 1-16，max_file_size 1-500MB）
         if isinstance(value, int) and not isinstance(value, bool):
-            clamped = _clamp_task_override_int(key, value)
+            clamped = clamp_task_override_int(key, value)
             if clamped is None:
                 logger.warning("%s=%s 越界，拒绝任务级覆盖", key, value)
                 return
@@ -756,7 +689,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
     @property
     def _persist_file(self) -> Path:
         """持久化文件路径（运行时计算，跟随 ``CONFIG_DIR`` monkeypatch）。"""
-        return config_module.CONFIG_DIR / _PERSIST_FILENAME
+        return config_module.CONFIG_DIR / PERSIST_FILENAME
 
     def _persist(self) -> None:
         """将所有工作区序列化到 ``~/.fuscan/workspaces.json``。
@@ -765,60 +698,16 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         使重启后仍能展示上次扫描结果状态；ScanController 的运行时态
         （scanState/worker/result_model）不持久化，重启后重置为 setup。
         """
-        items = self._model.all_workspaces()
-        payload = {
-            "version": _PERSIST_VERSION,
-            "workspaces": [
-                {
-                    "id": item.workspace_id,
-                    "name": item.name,
-                    "mode": item.mode_str,
-                    "target": item.target,
-                    "rules_paths": list(item.rules_paths),
-                    "use_builtin": item.use_builtin,
-                    # iter-102 起持久化上次扫描状态，重启后仍能展示
-                    "status_text": item.status_text,
-                    "matched_count": item.matched_count,
-                    "passed_count": item.passed_count,
-                    "skipped_count": item.skipped_count,
-                    "error_count": item.error_count,
-                    "last_summary": item.last_summary,
-                    # iter-105 起持久化收集到的符合文件类型文件数
-                    "collected_count": item.collected_count,
-                    # iter-104 起持久化任务级配置覆盖
-                    "task_overrides": _serialize_task_overrides(item.task_overrides),
-                }
-                for item in items
-            ],
-        }
-        try:
-            config_module.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            self._persist_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        except OSError as exc:
-            logger.warning("工作区持久化失败: %s", exc)
+        payload = serialize_workspaces(self._model.all_workspaces())
+        save_persisted_workspaces(self._persist_file, payload, config_module.CONFIG_DIR)
 
     def _load_persisted(self) -> None:
         """从 ``~/.fuscan/workspaces.json`` 恢复工作区列表。
 
         文件不存在/解析失败时静默跳过（首次启动或文件损坏）。
         """
-        persist_file = self._persist_file
-        if not persist_file.exists():
-            return
-        try:
-            payload = json.loads(persist_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("工作区持久化文件读取失败: %s", exc)
-            return
-        if not isinstance(payload, dict) or payload.get("version") != _PERSIST_VERSION:
-            logger.warning("工作区持久化版本不兼容，跳过: %s", payload.get("version"))
-            return
-        workspaces = payload.get("workspaces", [])
-        if not isinstance(workspaces, list):
-            return
+        workspaces = load_persisted_workspaces(self._persist_file)
         for ws in workspaces:
-            if not isinstance(ws, dict):
-                continue
             ws_id = ws.get("id", "")
             if not ws_id or self._model.get_workspace(ws_id) is not None:
                 continue
@@ -840,7 +729,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     # 恢复收集到的符合文件类型文件数（iter-105 起持久化）
                     collected_count=int(ws.get("collected_count", 0)),
                     # 恢复任务级配置覆盖（iter-104 起持久化）
-                    task_overrides=_deserialize_task_overrides(ws.get("task_overrides", {})),
+                    task_overrides=deserialize_task_overrides(ws.get("task_overrides", {})),
                 )
             except Exception as exc:  # 持久化恢复容错：单条失败不阻塞其余
                 logger.warning("工作区 %s 恢复失败: %s", ws_id, exc)

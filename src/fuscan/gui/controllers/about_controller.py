@@ -40,7 +40,6 @@ _DEPENDENCIES: tuple[str, ...] = (
     "olefile - OLE 复合文档",
     "extract-msg - MSG 邮件解析",
     "reportlab - 用户手册 PDF 生成",
-    "pyzstd - Zstandard 解压",
 )
 
 

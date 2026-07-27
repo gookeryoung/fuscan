@@ -34,10 +34,10 @@ dependencies = [
     # 故仍锁定 0.x 直到迁移到 extract+临时目录方案。
     "py7zr>=0.20.0,<1.0.0",
     "reportlab>=4.0.0",
-    "pyzstd==0.15.0",
     # iter-126：迁移 Python 3.10 后统一使用 python-calamine 0.8.2（更高性能）
     "python-calamine==0.8.2",
-    "kreuzberg>=4.10.2",
+    # kreuzberg 为可选加速后端（见 [project.optional-dependencies].fast），
+    # 不在此强制依赖中，使基础安装包轻量；is_available() 运行时检测。
 ]
 
 description     = "极速通用文件扫描器."

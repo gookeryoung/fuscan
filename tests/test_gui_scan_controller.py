@@ -1185,6 +1185,81 @@ class TestOpenLocationWithResult:
         assert "已复制" in controller.statusText
 
 
+class TestIter112ResultFilterSort:
+    """iter-112：ScanController 过滤+排序 Slot 测试。"""
+
+    def _populate_results(self, controller: ScanController, tmp_path: Path) -> None:
+        """构造 3 条命中结果填入 resultModel。"""
+        h_critical = RuleHit(rule_name="敏感内容", severity=Severity.CRITICAL, detail="d1")
+        h_warning = RuleHit(rule_name="API 密钥", severity=Severity.WARNING, detail="d2")
+        results = (
+            ScanResult(path=tmp_path / "config" / "secret.txt", size=10, hits=(h_critical,), errors=0),
+            ScanResult(path=tmp_path / "app.py", size=20, hits=(h_warning,), errors=0),
+            ScanResult(
+                path=tmp_path / "db.yaml",
+                size=30,
+                hits=(h_critical, h_warning),
+                errors=0,
+            ),
+        )
+        controller._result_model.set_results(results)
+
+    def test_set_result_filter_text(self, controller: ScanController, tmp_path: Path) -> None:
+        """setResultFilterText 应触发 model 过滤。"""
+        self._populate_results(controller, tmp_path)
+        assert controller.resultModel.rowCount() == 3
+        controller.setResultFilterText("config")
+        assert controller.resultModel.rowCount() == 1
+        assert controller.resultFilteredCount == 1
+        assert controller.resultTotalCount == 3
+
+    def test_set_result_filter_rules(self, controller: ScanController, tmp_path: Path) -> None:
+        """setResultFilterRules 应触发规则多选过滤。"""
+        self._populate_results(controller, tmp_path)
+        controller.setResultFilterRules(["API 密钥"])
+        # app.py 与 db.yaml 含 API 密钥
+        assert controller.resultFilteredCount == 2
+
+    def test_set_result_filter_severities(self, controller: ScanController, tmp_path: Path) -> None:
+        """setResultFilterSeverities 接收中文文本列表并触发过滤。"""
+        self._populate_results(controller, tmp_path)
+        controller.setResultFilterSeverities(["严重"])
+        # secret.txt 与 db.yaml 的 max_severity 为 CRITICAL
+        assert controller.resultFilteredCount == 2
+
+    def test_set_result_sort(self, controller: ScanController, tmp_path: Path) -> None:
+        """setResultSort 应触发排序。"""
+        self._populate_results(controller, tmp_path)
+        controller.setResultSort("hitsCount", False)
+        # 降序：db.yaml (2 hits) → secret.txt (1) → app.py (1)
+        first = controller.resultModel.get_result(0)
+        assert first is not None
+        assert len(first.hits) == 2
+
+    def test_clear_result_filters(self, controller: ScanController, tmp_path: Path) -> None:
+        """clearResultFilters 应清除所有过滤条件。"""
+        self._populate_results(controller, tmp_path)
+        controller.setResultFilterText("config")
+        assert controller.resultFilteredCount == 1
+        controller.clearResultFilters()
+        assert controller.resultFilteredCount == 3
+
+    def test_filter_resets_selected_index_when_out_of_range(self, controller: ScanController, tmp_path: Path) -> None:
+        """过滤后选中索引越界应重置为 -1。"""
+        self._populate_results(controller, tmp_path)
+        controller.setSelectedResultIndex(2)  # 选中第 3 条
+        controller.setResultFilterText("config")  # 过滤后只剩 1 条
+        assert controller.selectedResultIndex == -1
+
+    def test_result_rule_names_property(self, controller: ScanController, tmp_path: Path) -> None:
+        """resultRuleNames 应返回所有结果中的规则名列表（去重保序）。"""
+        self._populate_results(controller, tmp_path)
+        names = controller.resultRuleNames
+        assert "敏感内容" in names
+        assert "API 密钥" in names
+        assert len(names) == 2  # 去重
+
+
 class TestBuildScanRoots:
     """测试 _build_scan_roots 构建扫描根路径。"""
 

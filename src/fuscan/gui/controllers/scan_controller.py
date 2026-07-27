@@ -53,6 +53,7 @@ from fuscan.gui.scan_mode import (
     SCAN_MODE_STR_TO_INDEX,
     scan_mode_index_to_str,
 )
+from fuscan.rules.model import Severity
 from fuscan.scanner import ScanReport
 from fuscan.scanner.result import ProgressInfo, ScanResult, WalkResult, format_size
 from fuscan.skip_store import SkipStore
@@ -513,6 +514,87 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """选中上一一条结果（越界自动忽略）。"""
         if self._selected_result_index > 0:
             self.setSelectedResultIndex(self._selected_result_index - 1)
+
+    # ----------------------------- iter-112 过滤+排序 -----------------------------
+
+    @Slot(str)  # pyrefly: ignore [not-callable]
+    def setResultFilterText(self, text: str) -> None:
+        """设置结果列表的文件路径模糊过滤（不区分大小写）。
+
+        :param text: 搜索文本；空字符串清除该维度过滤
+        """
+        self._result_model.set_filter_text(text)
+        # 过滤后选中索引可能越界，重置为 -1 避免显示错误详情
+        if self._selected_result_index >= self._result_model.rowCount():
+            self.setSelectedResultIndex(-1)
+        self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    @Slot("QVariantList")  # pyrefly: ignore [not-callable]
+    def setResultFilterRules(self, rule_names: list[str]) -> None:
+        """设置结果列表的规则名多选过滤。
+
+        :param rule_names: 选中的规则名列表；空列表清除该维度过滤
+        """
+        self._result_model.set_filter_rules(rule_names)
+        if self._selected_result_index >= self._result_model.rowCount():
+            self.setSelectedResultIndex(-1)
+        self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    @Slot("QVariantList")  # pyrefly: ignore [not-callable]
+    def setResultFilterSeverities(self, severities: list[str]) -> None:
+        """设置结果列表的严重度多选过滤。
+
+        :param severities: 选中的严重度文本列表（"信息"/"警告"/"严重"）；
+            空列表清除该维度过滤
+        """
+        from fuscan.gui.severity_utils import severity_text
+
+        # 将中文文本反向映射为 Severity 枚举
+        text_to_sev = {severity_text(sev): sev for sev in (Severity.INFO, Severity.WARNING, Severity.CRITICAL)}
+        selected = [text_to_sev[s] for s in severities if s in text_to_sev]
+        self._result_model.set_filter_severities(selected)
+        if self._selected_result_index >= self._result_model.rowCount():
+            self.setSelectedResultIndex(-1)
+        self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    @Slot(str, bool)  # pyrefly: ignore [not-callable]
+    def setResultSort(self, field: str, ascending: bool) -> None:
+        """设置结果列表排序。
+
+        :param field: 排序字段，``"default"/"filePath"/"hitsCount"/"severity"``
+        :param ascending: True 升序，False 降序
+        """
+        self._result_model.set_sort(field, ascending)
+        if self._selected_result_index >= self._result_model.rowCount():
+            self.setSelectedResultIndex(-1)
+        self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    @Slot()  # pyrefly: ignore [not-callable]
+    def clearResultFilters(self) -> None:
+        """清除结果列表所有过滤条件（保留排序）。"""
+        self._result_model.clear_filters()
+        # 清除过滤后 rowCount 通常增加，选中索引仍有效，无需重置
+        self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    @Property(int, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
+    def resultTotalCount(self) -> int:
+        """原始结果总数（未过滤）。"""
+        return self._result_model.total_count
+
+    @Property(int, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
+    def resultFilteredCount(self) -> int:
+        """过滤后结果数。"""
+        return self._result_model.filtered_count
+
+    @Property("QVariantList", notify=scanStateChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
+    def resultRuleNames(self) -> list[str]:
+        """当前结果中出现的所有规则名（供 QML 规则过滤 ComboBox 选择）。"""
+        seen: list[str] = []
+        for result in self._result_model.results:
+            for name in result.rule_names:
+                if name not in seen:
+                    seen.append(name)
+        return seen
 
     @Slot(result=str)  # pyrefly: ignore [not-callable]
     def replaceSelectedResult(self) -> str:

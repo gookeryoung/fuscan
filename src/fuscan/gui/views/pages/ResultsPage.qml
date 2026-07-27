@@ -52,6 +52,107 @@ Item {
             }
         }
 
+        // ---------- iter-112 过滤+排序工具栏 ----------
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 8
+            visible: workspaceController.hasCurrentWorkspace
+
+            // 文件路径搜索框
+            TextField {
+                id: filterTextInput
+                Layout.fillWidth: true
+                Layout.preferredWidth: 280
+                placeholderText: "搜索文件路径…"
+                font.pixelSize: theme.fontSizeBody
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                background: Rectangle {
+                    color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                    border.width: 1
+                    radius: theme.radiusMd
+                }
+                // 防抖：输入后 300ms 触发过滤，避免每个字符都 reset model
+                Timer {
+                    id: filterDebounce
+                    interval: 300
+                    repeat: false
+                    onTriggered: {
+                        workspaceController.currentScanController.setResultFilterText(filterTextInput.text)
+                    }
+                }
+                onTextEdited: filterDebounce.restart()
+            }
+
+            // 严重度过滤（多选，用 ComboBox 简化为单选迭代）
+            ComboBox {
+                id: severityFilterCombo
+                Layout.preferredWidth: 120
+                font.pixelSize: theme.fontSizeBody
+                model: ["全部", "严重", "警告", "信息"]
+                onCurrentIndexChanged: {
+                    var sel = []
+                    if (currentIndex === 1) sel = ["严重"]
+                    else if (currentIndex === 2) sel = ["警告"]
+                    else if (currentIndex === 3) sel = ["信息"]
+                    workspaceController.currentScanController.setResultFilterSeverities(sel)
+                }
+            }
+
+            // 排序字段
+            ComboBox {
+                id: sortFieldCombo
+                Layout.preferredWidth: 120
+                font.pixelSize: theme.fontSizeBody
+                model: ["默认顺序", "文件路径", "命中数", "严重度"]
+                onCurrentIndexChanged: {
+                    var field = "default"
+                    if (currentIndex === 1) field = "filePath"
+                    else if (currentIndex === 2) field = "hitsCount"
+                    else if (currentIndex === 3) field = "severity"
+                    workspaceController.currentScanController.setResultSort(field, sortOrderCombo.currentIndex === 0)
+                }
+            }
+
+            // 排序方向（升/降）
+            ComboBox {
+                id: sortOrderCombo
+                Layout.preferredWidth: 80
+                font.pixelSize: theme.fontSizeBody
+                model: ["升序", "降序"]
+                onCurrentIndexChanged: {
+                    var field = "default"
+                    if (sortFieldCombo.currentIndex === 1) field = "filePath"
+                    else if (sortFieldCombo.currentIndex === 2) field = "hitsCount"
+                    else if (sortFieldCombo.currentIndex === 3) field = "severity"
+                    workspaceController.currentScanController.setResultSort(field, currentIndex === 0)
+                }
+            }
+
+            // 清除过滤按钮
+            Button {
+                text: "清除"
+                font.pixelSize: theme.fontSizeBody
+                Layout.preferredHeight: 32
+                onClicked: {
+                    filterTextInput.text = ""
+                    severityFilterCombo.currentIndex = 0
+                    sortFieldCombo.currentIndex = 0
+                    sortOrderCombo.currentIndex = 0
+                    workspaceController.currentScanController.clearResultFilters()
+                    workspaceController.currentScanController.setResultSort("default", true)
+                }
+            }
+
+            // 过滤后计数
+            Label {
+                text: workspaceController.currentScanController.resultFilteredCount
+                      + " / " + workspaceController.currentScanController.resultTotalCount
+                font.pixelSize: theme.fontSizeSmall
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+            }
+        }
+
         // ---------- 主体：左右分栏 ----------
         RowLayout {
             Layout.fillWidth: true

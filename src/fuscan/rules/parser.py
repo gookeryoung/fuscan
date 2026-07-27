@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 _LEAF_TYPES = {"filename", "content", "path"}
 _COMPOSITE_TYPES = {"and", "or", "not"}
 
+# iter-122：规则集版本兼容性检查
+# 当前支持的规则集版本；导入时校验，不兼容版本抛出 RuleParseError
+SUPPORTED_VERSIONS: frozenset[str] = frozenset({"1.0"})
+
 
 def parse_match(data: Any) -> MatchSpec:
     """从字典构造匹配条件。
@@ -158,6 +162,11 @@ def parse_ruleset(data: Any) -> RuleSet:
         raise RuleParseError(f"规则集必须是字典，得到 {type(data).__name__}")
 
     version = str(data.get("version", "1.0"))
+
+    # iter-122：版本兼容性检查
+    if version not in SUPPORTED_VERSIONS:
+        supported = ", ".join(sorted(SUPPORTED_VERSIONS))
+        raise RuleParseError(f"不支持的规则集版本 {version!r}，当前支持: {supported}。请升级 fuscan 或降级规则集格式。")
 
     # ignore_dirs 已迁移至全局 Config.ignore_dirs；ignore_extensions 已由全局
     # 文件类型白名单（Config.scan_extensions）替代。规则文件中这两个字段被静默忽略。

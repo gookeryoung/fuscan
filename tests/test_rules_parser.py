@@ -326,6 +326,29 @@ class TestParseRuleset:
         with pytest.raises(RuleParseError, match="rules"):
             parse_ruleset({"version": "1.0", "rules": "not-a-list"})
 
+    # ------------------ iter-122：版本兼容性检查 ------------------
+
+    def test_parse_ruleset_unsupported_version_raises(self) -> None:
+        """不支持的规则集版本应抛 RuleParseError，提示升级或降级。"""
+        with pytest.raises(RuleParseError, match="不支持的规则集版本"):
+            parse_ruleset({"version": "2.0", "rules": []})
+
+    def test_parse_ruleset_version_1_1_unsupported(self) -> None:
+        """1.1 版本当前不支持，应抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match=r"1\.1"):
+            parse_ruleset({"version": "1.1", "rules": []})
+
+    def test_parse_ruleset_version_float_coerced_to_string(self) -> None:
+        """version 字段为数值时经 str() 转换后校验（YAML 解析 1.0 为 float）。"""
+        # YAML 中 version: 1.0 会被解析为 float 1.0，str(1.0) == "1.0"
+        rs = parse_ruleset({"version": 1.0, "rules": []})
+        assert rs.version == "1.0"
+
+    def test_parse_ruleset_unsupported_version_error_message_lists_supported(self) -> None:
+        """错误信息应列出当前支持的版本，便于用户排查。"""
+        with pytest.raises(RuleParseError, match=r"1\.0"):
+            parse_ruleset({"version": "3.0", "rules": []})
+
 
 class TestLoadRuleset:
     def test_load_valid_yaml(self, tmp_path: Path) -> None:

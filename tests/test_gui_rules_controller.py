@@ -39,7 +39,7 @@ rules:
   - name: "敏感内容"
     severity: critical
     match:
-      target: content
+      type: content
       mode: contains
       pattern: "{pattern}"
 """,
@@ -733,3 +733,294 @@ class TestPersistToBoundWorkspaceNoop:
         # 默认未绑定，_workspace_controller 为 None
         controller._persist_to_bound_workspace()  # type: ignore[attr-defined]
         # 无副作用即可
+
+
+# ============================= iter-122 导入/导出/模板 =============================
+
+
+class TestTemplateList:
+    """``templateList`` Property 测试。"""
+
+    def test_template_list_returns_all_templates(self, config_controller: ConfigController) -> None:
+        """templateList 应返回所有内置模板，按名字母序排列。"""
+        controller = RulesController(config_controller)
+        templates = controller.templateList
+        assert len(templates) >= 5
+        # 每项含 name/description 字段
+        for item in templates:
+            assert "name" in item
+            assert "description" in item
+            assert len(item["name"]) > 0
+            assert len(item["description"]) > 0
+
+    def test_template_list_contains_aws_keys(self, config_controller: ConfigController) -> None:
+        """templateList 应包含 aws_keys 模板。"""
+        controller = RulesController(config_controller)
+        names = [t["name"] for t in controller.templateList]
+        assert "aws_keys" in names
+        assert "azure_keys" in names
+        assert "gcp_keys" in names
+        assert "privacy_data" in names
+        assert "common_credentials" in names
+
+    def test_template_list_sorted_alphabetically(self, config_controller: ConfigController) -> None:
+        """templateList 应按名字母序排列。"""
+        controller = RulesController(config_controller)
+        names = [t["name"] for t in controller.templateList]
+        assert names == sorted(names)
+
+
+class TestExportRuleset:
+    """``exportRuleset`` Slot 测试（iter-122）。"""
+
+    def test_export_to_yaml_roundtrip(
+        self,
+        controller_with_file: RulesController,
+        tmp_path: Path,
+    ) -> None:
+        """导出 YAML 后可被 load_ruleset 加载，规则数一致。"""
+        from fuscan.rules import load_ruleset
+
+        target = tmp_path / "exported.yaml"
+        assert controller_with_file.exportRuleset(str(target)) is True
+        assert target.exists()
+
+        loaded = load_ruleset(target)
+        assert loaded.version == "1.0"
+        assert len(loaded.rules) == controller_with_file.ruleCount
+
+    def test_export_to_json_roundtrip(
+        self,
+        controller_with_file: RulesController,
+        tmp_path: Path,
+    ) -> None:
+        """导出 JSON 后可被 load_ruleset 加载。"""
+        from fuscan.rules import load_ruleset
+
+        target = tmp_path / "exported.json"
+        assert controller_with_file.exportRuleset(str(target)) is True
+        assert target.exists()
+
+        # YAML 是 JSON 超集，可解析 JSON 文件
+        loaded = load_ruleset(target)
+        assert loaded.version == "1.0"
+        assert len(loaded.rules) > 0
+
+    def test_export_emits_success_signal(
+        self,
+        controller_with_file: RulesController,
+        tmp_path: Path,
+    ) -> None:
+        """导出成功后应 emit rulesIoCompleted(True, msg)。"""
+        emitted: list[tuple[bool, str]] = []
+        controller_with_file.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        target = tmp_path / "out.yaml"
+        controller_with_file.exportRuleset(str(target))
+        assert len(emitted) == 1
+        assert emitted[0][0] is True
+        assert "已导出" in emitted[0][1]
+
+    def test_export_empty_path_returns_false(
+        self,
+        controller_with_file: RulesController,
+    ) -> None:
+        """空路径应返回 False 并 emit 失败信号。"""
+        emitted: list[tuple[bool, str]] = []
+        controller_with_file.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller_with_file.exportRuleset("") is False
+        assert len(emitted) == 1
+        assert emitted[0][0] is False
+
+    def test_export_no_ruleset_returns_false(
+        self,
+        config_controller: ConfigController,
+        tmp_path: Path,
+    ) -> None:
+        """无规则集（未启用内置且无规则文件）时返回 False。"""
+        config_controller.config.use_builtin = False
+        config_controller.config.rules_paths = []
+        controller = RulesController(config_controller)
+        assert controller.ruleset is None
+
+        target = tmp_path / "empty.yaml"
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller.exportRuleset(str(target)) is False
+        assert len(emitted) == 1
+        assert emitted[0][0] is False
+        assert "无规则集" in emitted[0][1]
+
+
+class TestImportRuleset:
+    """``importRuleset`` Slot 测试（iter-122）。"""
+
+    def test_import_valid_yaml_adds_to_rules_paths(
+        self,
+        config_controller: ConfigController,
+        tmp_path: Path,
+    ) -> None:
+        """导入合法 YAML 后应加入 rules_paths 并刷新 ruleset。"""
+        # 准备一个合法规则文件
+        rules_file = _write_rules_file(tmp_path, "importable.yaml", "secret")
+        controller = RulesController(config_controller)
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+
+        assert controller.importRuleset(str(rules_file)) is True
+        assert str(rules_file) in config_controller.config.rules_paths
+        assert controller.ruleset is not None
+        assert len(emitted) == 1
+        assert emitted[0][0] is True
+        assert "已导入" in emitted[0][1]
+
+    def test_import_already_loaded_returns_false(
+        self,
+        controller_with_file: RulesController,
+        rules_file: Path,
+    ) -> None:
+        """重复导入已加载的规则文件返回 False。"""
+        emitted: list[tuple[bool, str]] = []
+        controller_with_file.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller_with_file.importRuleset(str(rules_file)) is False
+        assert len(emitted) == 1
+        assert emitted[0][0] is False
+        assert "已加载" in emitted[0][1]
+
+    def test_import_nonexistent_returns_false(
+        self,
+        config_controller: ConfigController,
+        tmp_path: Path,
+    ) -> None:
+        """导入不存在的文件返回 False。"""
+        controller = RulesController(config_controller)
+        target = tmp_path / "missing.yaml"
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller.importRuleset(str(target)) is False
+        assert len(emitted) == 1
+        assert emitted[0][0] is False
+        assert "不存在" in emitted[0][1]
+
+    def test_import_empty_path_returns_false(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """空路径返回 False。"""
+        controller = RulesController(config_controller)
+        assert controller.importRuleset("") is False
+
+    def test_import_unsupported_version_returns_false(
+        self,
+        config_controller: ConfigController,
+        tmp_path: Path,
+    ) -> None:
+        """导入版本不兼容的规则文件返回 False（版本兼容性检查）。"""
+        bad_version = tmp_path / "v2.yaml"
+        bad_version.write_text(
+            'version: "2.0"\nrules: []\n',
+            encoding="utf-8",
+        )
+        controller = RulesController(config_controller)
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller.importRuleset(str(bad_version)) is False
+        assert len(emitted) == 1
+        assert emitted[0][0] is False
+        assert "不支持" in emitted[0][1] or "导入失败" in emitted[0][1]
+        # 不应污染 rules_paths
+        assert str(bad_version) not in config_controller.config.rules_paths
+
+
+class TestLoadTemplate:
+    """``loadTemplate`` Slot 测试（iter-122）。"""
+
+    def test_load_aws_keys_template_persists_to_home(
+        self,
+        config_controller: ConfigController,
+        config_dir: Path,
+    ) -> None:
+        """加载 aws_keys 模板后应在 ~/.fuscan/templates/ 创建文件并加入 rules_paths。"""
+        controller = RulesController(config_controller)
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+
+        assert controller.loadTemplate("aws_keys") is True
+        assert len(emitted) == 1
+        assert emitted[0][0] is True
+        assert "aws_keys" in emitted[0][1]
+
+        # 模板文件已创建
+        templates_dir = config_dir / "templates"
+        assert (templates_dir / "aws_keys.yaml").exists()
+
+        # rules_paths 中应包含模板文件路径
+        template_path = str(templates_dir / "aws_keys.yaml")
+        assert template_path in config_controller.config.rules_paths
+        # ruleset 已刷新
+        assert controller.ruleset is not None
+        # AWS 模板包含 2 条规则
+        aws_rules = [r for r in controller.ruleset.rules if "AWS" in r.name]
+        assert len(aws_rules) >= 2
+
+    def test_load_template_unknown_returns_false(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """加载不存在的模板返回 False。"""
+        controller = RulesController(config_controller)
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller.loadTemplate("nonexistent") is False
+        assert len(emitted) == 1
+        assert emitted[0][0] is False
+        assert "不存在" in emitted[0][1]
+
+    def test_load_template_empty_name_returns_false(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """空模板名返回 False。"""
+        controller = RulesController(config_controller)
+        assert controller.loadTemplate("") is False
+
+    def test_load_template_twice_succeeds(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """重复加载同一模板应返回 True（视为已加载成功，不报错）。"""
+        controller = RulesController(config_controller)
+        assert controller.loadTemplate("privacy_data") is True
+        # 第二次：路径已存在，loadFileFromPath 返回 False，但 loadTemplate 应返回 True
+        assert controller.loadTemplate("privacy_data") is True
+
+    def test_load_all_templates_succeed(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """所有列出的模板都应能成功加载。"""
+        from fuscan.rules import get_template_names
+
+        controller = RulesController(config_controller)
+        for name in get_template_names():
+            assert controller.loadTemplate(name) is True, f"加载模板 {name} 失败"
+
+        # rules_paths 应包含所有模板文件
+        assert len(config_controller.config.rules_paths) >= 5

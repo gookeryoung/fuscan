@@ -7,6 +7,10 @@
   :class:`MatchMode`, :class:`Severity`
 - 解析函数： :func:`load_ruleset`, :func:`parse_ruleset`, :func:`parse_rule`,
   :func:`parse_match`
+- 序列化函数（iter-122）： :func:`save_ruleset`, :func:`serialize_ruleset`,
+  :func:`serialize_rule`, :func:`serialize_match`
+- 模板库（iter-122）： :func:`get_template_names`, :func:`get_template_descriptions`,
+  :func:`load_template`
 - 异常： :class:`RuleError`, :class:`RuleParseError`, :class:`RuleLoadError`
 """
 
@@ -27,6 +31,8 @@ from fuscan.rules.model import (
     Severity,
 )
 from fuscan.rules.parser import load_ruleset, parse_match, parse_rule, parse_ruleset
+from fuscan.rules.serializer import save_ruleset, serialize_match, serialize_rule, serialize_ruleset
+from fuscan.rules.templates import get_template_descriptions, get_template_names, load_template
 
 __all__ = [
     "AndMatch",
@@ -42,10 +48,17 @@ __all__ = [
     "RuleParseError",
     "RuleSet",
     "Severity",
+    "get_template_descriptions",
+    "get_template_names",
     "load_ruleset",
+    "load_template",
     "merge_multiple_rulesets",
     "merge_rulesets",
     "parse_match",
     "parse_rule",
     "parse_ruleset",
+    "save_ruleset",
+    "serialize_match",
+    "serialize_rule",
+    "serialize_ruleset",
 ]

@@ -395,7 +395,7 @@ class ScanReport:
         return f"发现 {len(self.hits)} 个文件命中规则，共 {self.stats.total_matches} 处匹配"
 
     def to_format(self, fmt: str) -> str:
-        """按格式名渲染报告（``json``/``csv``/``text``）。
+        """按格式名渲染报告（``json``/``csv``/``sarif``/``text``）。
 
         调用方无需维护 if-else 调度，未知格式回退到 ``text``。
         """
@@ -403,6 +403,8 @@ class ScanReport:
             return self.to_json()
         if fmt == "csv":
             return self.to_csv()
+        if fmt == "sarif":
+            return self.to_sarif()
         return self.to_text()
 
     def filter(self, path_query: str = "", rule_name: str = "") -> ScanReport:
@@ -540,3 +542,77 @@ class ScanReport:
                 rule_label = f"{hit.rule_name} - {hit.match_description}" if hit.match_description else hit.rule_name
                 lines.append(f"    [{hit.severity.value}] {rule_label} (条数 {hit.match_count}): {hit.detail}")
         return "\n".join(lines)
+
+    def to_sarif(self) -> str:
+        """将扫描报告转换为 SARIF v2.1.0 JSON 字符串。
+
+        SARIF（Static Analysis Results Interchange Format）是 OASIS 标准，
+        GitHub Code Scanning 原生支持。每条 RuleHit 映射为一个 SARIF result：
+
+        - ``ruleId``：规则名
+        - ``level``：严重等级映射（CRITICAL→error, WARNING→warning, INFO→note）
+        - ``message.text``：匹配描述或详情
+        - ``locations[0].physicalLocation.artifactLocation.uri``：文件相对路径
+
+        压缩包内部条目在 ``message.text`` 中附加 ``[压缩包: path » inner]`` 标注。
+        """
+        from fuscan import __version__
+
+        severity_to_level: dict[Severity, str] = {
+            Severity.CRITICAL: "error",
+            Severity.WARNING: "warning",
+            Severity.INFO: "note",
+        }
+
+        results: list[dict[str, object]] = []
+        for sr in self.hits:
+            try:
+                uri = str(sr.path.relative_to(self.root))
+            except ValueError:
+                uri = str(sr.path)
+
+            for hit in sr.hits:
+                # 压缩包内部条目附加标注
+                if sr.archive_path is not None:
+                    msg_text = f"[压缩包: {sr.archive_path} » {sr.inner_path}] {hit.match_description or hit.detail}"
+                else:
+                    msg_text = hit.match_description or hit.detail
+
+                result_entry: dict[str, object] = {
+                    "ruleId": hit.rule_name,
+                    "level": severity_to_level.get(hit.severity, "note"),
+                    "message": {"text": msg_text},
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "artifactLocation": {
+                                    "uri": uri,
+                                }
+                            }
+                        }
+                    ],
+                    "properties": {
+                        "severity": hit.severity.value,
+                        "matchCount": hit.match_count,
+                        "target": hit.target,
+                    },
+                }
+                results.append(result_entry)
+
+        sarif: dict[str, object] = {
+            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": "fuscan",
+                            "version": __version__,
+                            "informationUri": "https://github.com/gookeryoung/fuscan",
+                        }
+                    },
+                    "results": results,
+                }
+            ],
+        }
+        return json.dumps(sarif, ensure_ascii=False, indent=2)

@@ -8,10 +8,14 @@ openpyxl）集中在本模块，职责单一。
 
 - :func:`export_pdf`：生成 PDF 二进制（reportlab，STSong-Light 中文字体）
 - :func:`export_excel`：生成 Excel 二进制（openpyxl，双工作表 + 严重等级着色）
-- :func:`save_report`：按文件扩展名自动选择格式写入文件
+- :func:`export_report`：按文件扩展名自动选择格式写入文件（统一入口）
+- :func:`save_report`：``export_report`` 的别名（向后兼容）
 
-文本格式（csv/json/text）仍由 :meth:`ScanReport.to_format` 处理，本模块
-仅负责二进制格式与文件分发。
+文本格式（csv/json/sarif/text）由 :meth:`ScanReport.to_format` 处理，
+本模块负责二进制格式与文件分发。
+
+iter-121 新增 SARIF 格式支持（GitHub Code Scanning 集成），
+``.sarif`` 扩展名导出 SARIF v2.1.0 JSON。
 """
 
 from __future__ import annotations
@@ -24,7 +28,7 @@ from pathlib import Path
 from fuscan.rules.model import Severity
 from fuscan.scanner.result import ScanReport, format_size
 
-__all__ = ["export_excel", "export_pdf", "save_report"]
+__all__ = ["export_excel", "export_pdf", "export_report", "save_report"]
 
 
 def export_pdf(report: ScanReport) -> bytes:
@@ -213,21 +217,46 @@ def export_excel(report: ScanReport) -> bytes:
     return buf.getvalue()
 
 
-def save_report(report: ScanReport, path: Path) -> None:
-    """将扫描报告保存到文件，根据扩展名自动选择格式。
+def export_report(report: ScanReport, path: Path, fmt: str | None = None) -> None:
+    """将扫描报告导出到文件，统一入口（iter-121）。
 
-    支持的扩展名：``.csv``/``.json``/``.txt``/``.pdf``/``.xlsx``。
-    其他扩展名按文本格式输出。
+    根据扩展名或 ``fmt`` 参数自动选择格式：
+
+    - ``.pdf``：PDF 二进制（reportlab）
+    - ``.xlsx``：Excel 二进制（openpyxl）
+    - ``.csv``：CSV 文本
+    - ``.json``：JSON 文本
+    - ``.sarif``：SARIF v2.1.0 JSON（GitHub Code Scanning）
+    - 其他扩展名：可读文本
 
     :param report: 扫描报告
     :param path: 目标文件路径；二进制格式（pdf/xlsx）写 bytes，文本格式写 UTF-8
+    :param fmt: 显式指定格式（``pdf``/``xlsx``/``csv``/``json``/``sarif``/``text``）；
+                为 None 时根据 ``path.suffix`` 推断
     """
     ext = path.suffix.lower()
-    if ext == ".pdf":
+    # 显式 fmt 优先，否则根据扩展名推断
+    if fmt == "pdf" or (fmt is None and ext == ".pdf"):
         path.write_bytes(export_pdf(report))
         return
-    if ext == ".xlsx":
+    if fmt == "xlsx" or (fmt is None and ext == ".xlsx"):
         path.write_bytes(export_excel(report))
         return
-    content = report.to_format(ext.lstrip(".") if ext.lstrip(".") in ("csv", "json") else "text")
+    # 文本格式：sarif/csv/json/text
+    if fmt is not None:
+        text_fmt = fmt
+    elif ext in (".csv", ".json", ".sarif"):
+        text_fmt = ext.lstrip(".")
+    else:
+        text_fmt = "text"
+    content = report.to_format(text_fmt)
     path.write_text(content, encoding="utf-8")
+
+
+def save_report(report: ScanReport, path: Path) -> None:
+    """将扫描报告保存到文件（``export_report`` 的向后兼容别名）。
+
+    .. deprecated:: iter-121
+        请使用 :func:`export_report` 替代。
+    """
+    export_report(report, path)

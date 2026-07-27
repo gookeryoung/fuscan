@@ -29,7 +29,7 @@ import pytest
 # 设置离屏平台，避免无显示器环境报错
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-pytestmark = pytest.mark.gui
+pytestmark = [pytest.mark.gui, pytest.mark.gui_qml]
 
 try:
     from PySide2.QtCore import QTimer, QtMsgType, QUrl, qInstallMessageHandler

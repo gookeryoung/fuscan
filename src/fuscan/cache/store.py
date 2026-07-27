@@ -67,6 +67,53 @@ __all__ = ["BatchWriteItem", "CacheStats", "CacheStore", "default_cache_path"]
 
 logger = logging.getLogger(__name__)
 
+# iter-110：PRAGMA 调优常量。集中在模块级便于调整与诊断，所有连接（读/写）
+# 共用同一组参数，避免行为不一致。
+# - mmap_size=256MB：内存映射 I/O，大缓存库（>10MB）读路径减少 syscall 与
+#   用户态/内核态数据拷贝；64 位系统地址空间充裕，256MB 上限足够覆盖
+#   fuscan 典型工作集（100MB 量级）
+# - cache_size=64MB（负值表示 KiB）：SQLite 页缓存，避免反复读同一页
+# - temp_store=MEMORY：临时 B-tree 与排序在内存中完成
+# - wal_autocheckpoint=10000：WAL 累积 10000 页（约 40MB）才 checkpoint，
+#   默认 1000 页过于激进，扫描期间频繁 checkpoint 导致 fsync 卡顿
+_PRAGMA_MMAP_SIZE: int = 256 * 1024 * 1024
+_PRAGMA_CACHE_SIZE_KIB: int = -65536  # 负值表示 KiB，65536 KiB = 64 MiB
+_PRAGMA_WAL_AUTOCHECKPOINT: int = 10000
+
+
+def _apply_pragmas(conn: sqlite3.Connection, read_only: bool) -> None:
+    """对连接应用 PRAGMA 调优（iter-110）。
+
+    :param conn: 待配置的 SQLite 连接
+    :param read_only: ``True`` 表示只读连接（应用 ``query_only=ON`` 防误写）；
+        ``False`` 表示主写连接（额外设置 ``wal_autocheckpoint``）
+
+    PRAGMA 失败（如低版本 SQLite 不支持）记 WARNING 不抛异常，保持向前兼容。
+    """
+    # 基础 PRAGMA（读/写连接共用）
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA temp_store = MEMORY")
+    # 安全设置 mmap_size：低版本或某些平台可能不支持，失败时降级到默认 0
+    try:
+        conn.execute(f"PRAGMA mmap_size = {_PRAGMA_MMAP_SIZE}")
+    except sqlite3.DatabaseError:
+        logger.warning("PRAGMA mmap_size 不支持，降级到默认", exc_info=True)
+    try:
+        conn.execute(f"PRAGMA cache_size = {_PRAGMA_CACHE_SIZE_KIB}")
+    except sqlite3.DatabaseError:
+        logger.warning("PRAGMA cache_size 不支持，降级到默认", exc_info=True)
+    if read_only:
+        # 只读保护：防止读连接误写，违反 query_only 会抛 sqlite3.OperationalError
+        conn.execute("PRAGMA query_only = ON")
+    else:
+        # 仅主写连接设置 wal_autocheckpoint：控制 WAL 文件增长节奏
+        try:
+            conn.execute(f"PRAGMA wal_autocheckpoint = {_PRAGMA_WAL_AUTOCHECKPOINT}")
+        except sqlite3.DatabaseError:
+            logger.warning("PRAGMA wal_autocheckpoint 不支持，降级到默认", exc_info=True)
+
 
 class CacheStore:
     """线程安全的 SQLite 扫描结果缓存。
@@ -136,20 +183,13 @@ class CacheStore:
 
         连接创建后登记到 ``_read_conns`` 列表，``close`` 时统一关闭。
         """
-        conn = getattr(self._read_local, "conn", None)
-        if conn is not None:
-            return conn
         conn = sqlite3.connect(
             str(self._db_path),
             check_same_thread=False,
             isolation_level=None,  # 自动提交，WAL 下每次查询读最新快照
         )
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA synchronous = NORMAL")
-        # 只读保护：防止读连接误写，违反 query_only 会抛 sqlite3.OperationalError
-        conn.execute("PRAGMA query_only = ON")
+        _apply_pragmas(conn, read_only=True)
         self._read_local.conn = conn
         with self._lru_lock:
             self._read_conns.append(conn)
@@ -158,9 +198,7 @@ class CacheStore:
     def _init_db(self) -> None:
         """初始化数据库：启用 WAL、外键，迁移 schema。"""
         with self._lock:
-            self._conn.execute("PRAGMA journal_mode = WAL")
-            self._conn.execute("PRAGMA foreign_keys = ON")
-            self._conn.execute("PRAGMA synchronous = NORMAL")
+            _apply_pragmas(self._conn, read_only=False)
             version = migrate(self._conn)
             logger.debug("缓存数据库已就绪: %s, schema_version=%d", self._db_path, version)
 

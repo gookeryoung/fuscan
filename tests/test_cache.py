@@ -389,6 +389,48 @@ class TestCacheStoreInit:
         # with 退出已 close，再调一次不应抛异常
         store.close()
 
+    def test_pragma_tuning_applied_to_write_conn(self, tmp_path: Path) -> None:
+        """iter-110：主写连接应用 PRAGMA 调优（mmap/cache_size/wal_autocheckpoint）。"""
+        store = CacheStore(tmp_path / "cache.db")
+        try:
+            # mmap_size 应为 256MB
+            mmap_size = store._conn.execute("PRAGMA mmap_size").fetchone()[0]
+            assert mmap_size == 256 * 1024 * 1024
+            # cache_size 应为 64MB（负值 KiB）
+            cache_size = store._conn.execute("PRAGMA cache_size").fetchone()[0]
+            assert cache_size == -65536
+            # temp_store 应为 MEMORY (2)
+            temp_store = store._conn.execute("PRAGMA temp_store").fetchone()[0]
+            assert temp_store == 2
+            # wal_autocheckpoint 应为 10000
+            wal_ac = store._conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0]
+            assert wal_ac == 10000
+            # journal_mode 应为 wal
+            journal = store._conn.execute("PRAGMA journal_mode").fetchone()[0]
+            assert str(journal).lower() == "wal"
+        finally:
+            store.close()
+
+    def test_pragma_tuning_applied_to_read_conn(self, tmp_path: Path) -> None:
+        """iter-110：读连接应用 PRAGMA 调优 + query_only 保护。"""
+        store = CacheStore(tmp_path / "cache.db")
+        try:
+            read_conn = store._get_read_conn()
+            # mmap_size 应与写连接一致
+            mmap_size = read_conn.execute("PRAGMA mmap_size").fetchone()[0]
+            assert mmap_size == 256 * 1024 * 1024
+            # cache_size 应与写连接一致
+            cache_size = read_conn.execute("PRAGMA cache_size").fetchone()[0]
+            assert cache_size == -65536
+            # query_only 应为 1（ON）
+            query_only = read_conn.execute("PRAGMA query_only").fetchone()[0]
+            assert query_only == 1
+            # 读连接写入应被拒绝
+            with pytest.raises(sqlite3.OperationalError, match="readonly"):
+                read_conn.execute("CREATE TABLE _test_should_fail (x INTEGER)")
+        finally:
+            store.close()
+
 
 # ---------------------------------------------------------------- 规则登记
 

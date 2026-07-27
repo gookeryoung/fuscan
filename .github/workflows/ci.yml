@@ -5,6 +5,15 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  # iter-120：手动触发 benchmark 回归对比（slow 测试 CI 默认跳过）
+  workflow_dispatch:
+    inputs:
+      run_benchmark:
+        description: 运行 benchmark 回归测试
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -60,8 +69,54 @@ jobs:
         run: uv sync --frozen --extra test --python ${{ matrix.python-version }}
 
       - name: Run tests
+        # iter-120：覆盖率门禁从 90% 提升至 95%，与 rule-11 和 .coveragerc 一致
         # Ubuntu headless 环境无 X11/XCB/GL 系统库，创建 QGuiApplication + QQmlApplicationEngine
         # 的 QML 集成测试会 SIGABRT（exit 134），故跳过 gui_qml 标记测试
         # （test_gui_launch / test_gui_qml_scan_progress），由 Windows 开发机本地覆盖。
         # gui 单元测试（controller/model 逻辑，不创建 QGuiApplication）仍正常运行。
-        run: uv run pytest -m "not slow and not gui_qml" --cov=fuscan --cov-fail-under=90 --cov-report=term-missing
+        run: uv run pytest -m "not slow and not gui_qml" --cov=fuscan --cov-fail-under=95 --cov-report=term-missing --cov-report=xml:coverage-${{ matrix.python-version }}.xml
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: coverage-${{ matrix.python-version }}.xml
+          retention-days: 14
+
+  # iter-120：benchmark 回归测试 job
+  # 仅手动触发（workflow_dispatch）时运行，CI 默认跳过 slow 测试
+  # 用于对比性能基线，检测回归
+  benchmark:
+    name: Benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'workflow_dispatch' && inputs.run_benchmark == 'true'
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync dependencies
+        run: uv sync --frozen --extra test --python 3.12
+
+      - name: Run benchmark tests
+        # 运行 perf benchmark 测试，生成 JSON 报告供对比
+        # 首次运行：--benchmark-save=baseline 建立基线
+        # 后续运行：--benchmark-compare=baseline 对比回归
+        run: uv run pytest -m slow tests/test_perf_benchmark.py --benchmark-only --benchmark-json=benchmark-results.json
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark-results.json
+          retention-days: 30

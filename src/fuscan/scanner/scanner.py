@@ -25,15 +25,16 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Mapping
 
-from fuscan.cache.hashes import hash_bytes
 from fuscan.cache.store import BatchWriteItem
-from fuscan.config import DEFAULT_MAX_FILE_SIZE
-from fuscan.extractors import extract_content_from_bytes
 from fuscan.perf import PerfStats
 from fuscan.rules.model import Rule, RuleSet
 from fuscan.scanner._archive_phase import run_archive_phase
+from fuscan.scanner._cache_phase import (
+    BatchBuffer,
+    build_hits_from_cache,
+    extract_with_cache,
+)
 from fuscan.scanner._helpers import (
-    BATCH_THRESHOLD,
     GIL_YIELD_INTERVAL,
     PROGRESS_LIST_MAX,
     cancel_all_futures,
@@ -55,12 +56,6 @@ if TYPE_CHECKING:
 __all__ = ["Scanner", "default_extract_content", "default_extract_content_with_hash"]
 
 logger = logging.getLogger(__name__)
-
-# 模块内复用的常量别名（来自 _helpers，保持 scanner.py 内引用简洁并兼容历史代码）
-_BATCH_THRESHOLD: int = BATCH_THRESHOLD
-_DEFAULT_MAX_FILE_SIZE: int = DEFAULT_MAX_FILE_SIZE
-_PROGRESS_LIST_MAX: int = PROGRESS_LIST_MAX
-_GIL_YIELD_INTERVAL: int = GIL_YIELD_INTERVAL
 
 
 class Scanner:
@@ -110,8 +105,8 @@ class Scanner:
         # 用户标记跳过的路径集合：walk 阶段命中即跳过并计入 user_skipped，
         # 与按扩展名/目录过滤的 skipped 区分。键为 str(Path)，与 SkipStore 存储格式一致。
         self._skip_paths: frozenset[str] = skip_paths or frozenset()
-        self._skipped_dirs: deque[str] = deque(maxlen=_PROGRESS_LIST_MAX)
-        self._matched_files: deque[tuple[str, str]] = deque(maxlen=_PROGRESS_LIST_MAX)
+        self._skipped_dirs: deque[str] = deque(maxlen=PROGRESS_LIST_MAX)
+        self._matched_files: deque[tuple[str, str]] = deque(maxlen=PROGRESS_LIST_MAX)
         self._walker = FileWalker(
             ignore_dirs=ignore_dirs,
             ignore_paths=ruleset.ignore_paths,
@@ -156,6 +151,19 @@ class Scanner:
         self._pause_event = threading.Event()
         self._pause_event.set()
         self._cancel_event = threading.Event()
+        # iter-111：自适应 GIL 让步间隔。
+        # 顺序扫描（max_workers<=1）：主线程独占 GIL，需每 20 个文件让步一次避免 UI 卡死。
+        # 并发扫描（max_workers>1）：PyO3 提取器（pdf_oxide/calamine）在 Rust 层释放 GIL，
+        # worker 线程在 I/O 与提取期间不持 GIL，主线程自然获得调度机会；
+        # 让步间隔提高到 50，减少 sleep(0) 开销（10万文件节省约 3ms）。
+        self._gil_yield_interval: int = (
+            GIL_YIELD_INTERVAL if not max_workers or max_workers <= 1 else GIL_YIELD_INTERVAL * 5 // 2
+        )
+        # iter-111：进度 emit 批处理阈值。
+        # 并发扫描时每 N 个 future 完成才调用一次 _emit_progress（内部仍有 150ms 节流），
+        # 减少 time.perf_counter() + 比较的函数调用开销。
+        # 顺序扫描保持每文件 emit（用户期望实时反馈）。
+        self._progress_emit_batch: int = 5 if (max_workers and max_workers > 1) else 1
         # 扫描进度上下文（scan() 期间设置，供 _emit_progress 使用）
         self._progress_start: float = 0.0
         self._progress_total: int = 0
@@ -166,12 +174,14 @@ class Scanner:
         self._base_matched: int = 0
         self._base_errors: int = 0
         self._base_matches: int = 0
-        # 批量写入缓冲：累积 BatchWriteItem，达到阈值后单次事务 flush。
-        # _batch_lock 保护 _pending_batch 跨 worker 线程的并发累积与 flush。
-        self._pending_batch: list[BatchWriteItem] = []
-        self._batch_lock = threading.Lock()
+        # 批量写入缓冲：缓存模式下累积 BatchWriteItem，达阈值后单次事务 flush。
+        # iter-109：抽取为 :class:`BatchBuffer` 子模块，消除 scanner.py 内的锁与
+        # 缓冲管理细节；无缓存模式下 :attr:`_cache` 为 None，BatchBuffer 不创建。
+        self._batch_buffer: BatchBuffer | None = None
         # 性能聚合统计：PerfStats 始终启用，仅做聚合统计无日志开销，不影响生产性能。
         self._perf: PerfStats = PerfStats()
+        if cache is not None:
+            self._batch_buffer = BatchBuffer(cache, self._perf)
 
     def pause(self) -> None:
         """暂停扫描，阻塞扫描线程直到 resume。"""
@@ -352,7 +362,7 @@ class Scanner:
             # 用 cancelled 而非 self.is_cancelled：collect_entries 已清除 _cancel_event，
             # walk 被取消时 is_cancelled 为 False，但 cancelled（来自 walk_result）为 True
             if self._scan_archives and self._archive_scanner is not None and not cancelled:
-                # archive phase 内部直接调 CacheStore，不走 _pending_batch，需先 flush
+                # archive phase 内部直接调 CacheStore，不走 _batch_buffer，需先 flush
                 # 避免批量缓冲与 archive scanner 的写入交错
                 self._flush_batch()
                 self._base_scanned = scanned
@@ -366,7 +376,7 @@ class Scanner:
                 matches += d_matches
         finally:
             # 异常路径（如 MemoryError、walker 未捕获错误）也 flush 已累积批次，
-            # 避免最后一批（最多 _BATCH_THRESHOLD 个文件）缓存数据丢失
+            # 避免最后一批（最多 BATCH_THRESHOLD 个文件）缓存数据丢失
             self._flush_batch()
             # 保留 walk 阶段的取消状态：collect_entries 已清除 _cancel_event，
             # 此处若 cancelled 已为 True（walk 取消）则不能用 is_cancelled（False）覆盖；
@@ -470,8 +480,9 @@ class Scanner:
                 logger.warning("扫描文件失败 %s", entry.path, exc_info=True)
             self._emit_progress(str(entry.path), scanned, matched, errors, matches)
             # GIL 让步：单线程扫描时也定期让出 GIL，避免长时间独占导致 UI 卡死
+            # iter-111：使用实例级 _gil_yield_interval（顺序扫描为 20）
             yield_counter += 1
-            if yield_counter >= _GIL_YIELD_INTERVAL:
+            if yield_counter >= self._gil_yield_interval:
                 yield_counter = 0
                 time.sleep(0)
         return scanned, matched, errors, matches
@@ -520,39 +531,74 @@ class Scanner:
                 cancel_all_futures(future_to_entry)
                 pool.shutdown(wait=False)
                 return scanned, matched, errors, matches
-            # 阻塞收集 future 结果（按完成顺序）
-            # GIL 让步：每 _GIL_YIELD_INTERVAL 个文件 sleep(0) 一次，让 UI 线程
-            # 有机会处理 Qt 事件队列，避免 5 个 worker 线程独占 GIL 导致界面卡死。
-            # time.sleep(0) 仅触发 GIL 释放/重获取，不真正睡眠，开销约 1μs。
-            yield_counter = 0
-            for future in as_completed(future_to_entry):
-                if self._check_control():
-                    cancel_all_futures(future_to_entry)
-                    pool.shutdown(wait=False)
-                    break
-                entry = future_to_entry[future]
-                scanned += 1
-                try:
-                    result = future.result()
-                    if result.has_hit:
-                        matched += 1
-                        matches += result.total_match_count
-                        if self._on_progress is not None:
-                            for hit in result.hits:
-                                self._matched_files.append((str(entry.path), hit.rule_name))
-                    errors += result.errors
-                    results.append(result)
-                except Exception:
-                    errors += 1
-                    logger.warning("扫描文件失败 %s", entry.path, exc_info=True)
-                self._emit_progress(str(entry.path), scanned, matched, errors, matches)
-                yield_counter += 1
-                if yield_counter >= _GIL_YIELD_INTERVAL:
-                    yield_counter = 0
-                    time.sleep(0)
+            scanned, matched, errors, matches = self._collect_concurrent_results(
+                future_to_entry, results, pool
+            )
         finally:
             # 正常完成时等待所有 future；取消时已 shutdown(wait=False)，此处幂等
             pool.shutdown(wait=True)
+        return scanned, matched, errors, matches
+
+    def _collect_concurrent_results(
+        self,
+        future_to_entry: dict[Future[ScanResult], FileEntry],
+        results: list[ScanResult],
+        pool: ThreadPoolExecutor,
+    ) -> tuple[int, int, int, int]:
+        """阻塞收集 future 结果，返回 ``(scanned, matched, errors, matches)``。
+
+        iter-111 从 :meth:`_scan_concurrent` 抽离的子流程，职责单一便于分支数控制。
+        内含 GIL 让步（``_gil_yield_interval``）与进度 emit 批处理
+        （``_progress_emit_batch``）逻辑：
+
+        - **GIL 让步**：并发模式下 PyO3 提取器在 Rust 层释放 GIL，worker I/O 期间
+          主线程自然获得调度，让步间隔提高到 50 减少 sleep(0) 调用开销。
+        - **emit 批处理**：每 N 个 future 完成才调用一次 :meth:`_emit_progress`
+          （内部仍有 150ms 节流），减少 ``time.perf_counter()`` 与 deque tuple
+          拷贝开销；尾部不足一批的剩余进度补发一次。
+
+        :param future_to_entry: future → entry 映射，由 :meth:`_scan_concurrent` 提交
+        :param results: 共享结果列表，本方法将 future 结果 append 到此列表
+        :param pool: 所属线程池，取消时调 ``shutdown(wait=False)`` 立即返回
+        """
+        scanned = 0
+        matched = 0
+        errors = 0
+        matches = 0
+        yield_counter = 0
+        emit_counter = 0
+        for future in as_completed(future_to_entry):
+            if self._check_control():
+                cancel_all_futures(future_to_entry)
+                pool.shutdown(wait=False)
+                break
+            entry = future_to_entry[future]
+            scanned += 1
+            try:
+                result = future.result()
+                if result.has_hit:
+                    matched += 1
+                    matches += result.total_match_count
+                    if self._on_progress is not None:
+                        for hit in result.hits:
+                            self._matched_files.append((str(entry.path), hit.rule_name))
+                errors += result.errors
+                results.append(result)
+            except Exception:
+                errors += 1
+                logger.warning("扫描文件失败 %s", entry.path, exc_info=True)
+            # iter-111：批处理 emit，减少并发高吞吐场景下的进度回调开销
+            emit_counter += 1
+            if emit_counter >= self._progress_emit_batch:
+                self._emit_progress(str(entry.path), scanned, matched, errors, matches)
+                emit_counter = 0
+            yield_counter += 1
+            if yield_counter >= self._gil_yield_interval:
+                yield_counter = 0
+                time.sleep(0)
+        # 批处理尾部：剩余未 emit 的进度补发一次（避免最后几个文件状态丢失）
+        if emit_counter > 0 and self._on_progress is not None:
+            self._emit_progress("", scanned, matched, errors, matches)
         return scanned, matched, errors, matches
 
     def scan_file(self, path: Path) -> ScanResult:
@@ -642,50 +688,13 @@ class Scanner:
         return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)
 
     def _extract_with_cache(self, entry: FileEntry) -> tuple[str, str]:
-        """缓存模式的提取+哈希：优先复用提取内容缓存（iter-39）。
+        """缓存模式的提取+哈希（委托 :func:`extract_with_cache`）。
 
-        与 :func:`default_extract_content_with_hash` 的区别：
-
-        - 一次 ``read_bytes`` 算哈希后，先查 :meth:`CacheStore.get_extracted_content`
-        - 命中则跳过 ``extract_content_from_bytes``（docx/pptx 提取 5-8ms）
-        - 未命中则提取并写入缓存（非空内容才写）
-        - 大文件跳过阈值由 ``Scanner(max_file_size=...)`` 控制，0 表示不限制
-
-        各阶段接入 ``PerfStats`` 计时（iter-66 起始终启用）：
-        ``read_bytes`` / ``hash`` / ``cache_lookup_extract`` / ``extract`` /
-        ``cache_put_extract``，便于定位 I/O 与 CPU 瓶颈。
-
-        :param entry: 文件元信息
-        :return: ``(content, file_hash)`` 元组
+        iter-109：实际逻辑抽离到 :mod:`fuscan.scanner._cache_phase`，
+        本方法保留为薄包装以维持调用点简洁。
         """
         assert self._cache is not None  # 调用方已保证非 None
-        if entry.is_dir or (self._max_file_size > 0 and entry.size > self._max_file_size):
-            return "", hash_bytes(b"")
-        try:
-            with self._perf.measure("read_bytes"):
-                data = entry.path.read_bytes()
-        except OSError:
-            logger.debug("读取文件失败: %s", entry.path, exc_info=True)
-            return "", hash_bytes(b"")
-        with self._perf.measure("hash"):
-            file_hash = hash_bytes(data)
-        # 查提取内容缓存
-        with self._perf.measure("cache_lookup_extract"):
-            cached_content = self._cache.get_extracted_content(file_hash)
-        if cached_content is not None:
-            return cached_content, file_hash
-        # 未命中，执行提取
-        try:
-            with self._perf.measure("extract"):
-                content = extract_content_from_bytes(data, entry.extension)
-        except Exception:
-            logger.debug("提取器提取失败，回退到纯文本: %s", entry.path, exc_info=True)
-            content = data.decode("utf-8", errors="ignore")
-        # 写入提取内容缓存（非空才写）
-        if content:
-            with self._perf.measure("cache_put_extract"):
-                self._cache.put_extracted_content(file_hash, content, entry.extension)
-        return content, file_hash
+        return extract_with_cache(entry, self._cache, self._max_file_size, self._perf)
 
     def _scan_entry_cached(self, entry: FileEntry) -> ScanResult:
         """缓存模式扫描：先查缓存，命中直接复用，未命中走匹配器并写入缓存。
@@ -724,7 +733,7 @@ class Scanner:
                 cached = self._cache.get_cached_hits(cached_file_hash, rule_hashes)
         if cached_file_hash is not None and cached is not None and all(rh in cached for rh in rule_hashes):
             # 全部规则已缓存命中（含未命中记录），无需读文件
-            hits, rule_errors = self._build_hits_from_cache(applicable, cached)
+            hits, rule_errors = build_hits_from_cache(applicable, cached)
             # 累积元数据刷新到批量缓冲（无新 scan_results 需写入，hits=()）
             self._add_to_batch(
                 BatchWriteItem(
@@ -809,65 +818,19 @@ class Scanner:
         return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)
 
     def _add_to_batch(self, item: BatchWriteItem) -> None:
-        """累积写入请求到批量缓冲，达到阈值时自动 flush。
+        """累积写入请求到批量缓冲，达到阈值时自动 flush（委托 :class:`BatchBuffer`）。
 
-        线程安全：通过 ``_batch_lock`` 保护并发累积与 flush。
-        无缓存模式下不应被调用（调用方 :meth:`_scan_entry_cached` 已保证）。
+        iter-109：实际逻辑抽离到 :mod:`fuscan.scanner._cache_phase`。
+        无缓存模式下 ``_batch_buffer`` 为 None，调用方 :meth:`_scan_entry_cached` 已保证。
         """
-        with self._batch_lock:
-            self._pending_batch.append(item)
-            if len(self._pending_batch) >= _BATCH_THRESHOLD:
-                self._flush_batch_locked()
+        if self._batch_buffer is not None:
+            self._batch_buffer.add(item)
 
     def _flush_batch(self) -> None:
-        """强制 flush 待写批次。
+        """强制 flush 待写批次（委托 :class:`BatchBuffer`）。
 
         在扫描阶段切换（如进入 archive phase）与 ``scan()`` 末尾调用，
         确保累积的数据不丢失。
         """
-        with self._batch_lock:
-            self._flush_batch_locked()
-
-    def _flush_batch_locked(self) -> None:
-        """执行批量写入（已持 ``_batch_lock``）。
-
-        先取出并清空 ``_pending_batch``，再释放锁的"持有期间"调用
-        :meth:`CacheStore.batch_put_results`。注意：``_batch_lock`` 仍持锁，
-        但 ``CacheStore`` 内部的 ``RLock`` 是另一把锁，worker 线程在
-        :meth:`_scan_entry_cached` 中查询（``get_cached_hits`` 等）不受影响。
-        """
-        if not self._pending_batch or self._cache is None:
-            return
-        items = self._pending_batch
-        self._pending_batch = []
-        with self._perf.measure("cache_write"):
-            self._cache.batch_put_results(items)
-
-    @staticmethod
-    def _build_hits_from_cache(
-        applicable: list[tuple[Rule, Matcher, str]],
-        cached: dict[str, RuleHit | None],
-    ) -> tuple[list[RuleHit], int]:
-        """从缓存字典重建 ``RuleHit`` 列表（与主路径的填回逻辑一致）。
-
-        :param applicable: 适用的 (Rule, Matcher, rule_hash) 列表，决定输出顺序
-        :param cached: ``rule_hash -> RuleHit | None`` 字典
-        :return: ``(hits, rule_errors)``；rule_errors 在纯缓存路径下恒为 0
-        """
-        hits: list[RuleHit] = []
-        for rule, _, rule_hash in applicable:
-            result = cached.get(rule_hash)
-            if result is not None:
-                hits.append(
-                    RuleHit(
-                        rule_name=rule.name,
-                        severity=result.severity,
-                        detail=result.detail,
-                        match_text=result.match_text,
-                        match_count=result.match_count,
-                        target=result.target,
-                        match_texts=result.match_texts,
-                        match_description=result.match_description,
-                    )
-                )
-        return hits, 0
+        if self._batch_buffer is not None:
+            self._batch_buffer.flush()

@@ -1246,6 +1246,77 @@ class TestScannerConcurrency:
         assert report.stats.errors >= 1
         assert report.stats.scanned_files >= 1
 
+    def test_iter111_gil_yield_interval_sequential(self) -> None:
+        """iter-111：顺序扫描（max_workers<=1）使用基础 GIL 让步间隔 20。"""
+        from fuscan.scanner._helpers import GIL_YIELD_INTERVAL
+
+        rs = _build_ruleset(_filename_rule("r", "x"))
+        # None 与 1 均走顺序路径
+        sc_none = Scanner(rs, max_workers=None)
+        sc_one = Scanner(rs, max_workers=1)
+        assert sc_none._gil_yield_interval == GIL_YIELD_INTERVAL
+        assert sc_one._gil_yield_interval == GIL_YIELD_INTERVAL
+
+    def test_iter111_gil_yield_interval_concurrent(self) -> None:
+        """iter-111：并发扫描使用扩大的 GIL 让步间隔（基础 * 5 // 2 = 50）。"""
+        from fuscan.scanner._helpers import GIL_YIELD_INTERVAL
+
+        rs = _build_ruleset(_filename_rule("r", "x"))
+        sc = Scanner(rs, max_workers=4)
+        expected = GIL_YIELD_INTERVAL * 5 // 2
+        assert sc._gil_yield_interval == expected
+        # 基础值为 20，扩大后应为 50
+        assert GIL_YIELD_INTERVAL == 20
+        assert sc._gil_yield_interval == 50
+
+    def test_iter111_progress_emit_batch_sequential(self) -> None:
+        """iter-111：顺序扫描的进度 emit 批处理阈值为 1（每文件实时反馈）。"""
+        rs = _build_ruleset(_filename_rule("r", "x"))
+        sc_none = Scanner(rs, max_workers=None)
+        sc_one = Scanner(rs, max_workers=1)
+        assert sc_none._progress_emit_batch == 1
+        assert sc_one._progress_emit_batch == 1
+
+    def test_iter111_progress_emit_batch_concurrent(self) -> None:
+        """iter-111：并发扫描的进度 emit 批处理阈值为 5（减少回调开销）。"""
+        rs = _build_ruleset(_filename_rule("r", "x"))
+        sc = Scanner(rs, max_workers=4)
+        assert sc._progress_emit_batch == 5
+
+    def test_iter111_concurrent_progress_emitted_at_least_once(self, tmp_path: Path) -> None:
+        """iter-111：并发扫描下批处理 emit 应至少触发一次最终进度上报。
+
+        20 个文件 + 批处理阈值 5：理论上触发 4 次 emit + 1 次尾部补发。
+        节流（150ms）会过滤掉中间 emit，最终 force=True 的进度必到达。
+        """
+        for i in range(20):
+            (tmp_path / f"f{i}.txt").write_text("x", encoding="utf-8")
+        rs = _build_ruleset(_filename_rule("r", "f"))
+        received: list[ProgressInfo] = []
+        sc = Scanner(rs, max_workers=4, on_progress=received.append)
+        sc.scan(tmp_path)
+        assert received
+        assert received[-1].scanned >= 20
+        assert received[-1].matched >= 20
+
+    def test_iter111_concurrent_batch_tail_flush(self, tmp_path: Path) -> None:
+        """iter-111：批处理尾部补发应在 future 总数非 emit_batch 整数倍时生效。
+
+        7 个文件 + emit_batch=5：emit 在第 5 个触发一次，剩 2 个在循环结束后
+        补发一次。最终 force=True 进度由 scan_entries 末尾发送，扫描中段
+        至少有一次进度回调反映非整除的尾部状态。
+        """
+        for i in range(7):
+            (tmp_path / f"f{i}.txt").write_text("x", encoding="utf-8")
+        rs = _build_ruleset(_filename_rule("r", "f"))
+        received: list[ProgressInfo] = []
+        # progress_interval=0 保证不节流，所有 emit 都到达
+        sc = Scanner(rs, max_workers=4, on_progress=received.append, progress_interval=0.0)
+        sc.scan(tmp_path)
+        # 至少触发：1 次 walk 阶段 + 1 次 emit 批次 + 1 次尾部补发 + 1 次 force 最终
+        assert len(received) >= 2
+        assert received[-1].scanned >= 7
+
 
 class TestScannerProgress:
     """扫描进度回调测试。"""
@@ -1965,10 +2036,11 @@ class TestScannerCache:
 
             scanner2 = Scanner(rs, cache=cache)
             # 注入计数器：通过 monkeypatch 替换模块级函数
-            import fuscan.scanner.scanner as scanner_module
+            # iter-109：extract_content_from_bytes 已迁移到 _cache_phase 子模块
+            import fuscan.scanner._cache_phase as cache_phase_module
 
             with pytest.MonkeyPatch.context() as mp:
-                mp.setattr(scanner_module, "extract_content_from_bytes", counting_extract)
+                mp.setattr(cache_phase_module, "extract_content_from_bytes", counting_extract)
                 result2 = scanner2.scan_file(p2)
             # 提取内容缓存应命中，extract 不应被调用
             assert extract_call_count == 0, "提取内容缓存未命中，extract 仍被调用"
@@ -2082,7 +2154,9 @@ class TestScannerCache:
         def mock_extract_from_bytes(data: bytes, extension: str) -> str:
             raise RuntimeError("模拟提取器失败")
 
-        monkeypatch.setattr("fuscan.scanner.scanner.extract_content_from_bytes", mock_extract_from_bytes)
+        # iter-109：default_extract_content_with_hash 在 _helpers 模块内调用
+        # extract_content_from_bytes，patch 目标须为 _helpers 模块而非 scanner.scanner
+        monkeypatch.setattr("fuscan.scanner._helpers.extract_content_from_bytes", mock_extract_from_bytes)
         content, file_hash = default_extract_content_with_hash(entry)
         assert "password content" in content  # 回退到 UTF-8 解码
         assert len(file_hash) == 64  # 哈希仍正确计算
@@ -2092,7 +2166,7 @@ class TestScannerBatchFlush:
     """扫描器批量写入 flush 集成测试（iter-39 P2）。"""
 
     def test_scan_flushes_batch_on_completion(self, tmp_path: Path) -> None:
-        """扫描完成后 _pending_batch 应已 flush，缓存中能查到结果。"""
+        """扫描完成后 batch 应已 flush，缓存中能查到结果。"""
         from fuscan.cache import CacheStore
 
         (tmp_path / "secret.txt").write_text("password=abc", encoding="utf-8")
@@ -2103,10 +2177,11 @@ class TestScannerBatchFlush:
         try:
             scanner = Scanner(rs, cache=cache)
             # 扫描前 batch 为空
-            assert scanner._pending_batch == []
+            assert scanner._batch_buffer is not None
+            assert scanner._batch_buffer.is_empty
             scanner.scan(tmp_path)
             # 扫描后 batch 应已 flush
-            assert scanner._pending_batch == []
+            assert scanner._batch_buffer.is_empty
             # cache 中应有 scan_results 记录
             assert cache.stats().scan_results >= 1
         finally:
@@ -2139,7 +2214,8 @@ class TestScannerBatchFlush:
             # 至少触发 1 次自动 flush（达到阈值时）
             assert call_count >= 1
             # 最终全部 flush 完成
-            assert scanner._pending_batch == []
+            assert scanner._batch_buffer is not None
+            assert scanner._batch_buffer.is_empty
             # 60 个 .txt 文件都被登记到 cache（cache.db 等 SQLite 文件不算）
             assert cache.stats().scanned_files >= 60
         finally:
@@ -2160,7 +2236,8 @@ class TestScannerBatchFlush:
             scanner = Scanner(rs, cache=cache, max_workers=4)
             scanner.scan(tmp_path)
             # 扫描后 batch 应已 flush
-            assert scanner._pending_batch == []
+            assert scanner._batch_buffer is not None
+            assert scanner._batch_buffer.is_empty
             # 二次扫描应命中缓存（mtime 预筛命中）
             scanner2 = Scanner(rs, cache=cache, max_workers=4)
             report2 = scanner2.scan(tmp_path)
@@ -2196,7 +2273,8 @@ class TestScannerBatchFlush:
             scanner._progress_interval = 0.0
             scanner.scan(tmp_path)
             # 取消后 batch 仍应 flush（_flush_batch 在 scan() 末尾调用）
-            assert scanner._pending_batch == []
+            assert scanner._batch_buffer is not None
+            assert scanner._batch_buffer.is_empty
             # cache 中应有部分结果（已 flush 的批次）
             assert cache.stats().scanned_files >= 1
         finally:

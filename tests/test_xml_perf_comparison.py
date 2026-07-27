@@ -306,3 +306,234 @@ class TestOdfXPathComparison:
         assert "password" in text
         # 200 行
         assert len(text.splitlines()) >= 150
+
+
+# ----------------------------- 极限测试（5MB+ 大样本） -----------------------------
+
+
+# module-level 缓存：大样本生成耗时较高，避免每个测试重复生成
+_extreme_cache: dict[str, Any] = {}
+
+
+def _get_extreme_odt() -> bytes:
+    """生成/缓存极限 ODT 样本（50000 段落，content.xml ~4MB+）。"""
+    if "odt" not in _extreme_cache:
+        from tests._odf_samples import make_odt_sample
+
+        _extreme_cache["odt"] = make_odt_sample(
+            [f"段落 {i}：password secret 关键词内容用于极限性能测试" for i in range(50000)]
+        )
+    return _extreme_cache["odt"]
+
+
+def _get_extreme_ods() -> bytes:
+    """生成/缓存极限 ODS 样本（2000 行 × 20 列，content.xml ~3MB+）。"""
+    if "ods" not in _extreme_cache:
+        from tests._odf_samples import make_ods_sample
+
+        rows = [[f"cell_{r}_{c}_password" for c in range(20)] for r in range(2000)]
+        _extreme_cache["ods"] = make_ods_sample(rows)
+    return _extreme_cache["ods"]
+
+
+def _get_extreme_docx() -> bytes:
+    """生成/缓存极限 DOCX 样本（10000 段落，document.xml ~2MB+）。
+
+    用直接构造 XML + zipfile 打包，避免 python-docx 生成大文档的慢速。
+    """
+    if "docx" not in _extreme_cache:
+        import zipfile
+
+        w_ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        # 直接构造 document.xml：10000 个 w:p 段落，每个含 1 个 w:r > w:t
+        parts = [
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n',
+            f'<w:document xmlns:w="{w_ns}"><w:body>',
+        ]
+        for i in range(10000):
+            parts.append(f"<w:p><w:r><w:t>段落 {i}：password secret 关键词内容用于极限性能测试</w:t></w:r></w:p>")
+        parts.append("</w:body></w:document>")
+        document_xml = "".join(parts).encode("utf-8")
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("word/document.xml", document_xml)
+        _extreme_cache["docx"] = buf.getvalue()
+        _extreme_cache["docx_xml_size"] = len(document_xml)
+    return _extreme_cache["docx"]
+
+
+@pytest.mark.slow
+class TestExtremeScale:
+    """极限规模性能测试（5MB+ 大样本）。
+
+    极限场景验证：
+    1. XPath 优化在大文件场景是否依然有效（C 层优势应更明显）
+    2. element_text 递归实现是否会成为瓶颈
+    3. DOCX 大文档是否有新的优化机会
+    """
+
+    def test_extreme_odt_xpath_vs_iter(self) -> None:
+        """极限 ODT（50000 段落）XPath vs iter 性能对比。"""
+        from fuscan.extractors._odf_xml import (
+            TEXT_NS,
+            iter_elements,
+            load_content_xml,
+        )
+
+        data = _get_extreme_odt()
+        root = load_content_xml(data)
+
+        # 功能等价性
+        legacy_result = _iter_elements_legacy(root, TEXT_NS, ("p", "h"))
+        new_result = list(iter_elements(root, TEXT_NS, ("p", "h")))
+        assert len(legacy_result) == len(new_result) == 50000, "段落数不符合预期"
+
+        legacy_time = _measure_median(_iter_elements_legacy, root, TEXT_NS, ("p", "h"), iterations=3)
+        new_time = _measure_median(lambda r=root: list(iter_elements(r, TEXT_NS, ("p", "h"))), iterations=3)
+
+        print(
+            f"\n[极限 ODT xpath 对比] 50000 段落\n"
+            f"  iter+endswith (旧): {legacy_time * 1000:.2f} ms\n"
+            f"  xpath         (新): {new_time * 1000:.2f} ms\n"
+            f"  提速: {legacy_time / new_time:.2f}x"
+        )
+
+        assert new_time <= legacy_time * 1.5
+
+    def test_extreme_ods_xpath_vs_iter(self) -> None:
+        """极限 ODS（2000 行 × 20 列 = 40000 单元格）XPath vs iter 性能对比。"""
+        from fuscan.extractors._odf_xml import (
+            TABLE_NS,
+            iter_elements,
+            load_content_xml,
+        )
+
+        data = _get_extreme_ods()
+        root = load_content_xml(data)
+
+        def _legacy_full() -> int:
+            count = 0
+            for row in _iter_elements_legacy(root, TABLE_NS, ("table-row",)):
+                count += len(_iter_elements_legacy(row, TABLE_NS, ("table-cell",)))
+            return count
+
+        def _new_full() -> int:
+            count = 0
+            for row in iter_elements(root, TABLE_NS, ("table-row",)):
+                count += len(list(iter_elements(row, TABLE_NS, ("table-cell",))))
+            return count
+
+        assert _legacy_full() == _new_full() == 40000
+
+        legacy_time = _measure_median(_legacy_full, iterations=3)
+        new_time = _measure_median(_new_full, iterations=3)
+
+        print(
+            f"\n[极限 ODS xpath 对比] 2000 行 × 20 列 = 40000 单元格\n"
+            f"  iter+endswith (旧): {legacy_time * 1000:.2f} ms\n"
+            f"  xpath         (新): {new_time * 1000:.2f} ms\n"
+            f"  提速: {legacy_time / new_time:.2f}x"
+        )
+
+        assert new_time <= legacy_time * 1.5
+
+    def test_extreme_odt_full_extraction_profile(self) -> None:
+        """极限 ODT 完整提取性能剖析（定位 element_text 等子环节瓶颈）。"""
+        from fuscan.extractors._odf_xml import (
+            TEXT_NS,
+            element_text,
+            iter_elements,
+            load_content_xml,
+        )
+
+        data = _get_extreme_odt()
+        root = load_content_xml(data)
+
+        # 阶段 1：iter_elements（XPath 节点匹配）
+        t1 = time.perf_counter()
+        paragraphs = list(iter_elements(root, TEXT_NS, ("p", "h")))
+        t_iter = time.perf_counter() - t1
+
+        # 阶段 2：element_text（递归文本提取）
+        t2 = time.perf_counter()
+        texts = [element_text(p) for p in paragraphs]
+        t_text = time.perf_counter() - t2
+
+        # 阶段 3：join
+        t3 = time.perf_counter()
+        result = "\n".join(t for t in texts if t)
+        t_join = time.perf_counter() - t3
+
+        print(
+            f"\n[极限 ODT 剖析] 50000 段落\n"
+            f"  iter_elements (xpath): {t_iter * 1000:.2f} ms\n"
+            f"  element_text (递归):   {t_text * 1000:.2f} ms\n"
+            f"  join:                  {t_join * 1000:.2f} ms\n"
+            f"  总计:                  {(t_iter + t_text + t_join) * 1000:.2f} ms\n"
+            f"  element_text 占比:     {t_text / (t_iter + t_text + t_join) * 100:.1f}%"
+        )
+
+        assert "password" in result
+        assert len(result.splitlines()) >= 40000
+
+    def test_extreme_ods_full_extraction_profile(self) -> None:
+        """极限 ODS 完整提取性能剖析（定位单元格遍历瓶颈）。"""
+        from fuscan.extractors._odf_xml import (
+            TABLE_NS,
+            element_text,
+            iter_elements,
+            load_content_xml,
+        )
+
+        data = _get_extreme_ods()
+        root = load_content_xml(data)
+
+        # 阶段 1：行遍历
+        t1 = time.perf_counter()
+        rows = list(iter_elements(root, TABLE_NS, ("table-row",)))
+        t_rows = time.perf_counter() - t1
+
+        # 阶段 2：单元格遍历
+        t2 = time.perf_counter()
+        cells: list[Any] = []
+        for row in rows:
+            cells.extend(iter_elements(row, TABLE_NS, ("table-cell",)))
+        t_cells = time.perf_counter() - t2
+
+        # 阶段 3：element_text（结果不计入断言，仅测耗时）
+        t3 = time.perf_counter()
+        for cell in cells:
+            element_text(cell)
+        t_text = time.perf_counter() - t3
+
+        print(
+            f"\n[极限 ODS 剖析] {len(rows)} 行 / {len(cells)} 单元格\n"
+            f"  行遍历 (xpath):      {t_rows * 1000:.2f} ms\n"
+            f"  单元格遍历 (xpath):  {t_cells * 1000:.2f} ms\n"
+            f"  element_text (递归): {t_text * 1000:.2f} ms\n"
+            f"  总计:                {(t_rows + t_cells + t_text) * 1000:.2f} ms"
+        )
+
+        assert len(cells) == 40000
+
+    def test_extreme_docx_extraction_profile(self) -> None:
+        """极限 DOCX（10000 段落）完整提取性能剖析。"""
+        from fuscan.extractors._ooxml_xml import extract_docx_text
+
+        data = _get_extreme_docx()
+        xml_size = _extreme_cache["docx_xml_size"]
+
+        t1 = time.perf_counter()
+        text = extract_docx_text(data)
+        elapsed = time.perf_counter() - t1
+
+        lines = len(text.splitlines())
+        print(
+            f"\n[极限 DOCX 剖析] document.xml={xml_size / 1024:.0f}KB\n"
+            f"  总耗时: {elapsed * 1000:.2f} ms\n"
+            f"  段落数: {lines}"
+        )
+
+        assert "password" in text
+        assert lines >= 10000

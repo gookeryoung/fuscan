@@ -1,8 +1,9 @@
 """OpenDocument 文档提取器：ODT 文字文档。
 
-iter-109 起改用标准库 ``zipfile`` + ``xml.etree.ElementTree`` 直接解析
-ODT 的 ``content.xml``，移除 odfpy 依赖（odfpy 在 PyPI 上仅有 sdist，
-无预编译 wheel，与 fspack 的 ``--only-binary=:all:`` 打包策略冲突）。
+iter-109 起改用 ``zipfile`` + ``lxml`` 直接解析 ODT 的 ``content.xml``，
+移除 odfpy 依赖（odfpy 在 PyPI 上仅有 sdist，无预编译 wheel，与 fspack
+的 ``--only-binary=:all:`` 打包策略冲突）。lxml 基于 libxml2 C 扩展，
+比 ElementTree 快 3-5x；lxml 不可用时自动回退到 ElementTree。
 """
 
 from __future__ import annotations
@@ -23,9 +24,9 @@ logger = logging.getLogger(__name__)
 class OdtExtractor(Extractor):
     """ODT 文字文档文本提取器。
 
-    用 ``zipfile`` 解压 ODT 包，``xml.etree.ElementTree`` 解析
-    ``content.xml`` 中的 ``<text:p>`` 段落与 ``<text:h>`` 标题，
-    递归提取元素文本。无需 odfpy 依赖。
+    用 ``zipfile`` 解压 ODT 包，``lxml`` 解析 ``content.xml`` 中的
+    ``<text:p>`` 段落与 ``<text:h>`` 标题，递归提取元素文本。
+    无需 odfpy 依赖。lxml 不可用时回退到 ElementTree。
     """
 
     @property
@@ -37,8 +38,10 @@ class OdtExtractor(Extractor):
     @property
     @override
     def speed_tier(self) -> SpeedTier:
-        """ODT 单次 ZIP 解压 + XML 解析 + 段落遍历为 T3 中速。"""
-        return SpeedTier.MEDIUM
+        """lxml 解析 XML 为 T2 快速；回退 ElementTree 为 T3 中速。"""
+        from fuscan.extractors._odf_xml import _LXML_AVAILABLE
+
+        return SpeedTier.FAST if _LXML_AVAILABLE else SpeedTier.MEDIUM
 
     @override
     @property

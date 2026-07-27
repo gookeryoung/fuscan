@@ -95,7 +95,23 @@ class WpsExtractor(Extractor):
         return None
 
     def _extract_as_docx(self, data: bytes) -> str:
-        """以 DOCX 方式提取 WPS 文字文档。"""
+        """以 DOCX 方式提取 WPS 文字文档。
+
+        优先使用 lxml 直接解析（与 :class:`DocxExtractor` 一致），
+        lxml 不可用时回退到 python-docx。
+        """
+        from fuscan.extractors.office import _lxml_available
+
+        if _lxml_available():
+            from fuscan.extractors._ooxml_xml import extract_docx_text
+
+            try:
+                return extract_docx_text(data)
+            except Exception as exc:
+                if isinstance(exc, zipfile.BadZipFile):
+                    raise ExtractorError(f"WPS 文字文档解析失败: {exc}") from exc
+                logger.debug("lxml 解析 WPS 文字文档失败，回退 python-docx: %s", exc)
+
         try:
             from docx import Document
         except ImportError as exc:
@@ -128,7 +144,23 @@ class WpsExtractor(Extractor):
         return _extract_calamine_workbook(data, error_label="WPS 表格")
 
     def _extract_as_pptx(self, data: bytes) -> str:
-        """以 PPTX 方式提取 WPS 演示文档。"""
+        """以 PPTX 方式提取 WPS 演示文档。
+
+        优先使用 lxml 直接解析（与 :class:`PptxExtractor` 一致），
+        lxml 不可用时回退到 python-pptx。
+        """
+        from fuscan.extractors.office import _lxml_available
+
+        if _lxml_available():
+            from fuscan.extractors._ooxml_xml import extract_pptx_text
+
+            try:
+                return extract_pptx_text(data)
+            except Exception as exc:
+                if isinstance(exc, zipfile.BadZipFile):
+                    raise ExtractorError(f"WPS 演示解析失败: {exc}") from exc
+                logger.debug("lxml 解析 WPS 演示失败，回退 python-pptx: %s", exc)
+
         try:
             from pptx import Presentation
         except ImportError as exc:

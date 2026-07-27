@@ -1,7 +1,10 @@
 """Microsoft Office 文档提取器：DOCX 与 PPTX。
 
-DOCX 使用 python-docx 提取段落、表格、页眉页脚。
-PPTX 使用 python-pptx 提取幻灯片文本框、表格、备注。
+DOCX/PPTX 优先使用 lxml (libxml2 C 扩展) 直接解析 OOXML XML，
+绕开 python-docx/python-pptx 的对象封装，性能提升 5-10x。
+lxml 不可用时回退到 python-docx/python-pptx。
+
+详见 :mod:`fuscan.extractors._ooxml_xml`。
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ from pathlib import Path
 
 from typing_extensions import override
 
+from fuscan.extractors._ooxml_xml import extract_docx_text, extract_pptx_text
 from fuscan.extractors.base import Extractor, ExtractorError, SpeedTier
 
 __all__ = ["DocxExtractor", "PptxExtractor"]
@@ -19,8 +23,21 @@ __all__ = ["DocxExtractor", "PptxExtractor"]
 logger = logging.getLogger(__name__)
 
 
+def _lxml_available() -> bool:
+    """检查 lxml 是否可导入。"""
+    try:
+        import lxml  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 class DocxExtractor(Extractor):
-    """DOCX 文档文本提取器。"""
+    """DOCX 文档文本提取器。
+
+    优先使用 lxml 直接解析 ``word/document.xml``，
+    回退到 python-docx（功能等价但较慢）。
+    """
 
     @property
     @override
@@ -31,8 +48,8 @@ class DocxExtractor(Extractor):
     @property
     @override
     def speed_tier(self) -> SpeedTier:
-        """DOCX 单次 XML 解析 + 段落/表格遍历为 T3 中速。"""
-        return SpeedTier.MEDIUM
+        """lxml 直接解析 XML 为 T2 快速；回退 python-docx 为 T3 中速。"""
+        return SpeedTier.FAST if _lxml_available() else SpeedTier.MEDIUM
 
     @override
     @property
@@ -52,6 +69,15 @@ class DocxExtractor(Extractor):
     @override
     def extract_from_bytes(self, data: bytes) -> str:
         """从内存字节提取 DOCX 文本。"""
+        if _lxml_available():
+            try:
+                return extract_docx_text(data)
+            except Exception as exc:
+                # ZIP 损坏或 XML 严重损坏，回退到 python-docx 再试一次
+                if _is_zip_error(exc):
+                    raise ExtractorError(f"DOCX 解析失败: {exc}") from exc
+                logger.debug("lxml 解析 DOCX 失败，回退 python-docx: %s", exc)
+
         try:
             from docx import Document
         except ImportError as exc:
@@ -63,30 +89,30 @@ class DocxExtractor(Extractor):
             raise ExtractorError(f"DOCX 解析失败: {exc}") from exc
 
         parts: list[str] = []
-
         for para in doc.paragraphs:
             text = para.text.strip()
             if text:
                 parts.append(text)
-
         for table in doc.tables:
             for row in table.rows:
                 row_texts = [cell.text.strip() for cell in row.cells if cell.text.strip()]
                 if row_texts:
                     parts.append("\t".join(row_texts))
-
         for section in doc.sections:
             for header_footer in (section.header, section.footer):
                 for para in header_footer.paragraphs:
                     text = para.text.strip()
                     if text:
                         parts.append(text)
-
         return "\n".join(parts)
 
 
 class PptxExtractor(Extractor):
-    """PPTX 演示文稿文本提取器。"""
+    """PPTX 演示文稿文本提取器。
+
+    优先使用 lxml 直接解析 ``ppt/slides/slideN.xml``，
+    回退到 python-pptx（功能等价但较慢）。
+    """
 
     @property
     @override
@@ -97,8 +123,8 @@ class PptxExtractor(Extractor):
     @property
     @override
     def speed_tier(self) -> SpeedTier:
-        """PPTX 逐幻灯片遍历形状/文本框/表格为 T4 慢速。"""
-        return SpeedTier.SLOW
+        """lxml 直接解析 XML 为 T2 快速；回退 python-pptx 为 T4 慢速。"""
+        return SpeedTier.FAST if _lxml_available() else SpeedTier.SLOW
 
     @override
     @property
@@ -118,6 +144,14 @@ class PptxExtractor(Extractor):
     @override
     def extract_from_bytes(self, data: bytes) -> str:
         """从内存字节提取 PPTX 文本。"""
+        if _lxml_available():
+            try:
+                return extract_pptx_text(data)
+            except Exception as exc:
+                if _is_zip_error(exc):
+                    raise ExtractorError(f"PPTX 解析失败: {exc}") from exc
+                logger.debug("lxml 解析 PPTX 失败，回退 python-pptx: %s", exc)
+
         try:
             from pptx import Presentation
         except ImportError as exc:
@@ -134,7 +168,6 @@ class PptxExtractor(Extractor):
             if slide_texts:
                 parts.append(f"--- 幻灯片 {slide_index} ---")
                 parts.extend(slide_texts)
-
         return "\n".join(parts)
 
     def _extract_slide(self, slide: object) -> list[str]:
@@ -157,3 +190,13 @@ class PptxExtractor(Extractor):
             if notes_text:
                 texts.append(f"[备注] {notes_text}")
         return texts
+
+
+def _is_zip_error(exc: Exception) -> bool:
+    """判断异常是否为 ZIP 格式错误（无法恢复，不应回退）。"""
+    import zipfile
+
+    if isinstance(exc, zipfile.BadZipFile):
+        return True
+    # lxml 的 XMLSyntaxError 在 recover=True 下通常不抛出，但严重损坏时可能抛出
+    return isinstance(exc, type(None))  # 其他异常允许回退

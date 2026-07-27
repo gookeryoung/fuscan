@@ -294,7 +294,7 @@ class TestPptxExtractor:
             PptxExtractor().extract(path)
 
     def test_pptx_import_error_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """python-pptx 未安装时应抛出 ExtractorError。"""
+        """python-pptx 未安装且 lxml 不可用时应抛出 ExtractorError。"""
         path = tmp_path / "test.pptx"
         path.write_bytes(b"fake")
         import builtins
@@ -307,6 +307,8 @@ class TestPptxExtractor:
             return original_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", fake_import)
+        # lxml 不可用时才走 python-pptx fallback；mock 后触发 import error 路径
+        monkeypatch.setattr("fuscan.extractors.office._lxml_available", lambda: False)
         with pytest.raises(ExtractorError, match="python-pptx 未安装"):
             PptxExtractor().extract(path)
 
@@ -356,7 +358,7 @@ class TestDocxExtractorExtra:
     """DocxExtractor 额外覆盖。"""
 
     def test_docx_import_error_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """python-docx 未安装时应抛出 ExtractorError。"""
+        """python-docx 未安装且 lxml 不可用时应抛出 ExtractorError。"""
         path = tmp_path / "test.docx"
         path.write_bytes(b"fake")
         import builtins
@@ -369,6 +371,8 @@ class TestDocxExtractorExtra:
             return original_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", fake_import)
+        # lxml 不可用时才走 python-docx fallback；mock 后触发 import error 路径
+        monkeypatch.setattr("fuscan.extractors.office._lxml_available", lambda: False)
         with pytest.raises(ExtractorError, match="python-docx 未安装"):
             DocxExtractor().extract(path)
 
@@ -537,9 +541,18 @@ class TestWpsExtractor:
             WpsExtractor().extract(path)
 
     def test_wps_invalid_dps_raises(self, tmp_path: Path) -> None:
-        """有效的 ZIP 但 pptx 内容损坏时应抛出 ExtractorError。"""
+        """有效的 ZIP 但 pptx 内容损坏时应抛出 ExtractorError。
+
+        lxml recover 模式下损坏 XML 返回 None，触发 AttributeError 回退到
+        python-pptx，由 python-pptx 抛出解析失败错误。
+        """
+        # 需同时包含 presentation.xml（类型检测）和 slide1.xml（损坏内容触发解析失败）
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("ppt/presentation.xml", "fake")
+            zf.writestr("ppt/slides/slide1.xml", "corrupt xml")
         path = tmp_path / "bad.dps"
-        path.write_bytes(_make_ooxml_zip("ppt/presentation.xml", "corrupt xml"))
+        path.write_bytes(buf.getvalue())
         with pytest.raises(ExtractorError, match="WPS 演示解析失败"):
             WpsExtractor().extract(path)
 
@@ -622,7 +635,7 @@ class TestWpsExtractorErrorPaths:
             WpsExtractor().extract(path)
 
     def test_extract_as_pptx_import_error_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """python-pptx 未安装时 _extract_as_pptx 应抛出 ExtractorError。"""
+        """python-pptx 未安装且 lxml 不可用时 _extract_as_pptx 应抛出 ExtractorError。"""
         path = tmp_path / "test.dps"
         path.write_bytes(_make_ooxml_zip("ppt/presentation.xml"))
         import builtins
@@ -635,6 +648,8 @@ class TestWpsExtractorErrorPaths:
             return original_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", fake_import)
+        # lxml 不可用时才走 python-pptx fallback；mock 后触发 import error 路径
+        monkeypatch.setattr("fuscan.extractors.office._lxml_available", lambda: False)
         with pytest.raises(ExtractorError, match="python-pptx 未安装"):
             WpsExtractor().extract(path)
 

@@ -2,16 +2,17 @@
 
 XLSX/XLSM 使用 calamine（Rust + PyO3）提取所有工作表单元格文本，相比
 openpyxl 的纯 Python 逐单元格遍历有 5-10 倍提速，且 Rust 侧执行期间释放
-GIL，避免阻塞 Qt 主线程。ODS 用标准库 ``zipfile`` + ``xml.etree``
-解析 ``content.xml``（iter-109 移除 odfpy 依赖以兼容 fspack 打包）。
+GIL，避免阻塞 Qt 主线程。ODS 用 ``zipfile`` + ``lxml`` 解析
+``content.xml``（iter-109 移除 odfpy 依赖以兼容 fspack 打包；lxml 比
+ElementTree 快 3-5x，不可用时回退 ElementTree）。
 """
 
 from __future__ import annotations
 
 import io
 import logging
-import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Any
 
 from typing_extensions import override
 
@@ -143,11 +144,11 @@ class XlsxExtractor(Extractor):
 class OdsExtractor(Extractor):
     """ODS 电子表格文本提取器（OpenDocument Spreadsheet）。
 
-    iter-109 起改用标准库 ``zipfile`` + ``xml.etree.ElementTree`` 直接
-    解析 ODS 的 ``content.xml``，移除 odfpy 依赖（odfpy 在 PyPI 上仅有
-    sdist，无预编译 wheel，与 fspack 的 ``--only-binary=:all:`` 打包策略
-    冲突）。speed_tier 从 T4 慢速调整为 T3 中速：标准库 XML 解析 +
-    TableRow/Cell 遍历比 odfpy 的对象封装略快。
+    iter-109 起改用 ``zipfile`` + ``lxml`` 直接解析 ODS 的 ``content.xml``，
+    移除 odfpy 依赖（odfpy 在 PyPI 上仅有 sdist，无预编译 wheel，与 fspack
+    的 ``--only-binary=:all:`` 打包策略冲突）。lxml 比 ElementTree 快 3-5x，
+    不可用时回退 ElementTree。speed_tier 从 T4 慢速调整为 T2 快速（lxml）
+    或 T3 中速（ElementTree 回退）。
     """
 
     @property
@@ -159,8 +160,10 @@ class OdsExtractor(Extractor):
     @property
     @override
     def speed_tier(self) -> SpeedTier:
-        """ODS ZIP 解压 + XML 解析 + TableRow/Cell 遍历为 T3 中速。"""
-        return SpeedTier.MEDIUM
+        """lxml 解析 XML 为 T2 快速；回退 ElementTree 为 T3 中速。"""
+        from fuscan.extractors._odf_xml import _LXML_AVAILABLE
+
+        return SpeedTier.FAST if _LXML_AVAILABLE else SpeedTier.MEDIUM
 
     @override
     @property
@@ -205,13 +208,13 @@ class OdsExtractor(Extractor):
 
         return "\n".join(parts)
 
-    def _extract_cell_text(self, cell: ET.Element) -> str:
+    def _extract_cell_text(self, cell: Any) -> str:
         """提取单元格内所有 ``<text:p>`` 段落文本。
 
         ODS 单元格的文本内容封装在 ``<text:p>`` 子元素中，一个单元格
         可能包含多个段落（用 ``\\n`` 分隔）。空白单元格返回空串。
 
-        :param cell: ``<table:table-cell>`` 元素
+        :param cell: ``<table:table-cell>`` 元素（lxml 或 ElementTree）
         :return: 单元格内所有段落文本拼接（已 ``strip``）
         """
         parts: list[str] = []

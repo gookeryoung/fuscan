@@ -20,6 +20,9 @@ dependencies = [
     "watchdog>=3.0.0",
     "python-docx>=1.1.0",
     "python-pptx>=0.6.23",
+    # lxml 是 python-docx/pptx 的传递依赖，但 _odf_xml.py 与 _ooxml_xml.py 直接依赖
+    # lxml.etree 做 XML 解析（XPath C 层匹配 / iterparse 流式），故显式声明
+    "lxml>=4.9.0",
     "pypdf>=4.0.0",
     "pdf_oxide>=0.3",
     "rarfile>=4.1",

@@ -7,12 +7,14 @@
 
 - T1 极速（``VERY_FAST``）：< 10ms/MB，纯字节解码
   - 纯文本/源代码/配置文件/标记与数据/样式表 5 个子提取器
-- T2 快速（``FAST``）：10-50ms/MB，Rust 加速后端或标准库解析
-  - EML 邮件、PDF（pdf_oxide）、XLSX/XLS（calamine，iter-92）
-- T3 中速（``MEDIUM``）：50-200ms/MB，单次 XML 解析 + 树遍历
-  - DOCX/ODT/RTF/WPS/MSG
+- T2 快速（``FAST``）：10-50ms/MB，Rust 加速后端或 lxml C 扩展解析
+  - EML 邮件、PDF（pdf_oxide）、XLSX/XLS（calamine，iter-92）、
+    DOCX/PPTX/ODT/ODS（lxml 直接解析，iter-110）
+- T3 中速（``MEDIUM``）：50-200ms/MB，单次 XML 解析 + 树遍历或正则扫描
+  - RTF/WPS/MSG、DOC/PPT（正则 UTF-16LE 扫描，iter-110）、
+    DOCX/PPTX/ODT/ODS 的 ElementTree/python-docx 回退路径
 - T4 慢速（``SLOW``）：200-1000ms/MB，单元格遍历或字节级扫描
-  - ODS（zipfile+xml）/PPTX/DOC/PPT
+  - （已空，原 ODS/PPTX/DOC/PPT 已升级至 T2/T3）
 - T5 极慢（``VERY_SLOW``）：> 1000ms/MB，复杂页面布局分析
   - PDF（pypdf 回退）
 

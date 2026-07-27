@@ -414,6 +414,20 @@ Rectangle {
                         taskSettingsDialog.open()
                     }
                 }
+                IconButton {
+                    iconSource: "qrc:/icons/history.svg"
+                    text: "历史"
+                    tooltip: "查看扫描历史与对比摘要"
+                    accent: "ghost"
+                    onClicked: {
+                        // 加载历史 JSON 与对比 JSON
+                        var histJson = workspaceController.workspaceHistoryJson(card.workspaceId)
+                        var cmpJson = workspaceController.compareWithPreviousScan(card.workspaceId)
+                        try { historyDialog.historyList = JSON.parse(histJson) } catch(e) { historyDialog.historyList = [] }
+                        try { historyDialog.comparison = JSON.parse(cmpJson) } catch(e) { historyDialog.comparison = {} }
+                        historyDialog.open()
+                    }
+                }
                 Item { Layout.fillWidth: true }
                 IconButton {
                     iconSource: "qrc:/icons/delete.svg"
@@ -715,6 +729,218 @@ Rectangle {
                     value = cleaned
                 }
                 workspaceController.setTaskOverride(card.workspaceId, key, JSON.stringify(value))
+            }
+        }
+    }
+
+    // ---------- 扫描历史对话框（iter-115） ----------
+    Dialog {
+        id: historyDialog
+        title: "扫描历史 — " + card.taskName
+        modal: true
+        anchors.centerIn: parent
+        width: 640
+        height: 520
+        standardButtons: Dialog.Close
+
+        // 历史列表（按时间倒序）
+        property var historyList: []
+        // 对比结果对象（current/previous/summary/trend/...）
+        property var comparison: {}
+
+        contentItem: Rectangle {
+            color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+            border.width: 1
+            radius: theme.radiusMd
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 12
+
+                // ---------- 对比摘要区 ----------
+                Rectangle {
+                    Layout.fillWidth: true
+                    visible: historyDialog.comparison && historyDialog.comparison.summary
+                    color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                    border.width: 1
+                    radius: theme.radiusSm
+                    implicitHeight: cmpColumn.implicitHeight + 16
+
+                    ColumnLayout {
+                        id: cmpColumn
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 6
+
+                        Label {
+                            text: "对比摘要"
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: historyDialog.comparison ? (historyDialog.comparison.summary || "") : ""
+                            font.pixelSize: 11
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            wrapMode: Text.WordWrap
+                        }
+                        // 趋势标签
+                        Rectangle {
+                            visible: historyDialog.comparison && historyDialog.comparison.trend
+                            radius: 8
+                            height: 18
+                            width: trendLabel.width + 12
+                            color: {
+                                var t = historyDialog.comparison ? historyDialog.comparison.trend : ""
+                                if (t === "改善") return theme.colorSuccess
+                                if (t === "恶化") return theme.colorDanger
+                                if (t === "首次") return theme.colorPrimary
+                                return theme.colorTextSecondary
+                            }
+                            Label {
+                                id: trendLabel
+                                anchors.centerIn: parent
+                                text: historyDialog.comparison ? (historyDialog.comparison.trend || "") : ""
+                                font.pixelSize: 10
+                                font.bold: true
+                                color: theme.colorTextOnPrimary
+                            }
+                        }
+                    }
+                }
+
+                // ---------- 历史列表 ----------
+                Label {
+                    text: "历史记录"
+                    font.pixelSize: 12
+                    font.bold: true
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
+
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+
+                    ListView {
+                        id: historyListView
+                        model: historyDialog.historyList
+                        spacing: 6
+
+                        // 空态
+                        Label {
+                            anchors.centerIn: parent
+                            visible: historyListView.count === 0
+                            text: "暂无扫描历史"
+                            font.pixelSize: 12
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+
+                        delegate: Rectangle {
+                            width: historyListView.width
+                            height: histRow.implicitHeight + 16
+                            color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                            border.width: 1
+                            radius: theme.radiusSm
+
+                            RowLayout {
+                                id: histRow
+                                anchors.fill: parent
+                                anchors.margins: 10
+                                spacing: 10
+
+                                // 状态色条
+                                Rectangle {
+                                    width: 3
+                                    height: parent.height * 0.6
+                                    color: {
+                                        var s = modelData.status
+                                        if (s === "completed") return theme.colorSuccess
+                                        if (s === "cancelled") return theme.colorWarning
+                                        return theme.colorDanger
+                                    }
+                                    radius: 2
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+
+                                    // 第一行：完成时间 + 命中数
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: {
+                                            var ts = modelData.finished_at || ""
+                                            // ISO 格式简化展示：取 YYYY-MM-DD HH:MM:SS 部分
+                                            return ts.replace("T", " ").replace("Z", "") + " | 命中 " + modelData.matched_files
+                                        }
+                                        font.pixelSize: 12
+                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                        elide: Text.ElideRight
+                                    }
+                                    // 第二行：摘要
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: modelData.summary || ""
+                                        font.pixelSize: 10
+                                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                        elide: Text.ElideRight
+                                        visible: text.length > 0
+                                    }
+                                }
+
+                                // 状态徽标
+                                Rectangle {
+                                    radius: 8
+                                    height: 18
+                                    width: statusTag.width + 10
+                                    color: {
+                                        var s = modelData.status
+                                        if (s === "completed") return theme.colorSuccess
+                                        if (s === "cancelled") return theme.colorWarning
+                                        return theme.colorDanger
+                                    }
+                                    Label {
+                                        id: statusTag
+                                        anchors.centerIn: parent
+                                        text: {
+                                            var s = modelData.status
+                                            if (s === "completed") return "完成"
+                                            if (s === "cancelled") return "取消"
+                                            return "失败"
+                                        }
+                                        font.pixelSize: 10
+                                        color: theme.colorTextOnPrimary
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ---------- 清空历史按钮 ----------
+                RowLayout {
+                    Layout.fillWidth: true
+                    Item { Layout.fillWidth: true }
+                    Button {
+                        text: "清空历史"
+                        font.pixelSize: theme.fontSizeSmall
+                        flat: true
+                        implicitHeight: 32
+                        palette.buttonText: theme.colorDanger
+                        enabled: historyDialog.historyList.length > 0
+                        onClicked: {
+                            var removed = workspaceController.clearWorkspaceHistory(card.workspaceId)
+                            historyDialog.historyList = []
+                            historyDialog.comparison = {}
+                        }
+                    }
+                }
             }
         }
     }

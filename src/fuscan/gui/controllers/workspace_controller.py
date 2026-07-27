@@ -123,6 +123,10 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._current_workspace_id: str = ""
         # 当前扫描中（含暂停态）工作区 ID；空串表示无扫描任务进行
         self._active_scan_workspace_id: str = ""
+        # iter-115：扫描历史归档存储，扫描结束时自动归档
+        from fuscan.history import HistoryStore
+
+        self._history_store: HistoryStore = HistoryStore()
         # 恢复持久化的工作区
         self._load_persisted()
 
@@ -334,7 +338,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str)  # pyrefly: ignore [not-callable]
     def removeWorkspace(self, ws_id: str) -> None:
-        """按 ID 移除工作区（同时清理对应 ScanController）。"""
+        """按 ID 移除工作区（同时清理对应 ScanController 与扫描历史）。"""
         if not self._model.remove_workspace(ws_id):
             return
         controller = self._scan_controllers.pop(ws_id, None)
@@ -348,6 +352,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if self._active_scan_workspace_id == ws_id:
             self._active_scan_workspace_id = ""
             self.activeScanChanged.emit()  # pyrefly: ignore [missing-attribute]
+        # iter-115：清理该工作区的扫描历史
+        self._history_store.clear_workspace(ws_id)
         self._persist()
         self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -666,6 +672,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self.activeScanChanged.emit()  # pyrefly: ignore [missing-attribute]
             # 扫描结束（scanning → 非 scanning）：持久化状态，重启后仍能展示
             self._persist()
+            # iter-115：扫描结束自动归档到历史存储
+            self._archive_scan_history(ws_id, controller)
 
     def cleanup(self) -> None:
         """窗口关闭时清理所有 ScanController 资源。"""
@@ -739,3 +747,106 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 logger.warning("工作区 %s 恢复失败: %s", ws_id, exc)
         if self._model.rowCount() > 0:
             self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    # ----------------------------- 扫描历史（iter-115） -----------------------------
+
+    def _archive_scan_history(self, ws_id: str, controller: ScanController) -> None:
+        """扫描结束时从 ScanController 提取报告并归档到 :class:`HistoryStore`。
+
+        :param ws_id: 工作区 ID
+        :param controller: 该工作区的 :class:`ScanController` 实例
+        """
+        ws_item = self._model.get_workspace(ws_id)
+        if ws_item is None:
+            return
+        try:
+            entry = controller.build_history_entry(ws_id, ws_item.name)
+            if entry is not None:
+                self._history_store.add(entry)
+        except Exception as exc:  # 归档失败不影响主流程
+            logger.warning("工作区 %s 扫描历史归档失败: %s", ws_id, exc)
+
+    @Slot(str, result=str)
+    def workspaceHistoryJson(self, ws_id: str) -> str:
+        """返回指定工作区的历史记录 JSON 字符串（供 QML 解析展示）。
+
+        :param ws_id: 工作区 ID
+        :return: JSON 数组字符串，每个元素为历史条目 dict（按时间倒序）；
+            空历史返回 ``"[]"``
+        """
+        import json as _json
+
+        entries = self._history_store.workspace_history(ws_id)
+        payload = [
+            {
+                "scan_id": e.scan_id,
+                "workspace_name": e.workspace_name,
+                "started_at": e.started_at,
+                "finished_at": e.finished_at,
+                "status": e.status,
+                "total_files": e.total_files,
+                "scanned_files": e.scanned_files,
+                "matched_files": e.matched_files,
+                "skipped_files": e.skipped_files,
+                "error_count": e.error_count,
+                "duration_seconds": round(e.duration_seconds, 2),
+                "rule_names": list(e.rule_names),
+                "summary": e.summary,
+            }
+            for e in entries
+        ]
+        return _json.dumps(payload, ensure_ascii=False)
+
+    @Slot(str, result=str)
+    def compareWithPreviousScan(self, ws_id: str) -> str:
+        """对比指定工作区最近一次扫描与上上次扫描，返回对比结果 JSON。
+
+        :param ws_id: 工作区 ID
+        :return: JSON 对象字符串，包含 ``current``/``previous``/``summary``/
+            ``new_hits``/``resolved_hits``/``persistent_hits``/``matched_delta``/
+            ``trend`` 字段；无历史返回 ``"{}"``
+        """
+        import json as _json
+
+        from fuscan.history import compare_scans
+
+        entries = self._history_store.workspace_history(ws_id, limit=2)
+        if not entries:
+            return "{}"
+        current = entries[0]
+        previous = entries[1] if len(entries) >= 2 else None
+        comparison = compare_scans(current, previous)
+        payload = {
+            "current": {
+                "scan_id": comparison.current.scan_id,
+                "finished_at": comparison.current.finished_at,
+                "matched_files": comparison.current.matched_files,
+                "status": comparison.current.status,
+            },
+            "previous": (
+                {
+                    "scan_id": comparison.previous.scan_id,
+                    "finished_at": comparison.previous.finished_at,
+                    "matched_files": comparison.previous.matched_files,
+                    "status": comparison.previous.status,
+                }
+                if comparison.previous is not None
+                else None
+            ),
+            "summary": comparison.summary(),
+            "trend": comparison.trend,
+            "matched_delta": comparison.matched_delta,
+            "new_hits_count": len(comparison.new_hits),
+            "resolved_hits_count": len(comparison.resolved_hits),
+            "persistent_hits_count": len(comparison.persistent_hits),
+            "new_hits": list(comparison.new_hits[:50]),  # 限制返回数量避免过大
+            "resolved_hits": list(comparison.resolved_hits[:50]),
+            "new_rules": list(comparison.new_rules),
+            "dropped_rules": list(comparison.dropped_rules),
+        }
+        return _json.dumps(payload, ensure_ascii=False)
+
+    @Slot(str, result=int)
+    def clearWorkspaceHistory(self, ws_id: str) -> int:
+        """清空指定工作区的扫描历史，返回被清除的条目数。"""
+        return self._history_store.clear_workspace(ws_id)

@@ -1136,6 +1136,43 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """获取当前选中的 :class:`ScanResult`。"""
         return self._result_model.get_result(self._selected_result_index)
 
+    def build_history_entry(self, workspace_id: str, workspace_name: str) -> object | None:
+        """从最近一次 :class:`ScanReport` 构建扫描历史条目（iter-115）。
+
+        在扫描完成/取消后由 :class:`WorkspaceController` 调用，将本次扫描
+        关键指标归档到 :class:`fuscan.history.HistoryStore`。无 ``_last_report``
+        时返回 ``None``。
+
+        :param workspace_id: 工作区 ID
+        :param workspace_name: 工作区名称快照
+        :return: :class:`fuscan.history.ScanHistoryEntry` 或 ``None``
+        """
+        if self._last_report is None:
+            return None
+        from fuscan.history import STATUS_CANCELLED, STATUS_COMPLETED, ScanHistoryEntry
+
+        report = self._last_report
+        stats = report.stats
+        status = STATUS_CANCELLED if report.cancelled else STATUS_COMPLETED
+        # 命中文件路径排序元组（用于对比）
+        hit_paths = tuple(sorted(str(r.path) for r in report.hits))
+        # 规则名排序元组
+        rule_names = tuple(sorted(report.rule_names))
+        return ScanHistoryEntry(
+            workspace_id=workspace_id,
+            workspace_name=workspace_name,
+            status=status,
+            total_files=stats.total_files,
+            scanned_files=stats.scanned_files,
+            matched_files=stats.matched_files,
+            skipped_files=stats.skipped_files,
+            error_count=stats.errors,
+            duration_seconds=stats.duration_seconds,
+            hit_paths=hit_paths,
+            rule_names=rule_names,
+            summary=self._status_summary,
+        )
+
     def _set_scan_state(self, state: str) -> None:
         """设置扫描状态并 emit 信号。
 

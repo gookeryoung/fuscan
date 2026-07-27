@@ -613,7 +613,6 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 controller.setTaskOverride(key, global_value)
         self._persist()
 
-
     @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
     def workspaceExists(self, ws_id: str) -> bool:
         """检查工作区 ID 是否存在。"""

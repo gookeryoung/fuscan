@@ -11,6 +11,7 @@ Rectangle {
     id: card
     property ThemeController theme: Theme
     property WorkspaceControllerType workspaceController: WorkspaceController
+    property ConfigControllerType configController: ConfigController
 
     // 由 ListView delegate 注入
     property string workspaceId: ""
@@ -405,14 +406,14 @@ Rectangle {
                         try { overrides = JSON.parse(jsonStr) } catch(e) { overrides = {} }
                         // 全局配置作为默认值（未覆盖时显示全局值）
                         taskSettingsDialog.editScanArchives = overrides.scan_archives !== undefined
-                            ? overrides.scan_archives : ConfigController.scanArchives
+                            ? overrides.scan_archives : configController.scanArchives
                         taskSettingsDialog.editMaxWorkers = overrides.max_workers !== undefined
-                            ? overrides.max_workers : ConfigController.maxWorkers
+                            ? overrides.max_workers : configController.maxWorkers
                         taskSettingsDialog.editMaxFileSizeMB = overrides.max_file_size !== undefined
                             ? Math.floor(overrides.max_file_size / (1024 * 1024))
-                            : ConfigController.maxFileSizeMB
+                            : configController.maxFileSizeMB
                         taskSettingsDialog.editMaxDepth = overrides.max_depth !== undefined
-                            ? overrides.max_depth : ConfigController.maxDepth
+                            ? overrides.max_depth : configController.maxDepth
                         // ignore_dirs 数组转成多行文本
                         var dirs = overrides.ignore_dirs !== undefined ? overrides.ignore_dirs : []
                         taskSettingsDialog.editIgnoreDirs = Array.isArray(dirs) ? dirs.join("\n") : ""
@@ -493,7 +494,7 @@ Rectangle {
                 visible: editTargetDialog.editModeIndex === 1
                 spacing: 6
                 Repeater {
-                    model: ConfigController.drives
+                    model: configController.drives
                     delegate: Button {
                         Layout.preferredWidth: 72
                         Layout.preferredHeight: theme.btnHeightSecondary
@@ -524,7 +525,7 @@ Rectangle {
                     }
                 }
                 Label {
-                    visible: ConfigController.drives.length === 0
+                    visible: configController.drives.length === 0
                     text: "未检测到可用盘符"
                     font.pixelSize: 12
                     color: theme.colorWarning
@@ -640,7 +641,7 @@ Rectangle {
                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                 }
                 Label {
-                    text: "当前机器最大线程=" + ConfigController.cpuCount
+                    text: "当前机器最大线程=" + configController.cpuCount
                     font.pixelSize: theme.fontSizeCaption
                     color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                 }
@@ -648,8 +649,8 @@ Rectangle {
                 SpinBox {
                     id: taskMaxWorkersSpin
                     from: 1
-                    to: Math.max(ConfigController.cpuCount, 1)
-                    value: Math.min(taskSettingsDialog.editMaxWorkers, ConfigController.cpuCount)
+                    to: Math.max(configController.cpuCount, 1)
+                    value: Math.min(taskSettingsDialog.editMaxWorkers, configController.cpuCount)
                     editable: true
                     onValueChanged: taskSettingsDialog.editMaxWorkers = value
                 }
@@ -734,16 +735,16 @@ Rectangle {
                 var globalValue
                 if (key === "scan_archives") {
                     value = taskSettingsDialog.editScanArchives
-                    globalValue = ConfigController.scanArchives
+                    globalValue = configController.scanArchives
                 } else if (key === "max_workers") {
                     value = taskSettingsDialog.editMaxWorkers
-                    globalValue = ConfigController.maxWorkers
+                    globalValue = configController.maxWorkers
                 } else if (key === "max_file_size") {
                     value = taskSettingsDialog.editMaxFileSizeMB * 1024 * 1024
-                    globalValue = ConfigController.maxFileSizeMB * 1024 * 1024
+                    globalValue = configController.maxFileSizeMB * 1024 * 1024
                 } else if (key === "max_depth") {
                     value = taskSettingsDialog.editMaxDepth
-                    globalValue = ConfigController.maxDepth
+                    globalValue = configController.maxDepth
                 } else if (key === "ignore_dirs") {
                     var lines = taskSettingsDialog.editIgnoreDirs.split("\n")
                     var cleaned = []

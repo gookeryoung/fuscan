@@ -24,6 +24,7 @@ kreuzberg 是**可选依赖**（``pip install fuscan[fast]``），未安装时�
 
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
 from functools import lru_cache
@@ -88,7 +89,5 @@ def extract_text_from_bytes(data: bytes, extension: str) -> str:
             f.write(data)
         return extract_text(Path(tmp_path_str))
     finally:
-        try:
-            os.unlink(tmp_path_str)
-        except OSError:  # pragma: no cover - 临时文件清理失败无需上报
-            pass
+        with contextlib.suppress(OSError):  # pragma: no cover - 临时文件清理失败无需上报
+            Path(tmp_path_str).unlink()

@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtGraphicalEffects 1.15
 import fuscan.theme 1.0
 
 Pane {
@@ -62,12 +63,12 @@ Pane {
 
         // ---------- 顶部主导航 ----------
         NavItem {
-            iconText: "🏠"; label: "首页"; pageId: "home"
+            iconSource: "qrc:/icons/home.svg"; label: "首页"; pageId: "home"
             selected: sidebar.currentPage === "home"
             onClicked: { sidebar.currentPage = "home" }
         }
         NavItem {
-            iconText: "➕"; label: "添加任务"; pageId: "addTask"
+            iconSource: "qrc:/icons/add.svg"; label: "添加任务"; pageId: "addTask"
             selected: sidebar.currentPage === "addTask"
             onClicked: { sidebar.currentPage = "addTask" }
         }
@@ -76,12 +77,12 @@ Pane {
 
         // ---------- 底部辅助导航 ----------
         NavItem {
-            iconText: "⚙"; label: "设置"; pageId: "settings"
+            iconSource: "qrc:/icons/settings.svg"; label: "设置"; pageId: "settings"
             selected: sidebar.currentPage === "settings"
             onClicked: { sidebar.currentPage = "settings" }
         }
         NavItem {
-            iconText: "ℹ"; label: "关于"; pageId: "about"
+            iconSource: "qrc:/icons/info.svg"; label: "关于"; pageId: "about"
             selected: sidebar.currentPage === "about"
             onClicked: { sidebar.currentPage = "about" }
         }
@@ -103,9 +104,24 @@ Pane {
                 anchors.fill: parent
                 anchors.margins: 8
                 spacing: 8
-                Label {
-                    text: "🌙"
-                    font.pixelSize: 14
+                // 暗色模式图标：SVG moon + ColorOverlay 染色为次要文本色
+                Item {
+                    width: 14
+                    height: 14
+                    Layout.preferredWidth: 14
+                    Layout.preferredHeight: 14
+                    Image {
+                        id: moonIcon
+                        anchors.fill: parent
+                        source: "qrc:/icons/moon.svg"
+                        sourceSize: Qt.size(14, 14)
+                        visible: false
+                    }
+                    ColorOverlay {
+                        anchors.fill: moonIcon
+                        source: moonIcon
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    }
                 }
                 Label {
                     text: "暗色模式"

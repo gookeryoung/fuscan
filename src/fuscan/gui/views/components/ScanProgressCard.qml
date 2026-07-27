@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtGraphicalEffects 1.15
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
 
@@ -51,9 +52,24 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 10
 
-            Label {
-                text: "📋"
-                font.pixelSize: 18
+            // 任务图标：SVG rules + ColorOverlay 染色
+            Item {
+                width: 18
+                height: 18
+                Layout.preferredWidth: 18
+                Layout.preferredHeight: 18
+                Image {
+                    id: scanTaskIcon
+                    anchors.fill: parent
+                    source: "qrc:/icons/rules.svg"
+                    sourceSize: Qt.size(18, 18)
+                    visible: false
+                }
+                ColorOverlay {
+                    anchors.fill: scanTaskIcon
+                    source: scanTaskIcon
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
             }
             Label {
                 text: taskName
@@ -320,14 +336,18 @@ Rectangle {
 
             // 暂停/继续按钮：扫描中显示「暂停」，已暂停显示「继续」
             IconButton {
-                text: workspaceController.activeScanController.isPaused ? "▶ 继续" : "⏸ 暂停"
+                iconSource: workspaceController.activeScanController.isPaused
+                    ? "qrc:/icons/scan.svg"
+                    : "qrc:/icons/pause.svg"
+                text: workspaceController.activeScanController.isPaused ? "继续" : "暂停"
                 tooltip: workspaceController.activeScanController.isPaused ? "继续扫描" : "暂停扫描"
                 accent: "secondary"
                 onClicked: workspaceController.togglePause(card.workspaceId)
             }
             // 取消按钮：危险操作
             IconButton {
-                text: "⏹ 取消"
+                iconSource: "qrc:/icons/stop.svg"
+                text: "取消"
                 tooltip: "取消扫描"
                 accent: "danger"
                 onClicked: workspaceController.cancelScan(card.workspaceId)

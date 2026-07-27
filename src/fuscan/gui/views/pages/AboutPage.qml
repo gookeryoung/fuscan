@@ -78,14 +78,16 @@ Item {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 12
                 IconButton {
-                    text:"📖 用户手册"
+                    iconSource: "qrc:/icons/manual.svg"
+                    text: "用户手册"
                     tooltip: "打开用户手册 PDF"
                     accent: "primary"
                     Layout.preferredWidth: 160
                     onClicked: aboutController.openManual()
                 }
                 IconButton {
-                    text:"🗂 配置目录"
+                    iconSource: "qrc:/icons/folder.svg"
+                    text: "配置目录"
                     tooltip: "打开配置目录"
                     accent: "secondary"
                     Layout.preferredWidth: 160

@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Dialogs 1.3 as Dialogs
+import QtGraphicalEffects 1.15
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
 
@@ -68,9 +69,24 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 10
 
-            Label {
-                text: "📋"
-                font.pixelSize: 16
+            // 任务图标：SVG rules + ColorOverlay 染色为前景色
+            Item {
+                width: 16
+                height: 16
+                Layout.preferredWidth: 16
+                Layout.preferredHeight: 16
+                Image {
+                    id: taskIcon
+                    anchors.fill: parent
+                    source: "qrc:/icons/rules.svg"
+                    sourceSize: Qt.size(16, 16)
+                    visible: false
+                }
+                ColorOverlay {
+                    anchors.fill: taskIcon
+                    source: taskIcon
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
             }
             Label {
                 text: taskName
@@ -219,13 +235,15 @@ Rectangle {
 
             // 左侧：定义规则 + 启动/暂停扫描 + 查看结果
             IconButton {
-                text:"🔧 定义规则"
+                iconSource: "qrc:/icons/rules.svg"
+                text: "定义规则"
                 tooltip: "编辑该任务的规则集"
                 accent: "secondary"
                 onClicked: card.defineRulesRequested(card.workspaceId)
             }
             IconButton {
-                text: statusText === "扫描中" ? "⏸ 暂停" : "▶ 启动扫描"
+                iconSource: statusText === "扫描中" ? "qrc:/icons/pause.svg" : "qrc:/icons/scan.svg"
+                text: statusText === "扫描中" ? "暂停" : "启动扫描"
                 tooltip: statusText === "扫描中" ? "暂停扫描" : "启动扫描"
                 accent: "primary"
                 // 扫描完成后切换为未激活，避免已完成任务仍高亮扫描按钮
@@ -239,7 +257,8 @@ Rectangle {
                 }
             }
             IconButton {
-                text:"🔄 更新扫描"
+                iconSource: "qrc:/icons/rescan.svg"
+                text: "更新扫描"
                 tooltip: "对已完成扫描的任务重新扫描"
                 accent: "secondary"
                 // 已完成（含用户取消）的工作区可重新扫描
@@ -247,7 +266,8 @@ Rectangle {
                 onClicked: workspaceController.startScan(card.workspaceId)
             }
             IconButton {
-                text:"📊 查看结果"
+                iconSource: "qrc:/icons/search.svg"
+                text: "查看结果"
                 tooltip: "查看扫描结果"
                 // 扫描完成后高亮（与扫描前的扫描按钮同色），未完成时 disabled 变灰
                 accent: "primary"
@@ -260,7 +280,8 @@ Rectangle {
 
             // 右侧：统计 + 展开按钮（保留）
             IconButton {
-                text:"📈 统计"
+                iconSource: "qrc:/icons/stats.svg"
+                text: "统计"
                 tooltip: "查看扫描统计"
                 accent: "ghost"
                 onClicked: card.viewStatsRequested(card.workspaceId)
@@ -288,12 +309,23 @@ Rectangle {
                 }
                 contentItem: Row {
                     spacing: 4
-                    Image {
-                        source: "file:///" + theme.iconsDir + "/more.svg"
-                        sourceSize: Qt.size(14, 14)
+                    // 展开图标：SVG more + ColorOverlay 染色
+                    Item {
+                        width: 14
+                        height: 14
                         anchors.verticalCenter: parent.verticalCenter
-                        // SVG 颜色跟随主题（Qt 5.15 ColorOverlay 不可用，用 opacity 区分）
-                        opacity: theme.isDark ? 0.9 : 1.0
+                        Image {
+                            id: moreIcon
+                            anchors.fill: parent
+                            source: theme.iconsPrefix + "more.svg"
+                            sourceSize: Qt.size(14, 14)
+                            visible: false
+                        }
+                        ColorOverlay {
+                            anchors.fill: moreIcon
+                            source: moreIcon
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        }
                     }
                     Label {
                         text: card.expanded ? "收起" : "展开"
@@ -323,7 +355,8 @@ Rectangle {
                 spacing: 8
 
                 IconButton {
-                    text:"🎯 切换目标"
+                    iconSource: "qrc:/icons/target.svg"
+                    text: "切换目标"
                     tooltip: "修改该任务的扫描模式与目标路径"
                     accent: "ghost"
                     // 扫描中/暂停中禁用
@@ -340,21 +373,24 @@ Rectangle {
                     }
                 }
                 IconButton {
-                    text:"📄 CSV"
+                    iconSource: "qrc:/icons/export_csv.svg"
+                    text: "CSV"
                     tooltip: "导出为 CSV"
                     accent: "ghost"
                     enabled: matchedCount > 0
                     onClicked: exportCsvRequested(card.workspaceId)
                 }
                 IconButton {
-                    text:"📦 JSON"
+                    iconSource: "qrc:/icons/export_json.svg"
+                    text: "JSON"
                     tooltip: "导出为 JSON"
                     accent: "ghost"
                     enabled: matchedCount > 0
                     onClicked: exportJsonRequested(card.workspaceId)
                 }
                 IconButton {
-                    text:"⚙ 设置"
+                    iconSource: "qrc:/icons/settings.svg"
+                    text: "设置"
                     tooltip: "任务级设置（仅对该任务生效）"
                     accent: "ghost"
                     onClicked: {
@@ -380,7 +416,8 @@ Rectangle {
                 }
                 Item { Layout.fillWidth: true }
                 IconButton {
-                    text:"🗑 删除"
+                    iconSource: "qrc:/icons/delete.svg"
+                    text: "删除"
                     tooltip: "删除该任务"
                     accent: "danger"
                     onClicked: workspaceController.removeWorkspace(card.workspaceId)
@@ -495,7 +532,8 @@ Rectangle {
                     }
                 }
                 IconButton {
-                    text:"📁 选择"
+                    iconSource: "qrc:/icons/folder.svg"
+                    text: "选择"
                     tooltip: "选择扫描目录"
                     accent: "secondary"
                     onClicked: folderDialogForEdit.open()

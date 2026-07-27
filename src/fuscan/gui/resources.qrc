@@ -17,7 +17,13 @@
     <file alias="qml/pages/StatsPage.qml">views/pages/StatsPage.qml</file>
     <file alias="qml/Sidebar.qml">views/Sidebar.qml</file>
     <file alias="icons/about.svg">../assets/icons/about.svg</file>
+    <file alias="icons/add.svg">../assets/icons/add.svg</file>
     <file alias="icons/all_disk.svg">../assets/icons/all_disk.svg</file>
+    <file alias="icons/check.svg">../assets/icons/check.svg</file>
+    <file alias="icons/check_box.svg">../assets/icons/check_box.svg</file>
+    <file alias="icons/check_box_blank.svg">../assets/icons/check_box_blank.svg</file>
+    <file alias="icons/close.svg">../assets/icons/close.svg</file>
+    <file alias="icons/delete.svg">../assets/icons/delete.svg</file>
     <file alias="icons/disk.svg">../assets/icons/disk.svg</file>
     <file alias="icons/edit.svg">../assets/icons/edit.svg</file>
     <file alias="icons/export.svg">../assets/icons/export.svg</file>
@@ -25,11 +31,15 @@
     <file alias="icons/export_json.svg">../assets/icons/export_json.svg</file>
     <file alias="icons/export_pdf.svg">../assets/icons/export_pdf.svg</file>
     <file alias="icons/favicon.svg">../assets/icons/favicon.svg</file>
+    <file alias="icons/file.svg">../assets/icons/file.svg</file>
     <file alias="icons/folder.svg">../assets/icons/folder.svg</file>
     <file alias="icons/hard_disk.svg">../assets/icons/hard_disk.svg</file>
     <file alias="icons/history.svg">../assets/icons/history.svg</file>
+    <file alias="icons/home.svg">../assets/icons/home.svg</file>
+    <file alias="icons/info.svg">../assets/icons/info.svg</file>
     <file alias="icons/load_list.svg">../assets/icons/load_list.svg</file>
     <file alias="icons/manual.svg">../assets/icons/manual.svg</file>
+    <file alias="icons/moon.svg">../assets/icons/moon.svg</file>
     <file alias="icons/more.svg">../assets/icons/more.svg</file>
     <file alias="icons/pause.svg">../assets/icons/pause.svg</file>
     <file alias="icons/rescan.svg">../assets/icons/rescan.svg</file>
@@ -40,5 +50,6 @@
     <file alias="icons/stats.svg">../assets/icons/stats.svg</file>
     <file alias="icons/stop.svg">../assets/icons/stop.svg</file>
     <file alias="icons/target.svg">../assets/icons/target.svg</file>
+    <file alias="icons/warning.svg">../assets/icons/warning.svg</file>
   </qresource>
 </RCC>

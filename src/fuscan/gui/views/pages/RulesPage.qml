@@ -174,7 +174,8 @@ Item {
                         }
                         Item { Layout.fillWidth: true }
                         IconButton {
-                            text:"📂 加载"
+                            iconSource: "qrc:/icons/load_list.svg"
+                            text: "加载"
                             tooltip: "加载规则文件"
                             accent: "ghost"
                             onClicked: rulesFileDialog.open()

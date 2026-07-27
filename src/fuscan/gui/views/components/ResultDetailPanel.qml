@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtGraphicalEffects 1.15
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
 
@@ -66,8 +67,27 @@ Rectangle {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 6
+                        // 文件信息图标：SVG file + ColorOverlay 染色
+                        Item {
+                            width: 12
+                            height: 12
+                            Layout.preferredWidth: 12
+                            Layout.preferredHeight: 12
+                            Image {
+                                id: fileInfoIcon
+                                anchors.fill: parent
+                                source: "qrc:/icons/file.svg"
+                                sourceSize: Qt.size(12, 12)
+                                visible: false
+                            }
+                            ColorOverlay {
+                                anchors.fill: fileInfoIcon
+                                source: fileInfoIcon
+                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                            }
+                        }
                         Label {
-                            text: "📄 文件信息"
+                            text: "文件信息"
                             font.pixelSize: 12
                             font.bold: true
                             color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
@@ -104,7 +124,8 @@ Rectangle {
                         }
                         // 定位文件按钮：调用 scanController.openLocation()（无参 Slot）
                         IconButton {
-                            text:"📁 定位"
+                            iconSource: "qrc:/icons/folder.svg"
+                            text: "定位"
                             tooltip: "在文件管理器中打开并选中该文件"
                             accent: "secondary"
                             enabled: !scanController.detailIsArchiveEntry
@@ -331,7 +352,8 @@ Rectangle {
             spacing: 8
             Item { Layout.fillWidth: true }
             IconButton {
-                text:"📦 移至暂存"
+                iconSource: "qrc:/icons/export.svg"
+                text: "移至暂存"
                 tooltip: "复制到暂存区隔离目录并标记为跳过"
                 accent: "secondary"
                 enabled: !scanController.detailIsArchiveEntry && scanController.selectedResultIndex >= 0
@@ -341,7 +363,8 @@ Rectangle {
                 }
             }
             IconButton {
-                text: "🔄 替换内容"
+                iconSource: "qrc:/icons/rescan.svg"
+                text: "替换内容"
                 tooltip: "备份源文件并替换命中内容（按规则 replace_with）"
                 accent: "primary"
                 enabled: scanController.canReplaceSelected

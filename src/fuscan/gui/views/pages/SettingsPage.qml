@@ -30,7 +30,8 @@ Item {
             }
             Item { Layout.fillWidth: true }
             IconButton {
-                text:"↺ 重置"
+                iconSource: "qrc:/icons/rescan.svg"
+                text: "重置"
                 tooltip: "重置扫描相关配置为默认值"
                 accent: "secondary"
                 onClicked: configController.resetToDefaults()
@@ -373,13 +374,15 @@ Item {
                             RowLayout {
                                 Layout.fillWidth: true
                                 IconButton {
-                                    text:"☑ 全选"
+                                    iconSource: "qrc:/icons/check_box.svg"
+                                    text: "全选"
                                     tooltip: "全部启用"
                                     accent: "secondary"
                                     onClicked: configController.selectAllExtractors()
                                 }
                                 IconButton {
-                                    text:"☐ 全不选"
+                                    iconSource: "qrc:/icons/check_box_blank.svg"
+                                    text: "全不选"
                                     tooltip: "全部禁用"
                                     accent: "secondary"
                                     onClicked: configController.unselectAllExtractors()

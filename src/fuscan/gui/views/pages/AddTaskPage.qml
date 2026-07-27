@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Dialogs 1.3
+import QtGraphicalEffects 1.15
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
 import "../components"
@@ -155,9 +156,24 @@ Item {
                         anchors.leftMargin: 12
                         anchors.rightMargin: 4
                         spacing: 8
-                        Label {
-                            text: "📄"
-                            font.pixelSize: 13
+                        // 规则文件图标：SVG file + ColorOverlay 染色
+                        Item {
+                            width: 13
+                            height: 13
+                            Layout.preferredWidth: 13
+                            Layout.preferredHeight: 13
+                            Image {
+                                id: ruleFileIcon
+                                anchors.fill: parent
+                                source: "qrc:/icons/file.svg"
+                                sourceSize: Qt.size(13, 13)
+                                visible: false
+                            }
+                            ColorOverlay {
+                                anchors.fill: ruleFileIcon
+                                source: ruleFileIcon
+                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                            }
                         }
                         Label {
                             text: modelData
@@ -167,7 +183,8 @@ Item {
                             elide: Text.ElideMiddle
                         }
                         IconButton {
-                            text:"✕"
+                            iconSource: "qrc:/icons/close.svg"
+                            text: ""
                             tooltip: "移除该规则文件"
                             accent: "secondary"
                             onClicked: {
@@ -180,7 +197,8 @@ Item {
                 }
             }
             IconButton {
-                text:"➕ 添加规则文件"
+                iconSource: "qrc:/icons/add.svg"
+                text: "添加规则文件"
                 tooltip: "选择规则文件"
                 accent: "secondary"
                 onClicked: rulesFileDialog.open()
@@ -194,13 +212,15 @@ Item {
                 spacing: 8
                 Item { Layout.fillWidth: true }
                 IconButton {
-                    text:"✕ 取消"
+                    iconSource: "qrc:/icons/close.svg"
+                    text: "取消"
                     tooltip: "取消并返回首页"
                     accent: "secondary"
                     onClicked: addTaskPage.cancelRequested()
                 }
                 IconButton {
-                    text:"✓ 创建任务"
+                    iconSource: "qrc:/icons/check.svg"
+                    text: "创建任务"
                     tooltip: "创建扫描任务并返回首页"
                     accent: "primary"
                     enabled: modeIndex === 0 || (modeIndex === 1 && selectedDrive.length > 0)
@@ -238,7 +258,7 @@ Item {
                     delegate: Button {
                         Layout.preferredWidth: 88
                         Layout.preferredHeight: theme.btnHeightSecondary
-                        text: "💽 " + modelData
+                        text: modelData
                         checkable: true
                         checked: selectedDrive === modelData
                         onClicked: selectedDrive = modelData
@@ -306,7 +326,8 @@ Item {
                     }
                 }
                 IconButton {
-                    text:"📁 选择"
+                    iconSource: "qrc:/icons/folder.svg"
+                    text: "选择"
                     tooltip: "选择扫描目录"
                     accent: "secondary"
                     onClicked: folderDialog.open()
@@ -327,7 +348,8 @@ Item {
                         Layout.fillWidth: true
                     }
                     IconButton {
-                        text: "🗑 清除"
+                        iconSource: "qrc:/icons/delete.svg"
+                        text: "清除"
                         tooltip: "清除全部路径历史"
                         accent: "secondary"
                         onClicked: configController.clearScanPaths()

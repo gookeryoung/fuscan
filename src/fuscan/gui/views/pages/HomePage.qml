@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtQuick.Dialogs 1.3
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtGraphicalEffects 1.15
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
 import "../components"
@@ -69,10 +70,23 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
-                    Label {
-                        text: "⚠"
-                        font.pixelSize: theme.fontSizeHeading
-                        color: theme.colorWarning
+                    Item {
+                        width: theme.fontSizeHeading
+                        height: theme.fontSizeHeading
+                        Layout.preferredWidth: theme.fontSizeHeading
+                        Layout.preferredHeight: theme.fontSizeHeading
+                        Image {
+                            id: warnIcon
+                            anchors.fill: parent
+                            source: "qrc:/icons/warning.svg"
+                            sourceSize: Qt.size(theme.fontSizeHeading, theme.fontSizeHeading)
+                            visible: false
+                        }
+                        ColorOverlay {
+                            anchors.fill: warnIcon
+                            source: warnIcon
+                            color: theme.colorWarning
+                        }
                     }
                     Label {
                         text: "清空所有工作区"
@@ -148,10 +162,23 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
-                    Label {
-                        text: "ℹ"
-                        font.pixelSize: theme.fontSizeHeading
-                        color: theme.colorPrimary
+                    Item {
+                        width: theme.fontSizeHeading
+                        height: theme.fontSizeHeading
+                        Layout.preferredWidth: theme.fontSizeHeading
+                        Layout.preferredHeight: theme.fontSizeHeading
+                        Image {
+                            id: infoIcon
+                            anchors.fill: parent
+                            source: "qrc:/icons/info.svg"
+                            sourceSize: Qt.size(theme.fontSizeHeading, theme.fontSizeHeading)
+                            visible: false
+                        }
+                        ColorOverlay {
+                            anchors.fill: infoIcon
+                            source: infoIcon
+                            color: theme.colorPrimary
+                        }
                     }
                     Label {
                         text: "无法清空"

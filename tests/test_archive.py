@@ -1319,7 +1319,7 @@ class TestSevenZReaderMocked:
     # --------------------- read_entry 分支测试 ---------------------
 
     def test_read_entry_encrypted_no_password(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """加密条目未提供密码时抛 ArchiveError。"""
+        """已标记加密的条目直接跳过，抛 ArchiveError（iter-127：不再重试）。"""
 
         class FakeInfo:
             filename = "secret.txt"
@@ -1332,11 +1332,11 @@ class TestSevenZReaderMocked:
         reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
         reader._info_map = {"secret.txt": FakeInfo()}
         reader._encrypted_entries.add("secret.txt")
-        with pytest.raises(ArchiveError, match="加密条目未提供密码"):
+        with pytest.raises(ArchiveError, match="条目不可读"):
             reader.read_entry("secret.txt")
 
-    def test_read_entry_encrypted_with_password_failed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """已标记加密 + 有密码时尝试重试，重试失败抛 ArchiveError。"""
+    def test_read_entry_encrypted_with_password_skipped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """已标记加密 + 有密码时直接跳过，不重试（iter-127：避免重复解压浪费 CPU）。"""
 
         class FakeInfo:
             filename = "secret.txt"
@@ -1346,7 +1346,12 @@ class TestSevenZReaderMocked:
             def close(self) -> None:
                 pass
 
+        # read_fn 不应被调用（已标记加密直接跳过）
+        call_count = 0
+
         def read_fn(targets: list[str] | None) -> dict[str, object]:
+            nonlocal call_count
+            call_count += 1
             raise OSError("密码错误")
 
         self._patch_sevenzipfile(monkeypatch, read_fn)
@@ -1354,8 +1359,9 @@ class TestSevenZReaderMocked:
         reader._password = "wrong"  # type: ignore[attr-defined]
         reader._info_map = {"secret.txt": FakeInfo()}
         reader._encrypted_entries.add("secret.txt")
-        with pytest.raises(ArchiveError, match="条目读取失败"):
+        with pytest.raises(ArchiveError, match="条目不可读"):
             reader.read_entry("secret.txt")
+        assert call_count == 0  # 确认未重试
 
     def test_read_entry_cache_hit_returns_bytes(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """命中 _bytes_cache 时直接返回缓存字节。"""
@@ -1442,7 +1448,7 @@ class TestSevenZReaderMocked:
     def test_read_entry_generic_exception_marks_encrypted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """read() 抛其他异常时标记为加密避免重试，并抛 ArchiveError。"""
+        """read() 抛 OSError 时不标记加密，抛可重试的 ArchiveError（iter-127）。"""
 
         class FakeInfo:
             filename = "a.txt"
@@ -1458,9 +1464,10 @@ class TestSevenZReaderMocked:
         self._patch_sevenzipfile(monkeypatch, read_fn)
         reader = self._make_mocked_reader(tmp_path, monkeypatch, FakeSevenZ())
         reader._info_map = {"a.txt": FakeInfo()}
-        with pytest.raises(ArchiveError, match="条目读取失败"):
+        with pytest.raises(ArchiveError, match="7Z 条目读取 IO 错误"):
             reader.read_entry("a.txt")
-        assert "a.txt" in reader._encrypted_entries
+        # iter-127：OSError 不标记加密，允许上层重试
+        assert "a.txt" not in reader._encrypted_entries
 
     def test_read_entry_bio_read_failure(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """BytesIO.read() 抛异常时抛 ArchiveError。"""

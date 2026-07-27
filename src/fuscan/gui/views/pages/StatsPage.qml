@@ -78,7 +78,7 @@ Item {
                                 height: 8
                                 radius: 4
                                 color: {
-                                    var s = workspaceController.currentScanController.statusText
+                                    var s = String(workspaceController.currentScanController.statusText || "")
                                     if (s === "扫描中") return theme.colorWarning
                                     if (s === "已暂停") return theme.colorTextSecondary
                                     if (s === "已完成") return (workspaceController.currentScanController.matchedCount > 0
@@ -97,7 +97,7 @@ Item {
                                 font.pixelSize: 13
                                 font.bold: true
                                 color: {
-                                    var s = workspaceController.currentScanController.statusText
+                                    var s = String(workspaceController.currentScanController.statusText || "")
                                     if (s === "扫描中") return theme.colorWarning
                                     if (s === "已暂停") return theme.colorTextSecondary
                                     if (s === "已完成") return (workspaceController.currentScanController.matchedCount > 0

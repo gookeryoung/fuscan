@@ -58,10 +58,14 @@ def _extract_context(path: Path, match_text: str) -> str:
     if not match_text:
         return ""
     try:
-        if not path.exists() or not is_text_file(path):
+        if not path.exists():
             return ""
+        # iter-127：先 stat 检查大小（O(1)），再 is_text_file（可能读内容），
+        # 避免对超大文件先触发 is_text_file 的内容读取
         size = path.stat().st_size
         if size > _MAX_CONTEXT_FILE_SIZE:
+            return ""
+        if not is_text_file(path):
             return ""
         content = path.read_text(encoding="utf-8", errors="replace")
     except OSError:

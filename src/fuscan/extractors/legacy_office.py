@@ -22,6 +22,7 @@ from pathlib import Path
 from typing_extensions import override
 
 from fuscan.extractors._kreuzberg import extract_text as kreuzberg_extract
+from fuscan.extractors._kreuzberg import extract_text_from_bytes as kreuzberg_extract_bytes
 from fuscan.extractors._kreuzberg import is_available as kreuzberg_available
 from fuscan.extractors.base import Extractor, ExtractorError, SpeedTier
 
@@ -154,12 +155,17 @@ class DocExtractor(Extractor):
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:
-        """从内存字节解析 DOC 文档（olefile 回退路径）。
+        """从内存字节解析 DOC 文档。
 
-        .. note::
-           kreuzberg 仅支持文件路径提取，``extract_from_bytes`` 始终走 olefile。
-           压缩包内条目通过临时文件走 :meth:`extract` 时才会用 kreuzberg。
+        iter-127：kreuzberg 可用时通过临时文件走 Rust 核心加速（压缩包内条目同样加速），
+        不可用时回退到 olefile + UTF-16LE 正则扫描。
         """
+        if kreuzberg_available():
+            try:
+                return kreuzberg_extract_bytes(data, "doc")
+            except RuntimeError as exc:
+                logger.debug("kreuzberg DOC bytes 提取失败，回退到 olefile: %s", exc)
+        # 回退：olefile + UTF-16LE 正则扫描
         try:
             import olefile
         except ImportError as exc:
@@ -230,12 +236,17 @@ class PptExtractor(Extractor):
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:
-        """从内存字节解析 PPT 演示文稿（olefile 回退路径）。
+        """从内存字节解析 PPT 演示文稿。
 
-        .. note::
-           kreuzberg 仅支持文件路径提取，``extract_from_bytes`` 始终走 olefile。
-           压缩包内条目通过临时文件走 :meth:`extract` 时才会用 kreuzberg。
+        iter-127：kreuzberg 可用时通过临时文件走 Rust 核心加速（压缩包内条目同样加速），
+        不可用时回退到 olefile + UTF-16LE 正则扫描。
         """
+        if kreuzberg_available():
+            try:
+                return kreuzberg_extract_bytes(data, "ppt")
+            except RuntimeError as exc:
+                logger.debug("kreuzberg PPT bytes 提取失败，回退到 olefile: %s", exc)
+        # 回退：olefile + UTF-16LE 正则扫描
         try:
             import olefile
         except ImportError as exc:

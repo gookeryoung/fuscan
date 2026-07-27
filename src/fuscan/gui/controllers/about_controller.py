@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 _DEPENDENCIES: tuple[str, ...] = (
     "PySide2/PySide6 - Qt GUI 框架",
     "PyYAML - 配置与规则文件解析",
-    "watchdog - 文件系统监控",
     "python-docx - DOCX 文档提取",
     "python-pptx - PPTX 演示提取",
     "pypdf / pdf_oxide - PDF 文本提取",

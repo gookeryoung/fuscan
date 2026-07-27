@@ -324,9 +324,10 @@ Item {
                                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                 }
                                 // iter-125：editable 支持手输入
+                                // iter-127：上限统一为 64（与 WorkspaceCard 任务级设置一致）
                                 SpinBox {
                                     from: 0
-                                    to: 50
+                                    to: 64
                                     value: configController.maxDepth
                                     editable: true
                                     onValueChanged: configController.setMaxDepth(value)

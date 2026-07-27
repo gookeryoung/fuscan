@@ -308,32 +308,39 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         )
         self._model.add_workspace(item)
 
-        # 为该工作区构造独立的 ScanController
-        scan_controller = ScanController(self._config_controller, self._rules_controller, self)
-        # 按工作区参数初始化 ScanController
-        mode_index = SCAN_MODE_STR_TO_INDEX.get(mode_str, SCAN_MODE_DEFAULT_INDEX)
-        scan_controller.setScanModeIndex(mode_index)
-        if mode_str == "drive" and target:
-            scan_controller.setSelectedDrive(target)
-        elif mode_str == "folder" and target:
-            scan_controller.setFolderRoot(target)
-        # 同步任务级配置覆盖到 ScanController（iter-104）
-        for key, value in item.task_overrides.items():
-            scan_controller.setTaskOverride(key, value)
-        # 注入工作区专属 ruleset（iter-107 规则与工作区绑定）
-        # ScanController 不再依赖全局 RulesController.ruleset，而是持工作区专属副本
-        workspace_ruleset = _load_workspace_ruleset(item.rules_paths, item.use_builtin)
-        scan_controller.setWorkspaceRuleset(workspace_ruleset, tuple(item.rules_paths), item.use_builtin)
-        # 连接状态变化信号以回写工作区
-        scan_controller.scanStateChanged.connect(  # pyrefly: ignore [missing-attribute]
-            lambda ws_id=ws_id: self._sync_workspace_state(ws_id)
-        )
-        scan_controller.progressChanged.connect(  # pyrefly: ignore [missing-attribute]
-            lambda ws_id=ws_id: self._sync_workspace_state(ws_id)
-        )
-        scan_controller.statusChanged.connect(  # pyrefly: ignore [missing-attribute]
-            lambda ws_id=ws_id: self._sync_workspace_state(ws_id)
-        )
+        # iter-127：ScanController 创建/初始化失败时回滚 model.add_workspace，
+        # 避免残留无 ScanController 的无效工作区（_load_persisted 单条容错）
+        try:
+            # 为该工作区构造独立的 ScanController
+            scan_controller = ScanController(self._config_controller, self._rules_controller, self)
+            # 按工作区参数初始化 ScanController
+            mode_index = SCAN_MODE_STR_TO_INDEX.get(mode_str, SCAN_MODE_DEFAULT_INDEX)
+            scan_controller.setScanModeIndex(mode_index)
+            if mode_str == "drive" and target:
+                scan_controller.setSelectedDrive(target)
+            elif mode_str == "folder" and target:
+                scan_controller.setFolderRoot(target)
+            # 同步任务级配置覆盖到 ScanController（iter-104）
+            for key, value in item.task_overrides.items():
+                scan_controller.setTaskOverride(key, value)
+            # 注入工作区专属 ruleset（iter-107 规则与工作区绑定）
+            # ScanController 不再依赖全局 RulesController.ruleset，而是持工作区专属副本
+            workspace_ruleset = _load_workspace_ruleset(item.rules_paths, item.use_builtin)
+            scan_controller.setWorkspaceRuleset(workspace_ruleset, tuple(item.rules_paths), item.use_builtin)
+            # 连接状态变化信号以回写工作区
+            scan_controller.scanStateChanged.connect(  # pyrefly: ignore [missing-attribute]
+                lambda ws_id=ws_id: self._sync_workspace_state(ws_id)
+            )
+            scan_controller.progressChanged.connect(  # pyrefly: ignore [missing-attribute]
+                lambda ws_id=ws_id: self._sync_workspace_state(ws_id)
+            )
+            scan_controller.statusChanged.connect(  # pyrefly: ignore [missing-attribute]
+                lambda ws_id=ws_id: self._sync_workspace_state(ws_id)
+            )
+        except Exception:
+            # 回滚已添加到 model 的工作区，避免残留无效项
+            self._model.remove_workspace(ws_id)
+            raise
         self._scan_controllers[ws_id] = scan_controller
 
     @Slot(str)  # pyrefly: ignore [not-callable]
@@ -575,6 +582,37 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if controller is not None:
             controller.setTaskOverride(key, value)
         self._persist()
+
+    @Slot(str, str)  # pyrefly: ignore [not-callable]
+    def clearTaskOverride(self, ws_id: str, key: str) -> None:
+        """清除任务级配置覆盖的指定字段（iter-127）。
+
+        用于"留空使用全局"语义：当任务级配置值与全局值相同时，
+        删除该字段的覆盖，使后续全局配置变更能自动生效。
+
+        :param ws_id: 工作区 ID
+        :param key: Config 字段名（如 ``"scan_archives"``/``"max_workers"``）
+        """
+        item = self._model.get_workspace(ws_id)
+        if item is None:
+            logger.warning("工作区 %s 不存在，无法清除任务级配置", ws_id)
+            return
+        if key not in TASK_OVERRIDE_KEYS:
+            logger.warning("不允许清除字段: %s", key)
+            return
+        if key not in item.task_overrides:
+            return  # 无覆盖，无需清除
+        new_overrides = dict(item.task_overrides)
+        new_overrides.pop(key, None)
+        self._model.update_workspace(ws_id, task_overrides=new_overrides)
+        # 同步到 ScanController：用 ConfigController 全局值回填
+        controller = self._scan_controllers.get(ws_id)
+        if controller is not None:
+            global_value = self._config_controller.get_config_value(key)
+            if global_value is not None:
+                controller.setTaskOverride(key, global_value)
+        self._persist()
+
 
     @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
     def workspaceExists(self, ws_id: str) -> bool:

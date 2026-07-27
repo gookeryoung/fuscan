@@ -62,6 +62,28 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """底层 :class:`Config` 实例（供 ScanController 读取）。"""
         return self._config
 
+    def get_config_value(self, key: str) -> object:
+        """按 task_override 字段名读取全局配置值（iter-127）。
+
+        供 :meth:`WorkspaceController.clearTaskOverride` 在清除任务级覆盖后
+        回填全局值到 ScanController。``max_file_size`` 返回字节（与
+        ``task_overrides`` 单位一致），``ignore_dirs`` 返回 tuple。
+
+        :param key: ``TASK_OVERRIDE_KEYS`` 中的字段名
+        :return: 全局配置值；未知字段返回 ``None``
+        """
+        if key == "scan_archives":
+            return self._config.scan_archives
+        if key == "max_workers":
+            return self._config.max_workers
+        if key == "max_file_size":
+            return self._config.max_file_size  # 字节
+        if key == "max_depth":
+            return self._config.max_depth or 0
+        if key == "ignore_dirs":
+            return tuple(self._config.ignore_dirs)
+        return None
+
     # ----------------------------- 扫描设置 -----------------------------
 
     @Property(bool, notify=configChanged)  # pyrefly: ignore [not-callable]

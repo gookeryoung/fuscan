@@ -20,6 +20,7 @@ from pathlib import Path
 from typing_extensions import override
 
 from fuscan.extractors._kreuzberg import extract_text as kreuzberg_extract
+from fuscan.extractors._kreuzberg import extract_text_from_bytes as kreuzberg_extract_bytes
 from fuscan.extractors._kreuzberg import is_available as kreuzberg_available
 from fuscan.extractors.base import Extractor, ExtractorError, SpeedTier
 
@@ -183,7 +184,17 @@ class MsgExtractor(Extractor):
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:
-        """从内存字节解析 MSG 邮件。"""
+        """从内存字节解析 MSG 邮件。
+
+        iter-127：kreuzberg 可用时通过临时文件走 Rust 核心加速（压缩包内条目同样加速），
+        不可用时回退到 extract-msg 纯 Python 实现。
+        """
+        if kreuzberg_available():
+            try:
+                return kreuzberg_extract_bytes(data, "msg")
+            except RuntimeError as exc:
+                logger.debug("kreuzberg MSG bytes 提取失败，回退到 extract-msg: %s", exc)
+        # 回退：extract-msg 纯 Python 实现
         try:
             from extract_msg import Message
         except ImportError as exc:

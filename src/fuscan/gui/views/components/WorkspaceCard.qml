@@ -41,21 +41,22 @@ Rectangle {
     border.width: 1
     radius: theme.radiusLg
 
-    // 状态色：根据 statusText 决定
+    // 状态色：根据 statusText 决定（iter-127：与 StatsPage 统一判断逻辑与配色）
     function statusColor() {
-        if (statusText === "扫描中") return theme.colorWarning
-        if (statusText === "已暂停") return theme.colorTextSecondary
-        if (statusText === "已完成") return (matchedCount > 0 ? theme.colorDanger : theme.colorSuccess)
-        // 用户取消：红色（保持与命中相同的警示色）
-        if (statusText === "已完成[用户取消]") return theme.colorDanger
-        if (statusText === "失败" || statusText === "已取消") return theme.colorWarning
+        var s = String(statusText || "")
+        if (s === "扫描中") return theme.colorWarning
+        if (s === "已暂停") return theme.colorTextSecondary
+        if (s === "已完成") return (matchedCount > 0 ? theme.colorDanger : theme.colorSuccess)
+        // 用户取消/失败：黄色警示（非命中危险色，与 StatsPage 一致）
+        if (s.indexOf("取消") >= 0 || s === "失败") return theme.colorWarning
         // 就绪：蓝色（非灰色），表示待命可操作
         return theme.colorPrimary
     }
 
     // 是否处于已完成态（含用户取消）：控制「更新扫描」「查看结果」按钮启用
     function isCompletedState() {
-        return statusText === "已完成" || statusText === "已完成[用户取消]"
+        var s = String(statusText || "")
+        return s === "已完成" || s.indexOf("取消") >= 0
     }
 
     ColumnLayout {
@@ -724,25 +725,47 @@ Rectangle {
         }
 
         onAccepted: {
-            // 提交所有覆盖（与全局值不同才提交，避免无意义持久化）
+            // iter-127：与全局值相同的字段清除覆盖（留空使用全局承诺），
+            // 不同的字段才下发 setTaskOverride，避免任务级配置冗余持久化。
             var keys = ["scan_archives", "max_workers", "max_file_size", "max_depth", "ignore_dirs"]
             for (var i = 0; i < keys.length; i++) {
                 var key = keys[i]
                 var value
-                if (key === "scan_archives") value = taskSettingsDialog.editScanArchives
-                else if (key === "max_workers") value = taskSettingsDialog.editMaxWorkers
-                else if (key === "max_file_size") value = taskSettingsDialog.editMaxFileSizeMB * 1024 * 1024
-                else if (key === "max_depth") value = taskSettingsDialog.editMaxDepth
-                else if (key === "ignore_dirs") {
+                var globalValue
+                if (key === "scan_archives") {
+                    value = taskSettingsDialog.editScanArchives
+                    globalValue = ConfigController.scanArchives
+                } else if (key === "max_workers") {
+                    value = taskSettingsDialog.editMaxWorkers
+                    globalValue = ConfigController.maxWorkers
+                } else if (key === "max_file_size") {
+                    value = taskSettingsDialog.editMaxFileSizeMB * 1024 * 1024
+                    globalValue = ConfigController.maxFileSizeMB * 1024 * 1024
+                } else if (key === "max_depth") {
+                    value = taskSettingsDialog.editMaxDepth
+                    globalValue = ConfigController.maxDepth
+                } else if (key === "ignore_dirs") {
                     var lines = taskSettingsDialog.editIgnoreDirs.split("\n")
                     var cleaned = []
                     for (var j = 0; j < lines.length; j++) {
                         var line = lines[j].trim()
                         if (line.length > 0) cleaned.push(line)
                     }
-                    value = cleaned
+                    // ignore_dirs 比较复杂（全局含预设分类），空列表清除覆盖，
+                    // 非空列表始终下发（用户自定义优先于全局预设）
+                    if (cleaned.length === 0) {
+                        workspaceController.clearTaskOverride(card.workspaceId, key)
+                    } else {
+                        workspaceController.setTaskOverride(card.workspaceId, key, JSON.stringify(cleaned))
+                    }
+                    continue
                 }
-                workspaceController.setTaskOverride(card.workspaceId, key, JSON.stringify(value))
+                // 与全局值相同则清除覆盖，不同则下发
+                if (value === globalValue) {
+                    workspaceController.clearTaskOverride(card.workspaceId, key)
+                } else {
+                    workspaceController.setTaskOverride(card.workspaceId, key, JSON.stringify(value))
+                }
             }
         }
     }

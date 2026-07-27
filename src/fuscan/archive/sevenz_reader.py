@@ -113,12 +113,22 @@ class SevenZReader(ArchiveReader):
             with py7zr.SevenZipFile(str(self._path), mode="r", password=self._password) as sz:
                 data = sz.read(targets=[entry_name])
         except py7zr.PasswordRequired:
+            # 未提供密码或条目加密：标记后永久跳过
             self._encrypted_entries.add(entry_name)
             raise ArchiveError(f"加密条目未提供密码: {entry_name}") from None
         except py7zr.Bad7zFile as exc:
+            # 损坏条目不可恢复，标记跳过避免重试
+            self._encrypted_entries.add(entry_name)
             raise ArchiveError(f"7Z 条目损坏: {self._path}!{entry_name}: {exc}") from exc
+        except (OSError, py7zr.UnsupportedCompressionMethodError) as exc:
+            # 瞬时 IO 错误（AV 文件锁、网络盘抖动）不标记，允许上层重试；
+            # 不支持的压缩方法不可恢复，标记跳过
+            if isinstance(exc, py7zr.UnsupportedCompressionMethodError):
+                self._encrypted_entries.add(entry_name)
+                raise ArchiveError(f"不支持的 7Z 压缩方法: {entry_name}: {exc}") from exc
+            raise ArchiveError(f"7Z 条目读取 IO 错误（可重试）: {entry_name}: {exc}") from exc
         except Exception as exc:
-            # 密码错误、解压失败等：标记为加密避免重试，降级为跳过
+            # 密码错误等其他错误：标记为加密避免重试，降级为跳过
             logger.warning("7Z 条目读取失败，标记为加密跳过: %s!%s: %s", self._path, entry_name, exc)
             self._encrypted_entries.add(entry_name)
             raise ArchiveError(f"条目读取失败（密码错误或解压失败）: {entry_name}") from exc
@@ -152,10 +162,10 @@ class SevenZReader(ArchiveReader):
             raise ArchiveError(f"7Z 条目不存在: {entry_name}")
         if bool(getattr(info, "is_directory", False)):
             return b""
-        # 已标记加密的条目直接跳过
-        if entry_name in self._encrypted_entries and self._password is None:
-            logger.info("7Z 条目加密且未提供密码，跳过: %s!%s", self._path, entry_name)
-            raise ArchiveError(f"加密条目未提供密码: {entry_name}")
+        # 已标记加密/损坏/不支持的条目直接跳过（避免重复解压浪费 CPU）
+        if entry_name in self._encrypted_entries:
+            logger.info("7Z 条目已标记不可读，跳过: %s!%s", self._path, entry_name)
+            raise ArchiveError(f"条目不可读（加密/损坏/不支持）: {entry_name}")
         # 命中缓存直接返回
         cached = self._bytes_cache.get(entry_name)
         if cached is not None:

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing_extensions import override
 
 from fuscan.extractors._kreuzberg import extract_text as kreuzberg_extract
+from fuscan.extractors._kreuzberg import extract_text_from_bytes as kreuzberg_extract_bytes
 from fuscan.extractors._kreuzberg import is_available as kreuzberg_available
 from fuscan.extractors.base import Extractor, ExtractorError, SpeedTier
 
@@ -65,12 +66,17 @@ class RtfExtractor(Extractor):
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:
-        """从内存字节提取 RTF 纯文本（striprtf 回退路径）。
+        """从内存字节提取 RTF 纯文本。
 
-        .. note::
-           kreuzberg 仅支持文件路径提取，``extract_from_bytes`` 始终走 striprtf。
-           压缩包内条目通过临时文件走 :meth:`extract` 时才会用 kreuzberg。
+        iter-127：kreuzberg 可用时通过临时文件走 Rust 核心加速（压缩包内条目同样加速），
+        不可用时回退到 striprtf 纯 Python 实现。
         """
+        if kreuzberg_available():
+            try:
+                return kreuzberg_extract_bytes(data, "rtf")
+            except RuntimeError as exc:
+                logger.debug("kreuzberg RTF bytes 提取失败，回退到 striprtf: %s", exc)
+        # 回退：striprtf 纯 Python 实现
         try:
             from striprtf.striprtf import rtf_to_text
         except ImportError as exc:

@@ -356,8 +356,13 @@ class Scanner:
         matched = 0
         errors = 0
         matches = 0
-        # 复位 walk 累积的进度上下文，供 _emit_progress 在 scan 阶段使用
-        self._progress_total = total
+        # 复位 walk 累积的进度上下文，供 _emit_progress 在 scan 阶段使用。
+        # scan 阶段 total 必须为实际待扫描文件数 len(entries)（符合类型的文件），
+        # 而非 walk 阶段的 walk_result.total（含白名单/用户标记跳过的文件）。
+        # 否则 progress = scanned / walk_total * 100 会偏低，与"已扫描 N / M 个文件"
+        # 数值不匹配（如 1000 个发现 / 300 跳过 → entries=700，但 total=1000 导致
+        # 进度条 350/1000=35% 而非正确的 350/700=50%）。
+        self._progress_total = len(entries)
         self._progress_skipped = skipped
         self._progress_user_skipped = user_skipped
 

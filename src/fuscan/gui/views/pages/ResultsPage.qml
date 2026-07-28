@@ -88,6 +88,7 @@ Item {
             ComboBox {
                 id: severityFilterCombo
                 Layout.preferredWidth: 120
+                Layout.preferredHeight: 32
                 font.pixelSize: theme.fontSizeBody
                 model: ["全部", "严重", "警告", "信息"]
                 onCurrentIndexChanged: {
@@ -103,6 +104,7 @@ Item {
             ComboBox {
                 id: sortFieldCombo
                 Layout.preferredWidth: 120
+                Layout.preferredHeight: 32
                 font.pixelSize: theme.fontSizeBody
                 model: ["默认顺序", "文件路径", "命中数", "严重度"]
                 onCurrentIndexChanged: {
@@ -118,6 +120,7 @@ Item {
             ComboBox {
                 id: sortOrderCombo
                 Layout.preferredWidth: 80
+                Layout.preferredHeight: 32
                 font.pixelSize: theme.fontSizeBody
                 model: ["升序", "降序"]
                 onCurrentIndexChanged: {
@@ -129,17 +132,14 @@ Item {
                 }
             }
 
-            // 清除过滤按钮
+            // 重置排序按钮（仅重置排序字段与方向，不影响过滤条件）
             Button {
-                text: "清除"
+                text: "重置排序"
                 font.pixelSize: theme.fontSizeBody
                 Layout.preferredHeight: 32
                 onClicked: {
-                    filterTextInput.text = ""
-                    severityFilterCombo.currentIndex = 0
                     sortFieldCombo.currentIndex = 0
                     sortOrderCombo.currentIndex = 0
-                    workspaceController.currentScanController.clearResultFilters()
                     workspaceController.currentScanController.setResultSort("default", true)
                 }
             }

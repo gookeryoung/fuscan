@@ -25,7 +25,7 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
-from fuscan.config import Config
+from fuscan.config import CONFIG_DIR, Config
 from fuscan.gui.controllers._result_detail import (
     build_detail_hits_model,
     can_replace_result,
@@ -56,7 +56,7 @@ from fuscan.gui.scan_mode import (
 from fuscan.replacer import ReplaceStatus
 from fuscan.rules.model import Severity
 from fuscan.scanner import ScanReport
-from fuscan.scanner.result import ProgressInfo, ScanResult, WalkResult, format_size
+from fuscan.scanner.result import IncrementalManifest, ProgressInfo, ScanResult, WalkResult, format_size
 from fuscan.skip_store import SkipStore
 from fuscan.workers import FileStatsWorker, ScanWorker
 
@@ -82,6 +82,9 @@ PHASE_WALK: str = "walk"
 PHASE_SCAN: str = "scan"
 PHASE_ARCHIVE: str = "archive"
 PHASE_DONE: str = "done"
+
+# iter-124：增量扫描清单持久化目录（与 results 目录并行，存放 <ws_id>.json）
+_MANIFESTS_DIR: Path = CONFIG_DIR / "manifests"
 
 
 class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -140,6 +143,13 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 存储 (src, backup) 配对而非仅 backup_path，因为 backup_path 与 src 不在同一目录，
         # 直接 with_suffix('') 会得到备份区下的路径而非源文件路径。
         self._last_batch_backup_paths: tuple[tuple[Path, Path], ...] = ()
+        # iter-124：增量扫描上下文（由 startIncrementalScan 设置，_on_stats_finished/
+        # _on_scan_finished 读取）。_pending_manifest 由 stats worker 完成后填入，
+        # _pending_prev_report 传给 ScanWorker 供 Scanner 合并未变更文件命中结果，
+        # _pending_ws_id 标识当前工作区用于 manifest 持久化（空串表示全量扫描不持久化）。
+        self._pending_manifest: IncrementalManifest | None = None
+        self._pending_prev_report: ScanReport | None = None
+        self._pending_ws_id: str = ""
 
         # 扫描状态
         self._scan_state: str = STATE_SETUP  # setup / scanning / results
@@ -828,6 +838,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             logger.warning("未选择有效扫描目标")
             return
 
+        # iter-124：全量扫描不合并 prev_report（_pending_prev_report=None）。
+        # 注意：不重置 _pending_ws_id——若由 startIncrementalScan 回退调用，
+        # _pending_ws_id 已设置为工作区 ID，仍需持久化 manifest 以便下次增量扫描。
+        self._pending_prev_report = None
+
         self._result_model.clear()
         self._selected_result_index = -1
         self._cancelling = False
@@ -862,6 +877,86 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             ignore_dirs=self._effective_ignore_dirs(),
             scan_extensions=self._config_controller.enabled_extensions(),
             skip_paths=self._skip_store.paths(),
+        )
+        self._stats_worker.progress_info.connect(self._on_scan_progress)  # pyrefly: ignore [missing-attribute]
+        self._stats_worker.finished_stats.connect(self._on_stats_finished)  # pyrefly: ignore [missing-attribute]
+        self._stats_worker.failed.connect(self._on_stats_failed)  # pyrefly: ignore [missing-attribute]
+        self._stats_worker.cancelled.connect(self._on_stats_cancelled)  # pyrefly: ignore [missing-attribute]
+        self._stats_worker.start()
+
+    @Slot(str)  # pyrefly: ignore [not-callable]
+    def startIncrementalScan(self, ws_id: str) -> None:
+        """启动增量扫描（iter-124）。
+
+        加载上次 ScanReport（``_last_report``）与 manifest（``~/.fuscan/manifests/<ws_id>.json``），
+        传入 FileStatsWorker 启用增量模式：walk 阶段对比指纹跳过未变更文件，
+        scan 阶段合并未变更文件的命中结果。
+
+        若无上次 ScanReport 或 manifest，回退到 :meth:`startScan` 全量扫描，
+        但仍持久化本次构建的 manifest（``_pending_ws_id`` 已设置），使下次可启用增量。
+
+        :param ws_id: 工作区 ID（用于 manifest 持久化路径 ``<ws_id>.json``）
+        """
+        # 标记当前工作区 ID，_on_scan_finished 据此持久化 manifest
+        self._pending_ws_id = ws_id
+
+        prev_report = self._last_report
+        manifest = self._load_manifest(ws_id)
+        if prev_report is None or manifest is None:
+            # 回退到全量扫描（_pending_ws_id 已设置，仍会持久化 manifest）
+            logger.info("工作区 %s 无上次扫描结果或清单，回退到全量扫描", ws_id)
+            self.startScan()
+            return
+
+        if self._scan_state == STATE_SCANNING:
+            return
+        if self._ruleset is None:
+            logger.warning("未加载规则集，无法开始增量扫描")
+            return
+
+        roots = self._build_scan_roots()
+        if not roots:
+            logger.warning("未选择有效扫描目标")
+            return
+
+        # 设置增量上下文：prev_report 传给 ScanWorker，manifest 传给 FileStatsWorker
+        self._pending_prev_report = prev_report
+
+        self._result_model.clear()
+        self._selected_result_index = -1
+        self._cancelling = False
+        self._is_paused = False
+        self._set_scan_state(STATE_SCANNING)
+        self._set_status("增量扫描中...", "准备统计...")
+        # 阶段重置：进入 walk 阶段（iter-105 双进度条）
+        self._scan_phase = PHASE_WALK
+        self._walk_indeterminate = True
+        self._walk_done = False
+        self._scan_done = False
+        self._walk_discovered = 0
+        self._walk_skipped = 0
+        self._walk_user_skipped = 0
+        # scan 阶段进度字段重置
+        self._progress_indeterminate = True
+        self._progress_scanned = 0
+        self._progress_total = 0
+        self._passed_count = 0
+        self._matched_count = 0
+        self._skipped_count = 0
+        self._error_count = 0
+        self._current_file = "准备统计..."
+        self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+        # 阶段 1：FileStatsWorker 执行 walk 收集文件清单（传入 incremental_manifest 启用增量）
+        self._stats_worker = FileStatsWorker(
+            ruleset=self._ruleset,
+            roots=roots,
+            scan_archives=self._effective_scan_archives(),
+            max_depth=self._effective_max_depth(),
+            ignore_dirs=self._effective_ignore_dirs(),
+            scan_extensions=self._config_controller.enabled_extensions(),
+            skip_paths=self._skip_store.paths(),
+            incremental_manifest=manifest,
         )
         self._stats_worker.progress_info.connect(self._on_scan_progress)  # pyrefly: ignore [missing-attribute]
         self._stats_worker.finished_stats.connect(self._on_stats_finished)  # pyrefly: ignore [missing-attribute]
@@ -996,6 +1091,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     @Slot(object)  # pyrefly: ignore [not-callable]
     def _on_stats_finished(self, results: list[WalkResult]) -> None:
         """stats worker 完成：标记 walk 阶段完成，构造带 precollected 的 ScanWorker 启动 scan 阶段。"""
+        # iter-124：在 cleanup 前读取本次构建的 manifest（_cleanup_stats_worker 置空 _stats_worker）
+        if self._stats_worker is not None:
+            self._pending_manifest = self._stats_worker.manifest
         self._cleanup_stats_worker()
         # walk 阶段完成：从最终 WalkResult 同步收集统计（iter-105 双进度条）
         total_discovered = sum(wr.total for wr in results)
@@ -1026,6 +1124,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             scan_extensions=self._config_controller.enabled_extensions(),
             skip_paths=self._skip_store.paths(),
             precollected=results,
+            # iter-124：传入上次报告供 Scanner 合并未变更文件命中结果
+            # （_pending_prev_report 由 startScan 置 None 或 startIncrementalScan 设置）
+            prev_report=self._pending_prev_report,
         )
         self._worker.progress_info.connect(self._on_scan_progress)  # pyrefly: ignore [missing-attribute]
         self._worker.finished_report.connect(self._on_scan_finished)  # pyrefly: ignore [missing-attribute]
@@ -1057,6 +1158,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 标记 scan 阶段完成（iter-105 双进度条）
         self._scan_done = True
         self._scan_phase = PHASE_DONE
+        # iter-124：持久化本次构建的 manifest（仅 startIncrementalScan 设置了 _pending_ws_id）
+        if self._pending_ws_id and self._pending_manifest is not None:
+            self._save_manifest(self._pending_ws_id, self._pending_manifest)
         self._reset_scan_ui()
         summary = report.summary()
         speed = report.stats.speed
@@ -1157,6 +1261,38 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             use_builtin=self._workspace_use_builtin,
         )
         return self._cache, source_files
+
+    # ----------------------------- iter-124 增量扫描清单持久化 -----------------------------
+
+    def _load_manifest(self, ws_id: str) -> IncrementalManifest | None:
+        """从 ``~/.fuscan/manifests/<ws_id>.json`` 加载增量扫描清单。
+
+        :param ws_id: 工作区 ID
+        :return: :class:`IncrementalManifest` 实例；文件不存在或解析失败返回 ``None``
+        """
+        manifest_file = _MANIFESTS_DIR / f"{ws_id}.json"
+        if not manifest_file.exists():
+            return None
+        try:
+            json_str = manifest_file.read_text(encoding="utf-8")
+            return IncrementalManifest.from_json(json_str)
+        except (OSError, ValueError) as exc:
+            logger.warning("工作区 %s 增量清单加载失败: %s", ws_id, exc)
+            return None
+
+    def _save_manifest(self, ws_id: str, manifest: IncrementalManifest) -> None:
+        """持久化增量扫描清单到 ``~/.fuscan/manifests/<ws_id>.json``。
+
+        :param ws_id: 工作区 ID
+        :param manifest: 本次扫描构建的新清单
+        """
+        try:
+            _MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
+            manifest_file = _MANIFESTS_DIR / f"{ws_id}.json"
+            manifest_file.write_text(manifest.to_json(), encoding="utf-8")
+            logger.debug("工作区 %s 增量清单已持久化（%d 项指纹）", ws_id, len(manifest.fingerprints))
+        except OSError as exc:
+            logger.warning("工作区 %s 增量清单持久化失败: %s", ws_id, exc)
 
     def _get_selected_result(self) -> ScanResult | None:
         """获取当前选中的 :class:`ScanResult`。"""

@@ -262,12 +262,12 @@ Rectangle {
             }
             IconButton {
                 iconSource: "qrc:/icons/rescan.svg"
-                text: "更新扫描"
-                tooltip: "对已完成扫描的任务重新扫描"
+                text: "增量扫描"
+                tooltip: "仅扫描变更文件，未变更文件复用上次结果（首次或无缓存时自动回退全量扫描）"
                 accent: "secondary"
-                // 已完成（含用户取消）的工作区可重新扫描
+                // 已完成（含用户取消）的工作区可增量扫描
                 enabled: card.isCompletedState()
-                onClicked: workspaceController.startScan(card.workspaceId)
+                onClicked: workspaceController.startIncrementalScan(card.workspaceId)
             }
             IconButton {
                 iconSource: "qrc:/icons/search.svg"

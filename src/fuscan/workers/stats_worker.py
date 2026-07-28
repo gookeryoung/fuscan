@@ -22,7 +22,7 @@ except ImportError:  # pragma: no cover
     from PySide6.QtCore import QObject, QThread, Signal  # pyrefly: ignore [missing-import]
 
 from fuscan.rules.model import RuleSet
-from fuscan.scanner.result import ProgressInfo, WalkResult
+from fuscan.scanner.result import IncrementalManifest, ProgressInfo, WalkResult
 from fuscan.scanner.scanner import Scanner
 
 __all__ = ["FileStatsWorker"]
@@ -56,6 +56,7 @@ class FileStatsWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         progress_interval: float = 0.3,
         scan_extensions: tuple[str, ...] | None = None,
         skip_paths: frozenset[str] | None = None,
+        incremental_manifest: IncrementalManifest | None = None,
         parent: QObject | None = None,
     ) -> None:
         """初始化统计线程。
@@ -70,6 +71,8 @@ class FileStatsWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         :param scan_extensions: 全局后缀白名单（iter-87 起统一白名单制），
             None 表示扫描所有文件；非空 tuple 按白名单过滤；空 tuple 不扫描任何文件
         :param skip_paths: 用户标记跳过的路径集合
+        :param incremental_manifest: 增量扫描清单（iter-124），非 None 启用增量模式，
+            walk 阶段对比指纹跳过未变更文件；None 走全量模式
         :param parent: 父 QObject
         """
         super().__init__(parent)
@@ -81,6 +84,7 @@ class FileStatsWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         self._progress_interval: float = progress_interval
         self._scan_extensions: tuple[str, ...] | None = scan_extensions
         self._skip_paths: frozenset[str] = skip_paths or frozenset()
+        self._incremental_manifest: IncrementalManifest | None = incremental_manifest
         self._scanner: Scanner | None = None
         self._cancel_requested: bool = False
         # 多根路径累计统计（供 _on_progress 累加前序根的统计后 emit）
@@ -130,6 +134,18 @@ class FileStatsWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
             )
         )
 
+    @property
+    def manifest(self) -> IncrementalManifest | None:
+        """本次 collect_entries 构建的新 manifest（供增量扫描持久化）。
+
+        stats 完成后由 :class:`ScanController` 读取并持久化到
+        ``~/.fuscan/manifests/<ws_id>.json``，供下次增量扫描加载。
+        ``_scanner`` 未创建（run 尚未启动）时返回 ``None``。
+        """
+        if self._scanner is None:
+            return None
+        return self._scanner.current_manifest
+
     def run(self) -> None:
         """线程入口：依次统计所有根路径并合并结果。"""
         try:
@@ -145,6 +161,7 @@ class FileStatsWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
                 progress_interval=self._progress_interval,
                 scan_extensions=self._scan_extensions,
                 skip_paths=self._skip_paths,
+                incremental_manifest=self._incremental_manifest,
             )
             if self._cancel_requested:
                 self._scanner.cancel()

@@ -62,6 +62,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         scan_extensions: tuple[str, ...] | None = None,
         skip_paths: frozenset[str] | None = None,
         precollected: list[WalkResult] | None = None,
+        prev_report: ScanReport | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -84,6 +85,11 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         # 直接调 Scanner.scan_entries。由 FileStatsWorker.finished_stats 提供，
         # 与 roots 一一对应（WalkResult.root == roots[i]）
         self._precollected: list[WalkResult] | None = precollected
+        # iter-124：上次扫描报告，提供未变更文件的命中结果供 Scanner 合并。
+        # 与 incremental_manifest 配合启用增量扫描（FileStatsWorker 侧传入 manifest）。
+        # ScanWorker 用 precollected 模式调 scan_entries，Scanner 在 __init__ 时
+        # 根据 prev_report 预索引未变更命中结果（_unchanged_hits），scan_entries 合并。
+        self._prev_report: ScanReport | None = prev_report
         self._scanner: Scanner | None = None
         self._cancel_requested: bool = False
         # 多根路径累计性能统计：每次 scan() 后合并 perf_summary
@@ -158,6 +164,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
                 progress_interval=self._progress_interval,
                 scan_extensions=self._scan_extensions,
                 skip_paths=self._skip_paths,
+                prev_report=self._prev_report,
             )
             if self._cancel_requested:
                 self._scanner.cancel()

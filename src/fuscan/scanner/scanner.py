@@ -47,7 +47,16 @@ from fuscan.scanner._helpers import (
 from fuscan.scanner._pipeline_phase import run_pipeline_phase
 from fuscan.scanner.context import ContentProvider, FileEntry, MatchContext
 from fuscan.scanner.matchers import Matcher, build_matcher
-from fuscan.scanner.result import ProgressInfo, RuleHit, ScanReport, ScanResult, ScanStats, WalkResult
+from fuscan.scanner.result import (
+    FileFingerprint,
+    IncrementalManifest,
+    ProgressInfo,
+    RuleHit,
+    ScanReport,
+    ScanResult,
+    ScanStats,
+    WalkResult,
+)
 from fuscan.scanner.walker import FileWalker
 
 if TYPE_CHECKING:
@@ -87,6 +96,8 @@ class Scanner:
         max_file_size: int | None = None,
         scan_extensions: tuple[str, ...] | None = None,
         skip_paths: frozenset[str] | None = None,
+        incremental_manifest: IncrementalManifest | None = None,
+        prev_report: ScanReport | None = None,
     ) -> None:
         self.ruleset = ruleset
         self._content_provider: ContentProvider = content_provider or default_extract_content
@@ -183,6 +194,24 @@ class Scanner:
         self._perf: PerfStats = PerfStats()
         if cache is not None:
             self._batch_buffer = BatchBuffer(cache, self._perf)
+        # 增量扫描上下文（iter-124）：
+        # - _incremental_manifest 非 None 时启用增量模式，walk 阶段对比指纹跳过未变更文件
+        # - _prev_report 提供未变更文件的命中结果，scan 阶段合并到本次报告
+        # - _unchanged_hits 缓存未变更文件中仍有命中的结果（按相对路径索引），供合并
+        # - _unchanged_count 统计未变更文件数，用于进度与统计合并
+        self._incremental_manifest: IncrementalManifest | None = incremental_manifest
+        self._prev_report: ScanReport | None = prev_report
+        self._unchanged_hits: dict[str, ScanResult] = {}
+        self._unchanged_count: int = 0
+        # 本次 collect_entries 构建的新 manifest（供调用方持久化，下次增量扫描用）
+        self._current_manifest: IncrementalManifest | None = None
+        if incremental_manifest is not None and prev_report is not None:
+            # 预索引上次命中结果按相对路径，供 scan_entries 合并
+            for sr in prev_report.hits:
+                if sr.archive_path is not None:
+                    continue  # 压缩包内部条目不参与增量合并（每次重新扫描压缩包）
+                rel = IncrementalManifest.rel_key(sr.path, prev_report.root)
+                self._unchanged_hits[rel] = sr
 
     def pause(self) -> None:
         """暂停扫描，阻塞扫描线程直到 resume。"""
@@ -259,6 +288,11 @@ class Scanner:
         - ``ignore_dirs``：在 ``FileWalker`` 内部过滤，
           跳过的目录收集到 ``skipped_dirs`` 供 UI 展示
 
+        增量模式（iter-124）：构造时传入 ``incremental_manifest`` 启用。walk 阶段
+        对比 ``(mtime, size)`` 指纹，未变更文件跳过（不加入 entries），仅变更/
+        新增文件进入扫描队列。未变更文件数累计到 ``_unchanged_count``，供
+        :meth:`scan_entries` 合并统计。
+
         :param root: 待遍历的根路径
         :return: walk 产物 :class:`WalkResult`，含 entries 与统计
         """
@@ -270,6 +304,16 @@ class Scanner:
         self._matched_files.clear()
         # 重置性能统计，使每次调用的汇总独立
         self._perf.reset()
+        # 重置增量扫描统计
+        self._unchanged_count = 0
+        # 构建本次扫描的新 manifest（供下次增量扫描用）
+        # 增量模式合并旧 manifest 未变更指纹 + 新文件指纹；全量模式从零构建
+        new_fingerprints: dict[str, FileFingerprint] = {}
+
+        # 增量模式指纹映射（空字典表示全量扫描）
+        prev_fps: dict[str, FileFingerprint] = (
+            self._incremental_manifest.fingerprints if self._incremental_manifest else {}
+        )
 
         entries: list[FileEntry] = []
         total = 0
@@ -292,6 +336,20 @@ class Scanner:
                     if not self._should_scan(entry):
                         skipped += 1
                         continue
+                    # 增量模式：指纹匹配的未变更文件跳过（不加入扫描队列），
+                    # 仅累计 _unchanged_count 供 scan_entries 合并统计
+                    if prev_fps:
+                        rel = IncrementalManifest.rel_key(entry.path, root)
+                        prev_fp = prev_fps.get(rel)
+                        if prev_fp is not None and prev_fp.mtime == entry.mtime and prev_fp.size == entry.size:
+                            self._unchanged_count += 1
+                            # 未变更文件指纹直接复用（mtime/size 未变）
+                            new_fingerprints[rel] = prev_fp
+                            continue
+                    # 变更/新文件/全量模式：记录当前指纹供下次增量扫描
+                    new_fingerprints[IncrementalManifest.rel_key(entry.path, root)] = FileFingerprint(
+                        mtime=entry.mtime, size=entry.size
+                    )
                     entries.append(entry)
                     if total % 200 == 0:
                         # 实时同步进度上下文，使 _emit_progress 反映 walk 阶段累计值。
@@ -314,6 +372,9 @@ class Scanner:
         cancelled = self.is_cancelled
         self._cancel_event.clear()
 
+        # 构建本次扫描的 manifest（全量+增量模式均构建，供下次增量扫描用）
+        self._current_manifest = IncrementalManifest(root=root, fingerprints=new_fingerprints)
+
         return WalkResult(
             root=root,
             entries=tuple(entries),
@@ -323,6 +384,15 @@ class Scanner:
             skipped_dirs=tuple(self._skipped_dirs),
             cancelled=cancelled,
         )
+
+    @property
+    def current_manifest(self) -> IncrementalManifest | None:
+        """本次 collect_entries 构建的新 manifest（供下次增量扫描持久化）。
+
+        全量模式也构建 manifest（记录所有通过过滤的文件指纹），使下次可启用
+        增量扫描。增量模式合并未变更文件旧指纹 + 变更文件新指纹。
+        """
+        return self._current_manifest
 
     def scan_entries(self, root: Path, walk_result: WalkResult) -> ScanReport:
         """scan + archive 阶段：对预收集的 entries 执行内容扫描。
@@ -406,6 +476,23 @@ class Scanner:
         self._perf.report(logger)
 
         duration = time.perf_counter() - self._progress_start
+
+        # 增量扫描合并（iter-124）：
+        # 本次 scan 仅扫描变更文件（entries），未变更文件的命中结果从上次
+        # ScanReport 复用（_unchanged_hits 按相对路径索引）。合并后 results
+        # 包含变更文件 + 未变更命中文件，统计需相应累加。
+        if self._unchanged_count > 0 and self._prev_report is not None:
+            # 收集本次扫描中仍有命中的文件相对路径，避免合并时重复
+            changed_hit_rels: set[str] = {IncrementalManifest.rel_key(r.path, root) for r in results if r.has_hit}
+            # 合并未变更文件中仍有命中的结果（本次未重新扫描的文件）
+            for rel, sr in self._unchanged_hits.items():
+                if rel not in changed_hit_rels:
+                    results.append(sr)
+                    matched += 1
+                    matches += sr.total_match_count
+            # 统计累加：未变更文件视为已扫描（复用上次结果，无需重新 I/O）
+            scanned += self._unchanged_count
+
         stats = ScanStats(
             total_files=total,
             scanned_files=scanned,

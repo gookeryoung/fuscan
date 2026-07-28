@@ -376,6 +376,19 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         controller.startScan()
 
     @Slot(str)  # pyrefly: ignore [not-callable]
+    def startIncrementalScan(self, ws_id: str) -> None:
+        """启动指定工作区的增量扫描（iter-124）。
+
+        委托给对应工作区的 :class:`ScanController`，加载上次 manifest 与
+        ScanReport 后启用增量模式。无上次结果时回退到全量扫描。
+        """
+        controller = self._scan_controllers.get(ws_id)
+        if controller is None:
+            logger.warning("工作区 %s 不存在", ws_id)
+            return
+        controller.startIncrementalScan(ws_id)
+
+    @Slot(str)  # pyrefly: ignore [not-callable]
     def togglePause(self, ws_id: str) -> None:
         """暂停/继续指定工作区的扫描。"""
         controller = self._scan_controllers.get(ws_id)

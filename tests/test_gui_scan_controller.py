@@ -90,6 +90,8 @@ class FakeStatsWorker:
         self.resume_called = False
         self.wait_called = False
         self._running = True
+        # iter-124：模拟 FileStatsWorker.manifest 属性（None 表示未构建清单）
+        self.manifest: Any = None
 
     def start(self) -> None:
         """start() 不自动触发回调，由测试显式调用 emit_* 方法。"""

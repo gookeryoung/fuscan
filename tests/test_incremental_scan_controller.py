@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from typing_extensions import override
 
 # 设置离屏平台，避免无显示器环境报错
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -526,6 +527,7 @@ class TestSaveManifest:
         manifests_dir = sc_module._MANIFESTS_DIR
 
         class _BadPath(type(manifests_dir)):  # type: ignore[misc]
+            @override
             def mkdir(self, *args: Any, **kwargs: Any) -> None:
                 raise OSError("模拟写入失败")
 
@@ -1135,10 +1137,11 @@ class TestStatsWorkerManifestProperty:
 
     def test_manifest_none_before_run(self, tmp_path: Path) -> None:
         """构造 FileStatsWorker 但未调 run() 时 manifest 属性返回 None。"""
-        from fuscan.rules.model import MatchTarget, Rule, RuleSet
+        from fuscan.rules.model import LeafMatch, MatchMode, MatchTarget, Rule, RuleSet
         from fuscan.workers.stats_worker import FileStatsWorker
 
-        rule = Rule(name="test", match={MatchTarget.FILENAME: "test"}, severity=Severity.INFO)
+        match = LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.CONTAINS, pattern="test")
+        rule = Rule(name="test", match=match, severity=Severity.INFO)
         ruleset = RuleSet(rules=(rule,), version="1.0")
         worker = FileStatsWorker(
             ruleset=ruleset,

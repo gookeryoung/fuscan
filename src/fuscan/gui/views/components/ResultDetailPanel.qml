@@ -22,6 +22,34 @@ Rectangle {
     border.width: 1
     radius: theme.radiusLg
 
+    // 将上下文文本转为 HTML：>>> 匹配行按严重程度颜色高亮整行
+    function formatContextHtml(context, severityColor) {
+        var lines = context.split("\n")
+        var result = []
+        for (var i = 0; i < lines.length; i++) {
+            var raw = lines[i]
+            var isMatch = raw.indexOf(">>>") === 0
+            // HTML 转义（& 必须先转义，否则后续 &lt; 中的 & 会被二次转义）
+            var escaped = raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            // 保留行首缩进（&nbsp; 替换前导空格，防止 HTML 折叠）
+            var k = 0
+            while (k < escaped.length && escaped.charAt(k) === " ") {
+                k++
+            }
+            var html = ""
+            for (var m = 0; m < k; m++) {
+                html += "&nbsp;"
+            }
+            html += escaped.substring(k)
+            // 匹配行整行用严重度颜色 + 加粗
+            if (isMatch) {
+                html = '<span style="color: ' + severityColor + '; font-weight: bold;">' + html + '</span>'
+            }
+            result.push(html)
+        }
+        return result.join("<br>")
+    }
+
     // 空态：未选中结果时提示
     // 注意：ScanController 一律通过 workspaceController.currentScanController.xxx 链式访问，
     // 不绑定到本地 property。PySide2 5.15 中将 @Property(ScanController) 返回的 QObject
@@ -36,18 +64,15 @@ Rectangle {
         horizontalAlignment: Text.AlignHCenter
     }
 
-    // 详情内容（选中结果后显示）
-    ScrollView {
-        anchors.fill: parent
+    // 固定顶部区域：文件信息卡片 + 命中详情标题（不随详情滚动）
+    ColumnLayout {
+        id: topSection
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
         anchors.margins: 16
-        anchors.bottomMargin: 100  // 给底部操作栏留空间
-        clip: true
+        spacing: 12
         visible: workspaceController.currentScanController.selectedResultIndex >= 0
-        contentWidth: availableWidth
-
-        ColumnLayout {
-            width: parent.width
-            spacing: 12
 
             // ---------- 文件信息卡片 ----------
             Rectangle {
@@ -186,6 +211,28 @@ Rectangle {
                 }
             }
 
+    }
+
+    // ---------- 命中详情列表（仅此区域滚动） ----------
+    ScrollView {
+        anchors.top: topSection.bottom
+        anchors.topMargin: 12
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        // 底部操作栏高度随 opMsgLabel/批量行可见性动态变化，
+        // 绑定到 bottomBar.height 避免内容与按钮重叠（12=bottomBar 底边距，8=间隔）
+        anchors.bottomMargin: bottomBar.height + 20
+        anchors.leftMargin: 16
+        anchors.rightMargin: 16
+        clip: true
+        visible: workspaceController.currentScanController.selectedResultIndex >= 0
+        contentWidth: availableWidth
+
+        ColumnLayout {
+            width: parent.width
+            spacing: 12
+
             // ---------- 命中详情列表（展开时显示完整内容） ----------
             Repeater {
                 model: workspaceController.currentScanController.detailHitsModel
@@ -279,10 +326,12 @@ Rectangle {
                             }
 
                             // 上下文（iter-124：实时读取文件内容，匹配行用 >>> 标记）
+                            // >>> 匹配行按严重程度颜色高亮整行（RichText + HTML span）
                             TextArea {
                                 visible: modelData.context !== ""
                                 Layout.fillWidth: true
-                                text: modelData.context
+                                text: panel.formatContextHtml(modelData.context, modelData.severityColor)
+                                textFormat: Text.RichText
                                 font.pixelSize: 11
                                 font.family: "Consolas, Monaco, monospace"
                                 color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
@@ -294,8 +343,6 @@ Rectangle {
                                     border.width: 1
                                     radius: 2
                                 }
-                                // 匹配行（>>> 开头）用加粗显示
-                                // TextArea 不支持多色，靠 >>> 前缀视觉区分
                             }
                         }
                     }
@@ -308,6 +355,7 @@ Rectangle {
 
     // ---------- 底部操作栏 ----------
     ColumnLayout {
+        id: bottomBar
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom

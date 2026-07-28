@@ -44,6 +44,33 @@ if not PYSIDE_AVAILABLE:
     pytest.skip("PySide 未安装，跳过工作区控制器测试", allow_module_level=True)
 
 
+# ============================= QApp fixture =============================
+
+
+@pytest.fixture(scope="session")
+def qapp() -> object:
+    """创建 QApplication（若不存在），用于 QThread 信号传递。"""
+    from PySide2.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    return app
+
+
+def _wait_for_restore(controller: WorkspaceController, ws_id: str, timeout_ms: int = 5000) -> None:
+    """等待异步恢复完成（处理 Qt 事件循环以接收 worker 信号）。"""
+    from PySide2.QtCore import QCoreApplication
+
+    elapsed = 0
+    while ws_id in controller._restoring_workspaces and elapsed < timeout_ms:  # type: ignore[attr-defined]
+        QCoreApplication.processEvents()
+        import time
+
+        time.sleep(0.01)
+        elapsed += 10
+
+
 # ============================= fixtures =============================
 
 
@@ -904,21 +931,22 @@ class TestCleanup:
         # ScanController 字典已清空
         assert len(controller._scan_controllers) == 0
 
-    def test_cleanup_calls_scan_controller_cleanup(
+    def test_cleanup_calls_scan_controller_quick_cancel(
         self,
         controller: WorkspaceController,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """iter-127：cleanup 改用 quick_cancel（非阻塞），不再调 cleanup/wait/close。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         called = False
 
-        def fake_cleanup() -> None:
+        def fake_quick_cancel() -> None:
             nonlocal called
             called = True
 
-        monkeypatch.setattr(sc, "cleanup", fake_cleanup)
+        monkeypatch.setattr(sc, "quick_cancel", fake_quick_cancel)
         controller.cleanup()
         assert called is True
 
@@ -2220,16 +2248,16 @@ class TestSaveCachedResults:
 
 
 class TestLoadCachedResults:
-    """``_load_cached_results`` 恢复测试。"""
+    """``_try_load_cached_results`` 异步恢复测试（iter-128）。"""
 
     def test_load_restores_report_to_scan_controller(
         self,
         controller: WorkspaceController,
         config_dir: Path,
+        qapp: object,
     ) -> None:
-        """加载缓存后 ScanController 恢复 _last_report 与 result_model。"""
+        """异步加载缓存后 ScanController 恢复 _last_report 与 result_model。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        # 必须切换为当前工作区，currentScanController 才会返回该工作区的 ScanController
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
 
@@ -2241,10 +2269,13 @@ class TestLoadCachedResults:
         # 重置 ScanController 状态模拟重启
         sc._last_report = None  # type: ignore[attr-defined]
         sc._result_model.clear()  # type: ignore[attr-defined]
+        # 清除已恢复标记，允许重新加载
+        controller._restored_workspaces.discard(ws_id)  # type: ignore[attr-defined]
         assert sc._last_report is None  # type: ignore[attr-defined]
 
-        # 加载缓存
-        controller._load_cached_results(ws_id)  # type: ignore[attr-defined]
+        # 异步加载缓存
+        controller._try_load_cached_results(ws_id)  # type: ignore[attr-defined]
+        _wait_for_restore(controller, ws_id)
 
         # 验证恢复
         assert sc._last_report is not None  # type: ignore[attr-defined]
@@ -2254,12 +2285,15 @@ class TestLoadCachedResults:
     def test_load_skipped_when_no_cache_file(
         self,
         controller: WorkspaceController,
+        qapp: object,
     ) -> None:
         """无缓存文件时静默跳过（不抛异常）。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
         sc = controller.currentScanController
         # 不创建缓存文件
-        controller._load_cached_results(ws_id)  # type: ignore[attr-defined]
+        controller._try_load_cached_results(ws_id)  # type: ignore[attr-defined]
+        # 无缓存文件 → 不启动 worker，_restoring_workspaces 为空
+        assert ws_id not in controller._restoring_workspaces  # type: ignore[attr-defined]
         # ScanController 状态不变
         assert sc._last_report is None  # type: ignore[attr-defined]
 
@@ -2267,6 +2301,7 @@ class TestLoadCachedResults:
         self,
         controller: WorkspaceController,
         config_dir: Path,
+        qapp: object,
     ) -> None:
         """缓存文件损坏时静默跳过（不抛异常）。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
@@ -2276,8 +2311,9 @@ class TestLoadCachedResults:
         (results_dir / f"{ws_id}.json").write_text("{not valid json", encoding="utf-8")
 
         # 加载不应抛异常
-        controller._load_cached_results(ws_id)  # type: ignore[attr-defined]
-        # ScanController 状态不变
+        controller._try_load_cached_results(ws_id)  # type: ignore[attr-defined]
+        _wait_for_restore(controller, ws_id)
+        # ScanController 状态不变（恢复失败，_last_report 仍为 None）
         sc = controller.currentScanController
         assert sc._last_report is None  # type: ignore[attr-defined]
 
@@ -2287,8 +2323,9 @@ class TestLoadCachedResults:
         config_controller: ConfigController,
         rules_controller: RulesController,
         config_dir: Path,
+        qapp: object,
     ) -> None:
-        """完整重启场景：保存缓存 → 重建 WorkspaceController → 恢复缓存。"""
+        """完整重启场景：保存缓存 → 重建 WorkspaceController → 后台恢复缓存。"""
         ws_id = controller.addWorkspace("任务A", "folder", "/tmp", "[]", True)
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
@@ -2302,8 +2339,10 @@ class TestLoadCachedResults:
             ConfigController(),
             RulesController(ConfigController()),
         )
-        # 重启后应自动加载工作区与缓存结果
+        # 重启后应自动加载工作区
         assert new_controller.workspaceModel.rowCount() == 1
+        # _load_persisted 已对第一个工作区启动后台恢复
+        _wait_for_restore(new_controller, ws_id)
         # 切换为当前工作区，currentScanController 才会返回该工作区的 ScanController
         new_controller.setCurrentWorkspaceId(ws_id)
         new_sc = new_controller.currentScanController

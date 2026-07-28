@@ -177,15 +177,36 @@ Item {
                     anchors.margins: 8
                     model: workspaceController.currentScanController.resultModel
                     spacing: 4
-                    // iter-106 P0：大规模命中（1000+）时预渲染屏幕外 delegate，
-                    // 避免滚动时频繁销毁重建（每个 delegate 含路径/规则/严重度绑定）
-                    cacheBuffer: 2000
+                    // iter-131：cacheBuffer 按结果量动态调整。
+                    // 小结果集高 cacheBuffer 提升滚动流畅度；大结果集降低减少内存占用。
+                    // 10w 结果 × 56px delegate ≈ 5.6MB 视觉区，cacheBuffer 500 限制预渲染约 9 个
+                    cacheBuffer: resultListView.count > 50000 ? 500
+                               : resultListView.count > 10000 ? 1000
+                               : 2000
                     currentIndex: workspaceController.currentScanController.selectedResultIndex
+
+                    // 恢复中占位态（iter-128：后台异步加载缓存结果）
+                    ColumnLayout {
+                        anchors.centerIn: parent
+                        visible: workspaceController.currentScanController.restoring
+                        spacing: 12
+                        BusyIndicator {
+                            Layout.alignment: Qt.AlignHCenter
+                            running: visible
+                        }
+                        Label {
+                            text: "正在恢复扫描结果…"
+                            font.pixelSize: 13
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                    }
 
                     // 空态引导
                     Label {
                         anchors.centerIn: parent
                         visible: resultListView.count === 0
+                            && !workspaceController.currentScanController.restoring
                         text: workspaceController.hasCurrentWorkspace
                             ? "暂无命中结果"
                             : "未选择任务\n请从首页工作区卡片点击「查看结果」"
@@ -197,6 +218,11 @@ Item {
                     delegate: ItemDelegate {
                         width: resultListView.width
                         height: 56
+
+                        // iter-131：缓存 model.* 到本地 property，避免 RowLayout 中重复求值
+                        // severityColor 在色条与标签背景两处使用，缓存减少一次 model 访问
+                        property string sevColor: model.severityColor
+                        property string sevText: model.severityText
 
                         background: Rectangle {
                             color: ListView.isCurrentItem
@@ -226,7 +252,7 @@ Item {
                             Rectangle {
                                 width: 3
                                 height: parent.height * 0.6
-                                color: model.severityColor
+                                color: sevColor
                                 radius: 2
                             }
 
@@ -255,11 +281,11 @@ Item {
                                 radius: 8
                                 height: 20
                                 width: severityLabel.width + 12
-                                color: model.severityColor
+                                color: sevColor
                                 Label {
                                     id: severityLabel
                                     anchors.centerIn: parent
-                                    text: model.severityText
+                                    text: sevText
                                     font.pixelSize: 10
                                     color: theme.colorTextOnPrimary
                                 }

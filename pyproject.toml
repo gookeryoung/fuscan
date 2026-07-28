@@ -35,6 +35,9 @@ dependencies = [
     "reportlab>=4.0.0",
     # iter-126：迁移 Python 3.10 后统一使用 python-calamine 0.8.2（更高性能）
     "python-calamine==0.8.2",
+    # orjson：Rust 实现的高性能 JSON 库，扫描结果序列化（to_json）比 stdlib json 快 5-10x，
+    # 10 万命中结果从数秒降至百毫秒级
+    "orjson>=3.9.0",
     # kreuzberg 为可选加速后端（见 [project.optional-dependencies].fast），
     # 不在此强制依赖中，使基础安装包轻量；is_available() 运行时检测。
 ]

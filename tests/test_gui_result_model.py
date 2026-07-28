@@ -390,3 +390,180 @@ class TestIter112GetResultOnFilteredView:
         filter_model.set_filter_text("secret")
         # 过滤后只有 1 条，索引 1 应返回 None
         assert filter_model.get_result(1) is None
+
+
+# ----------------------------- iter-129 后台过滤+排序测试 -----------------------------
+
+
+def _build_large_results(tmp_path: Path, n: int = 12000) -> tuple[ScanResult, ...]:
+    """构造 n 条命中结果，覆盖不同规则名/严重度/路径。"""
+    severities = [Severity.CRITICAL, Severity.WARNING, Severity.INFO]
+    rule_names = ["敏感内容", "API 密钥", "提示信息"]
+    return tuple(
+        ScanResult(
+            path=tmp_path / f"file_{i:05d}.txt",
+            size=i,
+            hits=(RuleHit(rule_name=rule_names[i % 3], severity=severities[i % 3], detail="d"),),
+            errors=0,
+        )
+        for i in range(n)
+    )
+
+
+@pytest.fixture(scope="session")
+def qapp() -> object:
+    """创建 QApplication（若不存在），用于 QThread 信号传递。"""
+    try:
+        from PySide2.QtWidgets import QApplication
+    except ImportError:  # pragma: no cover
+        from PySide6.QtWidgets import QApplication  # pyrefly: ignore [missing-import]
+
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    return app
+
+
+class TestIter129FilterAndSortPureFunction:
+    """iter-129：``filter_and_sort`` 纯函数（无 Qt 依赖部分）。"""
+
+    def test_empty_results_returns_empty_tuple(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import filter_and_sort
+
+        assert filter_and_sort((), "", frozenset(), frozenset(), "default", True) == ()
+
+    def test_no_filter_no_sort_keeps_order(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import filter_and_sort
+
+        results = _build_filter_results(tmp_path)
+        out = filter_and_sort(results, "", frozenset(), frozenset(), "default", True)
+        assert out == results
+
+    def test_filter_text_only(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import filter_and_sort
+
+        results = _build_filter_results(tmp_path)
+        out = filter_and_sort(results, "config", frozenset(), frozenset(), "default", True)
+        assert len(out) == 2
+        assert all("config" in str(r.path).lower() for r in out)
+
+    def test_filter_severity_only(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import filter_and_sort
+
+        results = _build_filter_results(tmp_path)
+        out = filter_and_sort(results, "", frozenset(), frozenset({Severity.CRITICAL}), "default", True)
+        # secret.txt + db.yaml 含 CRITICAL
+        assert len(out) == 2
+        assert all(r.max_severity == Severity.CRITICAL for r in out)
+
+    def test_sort_severity_descending(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import _SEVERITY_WEIGHT, filter_and_sort
+
+        results = _build_filter_results(tmp_path)
+        out = filter_and_sort(results, "", frozenset(), frozenset(), "severity", sort_ascending=False)
+        weights = [_SEVERITY_WEIGHT[r.max_severity] for r in out]
+        assert weights == sorted(weights, reverse=True)
+
+    def test_unknown_sort_field_keeps_order(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import filter_and_sort
+
+        results = _build_filter_results(tmp_path)
+        out = filter_and_sort(results, "", frozenset(), frozenset(), "unknown", True)
+        assert out == results
+
+
+class TestIter129AsyncPath:
+    """iter-129：大结果集后台过滤路径（>= ``_ASYNC_THRESHOLD``）。
+
+    使用 ``QCoreApplication.processEvents()`` 循环等待 worker 完成，
+    与项目现有 ``test_gui_workspace_controller.py`` 的异步测试模式一致。
+    """
+
+    def _wait_for_worker(self, m: ResultListModel, timeout_ms: int = 5000) -> None:
+        """处理 Qt 事件循环直到 worker 完成。"""
+        import time
+
+        try:
+            from PySide2.QtCore import QCoreApplication
+        except ImportError:  # pragma: no cover
+            from PySide6.QtCore import QCoreApplication  # pyrefly: ignore [missing-import]
+
+        elapsed = 0
+        while m._filter_worker is not None and elapsed < timeout_ms:  # type: ignore[attr-defined]
+            QCoreApplication.processEvents()
+            time.sleep(0.005)
+            elapsed += 5
+        # worker 完成后多轮处理事件，确保 done 信号回调被消费
+        for _ in range(10):
+            QCoreApplication.processEvents()
+
+    def test_async_threshold_triggers_worker(self, tmp_path: Path, qapp: object) -> None:
+        """结果数 >= 阈值时启动 FilterWorker。"""
+        from fuscan.gui.models.result_model import _ASYNC_THRESHOLD
+
+        m = ResultListModel()
+        results = _build_large_results(tmp_path, n=_ASYNC_THRESHOLD + 1)
+        # set_results 应触发异步路径，worker 在后台执行
+        m.set_results(results)
+        # 此时 _filtered 可能为空（worker 未完成），但不应阻塞
+        self._wait_for_worker(m)
+        assert m.rowCount() == _ASYNC_THRESHOLD + 1
+
+    def test_async_filter_applies_correctly(self, tmp_path: Path, qapp: object) -> None:
+        """后台过滤完成后视图反映过滤条件。"""
+        from fuscan.gui.models.result_model import _ASYNC_THRESHOLD
+
+        m = ResultListModel()
+        # set_results 先完成初始加载
+        results = _build_large_results(tmp_path, n=_ASYNC_THRESHOLD + 1)
+        m.set_results(results)
+        self._wait_for_worker(m)
+        assert m.rowCount() == _ASYNC_THRESHOLD + 1
+
+        # 设置过滤条件，等待异步完成
+        m.set_filter_text("file_00000")  # 仅匹配 1 条
+        self._wait_for_worker(m)
+        assert m.rowCount() == 1
+        assert "file_00000" in str(m.filtered_results[0].path).lower()
+
+    def test_async_generation_guard_drops_stale(self, tmp_path: Path, qapp: object) -> None:
+        """连续修改过滤条件时，过期 worker 结果被丢弃。"""
+        from fuscan.gui.models.result_model import _ASYNC_THRESHOLD
+
+        m = ResultListModel()
+        results = _build_large_results(tmp_path, n=_ASYNC_THRESHOLD + 1)
+        m.set_results(results)
+        self._wait_for_worker(m)
+
+        # 连续修改三次过滤条件，最后一次才是有效结果
+        m.set_filter_text("file_00000")
+        m.set_filter_text("file_00001")
+        m.set_filter_text("file_00002")
+        self._wait_for_worker(m)
+        # 最终 rowCount 应是 file_00002 对应的 1 条
+        assert m.rowCount() == 1
+        assert "file_00002" in str(m.filtered_results[0].path).lower()
+
+    def test_cancel_worker_on_new_set_results(self, tmp_path: Path, qapp: object) -> None:
+        """set_results 在 worker 运行期间被调用时，旧 worker 应被取消。"""
+        from fuscan.gui.models.result_model import _ASYNC_THRESHOLD
+
+        m = ResultListModel()
+        results1 = _build_large_results(tmp_path, n=_ASYNC_THRESHOLD + 1)
+        results2 = tuple(
+            ScanResult(
+                path=tmp_path / f"new_{i:05d}.txt",
+                size=i,
+                hits=(RuleHit(rule_name="敏感内容", severity=Severity.CRITICAL, detail="d"),),
+                errors=0,
+            )
+            for i in range(_ASYNC_THRESHOLD + 5)
+        )
+        m.set_results(results1)
+        # 立即替换为新的结果集
+        m.set_results(results2)
+        self._wait_for_worker(m)
+        # 最终视图应反映 results2
+        assert m.rowCount() == _ASYNC_THRESHOLD + 5
+        # 第一条路径应为 new_00000
+        assert "new_00000" in str(m.filtered_results[0].path).lower()

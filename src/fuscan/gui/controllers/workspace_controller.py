@@ -121,6 +121,10 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._model = WorkspaceListModel(self)
         self._scan_controllers: dict[str, ScanController] = {}
         self._current_workspace_id: str = ""
+        # iter-128：延迟加载——已恢复结果的工作区集合 + 正在恢复中的工作区集合
+        self._restored_workspaces: set[str] = set()
+        self._restoring_workspaces: set[str] = set()
+        self._restore_workers: dict[str, object] = {}  # ws_id → ResultRestoreWorker
         # 当前扫描中（含暂停态）工作区 ID；空串表示无扫描任务进行
         self._active_scan_workspace_id: str = ""
         # iter-115：扫描历史归档存储，扫描结束时自动归档
@@ -154,10 +158,16 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str)  # pyrefly: ignore [not-callable]
     def setCurrentWorkspaceId(self, ws_id: str) -> None:
-        """切换当前工作区 ID。"""
+        """切换当前工作区 ID。
+
+        iter-128：切换时触发延迟加载——若该工作区有缓存结果且尚未恢复，
+        在后台启动 ResultRestoreWorker 异步加载，避免启动时全量阻塞。
+        """
         if ws_id != self._current_workspace_id:
             self._current_workspace_id = ws_id
             self.currentWorkspaceChanged.emit()  # pyrefly: ignore [missing-attribute]
+            # 延迟加载：切换到的工作区若有缓存且未恢复，后台异步加载
+            self._try_load_cached_results(ws_id)
 
     @Property(ScanController, notify=currentWorkspaceChanged)  # pyrefly: ignore [not-callable]
     def currentScanController(self) -> ScanController:
@@ -734,25 +744,23 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._save_cached_results(ws_id, controller)
 
     def cleanup(self) -> None:
-        """窗口关闭时清理所有 ScanController 资源。
+        """窗口关闭时快速取消所有 ScanController 的 worker。
+
+        iter-127：改用 ``quick_cancel()`` 替代 ``cleanup()``——仅设置 cancel 标志，
+        不 ``wait()`` / ``cache.close()`` / ``deleteLater()``，进程退出时由 OS
+        回收线程与文件句柄。10 万结果场景下避免主线程阻塞（原 ``cleanup()``
+        每 controller 最多 5s 累计等待 + SQLite 刷盘）。
 
         iter-124：关闭时不再 emit ``currentWorkspaceChanged``/``activeScanChanged``
         信号，避免 QML 在组件销毁过程中重新求值 ``currentScanController`` binding
         访问到已被 ``deleteLater`` 的对象（Terminal#4-17 null 错误根因）。
-        同时保留 ``_fallback_controller`` 不删除——Python 进程即将退出，由系统
-        回收即可；删除会触发 QML 重新求值访问 null。
-
-        仍清理 worker/cache 等资源（QThread 等待退出、SQLite 连接关闭），
-        避免「关闭卡住太久」与文件句柄泄漏。worker 等待超时由各 ScanController
-        自身 :meth:`ScanController.cleanup` 控制。
         """
         for controller in self._scan_controllers.values():
-            controller.cleanup()
-            controller.deleteLater()
+            controller.quick_cancel()
         self._scan_controllers.clear()
-        # fallback 仅清理 worker 资源，不 deleteLater（避免 QML binding 访问 null）
+        # fallback 仅快速取消，不 wait/close/deleteLater（进程退出由 OS 回收）
         if hasattr(self, "_fallback_controller"):
-            self._fallback_controller.cleanup()
+            self._fallback_controller.quick_cancel()
         # 不清空 _current_workspace_id / _active_scan_workspace_id，不 emit 信号：
         # 应用退出阶段 QML 组件正在销毁，重新求值 binding 会触发 null TypeError。
         # 状态清空无意义（进程即将退出），保留原值让 QML binding 求值稳定。
@@ -805,12 +813,17 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     # 恢复任务级配置覆盖（iter-104 起持久化）
                     task_overrides=deserialize_task_overrides(ws.get("task_overrides", {})),
                 )
-                # iter-123：恢复扫描结果到 ScanController（避免重启后被迫重新扫描）
-                self._load_cached_results(ws_id)
+                # iter-128：不再在启动时同步加载所有工作区的缓存结果，
+                # 改为延迟加载——setCurrentWorkspaceId 时按需后台异步恢复。
+                # 工作区列表的 status_text/matched_count 等已从 workspaces.json 恢复，
+                # 用户看到正确的状态摘要，完整结果在切换到该工作区时才加载。
             except Exception as exc:  # 持久化恢复容错：单条失败不阻塞其余
                 logger.warning("工作区 %s 恢复失败: %s", ws_id, exc)
         if self._model.rowCount() > 0:
             self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
+            # iter-128：启动时仅后台加载第一个工作区的结果（QML 默认选中第一个）
+            first_ws_id = self._model.all_workspaces()[0].workspace_id
+            self._try_load_cached_results(first_ws_id)
 
     # ----------------------------- 扫描结果缓存（iter-123） -----------------------------
 
@@ -828,38 +841,75 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         扫描结束（含取消）后调用，重启后通过 :meth:`_load_cached_results` 恢复。
         持久化失败仅记录日志，不影响主流程。
+
+        iter-127：改用 ``to_json_bytes()`` + ``write_bytes()``，orjson 直接输出
+        UTF-8 bytes，跳过 ``.decode()`` + ``.encode()`` 往返，10 万命中结果
+        序列化速度提升 5-10x。
         """
         report = controller._last_report  # 同包私有访问
         if report is None:
             return
         try:
             self._cached_results_dir.mkdir(parents=True, exist_ok=True)
-            json_str = report.to_json()
-            self._cached_results_path(ws_id).write_text(json_str, encoding="utf-8")
+            self._cached_results_path(ws_id).write_bytes(report.to_json_bytes())
             logger.debug("工作区 %s 扫描结果已缓存（%d 条命中）", ws_id, len(report.hits))
         except (OSError, ValueError) as exc:
             logger.warning("工作区 %s 扫描结果缓存失败: %s", ws_id, exc)
 
-    def _load_cached_results(self, ws_id: str) -> None:
-        """从 ``~/.fuscan/results/<ws_id>.json`` 加载扫描结果到对应 ScanController。
+    def _try_load_cached_results(self, ws_id: str) -> None:
+        """后台异步加载工作区缓存结果（iter-128）。
 
-        工作区恢复时调用，加载失败静默跳过（首次启动或文件损坏）。
+        若该工作区已恢复或正在恢复中则跳过（幂等）。否则启动
+        :class:`ResultRestoreWorker` 在后台线程读取 + 反序列化，
+        完成后通过 ``_on_restore_done`` 信号回到主线程恢复结果。
+
+        启动时对第一个工作区调用、``setCurrentWorkspaceId`` 时对目标工作区调用。
         """
-        from fuscan.scanner import ScanReport
-
+        if not ws_id or ws_id in self._restored_workspaces or ws_id in self._restoring_workspaces:
+            return
         cache_file = self._cached_results_path(ws_id)
         if not cache_file.exists():
             return
         controller = self._scan_controllers.get(ws_id)
         if controller is None:
             return
-        try:
-            json_str = cache_file.read_text(encoding="utf-8")
-            report = ScanReport.from_json(json_str)
+        # 标记恢复中，启动后台线程
+        self._restoring_workspaces.add(ws_id)
+        controller._set_restoring(True)
+        from fuscan.workers.restore_worker import ResultRestoreWorker
+
+        worker = ResultRestoreWorker(ws_id, cache_file)
+        worker.restore_done.connect(self._on_restore_done)  # pyrefly: ignore [missing-attribute]
+        worker.restore_failed.connect(self._on_restore_failed)  # pyrefly: ignore [missing-attribute]
+        worker.finished.connect(lambda wid=ws_id: self._cleanup_restore_worker(wid))
+        self._restore_workers[ws_id] = worker
+        worker.start()
+
+    def _on_restore_done(self, ws_id: str, report: object) -> None:
+        """后台恢复完成：在主线程恢复结果到 ScanController。"""
+        from fuscan.scanner import ScanReport
+
+        controller = self._scan_controllers.get(ws_id)
+        if controller is not None and isinstance(report, ScanReport):
             controller.restoreFromReport(report)
-            logger.debug("工作区 %s 扫描结果已恢复（%d 条命中）", ws_id, len(report.hits))
-        except (OSError, ValueError, KeyError) as exc:
-            logger.warning("工作区 %s 扫描结果恢复失败: %s", ws_id, exc)
+            controller._set_restoring(False)
+            logger.debug("工作区 %s 扫描结果后台恢复完成（%d 条命中）", ws_id, len(report.hits))
+        self._restoring_workspaces.discard(ws_id)
+        self._restored_workspaces.add(ws_id)
+
+    def _on_restore_failed(self, ws_id: str, error_msg: str) -> None:
+        """后台恢复失败：记录日志，清除恢复态。"""
+        controller = self._scan_controllers.get(ws_id)
+        if controller is not None:
+            controller._set_restoring(False)
+        self._restoring_workspaces.discard(ws_id)
+        logger.warning("工作区 %s 扫描结果后台恢复失败: %s", ws_id, error_msg)
+
+    def _cleanup_restore_worker(self, ws_id: str) -> None:
+        """清理已完成的 ResultRestoreWorker（避免 QObject 泄漏）。"""
+        worker = self._restore_workers.pop(ws_id, None)
+        if worker is not None:
+            worker.deleteLater()  # pyrefly: ignore [missing-attribute]
 
     def _delete_cached_results(self, ws_id: str) -> None:
         """删除指定工作区的缓存扫描结果文件。"""

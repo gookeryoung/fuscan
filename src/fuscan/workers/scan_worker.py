@@ -58,7 +58,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         ignore_dirs: tuple[str, ...] = (),
         cache: CacheStore | None = None,
         source_files: Mapping[Path, str] | None = None,
-        progress_interval: float = 0.3,
+        progress_interval: float = 0.1,
         scan_extensions: tuple[str, ...] | None = None,
         skip_paths: frozenset[str] | None = None,
         precollected: list[WalkResult] | None = None,

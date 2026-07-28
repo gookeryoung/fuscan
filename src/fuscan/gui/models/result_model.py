@@ -24,6 +24,7 @@ iter-112 起在 Model 内部维护过滤+排序视图：
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 
 try:
@@ -36,6 +37,7 @@ from fuscan.rules.model import Severity
 
 if TYPE_CHECKING:
     from fuscan.scanner.result import ScanResult
+    from fuscan.workers.filter_worker import FilterWorker
 
 __all__ = ["ResultListModel"]
 
@@ -70,6 +72,58 @@ SORT_HITS_COUNT = "hitsCount"
 SORT_SEVERITY = "severity"
 _SORT_FIELDS: frozenset[str] = frozenset({SORT_DEFAULT, SORT_FILE_PATH, SORT_HITS_COUNT, SORT_SEVERITY})
 
+# iter-129：结果数超过此阈值时过滤+排序移至后台线程，避免主线程阻塞
+_ASYNC_THRESHOLD = 10000
+
+
+def filter_and_sort(
+    results: tuple[ScanResult, ...],
+    filter_text: str,
+    filter_rules: frozenset[str],
+    filter_severities: frozenset[Severity],
+    sort_field: str,
+    sort_ascending: bool,
+) -> tuple[ScanResult, ...]:
+    """纯函数：过滤+排序扫描结果（无副作用，可独立测试）。
+
+    iter-129 从 ``ResultListModel`` 内联实现中提取为独立纯函数，供
+    ``FilterWorker`` 后台调用与单元测试直接使用。
+
+    :param results: 原始结果元组
+    :param filter_text: 文件路径模糊匹配文本（空串表示不过滤）
+    :param filter_rules: 规则名过滤集合（空集合表示不过滤）
+    :param filter_severities: 严重度过滤集合（空集合表示不过滤）
+    :param sort_field: 排序字段
+    :param sort_ascending: True 升序，False 降序
+    :return: 过滤+排序后的结果元组
+    """
+    if not results:
+        return ()
+    # 阶段 1：过滤
+    view = list(results)
+    if filter_text:
+        keyword = filter_text.lower()
+        view = [r for r in view if keyword in str(r.path).lower()]
+    if filter_rules:
+        view = [r for r in view if any(name in filter_rules for name in r.rule_names)]
+    if filter_severities:
+        view = [r for r in view if r.max_severity in filter_severities]
+    # 阶段 2：排序
+    if sort_field == SORT_DEFAULT:
+        return tuple(view)
+
+    if sort_field == SORT_FILE_PATH:
+        key_func = lambda r: str(r.path).lower()  # noqa: E731
+    elif sort_field == SORT_HITS_COUNT:
+        key_func = lambda r: len(r.hits)  # noqa: E731
+    elif sort_field == SORT_SEVERITY:
+        key_func = lambda r: _SEVERITY_WEIGHT.get(r.max_severity, 0)  # noqa: E731
+    else:
+        return tuple(view)
+
+    view.sort(key=key_func, reverse=not sort_ascending)
+    return tuple(view)
+
 
 class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritance]
     """扫描结果列表模型。
@@ -90,6 +144,17 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         # 排序条件：default = 保持原始顺序
         self._sort_field: str = SORT_DEFAULT
         self._sort_ascending: bool = True
+        # iter-129：后台过滤+排序（大结果集时启用）
+        # generation 每次提交过滤任务时 +1，worker 回调时校验，丢弃过期结果
+        self._filter_generation: int = 0
+        self._filter_worker: FilterWorker | None = None
+
+    def __del__(self) -> None:
+        """析构时阻断 worker 信号回调，避免访问已释放的对象。"""
+        worker = self._filter_worker
+        if worker is not None:
+            with contextlib.suppress(RuntimeError, TypeError):
+                worker.done.disconnect()  # pyrefly: ignore [missing-attribute]
 
     def rowCount(self, parent: QModelIndex = None) -> int:  # type: ignore[assignment]
         """返回过滤后视图的行数。"""
@@ -124,14 +189,14 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
     # ----------------------------- 公共 API -----------------------------
 
     def set_results(self, results: tuple[ScanResult, ...]) -> None:
-        """批量替换结果（emit beginResetModel/endResetModel）。
+        """批量替换结果。
 
         替换后自动重新应用当前过滤+排序条件，视图同步刷新。
+        iter-129：``beginResetModel``/``endResetModel`` 由 ``_schedule_filter_refresh``
+        或 ``_on_filter_done`` 统一管理，避免双重 reset。
         """
-        self.beginResetModel()
         self._results = results
-        self._apply_filter_and_sort()
-        self.endResetModel()
+        self._schedule_filter_refresh()
 
     def clear(self) -> None:
         """清空结果。"""
@@ -173,10 +238,8 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         normalized = text.strip() if text else ""
         if normalized == self._filter_text:
             return
-        self.beginResetModel()
         self._filter_text = normalized
-        self._apply_filter_and_sort()
-        self.endResetModel()
+        self._schedule_filter_refresh()
 
     def set_filter_rules(self, rule_names: tuple[str, ...] | list[str] | None) -> None:
         """设置规则名多选过滤条件。
@@ -186,10 +249,8 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         new_rules = frozenset(rule_names) if rule_names else frozenset()
         if new_rules == self._filter_rules:
             return
-        self.beginResetModel()
         self._filter_rules = new_rules
-        self._apply_filter_and_sort()
-        self.endResetModel()
+        self._schedule_filter_refresh()
 
     def set_filter_severities(self, severities: tuple[Severity, ...] | list[Severity] | None) -> None:
         """设置严重度多选过滤条件。
@@ -199,10 +260,8 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         new_sevs = frozenset(severities) if severities else frozenset()
         if new_sevs == self._filter_severities:
             return
-        self.beginResetModel()
         self._filter_severities = new_sevs
-        self._apply_filter_and_sort()
-        self.endResetModel()
+        self._schedule_filter_refresh()
 
     def set_sort(self, field: str, ascending: bool = True) -> None:
         """设置排序条件。
@@ -214,22 +273,18 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             return
         if field == self._sort_field and ascending == self._sort_ascending:
             return
-        self.beginResetModel()
         self._sort_field = field
         self._sort_ascending = ascending
-        self._apply_filter_and_sort()
-        self.endResetModel()
+        self._schedule_filter_refresh()
 
     def clear_filters(self) -> None:
         """清除所有过滤条件（保留排序）。"""
         if not self._filter_text and not self._filter_rules and not self._filter_severities:
             return
-        self.beginResetModel()
         self._filter_text = ""
         self._filter_rules = frozenset()
         self._filter_severities = frozenset()
-        self._apply_filter_and_sort()
-        self.endResetModel()
+        self._schedule_filter_refresh()
 
     @property
     def filter_text(self) -> str:
@@ -258,51 +313,87 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
 
     # ----------------------------- 内部实现 -----------------------------
 
-    def _apply_filter_and_sort(self) -> None:
-        """根据当前过滤+排序条件刷新 ``_filtered`` 视图。
+    def _schedule_filter_refresh(self) -> None:
+        """根据结果量选择同步或异步路径刷新 ``_filtered`` 视图。
 
-        纯 Python 实现（无 QML 依赖），便于单元测试。耗时与结果数线性相关，
-        10k 结果约 5ms，可接受。后续如需进一步优化可下沉到 SQLite ORDER BY。
+        - 结果数 < ``_ASYNC_THRESHOLD``：主线程同步执行，立即 reset model
+        - 结果数 >= ``_ASYNC_THRESHOLD``：取消旧 worker，启动新 ``FilterWorker``
+          后台执行，完成后通过 :meth:`_on_filter_done` 回调到主线程 reset
+
+        ``beginResetModel`` / ``endResetModel`` 仅在此处与 ``_on_filter_done`` 中调用，
+        setters 不再手动管理，避免双重 reset。
         """
-        if not self._results:
-            self._filtered = ()
+        # 取消上一个未完成的 worker：disconnect 信号后 wait 短暂等待退出
+        self._cancel_worker()
+
+        if len(self._results) < _ASYNC_THRESHOLD:
+            # 同步路径：小结果集直接计算，立即刷新
+            new_filtered = filter_and_sort(
+                self._results,
+                self._filter_text,
+                self._filter_rules,
+                self._filter_severities,
+                self._sort_field,
+                self._sort_ascending,
+            )
+            self.beginResetModel()
+            self._filtered = new_filtered
+            self.endResetModel()
             return
-        # 阶段 1：过滤
-        view = list(self._results)
-        if self._filter_text:
-            keyword = self._filter_text.lower()
-            view = [r for r in view if keyword in str(r.path).lower()]
-        if self._filter_rules:
-            # 任一命中规则名在选中集合中即保留
-            view = [r for r in view if any(name in self._filter_rules for name in r.rule_names)]
-        if self._filter_severities:
-            view = [r for r in view if r.max_severity in self._filter_severities]
-        # 阶段 2：排序
-        if self._sort_field == SORT_DEFAULT:
-            # 保持原始顺序，仅复制列表
-            self._filtered = tuple(view)
+
+        # 异步路径：大结果集移至后台线程
+        # generation 自增，回调时校验，丢弃过期结果（用户可能已修改过滤条件）
+        self._filter_generation += 1
+        gen = self._filter_generation
+        # 延迟导入避免循环依赖（FilterWorker 依赖本模块的 filter_and_sort）
+        from fuscan.workers.filter_worker import FilterWorker
+
+        worker = FilterWorker(
+            results=self._results,
+            filter_text=self._filter_text,
+            filter_rules=self._filter_rules,
+            filter_severities=self._filter_severities,
+            sort_field=self._sort_field,
+            sort_ascending=self._sort_ascending,
+        )
+        worker.done.connect(  # pyrefly: ignore [missing-attribute]
+            lambda filtered, g=gen: self._on_filter_done(g, filtered)
+        )
+        self._filter_worker = worker
+        worker.start()
+
+    def _cancel_worker(self) -> None:
+        """取消当前未完成的过滤 worker：断开信号并请求中断。"""
+        worker = self._filter_worker
+        if worker is None:
             return
+        with contextlib.suppress(RuntimeError, TypeError):
+            worker.done.disconnect()  # pyrefly: ignore [missing-attribute]
+        # 请求中断并等待退出，避免遗留线程访问已替换的状态
+        if worker.isRunning():
+            worker.quit()
+            # wait(500) 阻塞最多 500ms，过滤任务通常 < 100ms
+            worker.wait(500)
+        self._filter_worker = None
 
-        def _key_file_path(r: ScanResult) -> str:
-            return str(r.path).lower()
+    def _on_filter_done(self, generation: int, filtered: tuple[ScanResult, ...]) -> None:
+        """``FilterWorker.done`` 信号回调：替换视图并 reset model。
 
-        def _key_hits_count(r: ScanResult) -> int:
-            return len(r.hits)
+        :param generation: 提交 worker 时的 generation 编号
+        :param filtered: 后台过滤+排序后的结果元组
 
-        def _key_severity(r: ScanResult) -> int:
-            return _SEVERITY_WEIGHT.get(r.max_severity, 0)
-
-        if self._sort_field == SORT_FILE_PATH:
-            key_func = _key_file_path
-        elif self._sort_field == SORT_HITS_COUNT:
-            key_func = _key_hits_count
-        elif self._sort_field == SORT_SEVERITY:
-            key_func = _key_severity
-        else:  # 防御性：未知字段保持原始顺序
-            self._filtered = tuple(view)
+        若 generation 不匹配当前 ``_filter_generation``，说明用户在 worker 运行期间
+        又修改了过滤条件并启动了新 worker，本次结果作废，避免覆盖最新视图。
+        """
+        # 处理完成后清理 worker 引用（无论 generation 是否匹配）
+        if self._filter_worker is not None and not self._filter_worker.isRunning():
+            self._filter_worker = None
+        if generation != self._filter_generation:
+            # 过期结果，丢弃
             return
-        view.sort(key=key_func, reverse=not self._sort_ascending)
-        self._filtered = tuple(view)
+        self.beginResetModel()
+        self._filtered = filtered
+        self.endResetModel()
 
     @staticmethod
     def _severity_to_text(severity: Severity) -> str:

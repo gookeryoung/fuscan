@@ -53,7 +53,7 @@ class FileStatsWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         max_depth: int | None = None,
         scan_archives: bool = False,
         ignore_dirs: tuple[str, ...] = (),
-        progress_interval: float = 0.3,
+        progress_interval: float = 0.1,
         scan_extensions: tuple[str, ...] | None = None,
         skip_paths: frozenset[str] | None = None,
         incremental_manifest: IncrementalManifest | None = None,

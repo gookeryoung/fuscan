@@ -112,6 +112,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     # canStartScan 的独立 NOTIFY 信号：仅触发 canStartScan 重算，
     # 不触发 QML 侧 Connections.onScanStateChanged（避免 StackView 误重建）
     canStartScanChanged = Signal()
+    # iter-128：后台恢复扫描结果时的加载态信号
+    restoringChanged = Signal()
 
     def __init__(
         self,
@@ -155,6 +157,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._scan_state: str = STATE_SETUP  # setup / scanning / results
         self._cancelling: bool = False
         self._is_paused: bool = False
+        # iter-128：后台恢复扫描结果的加载态
+        self._restoring: bool = False
 
         # 进度信息
         self._progress_scanned: int = 0
@@ -203,6 +207,14 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def scanState(self) -> str:
         """扫描状态（setup/scanning/results）。"""
         return self._scan_state
+
+    @Property(bool, notify=restoringChanged)  # pyrefly: ignore [not-callable]
+    def restoring(self) -> bool:
+        """是否正在后台恢复扫描结果（iter-128）。
+
+        QML 据此显示「正在恢复扫描结果...」占位态，加载完成后无缝切换到结果列表。
+        """
+        return self._restoring
 
     @Property(bool, notify=scanStateChanged)  # pyrefly: ignore [not-callable]
     def isPaused(self) -> bool:
@@ -1335,7 +1347,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             summary=self._status_summary,
         )
 
-    @Slot(object)  # pyrefly: ignore [not-callable]
+    def _set_restoring(self, value: bool) -> None:
+        """设置后台恢复加载态（由 WorkspaceController 调用）。"""
+        if self._restoring != value:
+            self._restoring = value
+            self.restoringChanged.emit()  # pyrefly: ignore [missing-attribute]
+
     def restoreFromReport(self, report: ScanReport) -> None:
         """从持久化的 :class:`ScanReport` 恢复扫描结果（iter-123）。
 
@@ -1434,3 +1451,15 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             except (sqlite3.Error, OSError):
                 logger.warning("缓存关闭失败", exc_info=True)
             self._cache = None
+
+    def quick_cancel(self) -> None:
+        """退出时快速取消所有 worker（非阻塞）。
+
+        仅设置 cancel 标志，不 ``wait()`` / ``close()`` / ``deleteLater()``，
+        进程退出时由 OS 回收线程与文件句柄。10 万结果场景下避免主线程阻塞
+        （原 ``cleanup()`` 每 controller 最多 5s 累计等待）。
+        """
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.cancel()
+        if self._stats_worker is not None and self._stats_worker.isRunning():
+            self._stats_worker.cancel()

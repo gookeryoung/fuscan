@@ -294,11 +294,21 @@ class Scanner:
                         continue
                     entries.append(entry)
                     if total % 200 == 0:
+                        # 实时同步进度上下文，使 _emit_progress 反映 walk 阶段累计值。
+                        # 旧实现在此处未同步 self._progress_*，导致 ProgressInfo 中
+                        # total/skipped/user_skipped 始终为旧值（0 或上次扫描值），
+                        # UI 的 walkDiscovered/walkSkipped 不增长，进度条不动。
+                        self._progress_total = total
+                        self._progress_skipped = skipped
+                        self._progress_user_skipped = user_skipped
                         self._emit_progress(str(entry.path), 0, 0, 0, phase="walk")
 
+        # walk 结束后同步最终统计并强制发送进度，确保 UI 收到完整 walk 统计。
+        # 文件数 < 200 时循环内不触发 emit，此处 force=True 是唯一的进度上报点。
         self._progress_total = total
         self._progress_skipped = skipped
         self._progress_user_skipped = user_skipped
+        self._emit_progress(str(root), 0, 0, 0, phase="walk", force=True)
         # 记录取消状态后清除标志，使 Scanner 可在取消/异常后复用（C1 修复）：
         # 否则下次 collect_entries 的 is_cancelled 仍为 True，静默跳过全部逻辑
         cancelled = self.is_cancelled

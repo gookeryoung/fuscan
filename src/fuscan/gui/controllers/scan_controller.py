@@ -199,6 +199,16 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """是否暂停中。"""
         return self._is_paused
 
+    @Property(bool, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def cancelling(self) -> bool:
+        """是否正在取消扫描中。
+
+        cancelScan 设置为 True，_reset_scan_ui 重置为 False（取消完成回调）。
+        QML 据此显示模态遮罩防止用户重复操作（与退出保存 Popup 同模式）。
+        notify 复用 progressChanged：cancelScan 与 _reset_scan_ui 均已 emit 该信号。
+        """
+        return self._cancelling
+
     @Property(bool, notify=canStartScanChanged)  # pyrefly: ignore [not-callable]
     def canStartScan(self) -> bool:
         """是否可开始扫描（规则集已加载 + 目标已选）。"""

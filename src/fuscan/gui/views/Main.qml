@@ -67,6 +67,55 @@ ApplicationWindow {
         }
     }
 
+    // 取消扫描进度 Popup（modal，不可手动关闭）
+    // 绑定到当前活动 ScanController 的 cancelling 属性：
+    // cancelScan 设 True 时自动 open，_reset_scan_ui 设 False 时自动 close。
+    // 注意：activeScanController 一律通过 WorkspaceController.activeScanController.xxx
+    // 链式访问，不绑定到本地 property（PySide2 5.15 类型推断 null 同源问题）。
+    Popup {
+        id: cancelPopup
+        modal: true
+        closePolicy: Popup.NoAutoClose
+        anchors.centerIn: parent
+        width: 360
+        padding: 24
+        visible: WorkspaceController.activeScanController.cancelling
+
+        background: Rectangle {
+            color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+            border.width: 1
+            radius: theme.radiusLg
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 16
+
+            Label {
+                Layout.fillWidth: true
+                text: "正在取消扫描，请稍候..."
+                font.pixelSize: 14
+                font.bold: true
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                horizontalAlignment: Text.AlignHCenter
+            }
+
+            ProgressBar {
+                Layout.fillWidth: true
+                indeterminate: true
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: "正在等待扫描线程退出并清理资源"
+                font.pixelSize: 11
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                horizontalAlignment: Text.AlignHCenter
+            }
+        }
+    }
+
     // 延迟触发 Qt.quit()，让 exitPopup 先渲染显示
     Timer {
         id: exitTimer

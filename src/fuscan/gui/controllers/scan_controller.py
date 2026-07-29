@@ -120,6 +120,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         config_controller: ConfigController,
         rules_controller: RulesController,
         parent: QObject | None = None,
+        skip_store: SkipStore | None = None,
     ) -> None:
         super().__init__(parent)
         self._config_controller = config_controller
@@ -130,7 +131,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._worker: ScanWorker | None = None
         self._stats_worker: FileStatsWorker | None = None
         self._cache: CacheStore | None = None
-        self._skip_store: SkipStore = SkipStore()
+        # iter-133：SkipStore 共享实例——由 WorkspaceController 注入全局共享
+        # SkipStore，避免 N 个工作区各自读 ~/.fuscan/skips.json 造成的重复 I/O。
+        # 独立构造（无 skip_store 参数）时回退到自建实例，保持向后兼容。
+        self._skip_store: SkipStore = skip_store if skip_store is not None else SkipStore()
         self._result_model: ResultListModel = ResultListModel(self)
         # 任务级配置覆盖（iter-104）：键为 Config 字段名，值为该任务专属覆盖值
         # 通过 _effective_<field>() 方法优先读取覆盖值，回退到全局 Config

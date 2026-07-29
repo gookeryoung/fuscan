@@ -1548,8 +1548,8 @@ class TestClearAllWorkspaces:
         """清空应调用每个 ScanController 的 cleanup。"""
         ws_id1 = controller.addWorkspace("t1", "folder", "/tmp", "[]", True)
         ws_id2 = controller.addWorkspace("t2", "folder", "/tmp", "[]", True)
-        sc1 = controller._scan_controllers[ws_id1]
-        sc2 = controller._scan_controllers[ws_id2]
+        sc1 = controller._ensure_scan_controller(ws_id1)  # type: ignore[attr-defined]
+        sc2 = controller._ensure_scan_controller(ws_id2)  # type: ignore[attr-defined]
 
         cleanup_calls: list[ScanController] = []
         monkeypatch.setattr(sc1, "cleanup", lambda: cleanup_calls.append(sc1))
@@ -1673,7 +1673,7 @@ class TestTaskOverrides:
         # 序列化时 tuple 转为 list
         assert overrides == {"ignore_dirs": [".git", "node_modules"]}
         # 内部存储为 tuple（通过 ScanController 同步验证）
-        sc = controller._scan_controllers[ws_id]  # type: ignore[attr-defined]
+        sc = controller._ensure_scan_controller(ws_id)  # type: ignore[attr-defined]
         assert sc._task_overrides["ignore_dirs"] == (".git", "node_modules")  # type: ignore[attr-defined]
 
     def test_set_task_override_invalid_key_noop(self, controller: WorkspaceController) -> None:
@@ -1706,7 +1706,7 @@ class TestTaskOverrides:
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
         controller.setTaskOverride(ws_id, "max_workers", "12")
 
-        sc = controller._scan_controllers[ws_id]  # type: ignore[attr-defined]
+        sc = controller._ensure_scan_controller(ws_id)  # type: ignore[attr-defined]
         assert sc._task_overrides.get("max_workers") == 12  # type: ignore[attr-defined]
         # _effective_max_workers 应返回覆盖值
         assert sc._effective_max_workers() == 12  # type: ignore[attr-defined]
@@ -1748,7 +1748,7 @@ class TestTaskOverrides:
         assert overrides.get("scan_archives") is False
         assert overrides.get("max_workers") == 6
         # ScanController 也应同步
-        sc = ctrl2._scan_controllers[ws_id]  # type: ignore[attr-defined]
+        sc = ctrl2._ensure_scan_controller(ws_id)  # type: ignore[attr-defined]
         assert sc._effective_scan_archives() is False  # type: ignore[attr-defined]
         assert sc._effective_max_workers() == 6  # type: ignore[attr-defined]
         ctrl2.cleanup()

@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import shutil
 from dataclasses import asdict, dataclass, field, fields
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -361,8 +362,13 @@ def save_config(config: Config, path: Path | None = None) -> None:
         logger.warning("配置保存失败: %s", exc)
 
 
+@lru_cache(maxsize=1)
 def load_builtin_ruleset() -> RuleSet:
     """加载内置通用规则集。
+
+    内置规则文件 ``builtin.yaml`` 在一次进程内不变，``lru_cache`` 缓存首次
+    解析结果，避免启动时被 :func:`load_with_builtin` 重复调用 N+1 次
+    （RulesController 1 次 + 每个工作区 N 次）导致的重复磁盘 I/O 与 YAML 解析。
 
     :return: 内置 RuleSet 实例
     :raises RuleError: 内置规则文件加载或解析失败

@@ -19,12 +19,14 @@
     <file alias="icons/about.svg">../assets/icons/about.svg</file>
     <file alias="icons/add.svg">../assets/icons/add.svg</file>
     <file alias="icons/all_disk.svg">../assets/icons/all_disk.svg</file>
+    <file alias="icons/back.svg">../assets/icons/back.svg</file>
     <file alias="icons/check.svg">../assets/icons/check.svg</file>
     <file alias="icons/check_box.svg">../assets/icons/check_box.svg</file>
     <file alias="icons/check_box_blank.svg">../assets/icons/check_box_blank.svg</file>
     <file alias="icons/close.svg">../assets/icons/close.svg</file>
     <file alias="icons/delete.svg">../assets/icons/delete.svg</file>
     <file alias="icons/disk.svg">../assets/icons/disk.svg</file>
+    <file alias="icons/down_arrow.svg">../assets/icons/down_arrow.svg</file>
     <file alias="icons/edit.svg">../assets/icons/edit.svg</file>
     <file alias="icons/export.svg">../assets/icons/export.svg</file>
     <file alias="icons/export_csv.svg">../assets/icons/export_csv.svg</file>
@@ -39,6 +41,7 @@
     <file alias="icons/info.svg">../assets/icons/info.svg</file>
     <file alias="icons/load_list.svg">../assets/icons/load_list.svg</file>
     <file alias="icons/manual.svg">../assets/icons/manual.svg</file>
+    <file alias="icons/minus.svg">../assets/icons/minus.svg</file>
     <file alias="icons/moon.svg">../assets/icons/moon.svg</file>
     <file alias="icons/more.svg">../assets/icons/more.svg</file>
     <file alias="icons/pause.svg">../assets/icons/pause.svg</file>
@@ -50,6 +53,7 @@
     <file alias="icons/stats.svg">../assets/icons/stats.svg</file>
     <file alias="icons/stop.svg">../assets/icons/stop.svg</file>
     <file alias="icons/target.svg">../assets/icons/target.svg</file>
+    <file alias="icons/up_arrow.svg">../assets/icons/up_arrow.svg</file>
     <file alias="icons/warning.svg">../assets/icons/warning.svg</file>
   </qresource>
 </RCC>

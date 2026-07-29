@@ -214,7 +214,8 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             IconButton {
-                text:"← 返回"
+                iconSource: "qrc:/icons/back.svg"
+                text: "返回"
                 tooltip: "返回工作区"
                 accent: "secondary"
                 onClicked: rulesPage.backRequested()
@@ -350,21 +351,21 @@ Item {
                         Layout.fillWidth: true
                         spacing: 4
                         IconButton {
-                            text:"↑"
+                            iconSource: "qrc:/icons/up_arrow.svg"
                             tooltip: "上移"
                             accent: "ghost"
                             enabled: rulesController.canMoveUp
                             onClicked: rulesController.moveUp()
                         }
                         IconButton {
-                            text:"↓"
+                            iconSource: "qrc:/icons/down_arrow.svg"
                             tooltip: "下移"
                             accent: "ghost"
                             enabled: rulesController.canMoveDown
                             onClicked: rulesController.moveDown()
                         }
                         IconButton {
-                            text:"−"
+                            iconSource: "qrc:/icons/minus.svg"
                             tooltip: "移除选中规则文件"
                             accent: "ghost"
                             enabled: rulesController.canRemove

@@ -771,13 +771,12 @@ Item {
                                         Layout.fillWidth: true
                                     }
 
-                                    Button {
-                                        text: "✕"
-                                        flat: true
-                                        implicitHeight: 24
-                                        implicitWidth: 24
-                                        font.pixelSize: 12
-                                        palette.buttonText: theme.colorDanger
+                                    IconButton {
+                                        iconSource: "qrc:/icons/close.svg"
+                                        tooltip: "移除"
+                                        accent: "danger"
+                                        iconSize: 14
+                                        btnSize: 24
                                         onClicked: configController.removeCustomIgnoreDir(modelData)
                                     }
                                 }

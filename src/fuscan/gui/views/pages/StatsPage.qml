@@ -24,7 +24,8 @@ Item {
             spacing: 12
 
             IconButton {
-                text:"← 返回"
+                iconSource: "qrc:/icons/back.svg"
+                text: "返回"
                 tooltip: "返回首页"
                 accent: "secondary"
                 onClicked: statsPage.backRequested()

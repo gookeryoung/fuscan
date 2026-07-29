@@ -56,6 +56,12 @@ def _apply_global_font(app: QGuiApplication) -> None:
 
     字号与加粗从用户配置读取（默认 14px、不加粗），
     QML 控件默认继承此全局字体，无需每个控件单独设置 ``font.family``。
+
+    .. note::
+        ``launch()`` 不再调用本函数；由 :meth:`AppController._apply_font_config_to_theme`
+        在构造 ``ConfigController`` 后复用其已加载的 :class:`Config` 实例统一设置字体，
+        避免 ``load_config()`` 重复读取 ``~/.fuscan/config.yaml``。本函数保留供
+        需要独立设置字体的入口（如脚本测试）使用。
     """
     from fuscan.config import load_config
 
@@ -74,7 +80,7 @@ def _apply_global_font(app: QGuiApplication) -> None:
 def launch(argv: Sequence[str] | None = None) -> int:
     """启动 QML GUI 应用。
 
-    :param argv: 命令行参数（默认从 sys.argv 读取）
+    :param argv: 命令参数（默认从 sys.argv 读取）
     :return: 退出码
     """
     # 抑制 cryptography 对 Python 3.8 的弃用警告
@@ -90,9 +96,6 @@ def launch(argv: Sequence[str] | None = None) -> int:
     app.setApplicationName("fuscan")
     app.setOrganizationName("fuscan")
 
-    # 设置全局跨平台字体（必须在 QML 引擎加载前，确保控件继承）
-    _apply_global_font(app)
-
     # 设置 QtQuick Controls 2 风格为 Fusion（跨平台一致）
     QQuickStyle.setStyle("Fusion")
 
@@ -101,6 +104,9 @@ def launch(argv: Sequence[str] | None = None) -> int:
     register_qml_types()
 
     # 构造主控制器并注册到 QML context
+    # AppController.__init__ 内部会调用 _apply_font_config_to_theme 设置全局字体，
+    # 复用 ConfigController 已加载的 Config 实例，避免重复 load_config() I/O。
+    # 字体设置必须在 QML 引擎加载前完成，确保控件继承全局字体。
     controller = AppController()
 
     engine = QQmlApplicationEngine()

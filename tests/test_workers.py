@@ -26,6 +26,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytestmark = pytest.mark.gui
 
 try:
+    from fuscan.gui.models.result_model import SORT_FILE_PATH, SORT_SEVERITY
     from fuscan.rules.model import (
         LeafMatch,
         MatchMode,
@@ -37,6 +38,8 @@ try:
     from fuscan.scanner import ScanReport, ScanResult, ScanStats
     from fuscan.scanner.result import ProgressInfo, RuleHit, WalkResult
     from fuscan.workers import ExportWorker, FileStatsWorker, ScanWorker
+    from fuscan.workers.filter_worker import FilterWorker
+    from fuscan.workers.restore_worker import ResultRestoreWorker
 
     PYSIDE_AVAILABLE = True
 except ImportError:
@@ -866,3 +869,158 @@ class TestStatsWorkerRun:
         assert info.skipped == 3  # 2 + 1
         assert info.user_skipped == 1  # 1 + 0
         assert info.current_file == "y.txt"
+
+
+# ============================== ResultRestoreWorker ==============================
+
+
+class TestResultRestoreWorker:
+    """``ResultRestoreWorker`` 测试：成功恢复 / 文件不存在 / JSON 格式错误。
+
+    覆盖 :meth:`run` 的成功与失败路径，确保 ``restore_done``/``restore_failed``
+    信号正确发射。
+    """
+
+    def test_run_success_emits_restore_done(self, tmp_path: Path) -> None:
+        """缓存文件有效时 emit restore_done 携带反序列化的 ScanReport。"""
+        hit = RuleHit(rule_name="敏感内容", severity=Severity.CRITICAL, detail="d1")
+        report = _make_scan_report(
+            tmp_path,
+            results=(_make_scan_result(tmp_path / "a.txt", hits=(hit,)),),
+            total=1,
+            scanned=1,
+            matched=1,
+            matches=1,
+        )
+        cache_file = tmp_path / "cache.json"
+        cache_file.write_bytes(report.to_json_bytes())
+
+        worker = ResultRestoreWorker("ws-1", cache_file)
+
+        done_payloads: list[tuple[str, ScanReport]] = []
+        failed_payloads: list[tuple[str, str]] = []
+        worker.restore_done.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ws_id, report: done_payloads.append((ws_id, report))
+        )
+        worker.restore_failed.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ws_id, err: failed_payloads.append((ws_id, err))
+        )
+
+        worker.run()
+
+        assert len(done_payloads) == 1
+        assert failed_payloads == []
+        ws_id, restored = done_payloads[0]
+        assert ws_id == "ws-1"
+        assert restored.root == tmp_path
+        assert len(restored.hits) == 1
+        assert restored.hits[0].path == tmp_path / "a.txt"
+
+    def test_run_missing_file_emits_restore_failed(self, tmp_path: Path) -> None:
+        """缓存文件不存在时 emit restore_failed 携带错误信息。"""
+        missing = tmp_path / "nonexistent.json"
+        worker = ResultRestoreWorker("ws-2", missing)
+
+        done_payloads: list[tuple[str, ScanReport]] = []
+        failed_payloads: list[tuple[str, str]] = []
+        worker.restore_done.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ws_id, report: done_payloads.append((ws_id, report))
+        )
+        worker.restore_failed.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ws_id, err: failed_payloads.append((ws_id, err))
+        )
+
+        worker.run()
+
+        assert done_payloads == []
+        assert len(failed_payloads) == 1
+        ws_id, err_msg = failed_payloads[0]
+        assert ws_id == "ws-2"
+        # 错误信息应包含文件名或系统错误
+        assert err_msg
+
+    def test_run_invalid_json_emits_restore_failed(self, tmp_path: Path) -> None:
+        """缓存文件 JSON 格式错误时 emit restore_failed。"""
+        cache_file = tmp_path / "broken.json"
+        cache_file.write_bytes(b"{not valid json")
+        worker = ResultRestoreWorker("ws-3", cache_file)
+
+        done_payloads: list[tuple[str, ScanReport]] = []
+        failed_payloads: list[tuple[str, str]] = []
+        worker.restore_done.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ws_id, report: done_payloads.append((ws_id, report))
+        )
+        worker.restore_failed.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ws_id, err: failed_payloads.append((ws_id, err))
+        )
+
+        worker.run()
+
+        assert done_payloads == []
+        assert len(failed_payloads) == 1
+        ws_id, err_msg = failed_payloads[0]
+        assert ws_id == "ws-3"
+        assert err_msg
+
+
+# ============================== FilterWorker ==============================
+
+
+class TestFilterWorker:
+    """``FilterWorker`` 测试：过滤+排序后 emit done 携带结果元组。"""
+
+    def test_run_emits_filtered_sorted_results(self, tmp_path: Path) -> None:
+        """run() 调用 filter_and_sort 并通过 done 信号回传结果。"""
+        h_critical = RuleHit(rule_name="敏感内容", severity=Severity.CRITICAL, detail="d1")
+        h_warning = RuleHit(rule_name="API 密钥", severity=Severity.WARNING, detail="d2")
+        results = (
+            ScanResult(path=tmp_path / "b.txt", size=20, hits=(h_warning,), errors=0),
+            ScanResult(path=tmp_path / "a.txt", size=10, hits=(h_critical,), errors=0),
+        )
+        worker = FilterWorker(
+            results=results,
+            filter_text="",
+            filter_rules=frozenset(),
+            filter_severities=frozenset(),
+            sort_field=SORT_FILE_PATH,
+            sort_ascending=True,
+        )
+
+        done_payloads: list[tuple[ScanResult, ...]] = []
+        worker.done.connect(done_payloads.append)  # pyrefly: ignore [missing-attribute]
+
+        worker.run()
+
+        assert len(done_payloads) == 1
+        filtered = done_payloads[0]
+        assert len(filtered) == 2
+        # 按文件路径升序：a.txt 在前
+        assert filtered[0].path == tmp_path / "a.txt"
+        assert filtered[1].path == tmp_path / "b.txt"
+
+    def test_run_applies_severity_filter(self, tmp_path: Path) -> None:
+        """filter_severities 非空时仅保留匹配严重度的结果。"""
+        h_critical = RuleHit(rule_name="敏感内容", severity=Severity.CRITICAL, detail="d1")
+        h_info = RuleHit(rule_name="提示信息", severity=Severity.INFO, detail="d2")
+        results = (
+            ScanResult(path=tmp_path / "a.txt", size=10, hits=(h_critical,), errors=0),
+            ScanResult(path=tmp_path / "b.txt", size=20, hits=(h_info,), errors=0),
+        )
+        worker = FilterWorker(
+            results=results,
+            filter_text="",
+            filter_rules=frozenset(),
+            filter_severities=frozenset({Severity.CRITICAL}),
+            sort_field=SORT_SEVERITY,
+            sort_ascending=False,
+        )
+
+        done_payloads: list[tuple[ScanResult, ...]] = []
+        worker.done.connect(done_payloads.append)  # pyrefly: ignore [missing-attribute]
+
+        worker.run()
+
+        assert len(done_payloads) == 1
+        filtered = done_payloads[0]
+        assert len(filtered) == 1
+        assert filtered[0].path == tmp_path / "a.txt"

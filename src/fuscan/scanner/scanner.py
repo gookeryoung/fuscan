@@ -205,8 +205,13 @@ class Scanner:
         self._unchanged_count: int = 0
         # 本次 collect_entries 构建的新 manifest（供调用方持久化，下次增量扫描用）
         self._current_manifest: IncrementalManifest | None = None
-        if incremental_manifest is not None and prev_report is not None:
-            # 预索引上次命中结果按相对路径，供 scan_entries 合并
+        # iter-133：_unchanged_hits 只依赖 prev_report 预索引上次命中结果，
+        # 与 incremental_manifest 无关（manifest 仅用于 walk 阶段对比指纹）。
+        # 此前条件为 `incremental_manifest is not None and prev_report is not None`，
+        # 但 ScanWorker 构造 Scanner 时不传 incremental_manifest（manifest 在
+        # FileStatsWorker 侧），导致 _unchanged_hits 永远为空，增量扫描合并
+        # 无数据可合并，结果清零。
+        if prev_report is not None:
             for sr in prev_report.hits:
                 if sr.archive_path is not None:
                     continue  # 压缩包内部条目不参与增量合并（每次重新扫描压缩包）
@@ -432,7 +437,10 @@ class Scanner:
         # 否则 progress = scanned / walk_total * 100 会偏低，与"已扫描 N / M 个文件"
         # 数值不匹配（如 1000 个发现 / 300 跳过 → entries=700，但 total=1000 导致
         # 进度条 350/1000=35% 而非正确的 350/700=50%）。
-        self._progress_total = len(entries)
+        # iter-133：total 须纳入未变更文件数（_unchanged_count），因为 scanned
+        # 在合并阶段会累加 _unchanged_count（未变更文件视为已扫描），若 total 不含
+        # 此部分会导致 scanned > total（分子超出分母）。
+        self._progress_total = len(entries) + self._unchanged_count
         self._progress_skipped = skipped
         self._progress_user_skipped = user_skipped
 
@@ -459,6 +467,8 @@ class Scanner:
                 matched += d_matched
                 errors += d_errors
                 matches += d_matches
+                # iter-133：压缩包内条目纳入分母，避免 scanned > total（分子超出分母）
+                self._progress_total += d_scanned
         finally:
             # 异常路径（如 MemoryError、walker 未捕获错误）也 flush 已累积批次，
             # 避免最后一批（最多 BATCH_THRESHOLD 个文件）缓存数据丢失

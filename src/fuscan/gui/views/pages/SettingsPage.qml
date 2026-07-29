@@ -434,10 +434,12 @@ Item {
                                         // 点击切换为相反状态（全选↔全不选）
                                         CheckBox {
                                             id: categoryCheckbox
-                                            // tristate 让 Qt 允许三态显示（包含 PartiallyChecked）
-                                            tristate: true
+                                            // iter-133：tristate=false 确保点击只在全选/全不选间
+                                            // 两态切换；PartiallyChecked 由 checkState binding 根据子项
+                                            // 状态自动显示（子项部分选中时），用户点击不会停留在该态
+                                            tristate: false
                                             // 根据 categoryEnabledState 计算三态
-                                            // iter-133：引用 extractorCountText 触发 binding 重新求值——
+                                            // 引用 extractorCountText 触发 binding 重新求值——
                                             // categoryEnabledState 是 @Slot 无 notify 信号，子项勾选变化时
                                             // 不会自动刷新；extractorCountText 是 @Property 且 notify=
                                             // extractorCountChanged，setExtractorEnabled/setCategoryEnabled
@@ -637,9 +639,11 @@ Item {
                                     spacing: 8
 
                                     CheckBox {
-                                        tristate: true
+                                        // iter-133：tristate=false 确保点击只两态切换
+                                        // PartiallyChecked 由 binding 根据子项状态自动显示
+                                        tristate: false
                                         checkState: categoryData.allEnabled ? Qt.Checked : Qt.Unchecked
-                                        // tristate 仅用于显示，点击时切全选/全不选
+                                        // 点击时切全选/全不选
                                         onClicked: {
                                             var willEnable = !(categoryData.allEnabled)
                                             configController.setIgnoreDirCategoryEnabled(categoryName, willEnable)

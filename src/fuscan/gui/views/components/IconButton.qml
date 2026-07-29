@@ -27,6 +27,7 @@ Button {
     property int iconSize: 14
     property int btnSize: accent === "primary" ? appTheme.btnHeightSecondary
         : accent === "secondary" ? appTheme.btnHeightSecondary
+        : accent === "danger" ? appTheme.btnHeightSecondary
         : appTheme.btnHeightGhost
     // dangerColor：accent="danger" 时使用，默认跟随主题危险色
     property color dangerColor: appTheme.colorDanger

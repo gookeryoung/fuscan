@@ -187,10 +187,10 @@ Rectangle {
                     Label {
                         text: workspaceController.activeScanController.walkIndeterminate
                             ? "统计中..."
-                            : ("符合 " + workspaceController.activeScanController.walkClassified
+                            : ("纳入扫描 " + workspaceController.activeScanController.walkClassified
                                + " / 发现 " + workspaceController.activeScanController.walkDiscovered
-                               + " | 跳过 " + workspaceController.activeScanController.walkSkipped
-                               + " | 用户跳过 " + workspaceController.activeScanController.walkUserSkipped)
+                               + " | 类型不符 " + workspaceController.activeScanController.walkSkipped
+                               + " | 用户标记 " + workspaceController.activeScanController.walkUserSkipped)
                         font.pixelSize: 11
                         color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                     }
@@ -295,7 +295,7 @@ Rectangle {
             spacing: 16
 
             Label {
-                text: "通过 " + workspaceController.activeScanController.passedCount
+                text: "安全 " + workspaceController.activeScanController.passedCount
                 color: theme.colorSuccess
                 font.bold: true
                 font.pixelSize: 12
@@ -303,12 +303,6 @@ Rectangle {
             Label {
                 text: "命中 " + workspaceController.activeScanController.matchedCount
                 color: theme.colorDanger
-                font.bold: true
-                font.pixelSize: 12
-            }
-            Label {
-                text: "跳过 " + workspaceController.activeScanController.skippedCount
-                color: theme.colorWarning
                 font.bold: true
                 font.pixelSize: 12
             }

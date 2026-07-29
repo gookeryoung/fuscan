@@ -199,12 +199,12 @@ Item {
                                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                             }
                             Label {
-                                text: "符合类型"
+                                text: "纳入扫描"
                                 font.pixelSize: 11
                                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                             }
                             Label {
-                                text: "白名单跳过"
+                                text: "类型不符跳过"
                                 font.pixelSize: 11
                                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                             }
@@ -349,7 +349,7 @@ Item {
                                 Layout.fillWidth: true
                             }
                             Label {
-                                text: "通过"
+                                text: "安全"
                                 font.pixelSize: 11
                                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                 horizontalAlignment: Text.AlignHCenter
@@ -378,34 +378,6 @@ Item {
                             }
                             Label {
                                 text: "命中"
-                                font.pixelSize: 11
-                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                horizontalAlignment: Text.AlignHCenter
-                                Layout.fillWidth: true
-                            }
-                        }
-                    }
-
-                    // 跳过
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 80
-                        radius: theme.radiusMd
-                        color: theme.isDark ? Qt.rgba(0.95, 0.62, 0.07, 0.15) : Qt.rgba(0.95, 0.62, 0.07, 0.08)
-                        border.color: theme.colorWarning
-                        border.width: 1
-                        ColumnLayout {
-                            anchors.centerIn: parent
-                            Label {
-                                text: workspaceController.currentScanController.skippedCount
-                                font.pixelSize: 28
-                                font.bold: true
-                                color: theme.colorWarning
-                                horizontalAlignment: Text.AlignHCenter
-                                Layout.fillWidth: true
-                            }
-                            Label {
-                                text: "跳过"
                                 font.pixelSize: 11
                                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                 horizontalAlignment: Text.AlignHCenter

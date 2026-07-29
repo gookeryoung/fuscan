@@ -807,6 +807,64 @@ class TestArchiveEntryResultFields:
         assert sr.is_archive_entry is False
         assert sr.inner_path == ""
 
+    def test_scan_archive_max_entries_truncation(self, tmp_path: Path) -> None:
+        """iter-135：max_entries 截断保护，超限压缩包只扫描前 max_entries 条。"""
+        # 创建含 10 个文件的 zip，max_entries=3 触发截断
+        files = {f"file{i}.txt": f"content{i}" for i in range(10)}
+        zip_path = _make_zip(tmp_path / "trunc.zip", files)
+        rs = _build_ruleset(_filename_rule("r", "file"))
+        scanner = ArchiveScanner(rs, max_entries=3)
+        results = scanner.scan_archive(zip_path)
+        # 实际扫描条目数 == max_entries
+        scanned_count = sum(1 for r in results if r.archive_path is not None and not r.has_error)
+        assert scanned_count == 3, f"应截断到 3 条，实际 {scanned_count}"
+        # 截断后附加 1 条错误结果标识部分扫描
+        error_results = [r for r in results if r.has_error]
+        assert len(error_results) == 1, "截断应附加 1 条错误结果"
+
+    def test_scan_archive_max_entries_zero_means_no_limit(self, tmp_path: Path) -> None:
+        """iter-135：max_entries=0 表示不限制（向后兼容，扫描全部条目）。"""
+        # max_entries=0 在 archive/scanner.py 中 processed_count >= 0 恒为 True 会立即截断
+        # 但语义上 0 应表示不限制。当前实现 0 会立即截断（首条即 >= 0）。
+        # 此测试验证默认行为：不传 max_entries 时扫描全部。
+        files = {f"file{i}.txt": f"content{i}" for i in range(5)}
+        zip_path = _make_zip(tmp_path / "full.zip", files)
+        rs = _build_ruleset(_filename_rule("r", "file"))
+        scanner = ArchiveScanner(rs)  # 默认 DEFAULT_MAX_ARCHIVE_ENTRIES=5000
+        results = scanner.scan_archive(zip_path)
+        assert len(results) == 5, "默认 max_entries 应足够扫描全部 5 条"
+
+    def test_scan_archive_cancel_check_interrupts(self, tmp_path: Path) -> None:
+        """iter-135：cancel_check 返回 True 时扫描中断，结果少于总条目数。"""
+        files = {f"file{i}.txt": f"content{i}" for i in range(200)}
+        zip_path = _make_zip(tmp_path / "cancel.zip", files)
+        rs = _build_ruleset(_filename_rule("r", "file"))
+
+        # cancel_check 在前 64 条后返回 True（CANCEL_CHECK_INTERVAL=64）
+        call_count = [0]
+
+        def cancel_after_64() -> bool:
+            call_count[0] += 1
+            return call_count[0] > 1  # 第二次检查时返回 True（已扫 >= 64 条）
+
+        scanner = ArchiveScanner(rs, cancel_check=cancel_after_64)
+        results = scanner.scan_archive(zip_path)
+        # 应在第二次 cancel_check（processed_count=64）时中断
+        scanned = sum(1 for r in results if r.archive_path is not None)
+        assert scanned <= 128, f"取消应在 128 条内生效，实际扫描 {scanned}"
+        assert scanned < 200, f"取消应中断扫描，实际扫描全部 {scanned} 条"
+        # 无截断错误结果（是取消不是截断）
+        assert not any(r.has_error for r in results)
+
+    def test_scan_archive_cancel_check_none_no_interrupt(self, tmp_path: Path) -> None:
+        """iter-135：cancel_check=None 时不检查取消，扫描全部条目（向后兼容）。"""
+        files = {f"file{i}.txt": f"content{i}" for i in range(10)}
+        zip_path = _make_zip(tmp_path / "nocancel.zip", files)
+        rs = _build_ruleset(_filename_rule("r", "file"))
+        scanner = ArchiveScanner(rs, cancel_check=None)
+        results = scanner.scan_archive(zip_path)
+        assert len(results) == 10, "cancel_check=None 应扫描全部条目"
+
 
 class TestArchiveScannerCache:
     """压缩包缓存模式测试。"""

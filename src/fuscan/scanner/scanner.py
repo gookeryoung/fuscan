@@ -152,6 +152,11 @@ class Scanner:
                 for rule, matcher in self._compiled
                 if rule.name in self._rule_hashes
             ]
+        # iter-135：_cancel_event 在 _archive_scanner 前创建，以便传入 cancel_check
+        # bound method（避免 lambda 触发 PLW0108，且 bound method 调用更快）
+        self._pause_event = threading.Event()
+        self._pause_event.set()
+        self._cancel_event = threading.Event()
         self._archive_scanner: ArchiveScanner | None = None
         if scan_archives:
             # 惰性导入避免与 archive.scanner 模块的循环依赖
@@ -165,13 +170,13 @@ class Scanner:
                 # 压缩包内条目同样按白名单过滤：None 表示全选快速路径，
                 # 非 frozenset 表示按白名单过滤内部条目（如压缩包内 .txt 在白名单不含 txt 时跳过）
                 scan_extensions=self._scan_extensions,
+                # iter-135：传 cancel_check 让压缩包内部循环能及时响应取消信号。
+                # 每 CANCEL_CHECK_INTERVAL 条检查一次，平衡响应性与开销。
+                cancel_check=self._cancel_event.is_set,
             )
         self._on_progress = on_progress
         self._progress_interval = progress_interval
         self._last_progress_time: float = 0.0
-        self._pause_event = threading.Event()
-        self._pause_event.set()
-        self._cancel_event = threading.Event()
         # iter-111：自适应 GIL 让步间隔。
         # 顺序扫描（max_workers<=1）：主线程独占 GIL，需每 20 个文件让步一次避免 UI 卡死。
         # 并发扫描（max_workers>1）：PyO3 提取器（pdf_oxide/calamine）在 Rust 层释放 GIL，
@@ -410,6 +415,9 @@ class Scanner:
             cancelled=cancelled,
             # iter-133：传递未变更文件数到 scan_entries，供合并未变更命中结果
             unchanged_count=self._unchanged_count,
+            # iter-135：传递本次构建的 manifest，供 scan_entries 合并循环过滤
+            # 已删除文件（keys() 即本次 walk 访问到的所有文件，含变更+未变更）
+            manifest=self._current_manifest,
         )
 
     @property
@@ -450,6 +458,12 @@ class Scanner:
         # 若不从 WalkResult 恢复，合并条件 _unchanged_count > 0 永远为 False，
         # 未变更命中结果不会被合并，导致增量扫描结果清零。
         self._unchanged_count = walk_result.unchanged_count
+        # iter-135：从 WalkResult 恢复 manifest——collect_entries 在 FileStatsWorker
+        # 的 Scanner 实例中构建 _current_manifest，但 ScanWorker 使用新 Scanner
+        # 实例调 scan_entries，_current_manifest 初始为 None。若不从 WalkResult
+        # 恢复，合并循环无法过滤已删除文件（_current_manifest.fingerprints.keys()
+        # 即本次 walk 访问到的所有文件，已删除文件不在其中）。
+        self._current_manifest = walk_result.manifest
         # walk_result.cancelled 来自 collect_entries 末尾的 is_cancelled 快照，
         # 此处沿用：walk 被取消则跳过 scan/archive 阶段
         cancelled = walk_result.cancelled
@@ -523,17 +537,9 @@ class Scanner:
         # 本次 scan 仅扫描变更文件（entries），未变更文件的命中结果从上次
         # ScanReport 复用（_unchanged_hits 按相对路径索引）。合并后 results
         # 包含变更文件 + 未变更命中文件，统计需相应累加。
+        # iter-135：合并时过滤已删除文件（不在本次 walk manifest 中）。
         if self._unchanged_count > 0 and self._prev_report is not None:
-            # 收集本次扫描中仍有命中的文件相对路径，避免合并时重复
-            changed_hit_rels: set[str] = {IncrementalManifest.rel_key(r.path, root) for r in results if r.has_hit}
-            # 合并未变更文件中仍有命中的结果（本次未重新扫描的文件）
-            for rel, sr in self._unchanged_hits.items():
-                if rel not in changed_hit_rels:
-                    results.append(sr)
-                    matched += 1
-                    matches += sr.total_match_count
-            # 统计累加：未变更文件视为已扫描（复用上次结果，无需重新 I/O）
-            scanned += self._unchanged_count
+            matched, matches, scanned = self._merge_unchanged_hits(results, root, matched, matches, scanned)
 
         # iter-133：误报白名单过滤——在命中聚合阶段过滤命中白名单的结果。
         # 过滤位置在增量合并之后、stats 构造之前，确保本次扫描与未变更合并的
@@ -571,6 +577,44 @@ class Scanner:
             perf_summary=self._perf.to_dict(),
         )
         return ScanReport(root=root, results=tuple(results), stats=stats, cancelled=cancelled)
+
+    def _merge_unchanged_hits(
+        self,
+        results: list[ScanResult],
+        root: Path,
+        matched: int,
+        matches: int,
+        scanned: int,
+    ) -> tuple[int, int, int]:
+        """合并未变更文件的命中结果到 results，返回更新后的 (matched, matches, scanned)。
+
+        iter-124：未变更文件的命中结果从 prev_report 复用（_unchanged_hits 按相对
+        路径索引），避免重新 I/O 读取未变更文件内容。
+
+        iter-135：合并时用 _current_manifest.fingerprints.keys() 过滤已删除文件。
+        manifest 来自 WalkResult（FileStatsWorker 构建并传递），其 keys() 即本次
+        walk 访问到的所有文件（含变更+未变更）。已删除文件不会被 walk 到，故不在
+        keys() 中，据此跳过其命中结果，避免已删除文件的命中重新出现在结果列表。
+        manifest 为 None 时（全量模式或传递缺失）回退为空集合，不过滤保持旧行为。
+        """
+        # 收集本次扫描中仍有命中的文件相对路径，避免合并时重复
+        changed_hit_rels: set[str] = {IncrementalManifest.rel_key(r.path, root) for r in results if r.has_hit}
+        # iter-135：本次 walk 访问到的所有文件相对路径集合（含变更+未变更）
+        current_rels: set[str] = (
+            set(self._current_manifest.fingerprints.keys()) if self._current_manifest is not None else set()
+        )
+        # 合并未变更文件中仍有命中的结果（本次未重新扫描的文件）
+        for rel, sr in self._unchanged_hits.items():
+            # iter-135：跳过已删除文件（不在本次 walk 访问集合中）
+            if current_rels and rel not in current_rels:
+                continue
+            if rel not in changed_hit_rels:
+                results.append(sr)
+                matched += 1
+                matches += sr.total_match_count
+        # 统计累加：未变更文件视为已扫描（复用上次结果，无需重新 I/O）
+        scanned += self._unchanged_count
+        return matched, matches, scanned
 
     def _emit_progress(
         self,

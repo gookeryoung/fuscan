@@ -386,6 +386,11 @@ class WalkResult:
     :param cancelled: walk 是否被取消
     :param unchanged_count: 增量扫描时未变更文件数（iter-133：供 scan_entries
         合并未变更命中结果；全量扫描时为 0）
+    :param manifest: 本次 collect_entries 构建的新 manifest（含变更+未变更所有
+        walk 到的文件指纹）。iter-135：scan_entries 用其 keys() 过滤已删除文件，
+        避免增量合并时把已删除文件的命中结果重新加入结果列表。ScanWorker 用
+        precollected 模式调 scan_entries 时，Scanner 实例自身 _current_manifest
+        为 None（collect_entries 未被本实例调用），需从 WalkResult 恢复。
     """
 
     root: Path
@@ -396,6 +401,7 @@ class WalkResult:
     skipped_dirs: tuple[str, ...] = ()
     cancelled: bool = False
     unchanged_count: int = 0
+    manifest: IncrementalManifest | None = None
 
 
 @dataclass(frozen=True)

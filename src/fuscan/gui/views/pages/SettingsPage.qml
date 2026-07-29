@@ -153,8 +153,9 @@ Item {
                         ComboBox {
                             id: fontFamilyCombo
                             Layout.fillWidth: true
-                            // 用 Qt.fontFamilies() 获取系统可用字体列表
-                            model: Qt.fontFamilies()
+                            // iter-135：延迟到 Component.onCompleted 再加载字体列表，
+                            // 避免页面首帧构造时 Qt.fontFamilies()（Windows 数百字体）阻塞。
+                            // 默认 model 为空，onCompleted 中赋值后触发 ComboBox 刷新。
                             // 显示当前配置字体（空串显示"平台默认"）
                             displayText: configController.fontFamily
                                 ? configController.fontFamily
@@ -162,8 +163,9 @@ Item {
                             onActivated: {
                                 configController.setFontFamily(fontFamilyCombo.currentText)
                             }
-                            // 预选当前字体
+                            // 预选当前字体：先加载字体列表再 find，避免空 model 时 find 返回 -1
                             Component.onCompleted: {
+                                fontFamilyCombo.model = Qt.fontFamilies()
                                 if (configController.fontFamily) {
                                     var idx = fontFamilyCombo.find(configController.fontFamily)
                                     if (idx >= 0) fontFamilyCombo.currentIndex = idx
@@ -498,8 +500,12 @@ Item {
                                 clip: true
                                 interactive: true
                                 // iter-106 P1：预渲染屏幕外 delegate，避免滚动时重建
-                                cacheBuffer: 500
-                                model: configController.extractorModel
+                                // iter-135：仅扫描 Tab 激活时绑定 model + 启用 cacheBuffer，
+                                // 避免页面首帧构造时 ListView 预渲染屏幕外 delegate 卡顿。
+                                // SettingsPage 重建时默认在通用 Tab，model 为 null 不构造
+                                // delegate；切到扫描 Tab 才绑定 model 构造 delegate。
+                                cacheBuffer: settingsTabBar.currentIndex === 1 ? 500 : 0
+                                model: settingsTabBar.currentIndex === 1 ? configController.extractorModel : null
                                 // 按 category 角色分组，配合 section.delegate 渲染类别头部
                                 section.property: "category"
                                 section.criteria: ViewSection.FullString

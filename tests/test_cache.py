@@ -462,7 +462,7 @@ class TestCacheStoreRuleset:
         store = CacheStore(tmp_path / "cache.db")
         rs = RuleSet(version="1.0", rules=(_filename_rule(),))
 
-        def raise_oserror(self: Path) -> float:
+        def raise_oserror(self: Path, *args: object, **kwargs: object) -> float:
             raise OSError("simulated")
 
         # 仅对真实存在的路径触发；__inline__ 路径走 exists() False 分支

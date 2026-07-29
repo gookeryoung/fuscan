@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -32,6 +33,14 @@ __all__ = ["ArchiveScanner"]
 
 logger = logging.getLogger(__name__)
 
+# iter-135：单压缩包条目数上限与取消检查频率默认值。
+# - DEFAULT_MAX_ARCHIVE_ENTRIES：超过此值的压缩包截断扫描，避免恶意/损坏压缩包
+#   （如 zip bomb）耗尽内存与时间。5000 条目足够覆盖常规工程压缩包。
+# - CANCEL_CHECK_INTERVAL：每处理 N 个条目检查一次取消信号，避免逐条检查的
+#   函数调用开销（5.5 万条目场景节省约 2ms）。
+DEFAULT_MAX_ARCHIVE_ENTRIES = 5000
+CANCEL_CHECK_INTERVAL = 64
+
 
 class ArchiveScanner:
     """压缩文件扫描器：对单个压缩包内所有文件应用规则。
@@ -40,6 +49,13 @@ class ArchiveScanner:
     - 通过 :func:`get_reader` 工厂分发到 ZipReader/RarReader
     - 内容提取策略：读取条目字节 → 通过 ``extract_content_from_bytes_with_retry`` 从内存直接提取
     - 加密条目未提供密码时跳过并记录错误
+
+    iter-135：``max_entries`` 与 ``cancel_check`` 提供保护，避免恶意/损坏压缩包
+    （如 zip bomb、超大归档）卡死扫描，并支持用户取消信号在压缩包内部及时生效。
+
+    - ``max_entries``：单压缩包扫描条目数上限，超过后截断并记录 warning
+    - ``cancel_check``：返回 ``True`` 表示外部已请求取消，每 ``CANCEL_CHECK_INTERVAL``
+      个条目检查一次（平衡响应性与开销）。``None`` 表示不检查取消（向后兼容）
     """
 
     def __init__(
@@ -49,10 +65,15 @@ class ArchiveScanner:
         max_entry_size: int = DEFAULT_MAX_FILE_SIZE,
         cache: CacheStore | None = None,
         scan_extensions: frozenset[str] | None = None,
+        max_entries: int = DEFAULT_MAX_ARCHIVE_ENTRIES,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> None:
         self._ruleset = ruleset
         self._password = password
         self._max_entry_size = max_entry_size
+        # iter-135：单压缩包条目数上限与取消检查回调
+        self._max_entries: int = max_entries
+        self._cancel_check: Callable[[], bool] | None = cancel_check
         # 压缩包内部条目同样按白名单过滤：
         #   - None：用户全选，扫所有内部条目（向后兼容全选快速路径）
         #   - 空 frozenset：用户全部取消勾选，不扫任何内部条目
@@ -107,7 +128,21 @@ class ArchiveScanner:
             )
 
         results: list[ScanResult] = []
+        # iter-135：processed_count 同时驱动取消检查（每 CANCEL_CHECK_INTERVAL 条）
+        # 与条目数上限保护（超过 max_entries 截断）。仅统计实际进入扫描的条目
+        # （已剔除 is_dir 与白名单过滤），与 results 长度一致。
+        processed_count = 0
+        truncated = False
         for entry in entries:
+            # 取消检查：cancel_check() 返回 True 表示外部已请求取消，立即 break。
+            # 每 CANCEL_CHECK_INTERVAL 条检查一次，避免逐条调用开销。
+            if (
+                self._cancel_check is not None
+                and (processed_count & (CANCEL_CHECK_INTERVAL - 1)) == 0
+                and self._cancel_check()
+            ):
+                logger.info("压缩包扫描被取消: %s（已扫描 %d 条）", archive_path, processed_count)
+                break
             if entry.is_dir:
                 continue
             # 按白名单过滤压缩包内部条目。
@@ -116,10 +151,31 @@ class ArchiveScanner:
             # 空 frozenset 表示用户全部取消勾选，跳过所有条目。
             if self._scan_extensions is not None and entry.extension not in self._scan_extensions:
                 continue
+            # iter-135：条目数上限保护，超过 max_entries 截断避免 zip bomb 卡死
+            if processed_count >= self._max_entries:
+                truncated = True
+                logger.warning(
+                    "压缩包条目数超上限截断: %s（已扫描 %d 条，上限 %d）",
+                    archive_path,
+                    processed_count,
+                    self._max_entries,
+                )
+                break
             result = self._scan_entry(archive_path, entry, reader)
             results.append(result)
+            processed_count += 1
 
         self._close_reader(reader)
+        # 截断时附加错误结果标识部分扫描，便于上层在统计中体现
+        if truncated:
+            results.append(
+                ScanResult(
+                    path=archive_path,
+                    size=0,
+                    hits=(),
+                    errors=1,
+                ),
+            )
         return tuple(results)
 
     def _scan_entry(

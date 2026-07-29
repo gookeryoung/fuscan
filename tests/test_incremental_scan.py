@@ -398,3 +398,97 @@ class TestIncrementalMerge:
         # 压缩包内部条目不被合并
         assert not any(r.archive_path is not None for r in report2.results)
         assert all("archive.zip" not in str(r.path) for r in report2.results)
+
+    def test_merge_excludes_deleted_file_hits(self, tmp_path: Path) -> None:
+        """iter-135：删除文件后增量扫描，删除文件的命中结果不应出现在最终 report。"""
+        file_a = tmp_path / "secret_a.txt"  # 将删除
+        file_b = tmp_path / "secret_b.txt"  # 保持不变
+        file_a.write_text("x", encoding="utf-8")
+        file_b.write_text("y", encoding="utf-8")
+        rs = _build_ruleset(_filename_rule("r", "secret"))
+
+        # 全量扫描：两个文件都命中
+        scanner1 = Scanner(rs, scan_extensions=("txt",))
+        report1 = scanner1.scan(tmp_path)
+        assert report1.stats.matched_files == 2
+        manifest = scanner1.current_manifest
+        assert manifest is not None
+
+        # 删除 file_a
+        file_a.unlink()
+
+        # 增量扫描
+        scanner2 = Scanner(
+            rs,
+            scan_extensions=("txt",),
+            incremental_manifest=manifest,
+            prev_report=report1,
+        )
+        walk_result = scanner2.collect_entries(tmp_path)
+        # file_a 已删除，不在 walk 结果中
+        assert all(e.path != file_a for e in walk_result.entries)
+
+        report2 = scanner2.scan_entries(tmp_path, walk_result)
+        # iter-135 关键断言：删除文件的命中结果不应出现在最终 report
+        assert not any(r.path == file_a for r in report2.results), "删除文件的命中结果不应被合并"
+        # 未删除文件的命中结果仍保留
+        assert any(r.path == file_b for r in report2.results)
+        # matched_files 只计未删除文件
+        assert report2.stats.matched_files == 1
+        # 结果路径集合不包含 file_a
+        result_paths = {r.path for r in report2.results}
+        assert file_a not in result_paths
+
+    def test_merge_excludes_deleted_file_hits_via_walk_result_manifest(self, tmp_path: Path) -> None:
+        """iter-135：ScanWorker precollected 模式下 manifest 经 WalkResult 传递，删除文件被过滤。
+
+        模拟 ScanWorker 用新 Scanner 实例调 scan_entries 的场景：
+        collect_entries 在 stats Scanner 实例构建 manifest 并放入 WalkResult，
+        scan_entries 在 scan Scanner 实例从 WalkResult 恢复 manifest 用于过滤。
+        """
+        file_a = tmp_path / "secret_a.txt"  # 将删除
+        file_b = tmp_path / "secret_b.txt"  # 保持不变
+        file_a.write_text("x", encoding="utf-8")
+        file_b.write_text("y", encoding="utf-8")
+        rs = _build_ruleset(_filename_rule("r", "secret"))
+
+        # 全量扫描
+        scanner1 = Scanner(rs, scan_extensions=("txt",))
+        report1 = scanner1.scan(tmp_path)
+        manifest1 = scanner1.current_manifest
+        assert manifest1 is not None
+        assert report1.stats.matched_files == 2
+
+        # 删除 file_a
+        file_a.unlink()
+
+        # 模拟 FileStatsWorker：用 stats Scanner 跑 collect_entries，产出 WalkResult
+        stats_scanner = Scanner(
+            rs,
+            scan_extensions=("txt",),
+            incremental_manifest=manifest1,
+        )
+        walk_result = stats_scanner.collect_entries(tmp_path)
+        # WalkResult.manifest 应非 None（iter-135 新增字段传递）
+        assert walk_result.manifest is not None
+        # file_a 已删除，不在 manifest.fingerprints 中
+        rel_a = IncrementalManifest.rel_key(file_a, tmp_path)
+        assert rel_a not in walk_result.manifest.fingerprints
+
+        # 模拟 ScanWorker：用新 scan Scanner 实例调 scan_entries，传 prev_report
+        scan_scanner = Scanner(
+            rs,
+            scan_extensions=("txt",),
+            prev_report=report1,
+        )
+        # scan_scanner 自身 _current_manifest 为 None（未调 collect_entries）
+        assert scan_scanner._current_manifest is None
+
+        report2 = scan_scanner.scan_entries(tmp_path, walk_result)
+        # scan_entries 从 WalkResult 恢复 manifest，用于过滤已删除文件
+        assert scan_scanner._current_manifest is not None
+        # 删除文件的命中结果不应出现
+        assert not any(r.path == file_a for r in report2.results), "删除文件命中不应经 WalkResult.manifest 过滤后仍出现"
+        # 未删除文件命中保留
+        assert any(r.path == file_b for r in report2.results)
+        assert report2.stats.matched_files == 1

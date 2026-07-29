@@ -23,9 +23,13 @@ Button {
     property string accent: "ghost"
     // 图标 qrc 路径（如 "qrc:/icons/rules.svg"），为空则不显示图标
     property string iconSource: ""
-    // 图标尺寸（像素），默认 14 与正文字号一致
-    property int iconSize: 14
-    property int btnSize: accent === "primary" ? appTheme.btnHeightSecondary
+    // 紧凑模式：true 时按钮高度降至 ghost 尺寸、图标与字号缩小、padding 收窄，
+    // 适用于详情面板等中等密度操作按钮，避免视觉上变成主要按钮
+    property bool compact: false
+    // 图标尺寸（像素），默认 14 与正文字号一致；compact 模式下默认 12
+    property int iconSize: control.compact ? 12 : 14
+    property int btnSize: control.compact ? appTheme.btnHeightGhost
+        : accent === "primary" ? appTheme.btnHeightSecondary
         : accent === "secondary" ? appTheme.btnHeightSecondary
         : accent === "danger" ? appTheme.btnHeightSecondary
         : appTheme.btnHeightGhost
@@ -47,8 +51,9 @@ Button {
     implicitHeight: btnSize
     // 宽度自适应内容（Button 默认 implicitWidth = contentItem.implicitWidth + padding）
     // 文字按钮如「选择」需足够宽度；左右 padding 12px 留白保证纯图标按钮不过窄
-    leftPadding: 12
-    rightPadding: 12
+    // compact 模式下 padding 收窄至 8px，与缩小的字号/图标协调
+    leftPadding: control.compact ? 8 : 12
+    rightPadding: control.compact ? 8 : 12
     topPadding: 0
     bottomPadding: 0
 
@@ -126,7 +131,8 @@ Button {
             Label {
                 text: control.text
                 visible: control.text.length > 0
-                font.pixelSize: control.accent === "primary" ? 14 : 13
+                font.pixelSize: control.compact ? 12
+                    : control.accent === "primary" ? 14 : 13
                 color: control._foreground
                 verticalAlignment: Text.AlignVCenter
             }

@@ -97,7 +97,7 @@ Rectangle {
             }
         }
 
-        // ---------- 第二行：任务元数据 ----------
+        // ---------- 第二行：任务元数据（iter-138 整合当前文件） ----------
         GridLayout {
             Layout.fillWidth: true
             columns: 2
@@ -142,13 +142,7 @@ Rectangle {
                 Layout.fillWidth: true
                 elide: Text.ElideRight
             }
-        }
-
-        // ---------- 第三行：当前文件 ----------
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 4
-
+            // iter-138：当前文件并入元数据网格作为第4行（原独立行整合）
             Label {
                 text: "当前文件"
                 font.pixelSize: 11
@@ -165,7 +159,7 @@ Rectangle {
             }
         }
 
-        // ---------- 第四行：双进度条（收集 + 解析，iter-105） ----------
+        // ---------- 第三行：双进度条（收集 + 解析，iter-105） ----------
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 8
@@ -199,13 +193,19 @@ Rectangle {
                                : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary))
                     }
                     Item { Layout.fillWidth: true }
+                    // iter-138：统计文字精简——去掉冗长前缀，改为「纳入 / 发现 · 跳过 N」紧凑格式
+                    // 跳过数 = 类型不符 + 用户标记，仅在有跳过时显示，避免空载噪音
                     Label {
                         text: workspaceController.activeScanController.walkIndeterminate
                             ? "统计中..."
-                            : ("纳入扫描 " + workspaceController.activeScanController.walkClassified
-                               + " / 发现 " + workspaceController.activeScanController.walkDiscovered
-                               + " | 类型不符 " + workspaceController.activeScanController.walkSkipped
-                               + " | 用户标记 " + workspaceController.activeScanController.walkUserSkipped)
+                            : (workspaceController.activeScanController.walkClassified
+                               + " / " + workspaceController.activeScanController.walkDiscovered
+                               + ((workspaceController.activeScanController.walkSkipped > 0
+                                   || workspaceController.activeScanController.walkUserSkipped > 0)
+                                  ? " · 跳过 "
+                                    + (workspaceController.activeScanController.walkSkipped
+                                       + workspaceController.activeScanController.walkUserSkipped)
+                                  : ""))
                         font.pixelSize: 11
                         color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                     }
@@ -310,11 +310,20 @@ Rectangle {
             }
         }
 
-        // ---------- 第五行：分类计数（PlainText + color，避免 RichText 解析开销） ----------
+        // ---------- 第四行：状态摘要 + 分类计数 + 控制按钮（iter-138 整合原五六两行） ----------
+        // 状态摘要 flex 占左侧，安全/命中/错误 紧跟其后，控制按钮固定右侧
         RowLayout {
             Layout.fillWidth: true
-            spacing: 16
+            spacing: 12
 
+            Label {
+                Layout.fillWidth: true
+                text: workspaceController.activeScanController.statusSummary
+                font.pixelSize: 11
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                elide: Text.ElideRight
+            }
+            // 分类计数（PlainText + color，避免 RichText 解析开销）
             Label {
                 text: "安全 " + workspaceController.activeScanController.passedCount
                 color: theme.colorSuccess
@@ -332,21 +341,6 @@ Rectangle {
                 color: theme.colorDanger
                 font.bold: true
                 font.pixelSize: 12
-            }
-            Item { Layout.fillWidth: true }
-        }
-
-        // ---------- 第六行：状态摘要 + 控制按钮 ----------
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 8
-
-            Label {
-                Layout.fillWidth: true
-                text: workspaceController.activeScanController.statusSummary
-                font.pixelSize: 11
-                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                elide: Text.ElideRight
             }
 
             // 暂停/继续按钮：扫描中显示「暂停」，已暂停显示「继续」

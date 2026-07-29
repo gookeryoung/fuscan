@@ -155,6 +155,7 @@ Rectangle {
                             text: "定位"
                             tooltip: workspaceController.currentScanController.detailIsArchiveEntry ? "在文件管理器中打开压缩包文件" : "在文件管理器中打开并选中该文件"
                             accent: "secondary"
+                            compact: true
                             onClicked: workspaceController.currentScanController.openLocation()
                         }
                     }
@@ -386,6 +387,7 @@ Rectangle {
                 text: "◀ 上一条"
                 tooltip: "查看上一条命中结果"
                 accent: "secondary"
+                compact: true
                 enabled: workspaceController.currentScanController.canSelectPrev
                 onClicked: {
                     opMsgLabel.text = ""
@@ -396,6 +398,7 @@ Rectangle {
                 text: "下一条 ▶"
                 tooltip: "查看下一条命中结果"
                 accent: "secondary"
+                compact: true
                 enabled: workspaceController.currentScanController.canSelectNext
                 onClicked: {
                     opMsgLabel.text = ""
@@ -434,7 +437,8 @@ Rectangle {
                 iconSource: "qrc:/icons/rescan.svg"
                 text: "替换内容"
                 tooltip: "备份源文件并替换命中内容（用输入框文本替换）"
-                accent: "primary"
+                accent: "secondary"
+                compact: true
                 enabled: workspaceController.currentScanController.canReplaceSelected
                 onClicked: {
                     var msg = workspaceController.currentScanController.replaceSelectedResult(replaceWithInput.text)
@@ -446,6 +450,7 @@ Rectangle {
                 text: "移至暂存"
                 tooltip: workspaceController.currentScanController.detailIsArchiveEntry ? "复制压缩包到暂存区隔离目录并标记为跳过" : "复制到暂存区隔离目录并标记为跳过"
                 accent: "secondary"
+                compact: true
                 enabled: workspaceController.currentScanController.selectedResultIndex >= 0
                 onClicked: {
                     var msg = workspaceController.currentScanController.moveSelectedToStaging()
@@ -458,6 +463,7 @@ Rectangle {
                 text: "标记误报"
                 tooltip: workspaceController.currentScanController.detailIsArchiveEntry ? "压缩包内部条目不支持标记误报" : "将此文件全部命中加入误报白名单，下次扫描起自动过滤"
                 accent: "secondary"
+                compact: true
                 enabled: workspaceController.currentScanController.selectedResultIndex >= 0
                          && !workspaceController.currentScanController.detailIsArchiveEntry
                 onClicked: {
@@ -482,7 +488,8 @@ Rectangle {
                 iconSource: "qrc:/icons/rescan.svg"
                 text: "全部替换"
                 tooltip: "对当前过滤后的所有命中结果执行批量替换（用上方输入框文本）"
-                accent: "primary"
+                accent: "secondary"
+                compact: true
                 enabled: workspaceController.currentScanController.canReplaceAllFiltered
                 onClicked: {
                     var msg = workspaceController.currentScanController.replaceAllFilteredResults(replaceWithInput.text)
@@ -494,6 +501,7 @@ Rectangle {
                 text: "撤销批量"
                 tooltip: "撤销最近一次批量替换，从 .bak 备份恢复所有文件"
                 accent: "secondary"
+                compact: true
                 enabled: workspaceController.currentScanController.canUndoLastBatchReplace
                 onClicked: {
                     var msg = workspaceController.currentScanController.undoLastBatchReplace()
@@ -505,6 +513,7 @@ Rectangle {
                 text: "撤销当前"
                 tooltip: "撤销当前选中结果的最近一次替换（从 .bak 恢复）"
                 accent: "secondary"
+                compact: true
                 enabled: workspaceController.currentScanController.canReplaceSelected
                 onClicked: {
                     var msg = workspaceController.currentScanController.undoSelectedReplace()

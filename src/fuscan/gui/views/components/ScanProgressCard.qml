@@ -312,19 +312,14 @@ Rectangle {
             }
         }
 
-        // ---------- 第四行：状态摘要 + 分类计数 + 控制按钮（iter-138 整合原五六两行） ----------
-        // 状态摘要 flex 占左侧，安全/命中/错误 紧跟其后，控制按钮固定右侧
+        // ---------- 第四行：分类计数 + 控制按钮（iter-138 整合原五六两行） ----------
+        // iter-139：移除左侧 statusSummary 文本——其"命中/错误"与右侧计数标签重复，
+        // "总计/扫描数"已在上方进度条显示，"跳过"在 walk 统计中，"耗时"完成后才准确。
+        // 计数靠左，控制按钮靠右
         RowLayout {
             Layout.fillWidth: true
             spacing: 12
 
-            Label {
-                Layout.fillWidth: true
-                text: workspaceController.activeScanController.statusSummary
-                font.pixelSize: 11
-                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                elide: Text.ElideRight
-            }
             // 分类计数（PlainText + color，避免 RichText 解析开销）
             Label {
                 text: "安全 " + workspaceController.activeScanController.passedCount
@@ -344,6 +339,7 @@ Rectangle {
                 font.bold: true
                 font.pixelSize: 12
             }
+            Item { Layout.fillWidth: true }
 
             // 暂停/继续按钮：扫描中显示「暂停」，已暂停显示「继续」
             IconButton {

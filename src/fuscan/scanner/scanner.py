@@ -388,6 +388,8 @@ class Scanner:
             user_skipped=user_skipped,
             skipped_dirs=tuple(self._skipped_dirs),
             cancelled=cancelled,
+            # iter-133：传递未变更文件数到 scan_entries，供合并未变更命中结果
+            unchanged_count=self._unchanged_count,
         )
 
     @property
@@ -422,6 +424,12 @@ class Scanner:
         total = walk_result.total
         skipped = walk_result.skipped
         user_skipped = walk_result.user_skipped
+        # iter-133：从 WalkResult 恢复未变更文件数——collect_entries 在
+        # FileStatsWorker 的 Scanner 实例中累加 _unchanged_count，但 ScanWorker
+        # 使用新 Scanner 实例调 scan_entries，_unchanged_count 初始为 0。
+        # 若不从 WalkResult 恢复，合并条件 _unchanged_count > 0 永远为 False，
+        # 未变更命中结果不会被合并，导致增量扫描结果清零。
+        self._unchanged_count = walk_result.unchanged_count
         # walk_result.cancelled 来自 collect_entries 末尾的 is_cancelled 快照，
         # 此处沿用：walk 被取消则跳过 scan/archive 阶段
         cancelled = walk_result.cancelled

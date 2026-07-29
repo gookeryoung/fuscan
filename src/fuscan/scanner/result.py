@@ -375,6 +375,8 @@ class WalkResult:
     :param user_skipped: 用户标记跳过的文件数（区别于 skipped）
     :param skipped_dirs: walk 阶段跳过的目录路径元组（最近条目，供 UI 展示）
     :param cancelled: walk 是否被取消
+    :param unchanged_count: 增量扫描时未变更文件数（iter-133：供 scan_entries
+        合并未变更命中结果；全量扫描时为 0）
     """
 
     root: Path
@@ -384,6 +386,7 @@ class WalkResult:
     user_skipped: int = 0
     skipped_dirs: tuple[str, ...] = ()
     cancelled: bool = False
+    unchanged_count: int = 0
 
 
 @dataclass(frozen=True)

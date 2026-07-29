@@ -22,8 +22,11 @@ pytestmark = pytest.mark.gui
 
 try:
     from PySide2.QtCore import QObject
+    from PySide2.QtGui import QGuiApplication
 
+    from fuscan.config import Config
     from fuscan.gui import AppController
+    from fuscan.gui.app import _apply_global_font
     from fuscan.gui.controllers.about_controller import AboutController
     from fuscan.gui.controllers.config_controller import ConfigController
     from fuscan.gui.controllers.rules_controller import RulesController
@@ -238,3 +241,40 @@ class TestGuiMainModule:
         import PySide2
 
         assert PySide2 is not None
+
+
+class TestApplyGlobalFont:
+    """``_apply_global_font`` 测试：用户配置覆盖与平台默认回退。
+
+    覆盖 :func:`fuscan.gui.app._apply_global_font` 的两个分支：
+    ``font_family`` 非空时用指定字体，为空时回退到平台默认字体族列表。
+    本测试不标记 ``gui_qml``，CI 上仍会运行（不同于 ``launch`` smoke 测试）。
+    """
+
+    def test_user_font_family_applied(self) -> None:
+        """用户配置 font_family 时使用指定字体族。"""
+        from unittest.mock import patch
+
+        app = QGuiApplication.instance() or QGuiApplication(["fuscan"])
+        cfg = Config(font_family="Microsoft YaHei UI", font_size=16, font_bold=True)
+        with patch("fuscan.config.load_config", return_value=cfg):
+            _apply_global_font(app)
+        font = app.font()
+        assert font.family() == "Microsoft YaHei UI"
+        assert font.pixelSize() == 16
+        assert font.bold() is True
+
+    def test_default_families_when_no_user_font(self) -> None:
+        """font_family 为 None 时回退到平台默认字体族列表。"""
+        from unittest.mock import patch
+
+        app = QGuiApplication.instance() or QGuiApplication(["fuscan"])
+        cfg = Config(font_family=None, font_size=14, font_bold=False)
+        with patch("fuscan.config.load_config", return_value=cfg), patch(
+            "fuscan.gui.theme.detect_font_families", return_value=("DefaultFont",)
+        ):
+            _apply_global_font(app)
+        font = app.font()
+        assert font.pixelSize() == 14
+        # family 应被设置（具体名取决于 QFont.setFamilies 选中的首个可用字体）
+        assert font.family()

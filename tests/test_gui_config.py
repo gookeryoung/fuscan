@@ -514,3 +514,71 @@ class TestResetToDefaults:
 
         reloaded = load_config()
         assert reloaded.max_workers == 5
+
+
+class TestGetConfigValue:
+    """``get_config_value`` 按 task_override 字段名读取全局配置值（iter-127）。
+
+    覆盖所有分支：scan_archives / max_workers / max_file_size / max_depth /
+    ignore_dirs / 未知字段。
+    """
+
+    def test_scan_archives(self, controller: ConfigController) -> None:
+        assert controller.get_config_value("scan_archives") == controller.config.scan_archives
+
+    def test_max_workers(self, controller: ConfigController) -> None:
+        assert controller.get_config_value("max_workers") == controller.config.max_workers
+
+    def test_max_file_size(self, controller: ConfigController) -> None:
+        assert controller.get_config_value("max_file_size") == controller.config.max_file_size
+
+    def test_max_depth_default_zero(self, controller: ConfigController) -> None:
+        """max_depth 默认 None 时应返回 0。"""
+        assert controller.get_config_value("max_depth") == 0
+
+    def test_max_depth_set_returns_value(self, controller: ConfigController) -> None:
+        """max_depth 设置后应返回设置值。"""
+        controller.config.max_depth = 5
+        assert controller.get_config_value("max_depth") == 5
+
+    def test_ignore_dirs_returns_tuple(self, controller: ConfigController) -> None:
+        """ignore_dirs 应返回 tuple 类型。"""
+        result = controller.get_config_value("ignore_dirs")
+        assert isinstance(result, tuple)
+        assert result == tuple(controller.config.ignore_dirs)
+
+    def test_unknown_key_returns_none(self, controller: ConfigController) -> None:
+        """未知字段应返回 None。"""
+        assert controller.get_config_value("nonexistent_field") is None
+
+
+class TestCategoryEnabled:
+    """``setCategoryEnabled``/``categoryEnabledState`` 类别勾选测试。"""
+
+    def test_set_category_enabled_updates_config(self, controller: ConfigController) -> None:
+        """setCategoryEnabled 应更新提取器勾选状态并持久化到 config。"""
+        model = controller.extractorModel
+        # 取第一个提取器所在的类别
+        first_category = model._rows[0].category  # type: ignore[attr-defined]
+        # 先禁用该类别
+        controller.setCategoryEnabled(first_category, False)
+        # disabled_extractors 应包含该类别下的提取器
+        assert len(controller.config.disabled_extractors) > 0
+
+        # 再启用
+        controller.setCategoryEnabled(first_category, True)
+        # disabled_extractors 应不再包含该类别下的提取器
+        assert len(controller.config.disabled_extractors) == 0
+
+    def test_category_enabled_state_all_selected(self, controller: ConfigController) -> None:
+        """全部启用时 categoryEnabledState 返回 1（全选）。"""
+        model = controller.extractorModel
+        first_category = model._rows[0].category  # type: ignore[attr-defined]
+        assert controller.categoryEnabledState(first_category) == 1
+
+    def test_category_enabled_state_none_selected(self, controller: ConfigController) -> None:
+        """全部禁用时 categoryEnabledState 返回 0（全不选）。"""
+        model = controller.extractorModel
+        first_category = model._rows[0].category  # type: ignore[attr-defined]
+        controller.setCategoryEnabled(first_category, False)
+        assert controller.categoryEnabledState(first_category) == 0

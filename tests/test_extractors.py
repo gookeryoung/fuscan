@@ -7,6 +7,8 @@ PDF/ODT/ODS 等较难动态生成的格式，使用 mock 或跳过。
 from __future__ import annotations
 
 import io
+import sys
+import types
 import zipfile
 from pathlib import Path
 
@@ -3182,3 +3184,116 @@ class TestExtractorFailureDataclass:
         assert len(failures) == 1
         # _retry_loop 中通过 str(exc)[:200] 截断
         assert len(failures[0].error_message) == 200
+
+
+# ---------------------------------------------------------------------------
+# _kreuzberg 适配层测试
+# ---------------------------------------------------------------------------
+
+
+class TestKreuzbergAdaptor:
+    """``fuscan.extractors._kreuzberg`` 适配层测试。
+
+    覆盖 ``is_available``/``extract_text``/``extract_text_from_bytes``
+    的可用性检测、ImportError 回退与提取失败路径。
+    """
+
+    def test_is_available_returns_false_when_import_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``import kreuzberg`` 抛 ImportError 时 is_available 返回 False。"""
+        from fuscan.extractors import _kreuzberg
+
+        # 设置 sys.modules["kreuzberg"] = None 使 `import kreuzberg` 抛 ImportError
+        monkeypatch.setitem(sys.modules, "kreuzberg", None)
+        _kreuzberg.is_available.cache_clear()
+
+        assert _kreuzberg.is_available() is False
+
+        # 清理缓存，避免影响后续测试
+        _kreuzberg.is_available.cache_clear()
+
+    def test_extract_text_raises_when_kreuzberg_missing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """``from kreuzberg import extract_file_sync`` 抛 ImportError 时 raise RuntimeError。"""
+        from fuscan.extractors import _kreuzberg
+
+        # 构造一个不含 extract_file_sync 的伪 kreuzberg 模块
+        fake_module = types.ModuleType("kreuzberg")
+        monkeypatch.setitem(sys.modules, "kreuzberg", fake_module)
+
+        with pytest.raises(RuntimeError, match="kreuzberg 未安装"):
+            _kreuzberg.extract_text(tmp_path / "fake.doc")
+
+    def test_extract_text_raises_on_extraction_failure(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """``extract_file_sync`` 抛异常时包装为 RuntimeError。"""
+        from fuscan.extractors import _kreuzberg
+
+        def _raise(_: str) -> None:
+            raise ValueError("解析失败")
+
+        monkeypatch.setattr("kreuzberg.extract_file_sync", _raise, raising=False)
+
+        with pytest.raises(RuntimeError, match="kreuzberg 提取失败"):
+            _kreuzberg.extract_text(tmp_path / "fake.doc")
+
+    def test_extract_text_returns_content_attribute(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """result 含 content 属性时返回 content。"""
+        from fuscan.extractors import _kreuzberg
+
+        class _Result:
+            content = "提取的文本"
+
+        monkeypatch.setattr("kreuzberg.extract_file_sync", lambda _: _Result(), raising=False)
+
+        assert _kreuzberg.extract_text(tmp_path / "fake.doc") == "提取的文本"
+
+    def test_extract_text_from_bytes_writes_temp_file(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """extract_text_from_bytes 写入临时文件后调用 extract_text。"""
+        from fuscan.extractors import _kreuzberg
+
+        called_paths: list[Path] = []
+
+        def _fake_extract(path: Path) -> str:
+            called_paths.append(path)
+            # 验证临时文件带正确扩展名且内容正确
+            assert path.suffix == ".rtf"
+            assert path.read_bytes() == b"test data"
+            return "提取结果"
+
+        monkeypatch.setattr(_kreuzberg, "extract_text", _fake_extract)
+
+        result = _kreuzberg.extract_text_from_bytes(b"test data", "rtf")
+        assert result == "提取结果"
+        assert len(called_paths) == 1
+
+    def test_extract_text_from_bytes_no_extension(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """extension 为空时临时文件无扩展名。"""
+        from fuscan.extractors import _kreuzberg
+
+        def _fake_extract(path: Path) -> str:
+            assert path.suffix == ""
+            return "ok"
+
+        monkeypatch.setattr(_kreuzberg, "extract_text", _fake_extract)
+
+        assert _kreuzberg.extract_text_from_bytes(b"data", "") == "ok"

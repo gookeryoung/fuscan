@@ -1965,6 +1965,96 @@ class TestTaskOverridesGlobalValueBehavior:
         assert overrides.get("scan_archives") == global_value
 
 
+class TestClearTaskOverride:
+    """iter-138 ``clearTaskOverride`` 测试：清除任务级配置覆盖。
+
+    覆盖四个分支：工作区不存在、非法 key、无覆盖 noop、正常清除并回填全局值。
+    """
+
+    def test_clear_nonexistent_workspace_noop(self, controller: WorkspaceController) -> None:
+        """工作区不存在时记录 warning 并返回，不抛异常。"""
+        # 不应抛异常
+        controller.clearTaskOverride("nonexistent-ws", "scan_archives")
+
+    def test_clear_invalid_key_noop(self, controller: WorkspaceController) -> None:
+        """非法 key（不在 TASK_OVERRIDE_KEYS 中）应被拒绝。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setTaskOverride(ws_id, "scan_archives", "false")
+
+        controller.clearTaskOverride(ws_id, "backup_dir")  # backup_dir 不在允许列表
+
+        # 原有覆盖应保留
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert overrides == {"scan_archives": False}
+
+    def test_clear_non_existing_override_noop(self, controller: WorkspaceController) -> None:
+        """key 在 task_overrides 中不存在时无操作返回。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # 未设置过任何覆盖，清除 scan_archives 应无操作
+        controller.clearTaskOverride(ws_id, "scan_archives")
+        assert controller.taskOverridesJson(ws_id) == "{}"
+
+    def test_clear_existing_override_removes_and_backfills_global(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """清除已有覆盖时应删除字段并用全局值回填 ScanController。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setTaskOverride(ws_id, "scan_archives", "false")
+        # 确认覆盖已设置
+        assert json.loads(controller.taskOverridesJson(ws_id)) == {"scan_archives": False}
+
+        # 清除覆盖
+        controller.clearTaskOverride(ws_id, "scan_archives")
+
+        # task_overrides 中应不再包含 scan_archives
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert "scan_archives" not in overrides
+
+        # ScanController 应被回填为全局值
+        sc = controller._ensure_scan_controller(ws_id)  # type: ignore[attr-defined]
+        global_value = controller._config_controller.scanArchives  # type: ignore[attr-defined]
+        assert sc._task_overrides.get("scan_archives") == global_value  # type: ignore[attr-defined]
+
+    def test_clear_persisted_after_restart(
+        self,
+        config_dir: Path,
+    ) -> None:
+        """清除覆盖后应持久化，重启后覆盖仍为空。"""
+        cfg1 = ConfigController()
+        rules1 = RulesController(cfg1)
+        ctrl1 = WorkspaceController(cfg1, rules1)
+        ws_id = ctrl1.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ctrl1.setTaskOverride(ws_id, "max_workers", "8")
+        ctrl1.clearTaskOverride(ws_id, "max_workers")
+
+        # 重新创建控制器，验证清除已持久化
+        cfg2 = ConfigController()
+        rules2 = RulesController(cfg2)
+        ctrl2 = WorkspaceController(cfg2, rules2)
+        assert ctrl2.taskOverridesJson(ws_id) == "{}"
+
+
+class TestNonexistentWorkspaceEdgeCases:
+    """工作区不存在时的边界测试：确保各方法不抛异常。"""
+
+    def test_start_incremental_scan_nonexistent_workspace_noop(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """startIncrementalScan 对不存在的工作区应记录 warning 并返回。"""
+        # 不应抛异常
+        controller.startIncrementalScan("nonexistent-ws")
+
+    def test_set_task_override_nonexistent_workspace_noop(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """setTaskOverride 对不存在的工作区应记录 warning 并返回。"""
+        # 不应抛异常
+        controller.setTaskOverride("nonexistent-ws", "scan_archives", "false")
+
+
 class TestLegacyPersistFileCompat:
     """iter-105 T4：旧版本持久化文件（无 collected_count/task_overrides 字段）兼容测试。"""
 

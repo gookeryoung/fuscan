@@ -763,24 +763,39 @@ class TestMoveToStaging:
             == "未选中结果"
         )
 
-    def test_archive_entry_returns_message(self, tmp_path: Path) -> None:
-        """压缩包内部条目返回提示消息。"""
-        hit = RuleHit(rule_name="可替换规则", severity=Severity.WARNING, detail="匹配")
+    def test_archive_entry_moves_archive_file(self, tmp_path: Path) -> None:
+        """iter-133：压缩包内部条目移至暂存压缩包文件本身。
+
+        压缩包内含敏感文件时隔离整个压缩包——内部条目无法直接复制，
+        移至暂存 archive_path 并标记跳过整个压缩包。
+        """
+        # 准备压缩包文件
+        archive = tmp_path / "scan_root" / "a.zip"
+        archive.parent.mkdir(parents=True)
+        archive.write_bytes(b"fake zip content")
+
+        hit = RuleHit(rule_name="敏感内容", severity=Severity.CRITICAL, detail="匹配")
         result = _make_result(
-            tmp_path / "a.zip!inner.txt",
+            archive.parent / "a.zip!inner.txt",
             hits=(hit,),
-            archive_path=tmp_path / "a.zip",
+            archive_path=archive,
         )
+
+        staging_dir = tmp_path / "staging"
         skip_store = SkipStore()
-        assert (
-            move_to_staging(
-                result=result,
-                staging_dir_str="",
-                last_report_root=None,
-                skip_store=skip_store,
-            )
-            == "压缩包内部条目不支持移至暂存"
+        msg = move_to_staging(
+            result=result,
+            staging_dir_str=str(staging_dir),
+            last_report_root=tmp_path / "scan_root",
+            skip_store=skip_store,
         )
+        assert "已移至暂存" in msg
+        # 压缩包文件应被复制到隔离目录
+        dest = staging_dir / "quarantine" / "a.zip"
+        assert dest.exists()
+        assert dest.read_bytes() == b"fake zip content"
+        # 应标记压缩包路径为跳过（而非内部条目路径）
+        assert str(archive) in skip_store.paths()
 
     def test_move_success(
         self,

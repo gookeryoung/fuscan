@@ -1203,6 +1203,31 @@ class TestOpenLocationWithResult:
         monkeypatch.setattr("fuscan.gui.controllers.scan_controller.open_path_in_explorer", _raise)
         controller.openLocation()  # 不应抛异常
 
+    def test_open_location_archive_entry_targets_archive(
+        self,
+        controller: ScanController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """iter-133：压缩包内部条目 openLocation 应定位到压缩包文件本身。"""
+        archive_path = Path("/tmp/a.zip")
+        result = ScanResult(
+            path=Path("/tmp/a.zip!inner/file.txt"),
+            size=100,
+            hits=(RuleHit(rule_name="敏感内容", severity=Severity.CRITICAL, detail="匹配"),),
+            archive_path=archive_path,
+        )
+        controller._result_model.set_results((result,))
+        controller.setSelectedResultIndex(0)
+
+        called: list[Path] = []
+        monkeypatch.setattr(
+            "fuscan.gui.controllers.scan_controller.open_path_in_explorer",
+            called.append,
+        )
+        controller.openLocation()
+        # 应定位到压缩包文件本身，而非内部条目路径
+        assert called == [archive_path]
+
     def test_copy_path_sets_clipboard(
         self,
         controller: ScanController,

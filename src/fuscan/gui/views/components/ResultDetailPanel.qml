@@ -149,12 +149,12 @@ Rectangle {
                             wrapMode: Text.WrapAnywhere
                         }
                         // 定位文件按钮：调用 workspaceController.currentScanController.openLocation()（无参 Slot）
+                        // iter-133：压缩包内部条目也启用——定位到压缩包文件本身
                         IconButton {
                             iconSource: "qrc:/icons/folder.svg"
                             text: "定位"
-                            tooltip: "在文件管理器中打开并选中该文件"
+                            tooltip: workspaceController.currentScanController.detailIsArchiveEntry ? "在文件管理器中打开压缩包文件" : "在文件管理器中打开并选中该文件"
                             accent: "secondary"
-                            enabled: !workspaceController.currentScanController.detailIsArchiveEntry
                             onClicked: workspaceController.currentScanController.openLocation()
                         }
                     }
@@ -444,9 +444,9 @@ Rectangle {
             IconButton {
                 iconSource: "qrc:/icons/export.svg"
                 text: "移至暂存"
-                tooltip: "复制到暂存区隔离目录并标记为跳过"
+                tooltip: workspaceController.currentScanController.detailIsArchiveEntry ? "复制压缩包到暂存区隔离目录并标记为跳过" : "复制到暂存区隔离目录并标记为跳过"
                 accent: "secondary"
-                enabled: !workspaceController.currentScanController.detailIsArchiveEntry && workspaceController.currentScanController.selectedResultIndex >= 0
+                enabled: workspaceController.currentScanController.selectedResultIndex >= 0
                 onClicked: {
                     var msg = workspaceController.currentScanController.moveSelectedToStaging()
                     opMsgLabel.text = msg

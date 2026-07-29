@@ -1034,12 +1034,19 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot()  # pyrefly: ignore [not-callable]
     def openLocation(self) -> None:
-        """在文件管理器中打开选中结果文件位置。"""
+        """在文件管理器中打开选中结果文件位置。
+
+        iter-133：压缩包内部条目（``archive_path`` 非 None）时定位到压缩包
+        文件本身——内部条目路径形如 ``archive.zip!inner/file.txt`` 无法直接
+        被 explorer 识别，定位到压缩包根让用户在文件管理器中查看压缩包。
+        """
         result = self._get_selected_result()
         if result is None:
             return
+        # 压缩包内部条目：定位到压缩包文件本身
+        target = result.archive_path if result.archive_path is not None else result.path
         try:
-            open_path_in_explorer(result.path)
+            open_path_in_explorer(target)
         except OSError as exc:
             logger.warning("打开文件位置失败: %s", exc, exc_info=True)
 

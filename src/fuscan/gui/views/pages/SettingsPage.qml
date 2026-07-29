@@ -437,7 +437,13 @@ Item {
                                             // tristate 让 Qt 允许三态显示（包含 PartiallyChecked）
                                             tristate: true
                                             // 根据 categoryEnabledState 计算三态
+                                            // iter-133：引用 extractorCountText 触发 binding 重新求值——
+                                            // categoryEnabledState 是 @Slot 无 notify 信号，子项勾选变化时
+                                            // 不会自动刷新；extractorCountText 是 @Property 且 notify=
+                                            // extractorCountChanged，setExtractorEnabled/setCategoryEnabled
+                                            // 均 emit 此信号，引用它让 checkState binding 随子项变化重算
                                             checkState: {
+                                                var _trigger = configController.extractorCountText
                                                 var state = configController.categoryEnabledState(section)
                                                 if (state === 1) return Qt.Checked
                                                 if (state === 2) return Qt.PartiallyChecked

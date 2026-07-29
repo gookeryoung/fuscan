@@ -213,12 +213,16 @@ def move_to_staging(
 
     流程：
 
-    1. 校验选中结果、非压缩包内部条目
+    1. 校验选中结果
     2. 计算暂存区隔离目录：``<staging_dir>/quarantine/`` 或
        ``<默认暂存区>/quarantine/``
     3. 保留源文件相对扫描根目录的目录结构，复制到隔离目录
     4. 调用 :meth:`SkipStore.add` 标记为跳过，后续扫描自动跳过
     5. 返回操作消息供 QML 显示
+
+    iter-133：压缩包内部条目（``archive_path`` 非 None）时，移至暂存的是
+    压缩包文件本身（``archive_path``），并标记 ``archive_path`` 为跳过——
+    压缩包内含敏感文件时隔离整个压缩包是合理的，且内部条目无法直接复制。
 
     :param result: 选中结果；``None`` 返回 ``未选中结果``
     :param staging_dir_str: 暂存区目录字符串（``None`` 或空字符串用默认目录）
@@ -229,36 +233,36 @@ def move_to_staging(
     返回值语义：
 
     - 未选中结果 → ``未选中结果``
-    - 压缩包内部条目 → ``压缩包内部条目不支持移至暂存``
     - 复制成功 → ``已移至暂存: <隔离路径>`` 并标记跳过
     - 复制失败 → ``移至暂存失败: <错误>``
     """
     if result is None:
         return "未选中结果"
-    if result.archive_path is not None:
-        return "压缩包内部条目不支持移至暂存"
+
+    # iter-133：压缩包内部条目时操作 archive_path（压缩包文件本身）
+    source_path = result.archive_path if result.archive_path is not None else result.path
 
     # 计算暂存区隔离目录
     staging_root = Path(staging_dir_str) if staging_dir_str else detect_default_staging_dir()
     quarantine_dir = staging_root / "quarantine"
-    scan_root = last_report_root if last_report_root is not None else result.path.parent
+    scan_root = last_report_root if last_report_root is not None else source_path.parent
 
     # 保留相对扫描根目录的目录结构
     try:
-        rel_path = result.path.relative_to(scan_root)
+        rel_path = source_path.relative_to(scan_root)
     except ValueError:
         # 不在扫描根下（如绝对路径跨盘符），仅保留文件名
-        rel_path = Path(result.path.name)
+        rel_path = Path(source_path.name)
 
     dest = quarantine_dir / rel_path
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(result.path, dest)
+        shutil.copy2(source_path, dest)
     except OSError as exc:
-        logger.warning("移至暂存失败: %s -> %s", result.path, dest, exc_info=True)
+        logger.warning("移至暂存失败: %s -> %s", source_path, dest, exc_info=True)
         return f"移至暂存失败: {exc}"
 
-    # 标记为跳过，后续扫描自动跳过该文件
-    skip_store.add(str(result.path))
-    logger.info("已移至暂存: %s -> %s（已标记跳过）", result.path, dest)
+    # 标记为跳过，后续扫描自动跳过该文件（压缩包条目标记 archive_path）
+    skip_store.add(str(source_path))
+    logger.info("已移至暂存: %s -> %s（已标记跳过）", source_path, dest)
     return f"已移至暂存: {dest}（已标记跳过）"

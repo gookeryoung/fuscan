@@ -383,10 +383,13 @@ Item {
 
         // ---------- 全局规则配置区（iter-137） ----------
         // 规则配置全局化：所有工作区共享同一规则集，首页下方提供编辑入口
+        // iter-138：改为可折叠，默认收起仅显示标题栏，点击展开显示完整规则面板
         Rectangle {
             Layout.fillWidth: true
-            Layout.fillHeight: true
-            Layout.preferredHeight: 1  // 与上方工作区列表弹性分配
+            // 收起时不占额外空间（仅标题栏 ~48px），展开时与上方工作区列表弹性分配
+            Layout.fillHeight: !rulesPanelInner.collapsed
+            Layout.preferredHeight: rulesPanelInner.collapsed ? 48 : 1
+            Layout.minimumHeight: 48
             visible: !workspaceController.hasActiveScan
             color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
             border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
@@ -394,8 +397,13 @@ Item {
             radius: theme.radiusLg
 
             RulesPanel {
+                id: rulesPanelInner
                 anchors.fill: parent
                 anchors.margins: 12
+                // 首页内嵌启用可折叠，默认收起（用户日常聚焦工作区列表，
+                // 需要编辑规则时点击展开）
+                collapsible: true
+                collapsed: true
             }
         }
     }

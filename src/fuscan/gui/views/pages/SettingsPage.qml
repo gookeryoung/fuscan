@@ -350,7 +350,10 @@ Item {
                                 // 避免页面首帧构造时 ListView 预渲染屏幕外 delegate 卡顿。
                                 // iter-136：扫描 Tab 已调到 index 0，SettingsPage 重建时
                                 // 默认即在此 Tab；切到其他 Tab 时 model 为 null 不构造 delegate。
-                                cacheBuffer: settingsTabBar.currentIndex === 0 ? 500 : 0
+                                // iter-138：cacheBuffer 改为固定值，避免与 currentIndex 双向依赖
+                                // 触发 "model" binding loop（model=null 时 contentHeight=0 引起
+                                // StackLayout 尺寸重算循环）。
+                                cacheBuffer: 500
                                 model: settingsTabBar.currentIndex === 0 ? configController.extractorModel : null
                                 // 按 category 角色分组，配合 section.delegate 渲染类别头部
                                 section.property: "category"

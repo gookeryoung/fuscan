@@ -68,6 +68,56 @@ class TestExportPdf:
         # PDF 中文字以 CID 编码无法直接 grep，但 PDF 结构标记应可见
         assert b"/Type /Catalog" in data or b"/Pages" in data
 
+    def test_export_pdf_truncates_long_detail(self, tmp_path: Path) -> None:
+        """iter-138：超长 detail 应被截断到 200 字符 + 省略号，避免 LayoutError。
+
+        原始 bug：未截断时单 cell 换行后行高可达 4972pt > A4 页面可用高度，
+        触发 ``LayoutError: Table N rows x M cols too large on page``。
+        """
+        # 构造 5000 字符的超长 detail（模拟 base64 编码内容）
+        long_detail = "A" * 5000
+        results = (
+            ScanResult(
+                path=tmp_path / "leak.txt",
+                size=100,
+                hits=(
+                    RuleHit(
+                        rule_name="密钥泄漏",
+                        severity=Severity.CRITICAL,
+                        detail=long_detail,
+                        match_count=1,
+                    ),
+                ),
+            ),
+        )
+        stats = ScanStats(
+            total_files=1,
+            scanned_files=1,
+            matched_files=1,
+            total_matches=1,
+        )
+        report = ScanReport(root=tmp_path, results=results, stats=stats)
+        # 不应抛 LayoutError，应正常生成 PDF
+        data = export_pdf(report)
+        assert data[:5] == b"%PDF-"
+
+    def test_truncate_text_helper(self) -> None:
+        """iter-138：_truncate_text 辅助函数应正确截断超长文本。"""
+        from fuscan.scanner.export import _truncate_text
+
+        # 短文本原样返回
+        assert _truncate_text("short") == "short"
+        # 边界：恰好等于阈值
+        assert _truncate_text("A" * 200) == "A" * 200
+        # 超长文本截断 + 省略号
+        result = _truncate_text("A" * 500)
+        assert len(result) == 203  # 200 + "..."
+        assert result.endswith("...")
+        # 自定义阈值
+        result_custom = _truncate_text("A" * 100, max_chars=50)
+        assert len(result_custom) == 53
+        assert result_custom.endswith("...")
+
 
 class TestExportExcel:
     def test_export_excel_returns_zip_archive(self, tmp_path: Path) -> None:

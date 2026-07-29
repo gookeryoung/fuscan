@@ -17,6 +17,7 @@ Rectangle {
     id: card
     property ThemeController theme: Theme
     property WorkspaceControllerType workspaceController: WorkspaceController
+    property ConfigControllerType configController: ConfigController
 
     // 由 HomePage 注入：扫描中的工作区 ID 与展示字段
     property string workspaceId: ""
@@ -126,6 +127,20 @@ Rectangle {
                 color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                 Layout.fillWidth: true
                 elide: Text.ElideMiddle
+            }
+            // iter-138：资源配置（CPU 线程 / 最大文件 / 扫描深度）
+            Label {
+                text: "配置"
+                font.pixelSize: 11
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+            }
+            Label {
+                text: "最多 " + configController.maxWorkers + " 线程 / 最大 "
+                      + configController.maxFileSizeMB + " MB / 深度 " + configController.maxDepth
+                font.pixelSize: 12
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                Layout.fillWidth: true
+                elide: Text.ElideRight
             }
         }
 
@@ -270,9 +285,12 @@ Rectangle {
                     Layout.fillWidth: true
                     // scan 阶段未开始时 indeterminate（walk 进行中）
                     indeterminate: workspaceController.activeScanController.progressIndeterminate
+                    // iter-138：改用 progress 百分比（0-100），扫描完成时 progress=100 进度条满。
+                    // 原 progressScanned/progressTotal 在扫描完成时可能 scanned<total
+                    // （错误文件未计入），导致 visualPosition<1 进度条未满。
                     from: 0.0
-                    to: Math.max(workspaceController.activeScanController.progressTotal, 1)
-                    value: workspaceController.activeScanController.progressScanned
+                    to: 100.0
+                    value: workspaceController.activeScanController.progress
                     background: Rectangle {
                         implicitHeight: 6
                         color: theme.isDark ? theme.colorBorderDark : theme.colorBorder

@@ -30,6 +30,21 @@ from fuscan.scanner.result import ScanReport, format_size
 
 __all__ = ["export_excel", "export_pdf", "export_report", "save_report"]
 
+# PDF 单元格文本最大字符数：超出截断加省略号，防止单行行高超过 A4 页面可用高度
+# （A4 约 800pt，9pt 字体 13pt 行距，每行约 12 个 CJK 字符，200 字符 ≈ 17 行 ≈ 221pt）
+_PDF_CELL_MAX_CHARS = 200
+
+
+def _truncate_text(text: str, max_chars: int = _PDF_CELL_MAX_CHARS) -> str:
+    """截断超长文本，超出加省略号。
+
+    防止 PDF 表格单元格内超长文本（如 base64 编码、长路径）换行后行高超过
+    A4 页面可用高度，触发 ``LayoutError: Table N rows x M cols too large on page``。
+    """
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "..."
+
 
 def export_pdf(report: ScanReport) -> bytes:
     """将扫描报告转换为 PDF 二进制数据。
@@ -106,13 +121,13 @@ def export_pdf(report: ScanReport) -> bytes:
             for hit in result.hits:
                 rows.append(
                     [
-                        Paragraph(rel, cell_style),
+                        Paragraph(_truncate_text(rel), cell_style),
                         Paragraph(format_size(result.size), cell_style),
                         Paragraph(hit.severity.value, cell_style),
-                        Paragraph(hit.rule_name, cell_style),
-                        Paragraph(hit.match_description or "", cell_style),
+                        Paragraph(_truncate_text(hit.rule_name), cell_style),
+                        Paragraph(_truncate_text(hit.match_description or ""), cell_style),
                         Paragraph(str(hit.match_count), cell_style),
-                        Paragraph(hit.detail, cell_style),
+                        Paragraph(_truncate_text(hit.detail), cell_style),
                     ]
                 )
         col_widths = [50 * mm, 18 * mm, 14 * mm, 24 * mm, 24 * mm, 12 * mm, 32 * mm]

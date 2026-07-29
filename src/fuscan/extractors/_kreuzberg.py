@@ -43,7 +43,7 @@ def is_available() -> bool:
     :return: kreuzberg 可用返回 ``True``，否则 ``False``
     """
     try:
-        import kreuzberg  # noqa: F401  # pyrefly: ignore [missing-import]
+        import kreuzberg  # noqa: F401
     except ImportError:
         return False
     return True
@@ -57,7 +57,7 @@ def extract_text(path: Path) -> str:
     :raises RuntimeError: kreuzberg 未安装或提取失败
     """
     try:
-        from kreuzberg import extract_file_sync  # pyrefly: ignore [missing-import]
+        from kreuzberg import extract_file_sync
     except ImportError as exc:
         raise RuntimeError("kreuzberg 未安装") from exc
 

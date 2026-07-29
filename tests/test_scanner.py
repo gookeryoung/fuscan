@@ -592,6 +592,56 @@ class TestScanStats:
         assert stats.perf_summary is not None
         assert stats.perf_summary["read_bytes"]["count"] == 50
 
+    def test_summary_includes_archive_entries(self) -> None:
+        """iter-137：archive_entries > 0 时 summary 应注明含压缩包内条目。"""
+        stats = ScanStats(
+            total_files=10,
+            scanned_files=210,
+            archive_entries=200,
+            matched_files=16,
+            duration_seconds=1.5,
+        )
+        s = stats.summary()
+        assert "扫描 210（含压缩包内条目 200）" in s
+
+    def test_summary_omits_archive_entries_when_zero(self) -> None:
+        """iter-137：archive_entries == 0 时 summary 不附加压缩包注明。"""
+        stats = ScanStats(
+            total_files=10,
+            scanned_files=8,
+            archive_entries=0,
+            matched_files=3,
+            duration_seconds=1.0,
+        )
+        s = stats.summary()
+        assert "压缩包内条目" not in s
+        assert "扫描 8" in s
+
+    def test_archive_entries_serialization_roundtrip(self, tmp_path: Path) -> None:
+        """iter-137：archive_entries 应在 to_json/from_json 往返中保留。"""
+        from fuscan.scanner.result import ScanReport
+
+        stats = ScanStats(
+            total_files=10,
+            scanned_files=210,
+            archive_entries=200,
+            matched_files=16,
+            duration_seconds=1.5,
+        )
+        report = ScanReport(root=tmp_path, results=(), stats=stats)
+        restored = ScanReport.from_json(report.to_json())
+        assert restored.stats.archive_entries == 200
+
+    def test_archive_entries_backward_compat(self, tmp_path: Path) -> None:
+        """iter-137：旧格式 JSON（无 archive_entries 字段）反序列化默认为 0。"""
+        from fuscan.scanner.result import ScanReport
+
+        # 模拟旧格式 JSON（不含 archive_entries）
+        escaped_root = str(tmp_path).replace("\\", "\\\\")
+        old_json = f'{{"root": "{escaped_root}", "stats": {{"total_files": 5, "scanned_files": 5}}, "cancelled": false, "hits": []}}'
+        restored = ScanReport.from_json(old_json)
+        assert restored.stats.archive_entries == 0
+
 
 class TestScanReport:
     def test_hits_filters_matched(self, tmp_path: Path) -> None:

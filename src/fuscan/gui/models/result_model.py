@@ -141,9 +141,9 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         self._filter_text: str = ""
         self._filter_rules: frozenset[str] = frozenset()
         self._filter_severities: frozenset[Severity] = frozenset()
-        # 排序条件：default = 保持原始顺序
-        self._sort_field: str = SORT_DEFAULT
-        self._sort_ascending: bool = True
+        # 排序条件：iter-137 默认按严重度降序（严重 → 轻微）
+        self._sort_field: str = SORT_SEVERITY
+        self._sort_ascending: bool = False
         # iter-129：后台过滤+排序（大结果集时启用）
         # generation 每次提交过滤任务时 +1，worker 回调时校验，丢弃过期结果
         self._filter_generation: int = 0

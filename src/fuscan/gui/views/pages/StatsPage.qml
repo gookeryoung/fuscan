@@ -315,6 +315,9 @@ Item {
                             Layout.fillWidth: true
                             Label {
                                 text: "已扫描：" + workspaceController.currentScanController.progressScanned + " / " + workspaceController.currentScanController.progressTotal + " 个文件"
+                                    + (workspaceController.currentScanController.archiveEntryCount > 0
+                                       ? "（含压缩包内条目 " + workspaceController.currentScanController.archiveEntryCount + "）"
+                                       : "")
                                 font.pixelSize: 12
                                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                 Layout.fillWidth: true

@@ -156,6 +156,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._pending_manifest: IncrementalManifest | None = None
         self._pending_prev_report: ScanReport | None = None
         self._pending_ws_id: str = ""
+        # iter-135：标记增量扫描回退为全量扫描，_on_scan_finished 据此在本次
+        # 无命中时合并 _pending_prev_report 中的旧 hits，避免回退全量 0 命中
+        # 导致用户丢失之前的结果。
+        self._fallback_from_incremental: bool = False
 
         # 扫描状态
         self._scan_state: str = STATE_SETUP  # setup / scanning / results
@@ -175,6 +179,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._matched_count: int = 0
         self._skipped_count: int = 0
         self._error_count: int = 0
+        # iter-137：压缩包内条目数（含在 scanned 中，单独暴露供 UI 注明）
+        self._archive_entry_count: int = 0
         # 阶段独立进度（iter-105 双进度条）：
         # walk 阶段：discovered 持续增长，skipped/user_skipped 反映白名单与用户标记跳过
         # scan 阶段：scanned/total 反映解析进度，与上方 progressScanned/progressTotal 同步
@@ -311,6 +317,15 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def errorCount(self) -> int:
         """错误文件数。"""
         return self._error_count
+
+    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def archiveEntryCount(self) -> int:
+        """压缩包内条目数（含在 scanned 中，iter-137）。
+
+        用于 UI 注明"扫描 N"中包含的压缩包内条目数，
+        避免 ``scanned > total_files`` 时产生误解。
+        """
+        return self._archive_entry_count
 
     # ----------------------------- 阶段与收集进度（iter-105 双进度条） -----------------------------
 
@@ -843,6 +858,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     @Slot()  # pyrefly: ignore [not-callable]
     def startScan(self) -> None:
         """开始扫描（启动 stats worker → scan worker 串行）。"""
+        # iter-135：提前读取并重置回退标志，确保所有提前返回路径都不会
+        # 遗留 _fallback_from_incremental=True 导致下次全量扫描误合并旧 hits
+        fallback = self._fallback_from_incremental
+        self._fallback_from_incremental = False
+
         if self._scan_state == STATE_SCANNING:
             return
         if self._ruleset is None:
@@ -857,7 +877,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # iter-124：全量扫描不合并 prev_report（_pending_prev_report=None）。
         # 注意：不重置 _pending_ws_id——若由 startIncrementalScan 回退调用，
         # _pending_ws_id 已设置为工作区 ID，仍需持久化 manifest 以便下次增量扫描。
-        self._pending_prev_report = None
+        # iter-135：若由 startIncrementalScan 回退调用（fallback=True），保留
+        # _pending_prev_report 供 _on_scan_finished 在本次无命中时合并旧 hits。
+        if not fallback:
+            self._pending_prev_report = None
 
         self._result_model.clear()
         self._selected_result_index = -1
@@ -881,6 +904,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._matched_count = 0
         self._skipped_count = 0
         self._error_count = 0
+        self._archive_entry_count = 0
         self._current_file = "准备统计..."
         self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -921,6 +945,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if prev_report is None or manifest is None:
             # 回退到全量扫描（_pending_ws_id 已设置，仍会持久化 manifest）
             logger.info("工作区 %s 无上次扫描结果或清单，回退到全量扫描", ws_id)
+            # iter-135：标记回退，startScan 据此保留 _pending_prev_report，
+            # _on_scan_finished 在本次无命中时合并旧 hits
+            self._fallback_from_incremental = True
+            self._pending_prev_report = prev_report  # 可能为 None，但保留供 _on_scan_finished 检查
             self.startScan()
             return
 
@@ -960,6 +988,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._matched_count = 0
         self._skipped_count = 0
         self._error_count = 0
+        self._archive_entry_count = 0
         self._current_file = "准备统计..."
         self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -1173,7 +1202,22 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(object)  # pyrefly: ignore [not-callable]
     def _on_scan_finished(self, report: ScanReport) -> None:
-        """扫描完成：填充结果模型并切到 results 态。"""
+        """扫描完成：填充结果模型并切到 results 态。
+
+        iter-135：增量扫描回退全量时，若本次无命中但 ``_pending_prev_report``
+        有 hits，将旧 hits 合并到 results 中。回退全量因 ``_unchanged_count=0``
+        导致 Scanner 层合并条件不满足，此处做 controller 层补救，避免用户
+        在运行时丢失之前扫描的结果。
+        """
+        if not report.hits and self._pending_prev_report is not None and self._pending_prev_report.hits:
+            old_hits = self._pending_prev_report.hits
+            report = ScanReport(
+                root=report.root,
+                results=report.results + old_hits,
+                stats=report.stats,
+                cancelled=report.cancelled,
+            )
+            logger.info("本次扫描无命中，合并上次扫描的 %d 条命中结果", len(old_hits))
         self._last_report = report
         self._result_model.set_results(report.hits)
         # 从 report.stats 同步最终统计，确保扫描完成后统计页展示正确数值
@@ -1252,6 +1296,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._skipped_count = stats.skipped_files
         self._error_count = stats.errors
         self._passed_count = max(stats.scanned_files - stats.matched_files - stats.errors, 0)
+        self._archive_entry_count = stats.archive_entries
 
     def _can_build_roots(self) -> bool:
         """判断当前是否可构建扫描根路径列表。"""
@@ -1316,6 +1361,20 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             logger.debug("工作区 %s 增量清单已持久化（%d 项指纹）", ws_id, len(manifest.fingerprints))
         except OSError as exc:
             logger.warning("工作区 %s 增量清单持久化失败: %s", ws_id, exc)
+
+    def invalidate_manifest(self, ws_id: str) -> None:
+        """删除工作区的增量扫描清单（iter-136）。
+
+        规则变更（新增/修改/删除/导入规则）时由 :meth:`WorkspaceController.updateWorkspaceRules`
+        调用，使下次增量扫描因 manifest 不存在而回退为全量扫描，确保新规则被实际执行。
+        """
+        manifest_file = _MANIFESTS_DIR / f"{ws_id}.json"
+        if manifest_file.exists():
+            try:
+                manifest_file.unlink()
+                logger.info("工作区 %s 规则已变更，增量清单已清除", ws_id)
+            except OSError as exc:
+                logger.warning("工作区 %s 增量清单清除失败: %s", ws_id, exc)
 
     def _get_selected_result(self) -> ScanResult | None:
         """获取当前选中的 :class:`ScanResult`。"""

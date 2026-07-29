@@ -329,9 +329,9 @@ class TestIter112Sort:
         assert first_path.endswith(str(tmp_path / "config" / "secret.txt"))
 
     def test_sort_unknown_field_ignored(self, filter_model: ResultListModel) -> None:
-        # 未知字段应被忽略，不改变现状
+        # 未知字段应被忽略，不改变现状（iter-137 默认为 severity 降序）
         filter_model.set_sort("unknown_field", ascending=True)
-        assert filter_model.sort_field == "default"  # 未变更
+        assert filter_model.sort_field == "severity"  # 未变更
 
     def test_sort_idempotent_same_value(self, filter_model: ResultListModel) -> None:
         filter_model.set_sort("filePath", ascending=True)
@@ -369,8 +369,9 @@ class TestIter112Properties:
         assert filter_model.filter_severities == frozenset({Severity.CRITICAL})
 
     def test_sort_field_and_ascending_properties(self, filter_model: ResultListModel) -> None:
-        assert filter_model.sort_field == "default"
-        assert filter_model.sort_ascending is True
+        # iter-137：默认按严重度降序
+        assert filter_model.sort_field == "severity"
+        assert filter_model.sort_ascending is False
         filter_model.set_sort("filePath", ascending=False)
         assert filter_model.sort_field == "filePath"
         assert filter_model.sort_ascending is False

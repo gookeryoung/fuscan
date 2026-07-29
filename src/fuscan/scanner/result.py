@@ -336,6 +336,9 @@ class ScanStats:
     # 用户标记跳过的文件数：扫描器在遍历阶段跳过用户已标记的路径，
     # 单独统计以区别于按扩展名/目录过滤的 skipped_files
     user_skipped: int = 0
+    # 压缩包内条目数（archive 阶段扫描的条目，已含在 scanned_files 中）。
+    # 单独统计以便在摘要中注明，避免 scanned_files > total_files 时产生误解
+    archive_entries: int = 0
     # 各阶段性能统计（PerfStats 始终启用）：
     # {stage_name: {"total_ms": float, "count": int, "max_ms": float}}
     # None 表示未采集（如测试构造的 ScanStats）；空 dict 表示扫描无数据
@@ -350,10 +353,16 @@ class ScanStats:
         """返回状态栏摘要文本。
 
         :param cancelled: 是否在摘要前缀"已取消"，GUI/CLI 取消场景共用。
+
+        iter-137：当 ``archive_entries > 0`` 时在"扫描"后注明含压缩包内条目数，
+        避免 ``scanned_files > total_files`` 时用户误解为统计异常。
         """
         prefix = "已取消" if cancelled else "完成"
+        scan_part = f"扫描 {self.scanned_files}"
+        if self.archive_entries > 0:
+            scan_part += f"（含压缩包内条目 {self.archive_entries}）"
         return (
-            f"{prefix}: 总计 {self.total_files} | 扫描 {self.scanned_files} | "
+            f"{prefix}: 总计 {self.total_files} | {scan_part} | "
             f"跳过 {self.skipped_files} | 用户跳过 {self.user_skipped} | "
             f"命中 {self.matched_files} | 条数 {self.total_matches} | "
             f"错误 {self.errors} | 耗时 {self.duration_seconds:.2f}s"
@@ -640,6 +649,7 @@ class ScanReport:
             duration_seconds=float(stats_data.get("duration_seconds", 0.0)),
             total_matches=int(stats_data.get("total_matches", 0)),
             user_skipped=int(stats_data.get("user_skipped", 0)),
+            archive_entries=int(stats_data.get("archive_entries", 0)),
             # perf_summary 不持久化（运行时统计，重启后无意义）
             perf_summary=None,
         )

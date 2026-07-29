@@ -84,6 +84,10 @@ def config_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     config_dir.mkdir()
     monkeypatch.setattr("fuscan.config.CONFIG_DIR", config_dir)
     monkeypatch.setattr("fuscan.config.CONFIG_PATH", config_dir / "config.yaml")
+    # 同步重定向 scan_controller 的 _MANIFESTS_DIR（模块级常量，加载时已求值）
+    manifests_dir = config_dir / "manifests"
+    manifests_dir.mkdir(exist_ok=True)
+    monkeypatch.setattr("fuscan.gui.controllers.scan_controller._MANIFESTS_DIR", manifests_dir)
     return config_dir
 
 
@@ -1437,6 +1441,29 @@ class TestUpdateWorkspaceRules:
         assert ws_data["rules_paths"] == ["/tmp/x.yaml"]
         assert ws_data["use_builtin"] is False
 
+    def test_update_workspace_rules_invalidates_manifest(
+        self,
+        controller: WorkspaceController,
+        tmp_path: Path,
+    ) -> None:
+        """iter-136：updateWorkspaceRules 应清除 manifest，使下次增量扫描回退全量。"""
+        ws_id = controller.addWorkspace("t", "folder", str(tmp_path), "[]", True)
+        sc = controller.currentScanController
+        # 先保存一个 manifest 文件
+        from fuscan.scanner.result import IncrementalManifest
+
+        sc._save_manifest(ws_id, IncrementalManifest(root=tmp_path, fingerprints={}))
+        from fuscan.gui.controllers import scan_controller as sc_module
+
+        manifest_path = sc_module._MANIFESTS_DIR / f"{ws_id}.json"
+        assert manifest_path.exists()
+
+        # 规则变更
+        controller.updateWorkspaceRules(ws_id, ["/tmp/new_rules.yaml"], False)
+
+        # manifest 应被删除
+        assert not manifest_path.exists()
+
 
 class TestBindRulesController:
     """iter-107 规则控制器绑定/解绑测试。"""
@@ -2296,6 +2323,37 @@ class TestSaveCachedResults:
         assert data["root"] == str(report.root)
         assert "hits" in data
         assert "stats" in data
+
+    def test_save_empty_does_not_overwrite_nonempty_cache(
+        self,
+        controller: WorkspaceController,
+        config_dir: Path,
+    ) -> None:
+        """iter-135：本次无命中但缓存已有非空结果时不覆盖。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        sc = controller.currentScanController
+        # 先保存有命中的结果
+        sc._last_report = _build_simple_report()  # type: ignore[attr-defined]
+        controller._save_cached_results(ws_id, sc)  # type: ignore[attr-defined]
+        cache_file = config_dir / "results" / f"{ws_id}.json"
+        assert cache_file.exists()
+
+        # 再保存空结果（模拟增量扫描回退全量后 0 命中）
+        from pathlib import Path
+
+        from fuscan.scanner import ScanReport
+        from fuscan.scanner.result import ScanStats
+
+        sc._last_report = ScanReport(
+            root=Path("/tmp"),
+            results=(),
+            stats=ScanStats(total_files=10, scanned_files=10),
+        )
+        controller._save_cached_results(ws_id, sc)  # type: ignore[attr-defined]
+
+        # 缓存文件应仍包含之前的有命中结果
+        data = json.loads(cache_file.read_text(encoding="utf-8"))
+        assert len(data["hits"]) > 0
 
 
 class TestLoadCachedResults:

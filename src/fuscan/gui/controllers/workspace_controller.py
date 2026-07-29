@@ -462,6 +462,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """启动指定工作区的扫描。
 
         iter-132：启动扫描时将工作区移到列表顶部（最近活动在最上方）。
+        iter-134：显式设置 ``ScanController._pending_ws_id``，即使是「启动扫描」
+            （全量）也持久化 manifest，使重启后下一次增量扫描可直接生效。
         """
         controller = self._ensure_scan_controller(ws_id)
         if controller is None:
@@ -469,6 +471,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return
         self._model.move_to_top(ws_id)
         self._persist()
+        # iter-134：全量扫描同样持久化 manifest，保证下次增量扫描有基线可比对
+        controller._pending_ws_id = ws_id  # 同包私有访问
         controller.startScan()
 
     @Slot(str)  # pyrefly: ignore [not-callable]
@@ -590,6 +594,9 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         controller = self._ensure_scan_controller(ws_id)
         if controller is not None:
             controller.setWorkspaceRuleset(workspace_ruleset, normalized_paths, bool(use_builtin))
+            # iter-136：规则变更后清除 manifest，使下次增量扫描回退为全量，
+            # 确保新规则被实际执行（manifest 指纹只记录 mtime+size，不感知规则变化）
+            controller.invalidate_manifest(ws_id)
         self._persist()
         self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -964,13 +971,33 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         iter-127：改用 ``to_json_bytes()`` + ``write_bytes()``，orjson 直接输出
         UTF-8 bytes，跳过 ``.decode()`` + ``.encode()`` 往返，10 万命中结果
         序列化速度提升 5-10x。
+
+        iter-135：本次结果无命中但缓存文件中已有非空结果时不覆盖，避免增量扫描
+        回退全量后空结果覆盖之前的完整结果，导致重启后无法恢复且后续增量扫描
+        因 ``prev_report.hits`` 为空而无法合并旧命中（恶性循环）。
         """
         report = controller._last_report  # 同包私有访问
         if report is None:
             return
+        # 防御：本次无命中但缓存已有非空结果时跳过覆盖
+        cache_file = self._cached_results_path(ws_id)
+        if not report.hits and cache_file.exists():
+            try:
+                from fuscan.scanner.result import ScanReport
+
+                prev = ScanReport.from_json(cache_file.read_bytes())
+                if prev.hits:
+                    logger.info(
+                        "工作区 %s 本次扫描无命中，保留已有缓存（%d 条命中）",
+                        ws_id,
+                        len(prev.hits),
+                    )
+                    return
+            except (OSError, ValueError):
+                pass  # 缓存读取失败时正常覆盖
         try:
             self._cached_results_dir.mkdir(parents=True, exist_ok=True)
-            self._cached_results_path(ws_id).write_bytes(report.to_json_bytes())
+            cache_file.write_bytes(report.to_json_bytes())
             logger.debug("工作区 %s 扫描结果已缓存（%d 条命中）", ws_id, len(report.hits))
         except (OSError, ValueError) as exc:
             logger.warning("工作区 %s 扫描结果缓存失败: %s", ws_id, exc)

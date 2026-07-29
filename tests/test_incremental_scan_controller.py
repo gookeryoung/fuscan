@@ -325,8 +325,9 @@ class TestStartIncrementalScanFallback:
         # 回退到全量扫描
         assert len(stats_instances) == 1
         assert controller.scanState == "scanning"
-        # _pending_prev_report 在 startScan 中会被重置为 None（全量扫描不合并）
-        assert controller._pending_prev_report is None
+        # iter-135：回退时保留 _pending_prev_report，供 _on_scan_finished
+        # 在本次无命中时合并旧 hits（不再清零）
+        assert controller._pending_prev_report is not None
         # _pending_ws_id 仍应被设置，以便 _on_scan_finished 持久化新 manifest
         assert controller._pending_ws_id == "ws-no-manifest"
 
@@ -671,6 +672,98 @@ class TestOnScanFinishedSavesManifest:
         manifests_dir = sc_module._MANIFESTS_DIR
         if manifests_dir.exists():
             assert not list(manifests_dir.glob("*.json"))
+
+
+class TestOnScanFinishedMergesOldHits:
+    """iter-135：增量扫描回退全量时，``_on_scan_finished`` 合并旧 hits 测试。"""
+
+    def test_merges_old_hits_when_new_report_empty(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """增量回退全量后本次无命中时，应合并 _pending_prev_report 中的旧 hits。"""
+        stats_instances, scan_instances = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+
+        # 设置 _last_report 有 hits，但不提供 manifest 文件 → startIncrementalScan 回退为全量
+        old_result = _make_scan_result(tmp_path / "old.txt", hits=2)
+        old_report = _make_scan_report(results=(old_result,))
+        controller._last_report = old_report
+
+        # startIncrementalScan 会因 manifest 不存在而回退为 startScan，
+        # 并保留 _pending_prev_report = old_report
+        controller.startIncrementalScan("ws-merge-test")
+        assert controller._pending_prev_report is not None
+
+        stats_instances[0].emit_finished([_make_walk_result(tmp_path)])
+
+        # 本次扫描无命中
+        empty_report = _make_scan_report(results=())
+        scan_instances[0].emit_finished(empty_report)
+
+        # _last_report 应包含合并后的旧 hits
+        assert controller._last_report is not None
+        assert len(controller._last_report.hits) == 1
+        assert controller._last_report.hits[0].path == old_result.path
+        # 状态应切到 results（有命中）
+        assert controller.scanState == "results"
+
+    def test_no_merge_when_prev_report_none(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """正常全量扫描（_pending_prev_report=None）无命中时不合并。"""
+        stats_instances, scan_instances = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+
+        controller.startScan()
+        stats_instances[0].emit_finished([_make_walk_result(tmp_path)])
+
+        # 本次扫描无命中，_pending_prev_report 为 None
+        empty_report = _make_scan_report(results=())
+        scan_instances[0].emit_finished(empty_report)
+
+        # 不合并，hits 为空
+        assert controller._last_report is not None
+        assert len(controller._last_report.hits) == 0
+        # 状态切到 setup（无命中）
+        assert controller.scanState == "setup"
+
+    def test_no_merge_when_new_report_has_hits(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """增量回退全量后本次有命中时，不合并旧 hits。"""
+        stats_instances, scan_instances = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+
+        # 设置 _last_report 有 hits，manifest 不存在 → 回退为全量
+        old_result = _make_scan_result(tmp_path / "old.txt", hits=1)
+        old_report = _make_scan_report(results=(old_result,))
+        controller._last_report = old_report
+
+        controller.startIncrementalScan("ws-merge-test2")
+        assert controller._pending_prev_report is not None
+
+        stats_instances[0].emit_finished([_make_walk_result(tmp_path)])
+
+        # 本次扫描有命中
+        new_result = _make_scan_result(tmp_path / "new.txt", hits=1)
+        new_report = _make_scan_report(results=(new_result,))
+        scan_instances[0].emit_finished(new_report)
+
+        # 不合并旧 hits，只有本次的 1 条命中
+        assert len(controller._last_report.hits) == 1
+        assert controller._last_report.hits[0].path == new_result.path
 
 
 class TestBuildHistoryEntry:
@@ -1151,3 +1244,71 @@ class TestStatsWorkerManifestProperty:
         # _scanner 在 run() 中创建，构造后尚未创建
         assert worker.manifest is None
         worker.deleteLater()
+
+
+class TestInvalidateManifest:
+    """``invalidate_manifest`` 删除 manifest 文件测试（iter-136）。
+
+    规则变更后调用此方法清除 manifest，使下次增量扫描回退为全量扫描，
+    确保新规则被实际执行。
+    """
+
+    def test_invalidate_deletes_manifest_file(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> None:
+        """invalidate_manifest 应删除已存在的 manifest 文件。"""
+        from fuscan.gui.controllers import scan_controller as sc_module
+
+        ws_id = "ws-invalidate"
+        manifest = IncrementalManifest(root=tmp_path, fingerprints={})
+        controller._save_manifest(ws_id, manifest)
+        manifest_file = sc_module._MANIFESTS_DIR / f"{ws_id}.json"
+        assert manifest_file.exists()
+
+        controller.invalidate_manifest(ws_id)
+
+        assert not manifest_file.exists()
+
+    def test_invalidate_noop_when_no_manifest(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """manifest 文件不存在时 invalidate_manifest 不报错。"""
+        from fuscan.gui.controllers import scan_controller as sc_module
+
+        ws_id = "ws-no-manifest-to-invalidate"
+        manifest_file = sc_module._MANIFESTS_DIR / f"{ws_id}.json"
+        assert not manifest_file.exists()
+
+        # 不应抛异常
+        controller.invalidate_manifest(ws_id)
+        assert not manifest_file.exists()
+
+    def test_invalidate_forces_fallback_to_full_scan(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """规则变更后 invalidate_manifest 使增量扫描回退为全量扫描。"""
+        stats_instances, _ = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+
+        # 先保存 manifest 和 _last_report
+        manifest = IncrementalManifest(root=tmp_path, fingerprints={})
+        controller._save_manifest("ws-rule-change", manifest)
+        old_result = _make_scan_result(tmp_path / "old.txt", hits=1)
+        controller._last_report = _make_scan_report(results=(old_result,))
+
+        # 模拟规则变更：invalidate_manifest
+        controller.invalidate_manifest("ws-rule-change")
+
+        # startIncrementalScan 应因 manifest 不存在而回退为全量
+        controller.startIncrementalScan("ws-rule-change")
+        assert controller.scanState == "scanning"
+        # 应创建了 stats worker（全量扫描模式，无 incremental_manifest 参数）
+        assert len(stats_instances) == 1
+        assert stats_instances[0].kwargs.get("incremental_manifest") is None

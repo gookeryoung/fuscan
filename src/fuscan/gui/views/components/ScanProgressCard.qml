@@ -257,7 +257,10 @@ Rectangle {
                         text: workspaceController.activeScanController.progressIndeterminate
                             ? "等待中..."
                             : (workspaceController.activeScanController.progressScanned + " / "
-                               + workspaceController.activeScanController.progressTotal)
+                               + workspaceController.activeScanController.progressTotal
+                               + (workspaceController.activeScanController.archiveEntryCount > 0
+                                  ? "（含压缩包 " + workspaceController.activeScanController.archiveEntryCount + "）"
+                                  : ""))
                         font.pixelSize: 11
                         color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                     }

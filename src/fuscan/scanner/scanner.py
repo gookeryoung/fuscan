@@ -439,6 +439,8 @@ class Scanner:
         matched = 0
         errors = 0
         matches = 0
+        # iter-137：压缩包内条目数（archive 阶段扫描的条目，含在 scanned 中）
+        archive_entries = 0
         # 复位 walk 累积的进度上下文，供 _emit_progress 在 scan 阶段使用。
         # scan 阶段 total 必须为实际待扫描文件数 len(entries)（符合类型的文件），
         # 而非 walk 阶段的 walk_result.total（含白名单/用户标记跳过的文件）。
@@ -475,6 +477,8 @@ class Scanner:
                 matched += d_matched
                 errors += d_errors
                 matches += d_matches
+                # iter-137：记录压缩包内条目数，用于摘要注明
+                archive_entries += d_scanned
                 # iter-133：压缩包内条目纳入分母，避免 scanned > total（分子超出分母）
                 self._progress_total += d_scanned
         finally:
@@ -521,6 +525,8 @@ class Scanner:
             total_matches=matches,
             # 用户标记跳过的文件数，与 skipped_files 区分
             user_skipped=user_skipped,
+            # iter-137：压缩包内条目数，用于摘要注明
+            archive_entries=archive_entries,
             # PerfStats 始终启用，导出各阶段统计供 GUI/CLI 展示与持久化
             perf_summary=self._perf.to_dict(),
         )

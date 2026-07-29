@@ -108,6 +108,8 @@ Item {
                 Layout.preferredHeight: 32
                 font.pixelSize: theme.fontSizeBody
                 model: ["默认顺序", "文件路径", "命中数", "严重度"]
+                // iter-137：默认按严重度排序（currentIndex=3）
+                currentIndex: 3
                 onCurrentIndexChanged: {
                     var field = "default"
                     if (currentIndex === 1) field = "filePath"
@@ -124,6 +126,8 @@ Item {
                 Layout.preferredHeight: 32
                 font.pixelSize: theme.fontSizeBody
                 model: ["升序", "降序"]
+                // iter-137：默认降序（严重 → 轻微）
+                currentIndex: 1
                 onCurrentIndexChanged: {
                     var field = "default"
                     if (sortFieldCombo.currentIndex === 1) field = "filePath"
@@ -139,9 +143,9 @@ Item {
                 font.pixelSize: theme.fontSizeBody
                 Layout.preferredHeight: 32
                 onClicked: {
-                    sortFieldCombo.currentIndex = 0
-                    sortOrderCombo.currentIndex = 0
-                    workspaceController.currentScanController.setResultSort("default", true)
+                    sortFieldCombo.currentIndex = 3
+                    sortOrderCombo.currentIndex = 1
+                    workspaceController.currentScanController.setResultSort("severity", false)
                 }
             }
 

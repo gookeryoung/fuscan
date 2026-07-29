@@ -103,6 +103,8 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         self._cum_matches = 0
         # 多根路径累计用户跳过数
         self._cum_user_skipped = 0
+        # iter-137：多根路径累计压缩包内条目数
+        self._cum_archive_entries = 0
         self._start_time: float = 0.0
 
     def pause(self) -> None:
@@ -201,6 +203,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
                     duration_seconds=elapsed,
                     total_matches=self._cum_matches,
                     user_skipped=self._cum_user_skipped,
+                    archive_entries=self._cum_archive_entries,
                     perf_summary=self._perf.to_dict(),
                 ),
                 cancelled=was_cancelled,
@@ -226,5 +229,6 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         self._cum_errors += report.stats.errors
         self._cum_matches += report.stats.total_matches
         self._cum_user_skipped += report.stats.user_skipped
+        self._cum_archive_entries += report.stats.archive_entries
         if report.stats.perf_summary:
             self._perf.merge_dict(report.stats.perf_summary)

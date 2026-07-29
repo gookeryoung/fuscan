@@ -35,11 +35,8 @@ dependencies = [
     "reportlab>=4.0.0",
     # iter-126：迁移 Python 3.10 后统一使用 python-calamine 0.8.2（更高性能）
     "python-calamine==0.8.2",
-    # orjson：Rust 实现的高性能 JSON 库，扫描结果序列化（to_json）比 stdlib json 快 5-10x，
-    # 10 万命中结果从数秒降至百毫秒级
     "orjson>=3.9.0",
-    # kreuzberg 为可选加速后端（见 [project.optional-dependencies].fast），
-    # 不在此强制依赖中，使基础安装包轻量；is_available() 运行时检测。
+    "kreuzberg>=4.10.0",
 ]
 
 description     = "极速通用文件扫描器."
@@ -56,9 +53,6 @@ dev = [
     "tox-uv>=1.13.1",
     "tox>=4.25.0",
 ]
-# iter-126：kreuzberg 加速后端（Rust 核心，支持 DOC/PPT/RTF/MSG 等 91+ 格式）
-# pip install fuscan[fast] 启用；未安装时自动回退到纯 Python 实现
-fast = ["kreuzberg>=4.10.0"]
 docs = ["myst-parser>=3.0", "sphinx-rtd-theme>=2.0", "sphinx>=7.0"]
 lint = ["pyrefly>=1.1.1", "ruff>=0.8.0"]
 test = [
@@ -88,8 +82,6 @@ packages = ["src/fuscan"]
 [tool.hatch.build.targets.wheel.force-include]
 "src/fuscan/py.typed" = "fuscan/py.typed"
 "src/fuscan/assets/docs/fuscan-用户手册.pdf" = "fuscan/assets/docs/fuscan-用户手册.pdf"
-# QML 与 SVG 资源已编译进 resources_rc.py（由 scripts/build_qrc.py 生成）
-# 打包时仅需包含编译产物与清单，无需单独包含 .qml/.svg 源文件
 "src/fuscan/gui/resources_rc.py" = "fuscan/gui/resources_rc.py"
 "src/fuscan/gui/resources.qrc" = "fuscan/gui/resources.qrc"
 "src/fuscan/gui/qtquickcontrols2.conf" = "fuscan/gui/qtquickcontrols2.conf"

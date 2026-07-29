@@ -64,12 +64,25 @@ if TYPE_CHECKING:
     from fuscan.cache import CacheStore
     from fuscan.gui.controllers.config_controller import ConfigController
     from fuscan.gui.controllers.rules_controller import RulesController
+    from fuscan.gui.controllers.whitelist_controller import WhitelistController
     from fuscan.history.model import ScanHistoryEntry
     from fuscan.rules.model import RuleSet
 
 __all__ = ["ScanController"]
 
 logger = logging.getLogger(__name__)
+
+
+def _new_whitelist_controller() -> WhitelistController:
+    """构造独立的 :class:`WhitelistController` 实例（向后兼容回退）。
+
+    延迟导入避免 controllers 包顶层循环依赖（whitelist_controller 导入 rules.whitelist，
+    与 scan_controller 无循环）。
+    """
+    from fuscan.gui.controllers.whitelist_controller import WhitelistController
+
+    return WhitelistController()
+
 
 # 扫描状态机字符串（与 QML 侧 ContentArea.qml 的 case 分支对齐）
 STATE_SETUP: str = "setup"
@@ -121,6 +134,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         rules_controller: RulesController,
         parent: QObject | None = None,
         skip_store: SkipStore | None = None,
+        whitelist_controller: WhitelistController | None = None,
     ) -> None:
         super().__init__(parent)
         self._config_controller = config_controller
@@ -135,6 +149,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # SkipStore，避免 N 个工作区各自读 ~/.fuscan/skips.json 造成的重复 I/O。
         # 独立构造（无 skip_store 参数）时回退到自建实例，保持向后兼容。
         self._skip_store: SkipStore = skip_store if skip_store is not None else SkipStore()
+        # iter-133：WhitelistController 共享实例——由 WorkspaceController 注入。
+        # 为 None 时（独立测试）回退到自建实例，保持向后兼容。
+        self._whitelist_controller: WhitelistController = (
+            whitelist_controller if whitelist_controller is not None else _new_whitelist_controller()
+        )
         self._result_model: ResultListModel = ResultListModel(self)
         # 任务级配置覆盖（iter-104）：键为 Config 字段名，值为该任务专属覆盖值
         # 通过 _effective_<field>() 方法优先读取覆盖值，回退到全局 Config
@@ -853,6 +872,38 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             skip_store=self._skip_store,
         )
 
+    @Slot(str, result=str)  # pyrefly: ignore [not-callable]
+    def markAsFalsePositive(self, rule_filter: str = "") -> str:
+        """将当前选中结果加入误报白名单。
+
+        将选中文件的路径与命中规则加入 :class:`WhitelistController`，下次扫描起
+        在命中聚合阶段过滤。加入后调用 :meth:`invalidate_manifest` 强制下次
+        扫描为全量（白名单变更后增量扫描的 prev_report 仍含误报命中，需重扫）。
+
+        :param rule_filter: 指定规则名（精确匹配）；空字符串表示该文件全部命中
+            规则均标记为误报（``*`` 通配）。默认空字符串。
+        :return: 操作消息供 QML 显示
+
+        返回值语义：
+
+        - 未选中结果 → ``未选中结果``
+        - 压缩包内部条目 → ``压缩包内部条目不支持标记误报``（路径含 ``!`` 无法 glob）
+        - 成功 → ``已标记为误报: <路径> (<规则>)``
+        """
+        result = self._get_selected_result()
+        if result is None:
+            return "未选中结果"
+        if result.archive_path is not None:
+            return "压缩包内部条目不支持标记误报"
+        rule_name = rule_filter.strip() or "*"
+        # 路径 glob 用绝对路径字符串（与 Scanner 中 str(Path) 一致）
+        path_glob = str(result.path)
+        msg = self._whitelist_controller.addEntry(path_glob, rule_name, "")
+        # 白名单变更需强制全量重扫，使本工作区下次扫描过滤误报
+        if self._pending_ws_id:
+            self.invalidate_manifest(self._pending_ws_id)
+        return msg
+
     # ----------------------------- QML 调用槽 -----------------------------
 
     @Slot()  # pyrefly: ignore [not-callable]
@@ -1179,6 +1230,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             # iter-124：传入上次报告供 Scanner 合并未变更文件命中结果
             # （_pending_prev_report 由 startScan 置 None 或 startIncrementalScan 设置）
             prev_report=self._pending_prev_report,
+            # iter-133：传入白名单快照，Scanner 在命中聚合阶段过滤误报
+            whitelist=self._whitelist_controller.snapshot(),
         )
         self._worker.progress_info.connect(self._on_scan_progress)  # pyrefly: ignore [missing-attribute]
         self._worker.finished_report.connect(self._on_scan_finished)  # pyrefly: ignore [missing-attribute]

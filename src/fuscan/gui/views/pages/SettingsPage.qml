@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtQuick.Dialogs 1.3 as Dialogs
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
 import "../components"
@@ -10,6 +11,35 @@ Item {
     id: settingsPage
     property ThemeController theme: Theme
     property ConfigControllerType configController: ConfigController
+    property WhitelistControllerType whitelistController: WhitelistController
+
+    // iter-133：白名单导入/导出文件对话框
+    Dialogs.FileDialog {
+        id: whitelistImportDialog
+        title: "导入误报白名单"
+        nameFilters: ["JSON 文件 (*.json)", "所有文件 (*.*)"]
+        onAccepted: {
+            var pathStr = whitelistImportDialog.fileUrl.toString()
+            if (pathStr.startsWith("file:///")) {
+                pathStr = decodeURIComponent(pathStr.substring(8))
+            }
+            whitelistOpMsg.text = whitelistController.importJson(pathStr)
+        }
+    }
+    Dialogs.FileDialog {
+        id: whitelistExportDialog
+        title: "导出误报白名单"
+        nameFilters: ["JSON 文件 (*.json)", "所有文件 (*.*)"]
+        selectExisting: false
+        defaultSuffix: "json"
+        onAccepted: {
+            var pathStr = whitelistExportDialog.fileUrl.toString()
+            if (pathStr.startsWith("file:///")) {
+                pathStr = decodeURIComponent(pathStr.substring(8))
+            }
+            whitelistOpMsg.text = whitelistController.exportJson(pathStr)
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -55,7 +85,7 @@ Item {
                 }
             }
             Repeater {
-                model: ["通用", "扫描", "忽略目录"]
+                model: ["通用", "扫描", "忽略目录", "白名单"]
                 TabButton {
                     id: tabBtn
                     text: modelData
@@ -799,6 +829,279 @@ Item {
                                 font.pixelSize: 11
                                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                 Layout.leftMargin: 8
+                            }
+                        }
+                    }
+
+                    Item { Layout.fillHeight: true }
+                }
+            }
+
+            // ===== Tab 4: 白名单（误报抑制） =====
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: availableWidth
+
+                ColumnLayout {
+                    width: settingsStack.width
+                    spacing: 8
+
+                    Label {
+                        text: "白名单条目在扫描命中聚合阶段过滤：匹配 (路径 glob, 规则名) 组合的命中将被排除。规则名 * 表示匹配任意规则。"
+                        font.pixelSize: 11
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                    }
+
+                    // ---------- 添加表单 ----------
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: addFormColumn.implicitHeight + 16
+                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                        border.width: 1
+                        radius: theme.radiusSm
+
+                        ColumnLayout {
+                            id: addFormColumn
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            spacing: 4
+
+                            Label {
+                                text: "添加白名单条目"
+                                font.bold: true
+                                font.pixelSize: theme.fontSizeBody
+                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Label {
+                                    text: "路径 glob"
+                                    font.pixelSize: 11
+                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    Layout.preferredWidth: 60
+                                }
+                                TextField {
+                                    id: wlPathGlobInput
+                                    Layout.fillWidth: true
+                                    font.pixelSize: 12
+                                    font.family: "Consolas, Monaco, monospace"
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                    placeholderText: "如 /a/vendor/*.txt 或 /a/b/c.txt（* 匹配任意字符）"
+                                    selectByMouse: true
+                                    background: Rectangle {
+                                        color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                        border.width: 1
+                                        radius: theme.radiusSm
+                                    }
+                                    onAccepted: {
+                                        if (text.trim().length > 0) {
+                                            whitelistOpMsg.text = whitelistController.addEntry(text, wlRuleNameInput.text, wlNoteInput.text)
+                                            text = ""
+                                            wlRuleNameInput.text = ""
+                                            wlNoteInput.text = ""
+                                        }
+                                    }
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Label {
+                                    text: "规则名"
+                                    font.pixelSize: 11
+                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    Layout.preferredWidth: 60
+                                }
+                                TextField {
+                                    id: wlRuleNameInput
+                                    Layout.fillWidth: true
+                                    font.pixelSize: 12
+                                    font.family: "Consolas, Monaco, monospace"
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                    placeholderText: "留空表示匹配任意规则（*）"
+                                    selectByMouse: true
+                                    background: Rectangle {
+                                        color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                        border.width: 1
+                                        radius: theme.radiusSm
+                                    }
+                                }
+                                Label {
+                                    text: "备注"
+                                    font.pixelSize: 11
+                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    Layout.leftMargin: 8
+                                }
+                                TextField {
+                                    id: wlNoteInput
+                                    Layout.fillWidth: true
+                                    font.pixelSize: 12
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                    placeholderText: "可空"
+                                    selectByMouse: true
+                                    background: Rectangle {
+                                        color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                        border.width: 1
+                                        radius: theme.radiusSm
+                                    }
+                                }
+                                Button {
+                                    text: "添加"
+                                    implicitHeight: 32
+                                    font.pixelSize: theme.fontSizeSmall
+                                    enabled: wlPathGlobInput.text.trim().length > 0
+                                    onClicked: {
+                                        whitelistOpMsg.text = whitelistController.addEntry(wlPathGlobInput.text, wlRuleNameInput.text, wlNoteInput.text)
+                                        wlPathGlobInput.text = ""
+                                        wlRuleNameInput.text = ""
+                                        wlNoteInput.text = ""
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ---------- 顶部操作行：导入/导出/清空 + 计数 ----------
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        IconButton {
+                            iconSource: "qrc:/icons/export_json.svg"
+                            text: "导入"
+                            tooltip: "从 JSON 文件导入白名单（合并去重）"
+                            accent: "secondary"
+                            onClicked: whitelistImportDialog.open()
+                        }
+                        IconButton {
+                            iconSource: "qrc:/icons/export.svg"
+                            text: "导出"
+                            tooltip: "导出当前白名单到 JSON 文件"
+                            accent: "secondary"
+                            enabled: whitelistController.whitelistCount > 0
+                            onClicked: whitelistExportDialog.open()
+                        }
+                        IconButton {
+                            iconSource: "qrc:/icons/delete.svg"
+                            text: "清空"
+                            tooltip: "清空全部白名单条目"
+                            accent: "danger"
+                            enabled: whitelistController.whitelistCount > 0
+                            onClicked: {
+                                whitelistController.clearAll()
+                                whitelistOpMsg.text = "已清空白名单"
+                            }
+                        }
+                        Item { Layout.fillWidth: true }
+                        Label {
+                            text: "共 " + whitelistController.whitelistCount + " 条"
+                            font.pixelSize: 11
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+                    }
+
+                    // 操作消息
+                    Label {
+                        id: whitelistOpMsg
+                        Layout.fillWidth: true
+                        visible: text !== ""
+                        font.pixelSize: 11
+                        color: {
+                            if (text.indexOf("已添加") >= 0 || text.indexOf("已导入") >= 0 || text.indexOf("已导出") >= 0 || text.indexOf("已清空") >= 0) return theme.colorSuccess
+                            if (text.indexOf("失败") >= 0 || text.indexOf("不能") >= 0) return theme.colorDanger
+                            return theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+                        wrapMode: Text.WordWrap
+                    }
+
+                    // ---------- 白名单条目列表 ----------
+                    ListView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.preferredHeight: 360
+                        clip: true
+                        interactive: true
+                        cacheBuffer: 500
+                        model: whitelistController.whitelistEntries
+                        // 空状态提示
+                        Label {
+                            anchors.centerIn: parent
+                            visible: whitelistController.whitelistCount === 0
+                            text: "（暂无白名单条目）"
+                            font.pixelSize: 11
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+                        delegate: ItemDelegate {
+                            width: ListView.view.width
+                            height: 40
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                spacing: 8
+
+                                // 路径 glob
+                                Label {
+                                    text: modelData.pathGlob
+                                    font.pixelSize: 12
+                                    font.family: "Consolas, Monaco, monospace"
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideMiddle
+                                }
+                                // 规则名 tag
+                                Rectangle {
+                                    radius: theme.radiusSm
+                                    color: modelData.ruleName === "*" ? theme.colorPrimary : theme.colorAccent
+                                    width: wlRuleTagLabel.implicitWidth + 12
+                                    height: wlRuleTagLabel.implicitHeight + 4
+                                    Label {
+                                        id: wlRuleTagLabel
+                                        anchors.centerIn: parent
+                                        text: modelData.ruleName === "*" ? "全部规则" : modelData.ruleName
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        color: theme.colorTextOnPrimary
+                                    }
+                                }
+                                // 创建时间
+                                Label {
+                                    text: modelData.createdAt
+                                    font.pixelSize: 10
+                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    visible: modelData.createdAt !== ""
+                                }
+                                // 备注
+                                Label {
+                                    text: modelData.note
+                                    font.pixelSize: 10
+                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    visible: modelData.note !== ""
+                                    elide: Text.ElideRight
+                                    Layout.maximumWidth: 160
+                                }
+                                IconButton {
+                                    iconSource: "qrc:/icons/close.svg"
+                                    tooltip: "移除"
+                                    accent: "danger"
+                                    iconSize: 14
+                                    btnSize: 24
+                                    onClicked: whitelistController.removeEntry(index)
+                                }
                             }
                         }
                     }

@@ -644,7 +644,7 @@ wheels = [
 
 [[package]]
 name = "fuscan"
-version = "0.2.3"
+version = "0.2.5"
 source = { editable = "." }
 dependencies = [
     { name = "charset-normalizer" },

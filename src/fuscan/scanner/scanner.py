@@ -62,6 +62,7 @@ from fuscan.scanner.walker import FileWalker
 if TYPE_CHECKING:
     from fuscan.archive import ArchiveScanner
     from fuscan.cache import CacheStore
+    from fuscan.rules.whitelist import Whitelist
 
 __all__ = ["Scanner", "default_extract_content", "default_extract_content_with_hash"]
 
@@ -98,6 +99,7 @@ class Scanner:
         skip_paths: frozenset[str] | None = None,
         incremental_manifest: IncrementalManifest | None = None,
         prev_report: ScanReport | None = None,
+        whitelist: Whitelist | None = None,
     ) -> None:
         self.ruleset = ruleset
         self._content_provider: ContentProvider = content_provider or default_extract_content
@@ -217,6 +219,9 @@ class Scanner:
                     continue  # 压缩包内部条目不参与增量合并（每次重新扫描压缩包）
                 rel = IncrementalManifest.rel_key(sr.path, prev_report.root)
                 self._unchanged_hits[rel] = sr
+        # iter-133：误报白名单快照——扫描期间持有不可变快照，UI 增删不影响本次扫描。
+        # 在 scan_entries 命中聚合阶段过滤命中白名单的结果（不计入 ScanReport.hits）。
+        self._whitelist: Whitelist | None = whitelist
 
     def pause(self) -> None:
         """暂停扫描，阻塞扫描线程直到 resume。"""
@@ -514,6 +519,26 @@ class Scanner:
                     matches += sr.total_match_count
             # 统计累加：未变更文件视为已扫描（复用上次结果，无需重新 I/O）
             scanned += self._unchanged_count
+
+        # iter-133：误报白名单过滤——在命中聚合阶段过滤命中白名单的结果。
+        # 过滤位置在增量合并之后、stats 构造之前，确保本次扫描与未变更合并的
+        # 命中结果都被同一份白名单覆盖。一个 ScanResult 仅在其所有命中规则
+        # 都被白名单覆盖时才整体过滤（部分命中过滤会让用户漏看不需过滤的部分）。
+        # 过滤后同步修正 matched/matches 统计，使 ScanStats 与 ScanReport.hits 一致。
+        if self._whitelist is not None and self._whitelist.entries and results:
+            kept_results: list[ScanResult] = []
+            for sr in results:
+                if not sr.has_hit:
+                    kept_results.append(sr)
+                    continue
+                # rule_names 为该文件命中的所有规则名（去重保序）
+                if self._whitelist.matches_any_rule(sr.path, sr.rule_names):
+                    # 全部命中规则被白名单覆盖 → 视为误报，过滤
+                    matched -= 1
+                    matches -= sr.total_match_count
+                else:
+                    kept_results.append(sr)
+            results = kept_results
 
         stats = ScanStats(
             total_files=total,

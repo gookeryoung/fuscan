@@ -452,6 +452,19 @@ Rectangle {
                     opMsgLabel.text = msg
                 }
             }
+            // iter-133：标记为误报——加入白名单，下次扫描起在命中聚合阶段过滤
+            IconButton {
+                iconSource: "qrc:/icons/stop.svg"
+                text: "标记误报"
+                tooltip: workspaceController.currentScanController.detailIsArchiveEntry ? "压缩包内部条目不支持标记误报" : "将此文件全部命中加入误报白名单，下次扫描起自动过滤"
+                accent: "secondary"
+                enabled: workspaceController.currentScanController.selectedResultIndex >= 0
+                         && !workspaceController.currentScanController.detailIsArchiveEntry
+                onClicked: {
+                    var msg = workspaceController.currentScanController.markAsFalsePositive("")
+                    opMsgLabel.text = msg
+                }
+            }
         }
 
         // iter-113：第三行 - 批量替换与撤销（针对过滤后的全部结果）

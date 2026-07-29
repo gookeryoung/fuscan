@@ -82,7 +82,7 @@ class TestRegisterTo:
         controller: AppController,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """register_to 应将 5 个 controller 全部注册到 QML context。"""
+        """register_to 应将 6 个 controller 全部注册到 QML context。"""
         registered: dict[str, QObject] = {}
 
         def fake_set_context_property(name: str, obj: QObject) -> None:
@@ -103,12 +103,14 @@ class TestRegisterTo:
             "ConfigController",
             "RulesController",
             "WorkspaceController",
+            "WhitelistController",
             "AboutController",
         }
         assert registered["Theme"] is controller.theme
         assert registered["ConfigController"] is controller.config
         assert registered["RulesController"] is controller.rules
         assert registered["WorkspaceController"] is controller.workspace
+        assert registered["WhitelistController"] is controller.whitelist
         assert registered["AboutController"] is controller.about
 
 

@@ -61,6 +61,7 @@ if TYPE_CHECKING:
 
     from fuscan.gui.controllers.config_controller import ConfigController
     from fuscan.gui.controllers.rules_controller import RulesController
+    from fuscan.gui.controllers.whitelist_controller import WhitelistController
     from fuscan.history import HistoryStore
     from fuscan.rules.model import RuleSet
 
@@ -114,10 +115,15 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         config_controller: ConfigController,
         rules_controller: RulesController,
         parent: QObject | None = None,
+        whitelist_controller: WhitelistController | None = None,
     ) -> None:
         super().__init__(parent)
         self._config_controller = config_controller
         self._rules_controller = rules_controller
+        # iter-133：误报白名单控制器——共享实例注入到所有 ScanController，
+        # 使白名单变更对所有工作区生效；为 None 时（独立测试）ScanController
+        # 内部回退到自建 WhitelistStore，保持向后兼容。
+        self._whitelist_controller: WhitelistController | None = whitelist_controller
         # 反向注入引用：RulesController 绑定工作区时需要查询 WorkspaceItem
         self._rules_controller.set_workspace_controller(self)
         self._model = WorkspaceListModel(self)
@@ -217,6 +223,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 self._rules_controller,
                 self,
                 skip_store=self._shared_skip_store,
+                whitelist_controller=self._whitelist_controller,
             )
             global_paths_str = [str(p) for p in self._rules_controller.rules_paths]
             global_ruleset = _load_workspace_ruleset(
@@ -396,11 +403,13 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return None
         # 首次访问：构造 ScanController + 注入参数 + 连接信号
         # iter-133：注入共享 SkipStore，避免每个工作区独立读 skips.json
+        # iter-133：注入共享 WhitelistController，使误报白名单对所有工作区生效
         scan_controller = ScanController(
             self._config_controller,
             self._rules_controller,
             self,
             skip_store=self._shared_skip_store,
+            whitelist_controller=self._whitelist_controller,
         )
         try:
             mode_index = SCAN_MODE_STR_TO_INDEX.get(item.mode_str, SCAN_MODE_DEFAULT_INDEX)

@@ -33,6 +33,7 @@ from fuscan.gui.controllers.about_controller import AboutController
 from fuscan.gui.controllers.config_controller import ConfigController
 from fuscan.gui.controllers.rules_controller import RulesController
 from fuscan.gui.controllers.scan_controller import ScanController
+from fuscan.gui.controllers.whitelist_controller import WhitelistController
 from fuscan.gui.controllers.workspace_controller import WorkspaceController
 from fuscan.gui.models import (
     ExtractorListModel,
@@ -73,6 +74,7 @@ def register_qml_types() -> None:
     qmlRegisterType(RulesController, "fuscan.controllers", 1, 0, "RulesControllerType")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(ScanController, "fuscan.controllers", 1, 0, "ScanControllerType")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(WorkspaceController, "fuscan.controllers", 1, 0, "WorkspaceControllerType")  # pyrefly: ignore [bad-argument-type]
+    qmlRegisterType(WhitelistController, "fuscan.controllers", 1, 0, "WhitelistControllerType")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(AboutController, "fuscan.controllers", 1, 0, "AboutControllerType")  # pyrefly: ignore [bad-argument-type]
     # URI=fuscan.models，QML 用 `import fuscan.models 1.0` 后用各 model 类型
     qmlRegisterType(ExtractorListModel, "fuscan.models", 1, 0, "ExtractorListModel")  # pyrefly: ignore [bad-argument-type]
@@ -89,13 +91,15 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        # 构造顺序：theme → config → rules → workspace → about
+        # 构造顺序：theme → config → rules → whitelist → workspace → about
         # theme 不依赖其他；config 不依赖其他；rules 依赖 config；
-        # workspace 依赖 config+rules（内部按需构造 ScanController）；about 独立
+        # whitelist 独立（仅持有 WhitelistStore）；
+        # workspace 依赖 config+rules+whitelist（内部按需构造 ScanController）；about 独立
         self._theme = ThemeController(self)
         self._config = ConfigController(self)
         self._rules = RulesController(self._config, self)
-        self._workspace = WorkspaceController(self._config, self._rules, self)
+        self._whitelist = WhitelistController(self)
+        self._workspace = WorkspaceController(self._config, self._rules, self, whitelist_controller=self._whitelist)
         self._about = AboutController(self)
         # 从用户配置注入字体设置到 ThemeController（QML 绑定 theme.fontSize* 自动刷新）
         self._apply_font_config_to_theme()
@@ -151,6 +155,11 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
         return self._workspace
 
     @property
+    def whitelist(self) -> WhitelistController:
+        """白名单控制器。"""
+        return self._whitelist
+
+    @property
     def about(self) -> AboutController:
         """关于控制器。"""
         return self._about
@@ -167,6 +176,7 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
         context.setContextProperty("ConfigController", self._config)  # pyrefly: ignore [missing-attribute]
         context.setContextProperty("RulesController", self._rules)  # pyrefly: ignore [missing-attribute]
         context.setContextProperty("WorkspaceController", self._workspace)  # pyrefly: ignore [missing-attribute]
+        context.setContextProperty("WhitelistController", self._whitelist)  # pyrefly: ignore [missing-attribute]
         context.setContextProperty("AboutController", self._about)  # pyrefly: ignore [missing-attribute]
 
     def cleanup(self) -> None:

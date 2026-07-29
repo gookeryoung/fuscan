@@ -19,6 +19,7 @@ except ImportError:  # pragma: no cover
 
 from fuscan.perf import PerfStats
 from fuscan.rules.model import RuleSet
+from fuscan.rules.whitelist import Whitelist
 from fuscan.scanner import ScanReport
 from fuscan.scanner.result import ProgressInfo, ScanResult, ScanStats, WalkResult
 from fuscan.scanner.scanner import Scanner
@@ -63,6 +64,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         skip_paths: frozenset[str] | None = None,
         precollected: list[WalkResult] | None = None,
         prev_report: ScanReport | None = None,
+        whitelist: Whitelist | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -90,6 +92,8 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         # ScanWorker 用 precollected 模式调 scan_entries，Scanner 在 __init__ 时
         # 根据 prev_report 预索引未变更命中结果（_unchanged_hits），scan_entries 合并。
         self._prev_report: ScanReport | None = prev_report
+        # iter-133：误报白名单快照，传给 Scanner 在命中聚合阶段过滤
+        self._whitelist: Whitelist | None = whitelist
         self._scanner: Scanner | None = None
         self._cancel_requested: bool = False
         # 多根路径累计性能统计：每次 scan() 后合并 perf_summary
@@ -167,6 +171,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
                 scan_extensions=self._scan_extensions,
                 skip_paths=self._skip_paths,
                 prev_report=self._prev_report,
+                whitelist=self._whitelist,
             )
             if self._cancel_requested:
                 self._scanner.cancel()

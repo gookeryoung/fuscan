@@ -350,12 +350,20 @@ class TestMoveSelectedToStaging:
         msg = controller_with_results.moveSelectedToStaging()
         assert "未选中" in msg
 
-    def test_returns_message_when_archive_entry(self, controller: ScanController, tmp_path: Path) -> None:
+    def test_returns_message_when_archive_entry(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """iter-133：压缩包内部条目移至暂存操作的是压缩包文件本身。"""
         controller._ruleset = _build_replace_ruleset()
         # 创建真实的压缩包文件，使复制操作成功
         archive_file = tmp_path / "archive.zip"
         archive_file.write_bytes(b"PK\x05\x06" + b"\x00" * 18)
+        # 重定向暂存目录到 tmp_path，避免 Linux CI 探测 /.fuscan-cache 无权限
+        staging_dir = tmp_path / "staging"
+        monkeypatch.setattr(controller._config, "staging_dir", str(staging_dir))
         result = _make_scan_result(
             Path(str(archive_file) + "!inner.txt"),
             archive_path=archive_file,

@@ -22,6 +22,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING
 
+from fuscan.scanner._executor import DaemonThreadPoolExecutor
 from fuscan.scanner._helpers import cancel_all_futures
 from fuscan.scanner.result import ScanResult
 
@@ -122,6 +123,12 @@ def _scan_concurrent(
     阻塞上限控制在百毫秒级。
 
     命中结果同步收集到 ``scanner._matched_files`` 供进度回调上报。
+
+    iter-139：使用 :class:`DaemonThreadPoolExecutor` 并在 finally 中
+    ``shutdown(wait=False)`` 不阻塞主线程，依赖 daemon worker 在进程退出时
+    由 OS 回收。原实现 ``shutdown(wait=True)`` 在取消路径下因
+    ``_collect_concurrent_results`` 内已 ``shutdown(wait=False)`` 仍会重新
+    ``t.join()`` 阻塞，导致 ``ScanWorker.run`` 不返回、进程不退。
     """
     scanned = 0
     matched = 0
@@ -132,7 +139,7 @@ def _scan_concurrent(
     # 避免某个 worker 卡在 read_bytes() 上导致 with 退出时无限阻塞。
     # 已运行 worker 在后台完成（_scan_entry 入口已检查取消标志会快速返回），
     # 不影响下次扫描（Scanner 每次扫描重新构造，不复用线程池）。
-    pool = ThreadPoolExecutor(max_workers=scanner._max_workers)
+    pool = DaemonThreadPoolExecutor(max_workers=scanner._max_workers)
     try:
         cancelled_in_submit = False
         # 一次性提交所有 entries：阶段 1 已完成遍历，entries 内存可见且可索引
@@ -149,8 +156,10 @@ def _scan_concurrent(
             return scanned, matched, errors, matches
         scanned, matched, errors, matches = _collect_concurrent_results(scanner, future_to_entry, results, pool)
     finally:
-        # 正常完成时等待所有 future；取消时已 shutdown(wait=False)，此处幂等
-        pool.shutdown(wait=True)
+        # iter-139：wait=False 不阻塞主线程。DaemonThreadPoolExecutor 的 worker
+        # 为 daemon，进程退出时由 OS 回收；正常完成路径 as_completed 循环已退出，
+        # 此时 worker 已空闲，shutdown 仅清理 pool 状态立即返回。
+        pool.shutdown(wait=False)
     return scanned, matched, errors, matches
 
 

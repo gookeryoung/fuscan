@@ -159,6 +159,13 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         ``precollected`` 非 None 时跳过 walk 阶段，直接对预收集的
         :class:`WalkResult` 调 :meth:`Scanner.scan_entries`，与
         :class:`FileStatsWorker` 配合实现 stats/scan 职责拆分。
+
+        iter-139：取消保护——多根路径扫描时每个根之前检查 ``_cancel_requested``，
+        避免取消后仍启动下一个根的扫描。单根扫描的取消由 Scanner 内部
+        ``_check_control``/``_cancel_event`` 保证（``_scan_entry`` 入口 +
+        ``as_completed`` 循环顶部双重检查）。ThreadPool worker 由
+        :class:`DaemonThreadPoolExecutor` 提供进程退出保护，``shutdown(wait=False)``
+        不阻塞主线程。
         """
         try:
             self._start_time = time.monotonic()
@@ -195,7 +202,20 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
             else:
                 reports = (self._scanner.scan(root) for root in self._roots)
 
-            for report in reports:
+            # iter-139：手动迭代 reports 生成器，每根之前检查 _cancel_requested。
+            # 原因：scan()/scan_entries() 在 finally 中清除 _cancel_event，
+            # 若用 `for report in reports:` 隐式 next()，下一根 scan 时 _cancel_event
+            # 已清空会正常执行，导致取消后仍扫描后续根路径。
+            reports_iter = iter(reports)
+            while not was_cancelled:
+                # 取消标志在 next() 之前检查，避免取消后仍启动下一根扫描
+                if self._cancel_requested:
+                    was_cancelled = True
+                    break
+                try:
+                    report = next(reports_iter)
+                except StopIteration:
+                    break
                 all_results.extend(report.results)
                 self._accumulate_report(report)
                 if report.cancelled:

@@ -16,6 +16,7 @@ import logging
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING
 
+from fuscan.scanner._executor import DaemonThreadPoolExecutor
 from fuscan.scanner._helpers import cancel_all_futures
 from fuscan.scanner.result import ScanResult
 
@@ -164,8 +165,10 @@ def run_archive_phase(
     # 多线程：archive 文件级别并行
     # 不使用 with 语句：取消时 shutdown(wait=False) 立即返回，避免大型压缩包
     # list_entries() 卡住时 with 退出无限阻塞。已运行 worker 在后台完成。
+    # iter-139：使用 DaemonThreadPoolExecutor，finally 中 shutdown(wait=False)
+    # 不阻塞主线程，避免取消路径下 worker 卡在慢 I/O 时 ScanWorker.run 不返回。
     future_to_entry: dict[Future[tuple[ScanResult, ...]], FileEntry] = {}
-    pool = ThreadPoolExecutor(max_workers=scanner._max_workers)
+    pool = DaemonThreadPoolExecutor(max_workers=scanner._max_workers)
     try:
         cancelled_in_walk = False
         for entry in archive_entries:
@@ -185,5 +188,6 @@ def run_archive_phase(
         errors += d_errors
         matches += d_matches
     finally:
-        pool.shutdown(wait=True)
+        # iter-139：wait=False 不阻塞主线程，daemon worker 由 OS 回收
+        pool.shutdown(wait=False)
     return scanned, matched, errors, matches

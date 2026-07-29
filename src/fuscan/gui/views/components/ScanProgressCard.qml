@@ -128,15 +128,17 @@ Rectangle {
                 Layout.fillWidth: true
                 elide: Text.ElideMiddle
             }
-            // iter-138：资源配置（CPU 线程 / 最大文件 / 扫描深度）
+            // iter-138/139：资源配置（CPU 线程 / 最大文件 / 扫描深度）
+            // 改读 activeScanController.effective* 以反映任务级 override（iter-139 修复）。
             Label {
                 text: "配置"
                 font.pixelSize: 11
                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
             }
             Label {
-                text: "最多 " + configController.maxWorkers + " 线程 / 最大 "
-                      + configController.maxFileSizeMB + " MB / 深度 " + configController.maxDepth
+                text: "最多 " + workspaceController.activeScanController.effectiveMaxWorkers + " 线程 / 最大 "
+                      + workspaceController.activeScanController.effectiveMaxFileSizeMB + " MB / 深度 "
+                      + workspaceController.activeScanController.effectiveMaxDepth
                 font.pixelSize: 12
                 color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                 Layout.fillWidth: true

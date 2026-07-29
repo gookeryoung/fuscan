@@ -128,6 +128,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     canStartScanChanged = Signal()
     # iter-128：后台恢复扫描结果时的加载态信号
     restoringChanged = Signal()
+    # iter-139：任务级 effective 配置变更信号——max_workers/max_file_size/max_depth
+    # 等任务级覆盖或全局 Config 变更时 emit，供 QML 重算 effective* 属性绑定。
+    # 同时连接到 configController.configChanged 以反映全局配置变更。
+    effectiveConfigChanged = Signal()
 
     def __init__(
         self,
@@ -223,6 +227,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # iter-137：规则配置全局化——启动时一次性快照全局 RulesController.ruleset
         # 作为占位（避免 None 状态），startScan 时再次取最新（保证规则变更立即生效）
         self._ruleset = self._rules_controller.ruleset
+        # iter-139：全局 Config 变更时同步 emit effectiveConfigChanged，
+        # 让 QML effective* 绑定（如 effectiveMaxWorkers）跟随全局配置更新。
+        # 任务级 override 变更由 setTaskOverride 内部 emit，不在此处处理。
+        self._config_controller.configChanged.connect(  # pyrefly: ignore [missing-attribute]
+            self._emit_effective_config_changed
+        )
 
     # ----------------------------- 扫描状态 -----------------------------
 
@@ -473,8 +483,23 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         覆盖值在 :meth:`_effective_scan_archives`/`_effective_max_workers` 等
         方法中优先读取，未设置时回退到全局 :attr:`_config`。
+
+        iter-139：影响 QML effective* 绑定的字段（``max_workers``/``max_file_size``/
+        ``max_depth``）变更时 emit :attr:`effectiveConfigChanged`，让
+        ``effectiveMaxWorkers``/``effectiveMaxFileSizeMB``/``effectiveMaxDepth``
+        绑定重算。
         """
         self._task_overrides[key] = value
+        if key in ("max_workers", "max_file_size", "max_depth"):
+            self.effectiveConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    def _emit_effective_config_changed(self) -> None:
+        """configController.configChanged → effectiveConfigChanged 桥接。
+
+        全局 Config 变更时 QML 侧 ``configController.maxWorkers`` 等绑定自行重算，
+        但 ``ScanController.effectiveMaxWorkers`` 等需通过本信号触发重算。
+        """
+        self.effectiveConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def _effective_scan_archives(self) -> bool:
         """任务级覆盖优先的 scan_archives。"""
@@ -500,6 +525,34 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def _effective_ignore_dirs(self) -> tuple[str, ...]:
         """任务级覆盖优先的 ignore_dirs。"""
         return effective_ignore_dirs(self._task_overrides, self._config)
+
+    @Property(int, notify=effectiveConfigChanged)  # pyrefly: ignore [not-callable]
+    def effectiveMaxWorkers(self) -> int:
+        """任务级覆盖优先的最大工作线程数（iter-139）。
+
+        供 QML ScanProgressCard 显示实际生效的线程数（任务级 override 优先，
+        回退到全局 Config）。变更通知走 :attr:`effectiveConfigChanged`：
+        ``setTaskOverride("max_workers", ...)`` 与全局 Config 变更均会触发。
+        """
+        return self._effective_max_workers()
+
+    @Property(int, notify=effectiveConfigChanged)  # pyrefly: ignore [not-callable]
+    def effectiveMaxFileSizeMB(self) -> int:
+        """任务级覆盖优先的最大文件大小（MB，iter-139）。
+
+        与 :attr:`effectiveMaxWorkers` 同模式：任务级 override 优先，回退全局。
+        """
+        return self._effective_max_file_size() // (1024 * 1024)
+
+    @Property(int, notify=effectiveConfigChanged)  # pyrefly: ignore [not-callable]
+    def effectiveMaxDepth(self) -> int:
+        """任务级覆盖优先的最大扫描深度（0=无限，iter-139）。
+
+        与 :attr:`effectiveMaxWorkers` 同模式：任务级 override 优先，回退全局。
+        ``None`` 归一化为 ``0`` 与 :meth:`ConfigController.maxDepth` 一致。
+        """
+        depth = self._effective_max_depth()
+        return depth or 0
 
     @Property(int, notify=rulesCountChanged)  # pyrefly: ignore [not-callable]
     def rulesCount(self) -> int:
@@ -1261,7 +1314,14 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         有 hits，将旧 hits 合并到 results 中。回退全量因 ``_unchanged_count=0``
         导致 Scanner 层合并条件不满足，此处做 controller 层补救，避免用户
         在运行时丢失之前扫描的结果。
+
+        iter-139：先切换扫描状态到 results/setup 与「已完成」状态文本，让 UI
+        状态机立即跳出"扫描中"；再执行 ``set_results``/``_sync_stats_from_report``
+        /``_save_manifest`` 等耗时操作。状态切换在前确保 Qt 信号 emit 后 QML
+        绑定可立即重算（虽然实际重绘需等事件循环），避免 set_results 大结果集
+        阻塞时 UI 状态机仍停在 STATE_SCANNING。
         """
+        # iter-135：增量回退全量无命中时合并上次 hits
         if not report.hits and self._pending_prev_report is not None and self._pending_prev_report.hits:
             old_hits = self._pending_prev_report.hits
             report = ScanReport(
@@ -1272,22 +1332,28 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             )
             logger.info("本次扫描无命中，合并上次扫描的 %d 条命中结果", len(old_hits))
         self._last_report = report
-        self._result_model.set_results(report.hits)
-        # 从 report.stats 同步最终统计，确保扫描完成后统计页展示正确数值
-        self._sync_stats_from_report(report)
-        # 标记 scan 阶段完成（iter-105 双进度条）
+        # 标记 scan 阶段完成（iter-105 双进度条）+ 切换 phase，让进度条满格
         self._scan_done = True
         self._scan_phase = PHASE_DONE
-        # iter-124：持久化本次构建的 manifest（仅 startIncrementalScan 设置了 _pending_ws_id）
-        if self._pending_ws_id and self._pending_manifest is not None:
-            self._save_manifest(self._pending_ws_id, self._pending_manifest)
+        # 先清理 worker 引用并复位 cancelling/paused 标志
         self._reset_scan_ui()
+        # 立即 emit 状态文本与扫描状态：让 QML 状态机先切到"已完成/已取消"
+        # 后续 set_results 等耗时操作即使阻塞主线程，Qt 信号已 emit，
+        # QML 绑定在事件循环恢复后立即重算到正确状态
         summary = report.summary()
         speed = report.stats.speed
         if speed > 0:
             summary += f" | 速度 {speed:.0f} 文件/s"
         self._set_status(STR_STATUS_DONE if not report.cancelled else STR_STATUS_CANCELLED, summary)
         self._set_scan_state(STATE_RESULTS if report.hits else STATE_SETUP)
+        # 耗时收尾：结果模型填充 + 统计同步 + manifest 持久化
+        self._result_model.set_results(report.hits)
+        self._sync_stats_from_report(report)
+        # iter-124：持久化本次构建的 manifest（仅 startIncrementalScan 设置了 _pending_ws_id）
+        if self._pending_ws_id and self._pending_manifest is not None:
+            self._save_manifest(self._pending_ws_id, self._pending_manifest)
+        # 重新 emit progressChanged 让统计页/进度条读取最新数值
+        self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     @Slot(str)  # pyrefly: ignore [not-callable]
     def _on_scan_failed(self, error: str) -> None:

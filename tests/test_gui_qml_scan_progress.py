@@ -163,3 +163,21 @@ def test_scan_progress_card_no_null_when_active_scan(
     assert not null_errors, f"扫描中 QML 报 null TypeError（共 {len(null_errors)} 条）:\n" + "\n".join(null_errors[:5])
 
     controller.cleanup()
+
+
+def test_no_binding_loop_warnings(
+    qml_warnings_handler: tuple[list[str], Callable[[], None]],
+) -> None:
+    """iter-138：加载 Main.qml 应无 binding loop 警告。
+
+    覆盖问题2 修复：SettingsPage ListView ``cacheBuffer`` 改为固定 500，
+    消除与 ``settingsTabBar.currentIndex`` 的双向依赖导致的 binding loop。
+    """
+    warnings, _ = qml_warnings_handler
+    app, controller, _engine = _build_engine_with_main_qml()
+    _process_events(app, 500)
+
+    binding_loops = [w for w in warnings if "binding loop" in w.lower()]
+    assert not binding_loops, f"QML 报 binding loop（共 {len(binding_loops)} 条）:\n" + "\n".join(binding_loops[:5])
+
+    controller.cleanup()

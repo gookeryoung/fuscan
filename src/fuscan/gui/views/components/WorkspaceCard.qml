@@ -21,7 +21,6 @@ Rectangle {
     property string taskName: ""
     property string modeText: ""
     property string target: ""
-    property string rulesText: ""
     property var rulesTags: []
     property string statusText: ""
     property int matchedCount: 0

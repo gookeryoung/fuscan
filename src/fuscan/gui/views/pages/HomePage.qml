@@ -344,7 +344,6 @@ Item {
                     taskName: model.name
                     modeText: model.modeText
                     target: model.target
-                    rulesText: model.rulesText
                     rulesTags: model.rulesTags
                     statusText: model.statusText
                     matchedCount: model.matchedCount

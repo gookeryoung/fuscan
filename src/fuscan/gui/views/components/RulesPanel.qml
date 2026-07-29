@@ -98,7 +98,9 @@ Item {
 
         Connections {
             target: rulesController
-            onRulesIoCompleted: function(ok, msg) {
+            // iter-138：使用 Qt 5.15+ 新语法 function onFoo()，消除
+            // "Implicitly defined onFoo properties in Connections are deprecated" 警告
+            function onRulesIoCompleted(ok, msg) {
                 ioToast.success = ok
                 ioToast.message = msg
                 toastTimer.restart()

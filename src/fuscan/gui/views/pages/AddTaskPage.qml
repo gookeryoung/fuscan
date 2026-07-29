@@ -13,15 +13,12 @@ Item {
     property ThemeController theme: Theme
     property WorkspaceControllerType workspaceController: WorkspaceController
     property ConfigControllerType configController: ConfigController
-    property RulesControllerType rulesController: RulesController
 
     // 表单状态
     property string taskName: ""
     property int modeIndex: 2  // 默认文件夹扫描
     property string selectedDrive: ""
     property string folderRoot: ""
-    property var rulesPaths: []
-    property bool useBuiltin: true
 
     // 文件夹选择对话框
     FileDialog {
@@ -32,22 +29,6 @@ Item {
         folder: folderRoot.length > 0 ? "file:///" + folderRoot : shortcuts.home
         onAccepted: {
             folderRoot = folderDialog.fileUrl.toString().replace(/^file:\/\/\//, "")
-        }
-    }
-
-    // 规则文件选择对话框
-    FileDialog {
-        id: rulesFileDialog
-        title: "选择规则文件"
-        selectExisting: true
-        nameFilters: ["YAML 文件 (*.yaml *.yml)", "所有文件 (*.*)"]
-        onAccepted: {
-            var path = rulesFileDialog.fileUrl.toString().replace(/^file:\/\/\//, "")
-            if (rulesPaths.indexOf(path) < 0) {
-                var paths = rulesPaths.slice()
-                paths.push(path)
-                rulesPaths = paths
-            }
         }
     }
 
@@ -129,81 +110,6 @@ Item {
                 sourceComponent: modeIndex === 1 ? driveComponent : folderComponent
             }
 
-            // ---------- 规则配置 ----------
-            Label {
-                text: "规则配置"
-                font.pixelSize: theme.fontSizeBody
-                font.bold: true
-                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-            }
-            CheckBox {
-                text: "启用内置通用规则"
-                checked: useBuiltin
-                onCheckedChanged: useBuiltin = checked
-            }
-            // 规则文件列表（带边框列表项）
-            Repeater {
-                model: rulesPaths
-                delegate: Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 36
-                    color: "transparent"
-                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                    border.width: 1
-                    radius: theme.btnRadiusGhost
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 12
-                        anchors.rightMargin: 4
-                        spacing: 8
-                        // 规则文件图标：SVG file + ColorOverlay 染色
-                        Item {
-                            width: 13
-                            height: 13
-                            Layout.preferredWidth: 13
-                            Layout.preferredHeight: 13
-                            Image {
-                                id: ruleFileIcon
-                                anchors.fill: parent
-                                source: "qrc:/icons/file.svg"
-                                sourceSize: Qt.size(13, 13)
-                                visible: false
-                            }
-                            ColorOverlay {
-                                anchors.fill: ruleFileIcon
-                                source: ruleFileIcon
-                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                            }
-                        }
-                        Label {
-                            text: modelData
-                            font.pixelSize: 12
-                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                            Layout.fillWidth: true
-                            elide: Text.ElideMiddle
-                        }
-                        IconButton {
-                            iconSource: "qrc:/icons/close.svg"
-                            text: ""
-                            tooltip: "移除该规则文件"
-                            accent: "secondary"
-                            onClicked: {
-                                var paths = rulesPaths.slice()
-                                paths.splice(index, 1)
-                                rulesPaths = paths
-                            }
-                        }
-                    }
-                }
-            }
-            IconButton {
-                iconSource: "qrc:/icons/add.svg"
-                text: "添加规则文件"
-                tooltip: "选择规则文件"
-                accent: "secondary"
-                onClicked: rulesFileDialog.open()
-            }
-
             Item { Layout.fillHeight: true }  // 弹性撑开
 
             // ---------- 操作按钮 ----------
@@ -228,8 +134,9 @@ Item {
                     onClicked: {
                         var modeStr = modeIndex === 0 ? "full" : (modeIndex === 1 ? "drive" : "folder")
                         var target = modeIndex === 0 ? "" : (modeIndex === 1 ? selectedDrive : folderRoot)
-                        var rulesJson = JSON.stringify(rulesPaths)
-                        workspaceController.addWorkspace(taskName, modeStr, target, rulesJson, useBuiltin)
+                        // iter-138：规则配置已全局化（首页 RulesPanel），新建工作区不再单独配置规则，
+                        // 传空规则路径 + 启用内置规则，由全局规则统一管理
+                        workspaceController.addWorkspace(taskName, modeStr, target, "[]", true)
                         addTaskPage.resetForm()
                         addTaskPage.created()
                     }
@@ -401,7 +308,5 @@ Item {
         modeIndex = 2
         selectedDrive = ""
         folderRoot = ""
-        rulesPaths = []
-        useBuiltin = true
     }
 }

@@ -1807,8 +1807,11 @@ class TestRtfExtractor:
         assert isinstance(get_extractor("rtf"), RtfExtractor)
 
     def test_rtf_import_error_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """striprtf 未安装时应抛出 ExtractorError。"""
+        """striprtf 未安装且 kreuzberg 不可用时应抛出 ExtractorError。"""
         import builtins
+
+        # kreuzberg 可用时会走 Rust 核心路径，不走 striprtf 导入
+        monkeypatch.setattr("fuscan.extractors.rtf.kreuzberg_available", lambda: False)
 
         original_import = builtins.__import__
 
@@ -1822,7 +1825,9 @@ class TestRtfExtractor:
             RtfExtractor().extract_from_bytes(b"{\\rtf1 fake}")
 
     def test_rtf_parse_error_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """rtf_to_text 抛异常时应包装为 ExtractorError。"""
+        """rtf_to_text 抛异常且 kreuzberg 不可用时应包装为 ExtractorError。"""
+        # kreuzberg 可用时会走 Rust 核心路径，不走 striprtf
+        monkeypatch.setattr("fuscan.extractors.rtf.kreuzberg_available", lambda: False)
 
         def raise_parse(text: str) -> None:
             raise RuntimeError("解析失败")

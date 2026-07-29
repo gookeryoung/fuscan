@@ -350,15 +350,23 @@ class TestMoveSelectedToStaging:
         msg = controller_with_results.moveSelectedToStaging()
         assert "未选中" in msg
 
-    def test_returns_message_when_archive_entry(self, controller: ScanController) -> None:
-        """压缩包内部条目返回不可移至暂存提示。"""
+    def test_returns_message_when_archive_entry(self, controller: ScanController, tmp_path: Path) -> None:
+        """iter-133：压缩包内部条目移至暂存操作的是压缩包文件本身。"""
         controller._ruleset = _build_replace_ruleset()
-        result = _make_scan_result(Path("/tmp/archive.zip!inner.txt"), archive_path=Path("/tmp/archive.zip"))
+        # 创建真实的压缩包文件，使复制操作成功
+        archive_file = tmp_path / "archive.zip"
+        archive_file.write_bytes(b"PK\x05\x06" + b"\x00" * 18)
+        result = _make_scan_result(
+            Path(str(archive_file) + "!inner.txt"),
+            archive_path=archive_file,
+        )
         controller._result_model.set_results((result,))
         controller._last_report = _make_scan_report((result,))
         controller.setSelectedResultIndex(0)
         msg = controller.moveSelectedToStaging()
-        assert "压缩包" in msg
+        # 应成功移至暂存（操作的是压缩包文件本身）
+        assert "已移至暂存" in msg
+        assert "archive.zip" in msg
 
     def test_move_success_copies_and_marks_skipped(
         self,

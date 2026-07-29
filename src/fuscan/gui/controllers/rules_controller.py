@@ -23,7 +23,6 @@
 - :meth:`RulesController.set_use_builtin`：勾选内置规则
 - :meth:`RulesController.export_ruleset`：导出当前规则集到 YAML/JSON（iter-122）
 - :meth:`RulesController.import_ruleset`：从 YAML/JSON 文件导入规则（iter-122）
-- :meth:`RulesController.load_template`：加载内置规则模板（iter-122）
 """
 
 from __future__ import annotations
@@ -43,10 +42,7 @@ from fuscan.config import Config
 from fuscan.gui.models.rule_model import RuleListModel
 from fuscan.rules import (
     RuleError,
-    get_template_descriptions,
-    get_template_names,
     load_ruleset,
-    load_template,
     merge_multiple_rulesets,
     save_ruleset,
 )
@@ -73,7 +69,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
     useBuiltinChanged = Signal()
     # 绑定工作区变化：QML 据此切换标题/提示
     boundWorkspaceChanged = Signal()
-    # 规则导入/导出/模板操作结果通知（QML 据此显示 toast/对话框）
+    # 规则导入/导出操作结果通知（QML 据此显示 toast/对话框）
     # 参数：成功 True/False，消息文本
     rulesIoCompleted = Signal(bool, str)
 
@@ -414,17 +410,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.selectionChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
 
-    # ------------------- iter-122：导入/导出/模板 -------------------
-
-    @Property("QVariantList", notify=rulesetChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
-    def templateList(self) -> list[dict[str, str]]:
-        """内置规则模板列表（供 QML 模板选择对话框绑定）。
-
-        返回 ``[{"name": "aws_keys", "description": "AWS 密钥检测..."}, ...]``，
-        按模板名字母序排列。
-        """
-        descriptions = get_template_descriptions()
-        return [{"name": name, "description": descriptions[name]} for name in get_template_names()]
+    # ------------------- iter-122：导入/导出 -------------------
 
     @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
     def exportRuleset(self, path_str: str) -> bool:
@@ -501,54 +487,6 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return False
 
         msg = f"已导入规则集 {path.name}（{len(imported.rules)} 条规则）"
-        logger.info(msg)
-        self.rulesIoCompleted.emit(True, msg)  # pyrefly: ignore [missing-attribute]
-        return True
-
-    @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
-    def loadTemplate(self, name: str) -> bool:
-        """加载内置规则模板（iter-122）。
-
-        将模板序列化到 ``~/.fuscan/templates/<name>.yaml`` 后加入规则文件列表，
-        用户可在 RulesPage 中查看与编辑模板内容（不修改内置模板本身）。
-
-        :param name: 模板名（如 ``aws_keys``，参见 :meth:`templateList`）
-        :return: 是否加载成功；失败时通过 ``rulesIoCompleted`` 信号通知 QML
-        """
-        if not name:
-            logger.warning("加载模板失败：模板名为空")
-            self.rulesIoCompleted.emit(False, "模板名为空")  # pyrefly: ignore [missing-attribute]
-            return False
-
-        try:
-            ruleset = load_template(name)
-        except KeyError:
-            logger.warning("加载模板失败：模板不存在 %s", name)
-            self.rulesIoCompleted.emit(False, f"模板不存在：{name}")  # pyrefly: ignore [missing-attribute]
-            return False
-
-        # 模板持久化到 ~/.fuscan/templates/<name>.yaml
-        from fuscan.config import CONFIG_DIR
-
-        templates_dir = CONFIG_DIR / "templates"
-        templates_dir.mkdir(parents=True, exist_ok=True)
-        target = templates_dir / f"{name}.yaml"
-        try:
-            save_ruleset(ruleset, target)
-        except (ValueError, OSError) as exc:
-            logger.warning("模板持久化失败: %s", exc)
-            self.rulesIoCompleted.emit(False, f"模板持久化失败：{exc}")  # pyrefly: ignore [missing-attribute]
-            return False
-
-        # 加入规则文件列表（复用 loadFileFromPath）
-        if not self.loadFileFromPath(str(target)):
-            # 已加载过的模板：直接提示成功（用户多次点击同一模板不应报错）
-            msg = f"模板 {name} 已加载，无需重复添加"
-            logger.info(msg)
-            self.rulesIoCompleted.emit(True, msg)  # pyrefly: ignore [missing-attribute]
-            return True
-
-        msg = f"已加载模板 {name}（{len(ruleset.rules)} 条规则）"
         logger.info(msg)
         self.rulesIoCompleted.emit(True, msg)  # pyrefly: ignore [missing-attribute]
         return True

@@ -63,6 +63,11 @@ class TestWhitelistControllerProperties:
         assert entries[0]["note"] == ""
         assert controller.whitelistCount == 1
 
+    def test_store_property_returns_underlying_store(self, controller: WhitelistController) -> None:
+        """store 属性返回底层 WhitelistStore 实例。"""
+        assert controller.store is not None
+        assert controller.store is controller.store  # 同一实例
+
 
 # --------------------------------------------------------------------------- #
 # addEntry
@@ -222,6 +227,18 @@ class TestWhitelistControllerImportExport:
         msg = controller.importJson(str(src))
         assert "失败" in msg
         assert controller.whitelistCount == 0
+
+    def test_import_empty_path_returns_error(self, controller: WhitelistController) -> None:
+        """空路径返回错误消息。"""
+        msg = controller.importJson("")
+        assert "未选择" in msg
+
+    def test_export_to_invalid_path_returns_error(self, controller: WhitelistController) -> None:
+        """导出到不可写路径返回错误消息（OSError 容错）。"""
+        controller.addEntry("/a", "r1", "")
+        # 使用不存在的盘符根目录作为不可写路径
+        msg = controller.exportJson("Z:/nonexistent_dir/export.json")
+        assert "失败" in msg
 
 
 # --------------------------------------------------------------------------- #

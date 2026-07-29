@@ -521,7 +521,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """导出指定工作区的扫描结果。
 
         :param ws_id: 工作区 ID
-        :param fmt: ``"csv"`` 或 ``"json"``
+        :param fmt: ``"pdf"``/``"csv"``/``"json"``/``"sarif"``/``"text"``
         :param path_str: 导出文件绝对路径（由 QML FileDialog 选定）
         """
         controller = self._ensure_scan_controller(ws_id)

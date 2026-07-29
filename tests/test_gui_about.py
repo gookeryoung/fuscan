@@ -83,6 +83,46 @@ class TestOpenManual:
         # 不应抛异常
         about.openManual()
 
+    def test_open_manual_calls_desktop_services(
+        self,
+        about: AboutController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """PDF 存在时应调用 QDesktopServices.openUrl。"""
+        from fuscan.gui.controllers import about_controller
+
+        pdf = tmp_path / "manual.pdf"
+        pdf.write_bytes(b"%PDF-1.4 test")
+        monkeypatch.setattr(about_controller, "MANUAL_PDF_PATH", pdf)
+
+        called_urls: list[str] = []
+
+        def fake_open_url(url: object) -> bool:
+            called_urls.append(str(url))
+            return True
+
+        monkeypatch.setattr(about_controller.QDesktopServices, "openUrl", fake_open_url)
+        about.openManual()
+        assert len(called_urls) == 1
+        assert "manual.pdf" in called_urls[0]
+
+    def test_open_manual_warns_when_open_url_fails(
+        self,
+        about: AboutController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """openUrl 返回 False 时仅记录 warning，不抛异常。"""
+        from fuscan.gui.controllers import about_controller
+
+        pdf = tmp_path / "manual.pdf"
+        pdf.write_bytes(b"%PDF-1.4 test")
+        monkeypatch.setattr(about_controller, "MANUAL_PDF_PATH", pdf)
+        monkeypatch.setattr(about_controller.QDesktopServices, "openUrl", lambda _url: False)
+        # 不应抛异常
+        about.openManual()
+
 
 class TestOpenConfigDir:
     """``openConfigDir`` Slot。"""
@@ -124,3 +164,19 @@ class TestOpenConfigDir:
         about.openConfigDir()
         assert len(called_urls) == 1
         assert "fuscan_config" in called_urls[0]
+
+    def test_open_config_dir_warns_when_open_url_fails(
+        self,
+        about: AboutController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """openUrl 返回 False 时仅记录 warning，不抛异常。"""
+        from fuscan.gui.controllers import about_controller
+
+        config_dir = tmp_path / "fuscan_config"
+        config_dir.mkdir()
+        monkeypatch.setattr(about_controller, "CONFIG_DIR", config_dir)
+        monkeypatch.setattr(about_controller.QDesktopServices, "openUrl", lambda _url: False)
+        # 不应抛异常
+        about.openConfigDir()

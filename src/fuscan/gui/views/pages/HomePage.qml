@@ -44,6 +44,19 @@ Item {
         }
     }
 
+    // PDF 导出文件保存对话框（iter-136）
+    FileDialog {
+        id: exportPdfDialog
+        title: "导出扫描结果为 PDF"
+        selectExisting: false
+        defaultSuffix: "pdf"
+        nameFilters: ["PDF (*.pdf)"]
+        onAccepted: {
+            var path = exportPdfDialog.fileUrl.toString().replace(/^file:\/\/\//, "")
+            workspaceController.exportResults(homePage._pendingExportWsId, "pdf", path)
+        }
+    }
+
     // 清空所有工作区确认对话框（自绘 Dialog，与应用本体风格一致）
     Dialog {
         id: clearConfirmDialog
@@ -360,6 +373,10 @@ Item {
                     onExportJsonRequested: function(wsId) {
                         homePage._pendingExportWsId = wsId
                         exportJsonDialog.open()
+                    }
+                    onExportPdfRequested: function(wsId) {
+                        homePage._pendingExportWsId = wsId
+                        exportPdfDialog.open()
                     }
                     onTaskSettingsRequested: function(wsId) {
                         homePage.taskSettingsRequested(wsId)

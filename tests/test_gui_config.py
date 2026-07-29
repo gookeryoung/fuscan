@@ -123,6 +123,31 @@ class TestCacheAndPerf:
         controller.setPerfLogEnabled(True)
         assert controller.perfLogEnabled is True
 
+    def test_cpu_count_positive(self, controller: ConfigController) -> None:
+        """cpuCount 应返回正整数（≥1）。"""
+        assert controller.cpuCount >= 1
+
+
+class TestEntropySettings:
+    """高熵字符串检测配置（iter-134）。"""
+
+    def test_entropy_enabled_default(self, controller: ConfigController) -> None:
+        assert controller.entropyEnabled is True
+
+    def test_set_entropy_enabled(self, controller: ConfigController) -> None:
+        controller.setEntropyEnabled(False)
+        assert controller.entropyEnabled is False
+
+    def test_entropy_threshold_default(self, controller: ConfigController) -> None:
+        assert 3.0 <= controller.entropyThreshold <= 5.0
+
+    def test_set_entropy_threshold_clamped(self, controller: ConfigController) -> None:
+        """阈值应钳制到 3.0~5.0 范围。"""
+        controller.setEntropyThreshold(10.0)
+        assert controller.entropyThreshold == 5.0
+        controller.setEntropyThreshold(1.0)
+        assert controller.entropyThreshold == 3.0
+
 
 class TestIgnoreDirs:
     def test_ignore_dir_categories_default_non_empty(self, controller: ConfigController) -> None:

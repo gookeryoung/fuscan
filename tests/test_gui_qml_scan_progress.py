@@ -36,14 +36,29 @@ try:
     from PySide2.QtGui import QGuiApplication
     from PySide2.QtQml import QQmlApplicationEngine
 
+    PYSIDE2_AVAILABLE = True
+except ImportError:
+    PYSIDE2_AVAILABLE = False
+    from PySide6.QtCore import (  # type: ignore[no-redef]
+        QTimer,
+        QtMsgType,
+        QUrl,
+        qInstallMessageHandler,
+    )
+    from PySide6.QtGui import QGuiApplication  # type: ignore[no-redef]
+    from PySide6.QtQml import QQmlApplicationEngine  # type: ignore[no-redef]
+
+try:
     from fuscan.gui.controllers import AppController, register_qml_types
 
     PYSIDE_AVAILABLE = True
 except ImportError:
     PYSIDE_AVAILABLE = False
 
-if not PYSIDE_AVAILABLE:
-    pytest.skip("PySide 未安装，跳过 QML 集成测试", allow_module_level=True)
+# QML 文件 import ``QtGraphicalEffects 1.15``（Qt5 专用模块，Qt6 已移除），
+# 故 QML 集成测试仅在 PySide2 环境下执行；PySide6-only 环境跳过。
+if not PYSIDE_AVAILABLE or not PYSIDE2_AVAILABLE:
+    pytest.skip("PySide2 未安装，跳过 QML 集成测试（QML 依赖 Qt5 专属模块）", allow_module_level=True)
 
 
 def _filter_null_errors(warnings: list[str]) -> list[str]:

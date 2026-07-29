@@ -26,7 +26,10 @@ pytestmark = pytest.mark.gui
 
 try:
     from PySide2.QtCore import Qt
+except ImportError:
+    from PySide6.QtCore import Qt  # type: ignore[no-redef]
 
+try:
     from fuscan.config import Config  # noqa: F401
     from fuscan.gui.controllers.config_controller import ConfigController
     from fuscan.gui.controllers.rules_controller import RulesController
@@ -51,7 +54,10 @@ if not PYSIDE_AVAILABLE:
 @pytest.fixture(scope="session")
 def qapp() -> object:
     """创建 QApplication（若不存在），用于 QThread 信号传递。"""
-    from PySide2.QtWidgets import QApplication
+    try:
+        from PySide2.QtWidgets import QApplication
+    except ImportError:
+        from PySide6.QtWidgets import QApplication  # type: ignore[no-redef]
 
     app = QApplication.instance()
     if app is None:
@@ -61,7 +67,10 @@ def qapp() -> object:
 
 def _wait_for_restore(controller: WorkspaceController, ws_id: str, timeout_ms: int = 5000) -> None:
     """等待异步恢复完成（处理 Qt 事件循环以接收 worker 信号）。"""
-    from PySide2.QtCore import QCoreApplication
+    try:
+        from PySide2.QtCore import QCoreApplication
+    except ImportError:
+        from PySide6.QtCore import QCoreApplication  # type: ignore[no-redef]
 
     elapsed = 0
     while ws_id in controller._restoring_workspaces and elapsed < timeout_ms:  # type: ignore[attr-defined]

@@ -22,6 +22,7 @@ pytestmark = pytest.mark.gui
 try:
     from fuscan.config import Config
     from fuscan.gui.controllers._persistence import (
+        coerce_float,
         coerce_int,
         coerce_str,
         coerce_str_tuple,
@@ -894,6 +895,35 @@ class TestCoerceInt:
 
     def test_list_returns_default(self) -> None:
         assert coerce_int([1, 2]) == 0
+
+
+class TestCoerceFloat:
+    """coerce_float 安全浮点数转换。"""
+
+    def test_float_value_passthrough(self) -> None:
+        assert coerce_float(3.14) == 3.14
+
+    def test_int_converted_to_float(self) -> None:
+        assert coerce_float(42) == 42.0
+
+    def test_none_returns_default(self) -> None:
+        assert coerce_float(None) == 0.0
+        assert coerce_float(None, default=-1.5) == -1.5
+
+    def test_bool_returns_default(self) -> None:
+        """bool 是 int 子类，但 coerce_float 视为非数字返回 default。"""
+        assert coerce_float(True) == 0.0
+        assert coerce_float(False, default=99.5) == 99.5
+
+    def test_numeric_str_parsed(self) -> None:
+        assert coerce_float("3.14") == 3.14
+
+    def test_invalid_str_returns_default(self) -> None:
+        assert coerce_float("abc") == 0.0
+        assert coerce_float("abc", default=-5.5) == -5.5
+
+    def test_list_returns_default(self) -> None:
+        assert coerce_float([1.0, 2.0]) == 0.0
 
 
 class TestCoerceStrTuple:

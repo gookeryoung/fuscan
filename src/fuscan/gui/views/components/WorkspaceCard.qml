@@ -372,7 +372,16 @@ Rectangle {
                         editTargetDialog.open()
                     }
                 }
-                // iter-125：CSV/JSON 合并为「导出」按钮 + Menu 格式选择
+                IconButton {
+                    iconSource: "qrc:/icons/rescan.svg"
+                    text: "重新扫描"
+                    tooltip: "全量重新扫描（不复用上次结果）"
+                    accent: "ghost"
+                    // 已完成（含用户取消）的工作区可重新扫描
+                    enabled: card.isCompletedState()
+                    onClicked: workspaceController.startScan(card.workspaceId)
+                }
+                // iter-125：CSV/JSON/PDF 合并为「导出」按钮 + Menu 格式选择
                 IconButton {
                     iconSource: "qrc:/icons/export_csv.svg"
                     text: "导出"
@@ -389,6 +398,10 @@ Rectangle {
                         MenuItem {
                             text: "JSON (*.json)"
                             onTriggered: card.exportJsonRequested(card.workspaceId)
+                        }
+                        MenuItem {
+                            text: "PDF (*.pdf)"
+                            onTriggered: card.exportPdfRequested(card.workspaceId)
                         }
                     }
                 }
@@ -585,6 +598,7 @@ Rectangle {
     // 信号：导出 / 任务设置
     signal exportCsvRequested(string workspaceId)
     signal exportJsonRequested(string workspaceId)
+    signal exportPdfRequested(string workspaceId)
     signal taskSettingsRequested(string workspaceId)
 
     // ---------- 任务级设置对话框（iter-104 任务专属配置覆盖） ----------

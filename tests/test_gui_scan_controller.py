@@ -1139,6 +1139,23 @@ class TestExportResults:
         content = export_path.read_text(encoding="utf-8")
         assert "test.txt" in content or "敏感内容" in content
 
+    def test_export_results_writes_pdf(
+        self,
+        controller: ScanController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """有命中时应写入 PDF 二进制导出文件（iter-136）。"""
+        result = _make_scan_result(tmp_path / "test.txt")
+        controller._last_report = _make_scan_report(results=(result,))
+
+        export_path = tmp_path / "export.pdf"
+        controller.exportResults("pdf", str(export_path))
+
+        assert export_path.exists()
+        # PDF 文件以 %PDF- 魔数开头
+        assert export_path.read_bytes()[:5] == b"%PDF-"
+
     def test_export_results_empty_path_noop(
         self,
         controller: ScanController,

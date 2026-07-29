@@ -30,14 +30,23 @@ try:
     from PySide2.QtCore import QTimer
     from PySide2.QtGui import QGuiApplication
 
+    PYSIDE2_AVAILABLE = True
+except ImportError:
+    PYSIDE2_AVAILABLE = False
+    from PySide6.QtCore import QTimer  # type: ignore[no-redef]
+    from PySide6.QtGui import QGuiApplication  # type: ignore[no-redef]
+
+try:
     from fuscan.gui.app import launch
 
     PYSIDE_AVAILABLE = True
 except ImportError:
     PYSIDE_AVAILABLE = False
 
-if not PYSIDE_AVAILABLE:
-    pytest.skip("PySide 未安装，跳过 GUI launch 测试", allow_module_level=True)
+# QML 文件 import ``QtGraphicalEffects 1.15``（Qt5 专属模块，Qt6 已移除），
+# launch smoke 测试需加载 Main.qml，仅在 PySide2 环境下执行。
+if not PYSIDE_AVAILABLE or not PYSIDE2_AVAILABLE:
+    pytest.skip("PySide2 未安装，跳过 GUI launch 测试（QML 依赖 Qt5 专属模块）", allow_module_level=True)
 
 
 def test_launch_loads_main_qml() -> None:

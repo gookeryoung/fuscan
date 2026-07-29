@@ -156,11 +156,11 @@ class TestData:
         pytest.fail("PdfExtractor 应在默认注册表中")
 
     def test_data_returns_format_tags_for_source_code(self, model: ExtractorListModel) -> None:
-        """SourceCodeExtractor 应返回代表性多标签 [HTML, C, CPP, PY]（iter-103）。"""
+        """SourceCodeExtractor 应返回代表性多标签 [HTML, XML, JSON, JS, C, CPP, PY, SH]（iter-136 扩展）。"""
         for i in range(model.rowCount()):
             if model.data(model.index(i), Qt.UserRole + 1) == "SourceCodeExtractor":
                 tags = model.data(model.index(i), Qt.UserRole + 9)
-                assert tags == ["HTML", "C", "CPP", "PY"]
+                assert tags == ["HTML", "XML", "JSON", "JS", "C", "CPP", "PY", "SH"]
                 return
         pytest.fail("SourceCodeExtractor 应在默认注册表中")
 

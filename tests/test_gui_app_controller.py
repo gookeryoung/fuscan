@@ -23,7 +23,11 @@ pytestmark = pytest.mark.gui
 try:
     from PySide2.QtCore import QObject
     from PySide2.QtGui import QGuiApplication
+except ImportError:
+    from PySide6.QtCore import QObject  # type: ignore[no-redef]
+    from PySide6.QtGui import QGuiApplication  # type: ignore[no-redef]
 
+try:
     from fuscan.config import Config
     from fuscan.gui import AppController
     from fuscan.gui.app import _apply_global_font
@@ -239,10 +243,13 @@ class TestGuiMainModule:
     def test_main_module_pyside_detection(self) -> None:
         """模块加载时应成功探测到 PySide2 或 PySide6 之一。"""
         # 间接验证：若 PySide 探测失败，模块 import 时即抛 ImportError，
-        # test_main_module_imports_launch 无法通过。这里再断言 PySide2 可用。
-        import PySide2
+        # test_main_module_imports_launch 无法通过。这里再断言 PySide 可用。
+        try:
+            import PySide2 as pyside
+        except ImportError:
+            import PySide6 as pyside  # type: ignore[no-redef]
 
-        assert PySide2 is not None
+        assert pyside is not None
 
 
 class TestApplyGlobalFont:
@@ -280,3 +287,32 @@ class TestApplyGlobalFont:
         assert font.pixelSize() == 14
         # family 应被设置（具体名取决于 QFont.setFamilies 选中的首个可用字体）
         assert font.family()
+
+
+class TestRegisterQmlTypes:
+    """``register_qml_types`` 注册 QML 类型测试。"""
+
+    def test_register_qml_types_is_callable(self) -> None:
+        """register_qml_types 应可重复调用且不抛异常（幂等）。"""
+        from fuscan.gui.controllers import register_qml_types
+
+        # 幂等：lru_cache 保证多次调用只注册一次
+        register_qml_types()
+        register_qml_types()
+
+
+class TestApplyFontConfigToTheme:
+    """``AppController._apply_font_config_to_theme`` 字体同步测试。"""
+
+    def test_apply_font_config_sets_theme_font(self, controller: AppController) -> None:
+        """应将 ConfigController 的字体配置同步到 ThemeController 与 QGuiApplication。"""
+        controller._apply_font_config_to_theme()  # type: ignore[attr-defined]
+        # ThemeController 应已收到字体配置（fontSizeMin 为最小字号约束）
+        assert controller.theme.fontSizeMin > 0
+
+    def test_apply_font_config_updates_app_font(self, controller: AppController) -> None:
+        """QGuiApplication 存在时应同步全局字体。"""
+        app = QGuiApplication.instance() or QGuiApplication(["fuscan"])
+        controller._apply_font_config_to_theme()  # type: ignore[attr-defined]
+        font = app.font()
+        assert font.pixelSize() > 0

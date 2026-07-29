@@ -56,6 +56,7 @@ from fuscan.gui.scan_mode import (
 from fuscan.replacer import ReplaceStatus
 from fuscan.rules.model import Severity
 from fuscan.scanner import ScanReport
+from fuscan.scanner.export import export_report
 from fuscan.scanner.result import IncrementalManifest, ProgressInfo, ScanResult, WalkResult, format_size
 from fuscan.skip_store import SkipStore
 from fuscan.workers import FileStatsWorker, ScanWorker
@@ -1095,9 +1096,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str, str)  # pyrefly: ignore [not-callable]
     def exportResults(self, fmt: str, path_str: str) -> None:
-        """导出结果为 CSV/JSON 文件（路径由 QML FileDialog 选定后传入）。
+        """导出结果到文件（路径由 QML FileDialog 选定后传入）。
 
-        :param fmt: ``"csv"`` 或 ``"json"``
+        :param fmt: 格式 ``"pdf"``/``"csv"``/``"json"``/``"sarif"``/``"text"``
         :param path_str: 导出文件绝对路径
         """
         if self._last_report is None or not self._last_report.hits:
@@ -1105,10 +1106,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if not path_str:
             return
         try:
-            content = self._last_report.to_format(fmt)
-            Path(path_str).write_text(content, encoding="utf-8")
+            export_report(self._last_report, Path(path_str), fmt)
             self._set_status("已导出", f"已导出到 {path_str}")
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             logger.warning("导出失败: %s", exc, exc_info=True)
             self._set_status("导出失败", f"导出失败: {exc}")
 

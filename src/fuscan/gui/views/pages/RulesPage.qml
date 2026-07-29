@@ -59,111 +59,7 @@ Item {
         }
     }
 
-    // iter-122：模板选择对话框
-    Dialog {
-        id: templateDialog
-        title: "选择规则模板"
-        modal: true
-        anchors.centerIn: parent
-        width: 420
-        height: 360
-
-        background: Rectangle {
-            color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
-            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-            border.width: 1
-            radius: 8
-        }
-
-        contentItem: ColumnLayout {
-            spacing: 8
-
-            Label {
-                text: "选择内置规则模板（加载后可自定义）"
-                font.pixelSize: 12
-                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                Layout.fillWidth: true
-                Layout.leftMargin: 12
-                Layout.topMargin: 12
-            }
-
-            ListView {
-                id: templateListView
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.leftMargin: 12
-                Layout.rightMargin: 12
-                clip: true
-                cacheBuffer: 500
-                model: rulesController.templateList
-                delegate: ItemDelegate {
-                    width: templateListView.width
-                    height: 56
-                    onClicked: {
-                        rulesController.loadTemplate(modelData.name)
-                        templateDialog.close()
-                    }
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.rightMargin: 8
-                        spacing: 2
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Label {
-                                text: modelData.name
-                                font.pixelSize: 12
-                                font.bold: true
-                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                            }
-                            Item { Layout.fillWidth: true }
-                            // 加载按钮（L3 辅助层级，32px 扁平）
-                            Button {
-                                text: "加载"
-                                flat: true
-                                font.pixelSize: 11
-                                onClicked: {
-                                    rulesController.loadTemplate(modelData.name)
-                                    templateDialog.close()
-                                }
-                            }
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            text: modelData.description
-                            font.pixelSize: 11
-                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                            elide: Text.ElideRight
-                            wrapMode: Text.WordWrap
-                            maximumLineCount: 2
-                        }
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 1
-                            color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                            visible: index < templateListView.count - 1
-                        }
-                    }
-                }
-            }
-
-            // 底部按钮区
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.rightMargin: 12
-                Layout.bottomMargin: 12
-                Layout.topMargin: 4
-                Item { Layout.fillWidth: true }
-                Button {
-                    text: "取消"
-                    flat: true
-                    onClicked: templateDialog.close()
-                }
-            }
-        }
-    }
-
-    // iter-122：导入/导出/模板操作结果通知（Toast 风格）
+    // iter-122：导入/导出操作结果通知（Toast 风格）
     Rectangle {
         id: ioToast
         property bool success: false
@@ -231,13 +127,7 @@ Item {
                 Layout.leftMargin: 8
             }
             Item { Layout.fillWidth: true }
-            // iter-122：导入/导出/模板按钮
-            IconButton {
-                text: "模板"
-                tooltip: "选择内置规则模板"
-                accent: "ghost"
-                onClicked: templateDialog.open()
-            }
+            // iter-122：导入/导出按钮
             IconButton {
                 text: "导入"
                 tooltip: "从 YAML/JSON 文件导入规则集"

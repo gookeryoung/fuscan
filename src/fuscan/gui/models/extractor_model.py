@@ -95,10 +95,10 @@ _ARCHIVE_VIRTUAL_ROWS: tuple[tuple[str, str, str], ...] = (
 
 # 扩展名较多的提取器代表性格式标签（iter-103）：
 # 当提取器支持的扩展名超过 4 个时，formatLabel（如 "CODE"）不足以体现覆盖范围，
-# 因此在文件类型树中以多个代表性 tag 展示（如 HTML/C/CPP/PY）。
+# 因此在文件类型树中以多个代表性 tag 展示（如 HTML/XML/JSON/JS/C/CPP/PY/SH）。
 # 未在此映射中的提取器默认使用 ``(format_label,)`` 单标签。
 _FORMAT_TAGS_BY_CLASS: dict[str, tuple[str, ...]] = {
-    "SourceCodeExtractor": ("HTML", "C", "CPP", "PY"),
+    "SourceCodeExtractor": ("HTML", "XML", "JSON", "JS", "C", "CPP", "PY", "SH"),
 }
 
 

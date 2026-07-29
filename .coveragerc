@@ -1,7 +1,9 @@
 [run]
 branch = true
 concurrency = thread
-omit = tests/*
+omit =
+    tests/*
+    src/fuscan/gui/resources_rc.py
 source = fuscan
 
 [report]

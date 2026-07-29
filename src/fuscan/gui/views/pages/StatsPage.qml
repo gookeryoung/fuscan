@@ -329,7 +329,7 @@ Item {
                 // ---------- 分类计数卡片 ----------
                 GridLayout {
                     Layout.fillWidth: true
-                    columns: 2
+                    columns: 3
                     columnSpacing: 12
                     rowSpacing: 12
 

@@ -269,7 +269,7 @@ Rectangle {
                 }
             }
             IconButton {
-                iconSource: "qrc:/icons/rescan.svg"
+                iconSource: "qrc:/icons/add_scan.svg"
                 text: "增量扫描"
                 tooltip: "仅扫描变更文件，未变更文件复用上次结果（首次或无缓存时自动回退全量扫描）"
                 accent: "secondary"
@@ -659,7 +659,9 @@ Rectangle {
                     to: Math.max(configController.cpuCount, 1)
                     value: Math.min(taskSettingsDialog.editMaxWorkers, configController.cpuCount)
                     editable: true
-                    onValueChanged: taskSettingsDialog.editMaxWorkers = value
+                    // iter-139：用 onValueModified 替代 onValueChanged，仅在用户交互时
+                    // 写回属性，避免 value 绑定 ↔ onValueChanged 双向触发 binding loop
+                    onValueModified: taskSettingsDialog.editMaxWorkers = value
                 }
             }
 
@@ -685,7 +687,8 @@ Rectangle {
                         if (v < 100) return 25
                         return 100
                     }
-                    onValueChanged: taskSettingsDialog.editMaxFileSizeMB = value
+                    // iter-139：用 onValueModified 替代 onValueChanged，避免 binding loop
+                    onValueModified: taskSettingsDialog.editMaxFileSizeMB = value
                 }
             }
 
@@ -703,7 +706,8 @@ Rectangle {
                     to: 64
                     value: taskSettingsDialog.editMaxDepth
                     editable: true
-                    onValueChanged: taskSettingsDialog.editMaxDepth = value
+                    // iter-139：用 onValueModified 替代 onValueChanged，避免 binding loop
+                    onValueModified: taskSettingsDialog.editMaxDepth = value
                 }
             }
 

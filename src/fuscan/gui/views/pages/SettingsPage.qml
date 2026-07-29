@@ -353,8 +353,11 @@ Item {
                                 // iter-138：cacheBuffer 改为固定值，避免与 currentIndex 双向依赖
                                 // 触发 "model" binding loop（model=null 时 contentHeight=0 引起
                                 // StackLayout 尺寸重算循环）。
+                                // iter-139：移除 model 条件绑定（null↔extractorModel 切换导致
+                                // contentHeight 变化触发 StackLayout 布局重算循环）。StackLayout
+                                // 已通过 visible 机制控制非当前 Tab 的渲染，无需再用 null 切换。
                                 cacheBuffer: 500
-                                model: settingsTabBar.currentIndex === 0 ? configController.extractorModel : null
+                                model: configController.extractorModel
                                 // 按 category 角色分组，配合 section.delegate 渲染类别头部
                                 section.property: "category"
                                 section.criteria: ViewSection.FullString

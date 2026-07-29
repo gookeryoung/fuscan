@@ -19,6 +19,7 @@
     <file alias="qml/Sidebar.qml">views/Sidebar.qml</file>
     <file alias="icons/about.svg">../assets/icons/about.svg</file>
     <file alias="icons/add.svg">../assets/icons/add.svg</file>
+    <file alias="icons/add_scan.svg">../assets/icons/add_scan.svg</file>
     <file alias="icons/all_disk.svg">../assets/icons/all_disk.svg</file>
     <file alias="icons/back.svg">../assets/icons/back.svg</file>
     <file alias="icons/check.svg">../assets/icons/check.svg</file>

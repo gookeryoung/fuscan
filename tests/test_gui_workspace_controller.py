@@ -601,31 +601,119 @@ class TestAddWorkspace:
         assert item is not None
         assert item.name == "任务 2"
 
-    def test_parses_rules_paths_json(self, controller: WorkspaceController) -> None:
-        """rules_paths_json 应解析为 tuple。"""
+    def test_add_workspace_syncs_global_rules(
+        self,
+        controller: WorkspaceController,
+        rules_controller: RulesController,
+        tmp_path: Path,
+    ) -> None:
+        """iter-139：新建工作区应从全局 RulesController 同步规则配置。
+
+        rules_paths_json 参数已废弃（iter-137 规则全局化），工作区的
+        rules_paths/use_builtin 始终从全局读取，使 rules_tags 标签
+        反映实际扫描时使用的规则。
+        """
+        # 准备一个真实的规则文件，使 RulesController.rules_paths 过滤后非空
+        rules_file = tmp_path / "custom.yaml"
+        rules_file.write_text("rules: []", encoding="utf-8")
+        rules_controller._config.rules_paths = [str(rules_file)]
+        rules_controller._config.use_builtin = True
+        rules_controller._reload_ruleset()
+        rules_controller.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+        # QML 传入 "[]" + True，但工作区应反映全局规则
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        item = controller.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+        assert item.rules_paths == (str(rules_file),)
+        assert item.use_builtin is True
+        # rules_tags 应包含内置 + 自定义规则文件
+        tags = item.rules_tags
+        assert len(tags) == 2
+        assert tags[0] == {"name": "内置", "is_builtin": True}
+        assert tags[1] == {"name": "custom.yaml", "is_builtin": False}
+
+    def test_add_workspace_ignores_rules_paths_json(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """iter-139：rules_paths_json 参数已废弃，不影响工作区规则。
+
+         无论传入什么 JSON，工作区 rules_paths 始终从全局同步
+        （fixture 中全局 Config.rules_paths=[]，故为空 tuple）。
+        """
         rules_json = json.dumps(["a.yaml", "b.yaml"])
         ws_id = controller.addWorkspace("t", "folder", "/tmp", rules_json, True)
         item = controller.workspaceModel.get_workspace(ws_id)
         assert item is not None
-        assert item.rules_paths == ("a.yaml", "b.yaml")
+        # 全局为空，工作区也为空（忽略 QML 传入的 ["a.yaml", "b.yaml"]）
+        assert item.rules_paths == ()
         assert item.use_builtin is True
 
-    def test_invalid_rules_paths_json_falls_back_to_empty(
+    def test_add_workspace_ignores_invalid_rules_paths_json(
         self,
         controller: WorkspaceController,
     ) -> None:
-        """无效 JSON 应回退为空 tuple。"""
+        """iter-139：无效 JSON 不影响工作区规则（从全局同步）。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "not-json", True)
         item = controller.workspaceModel.get_workspace(ws_id)
         assert item is not None
         assert item.rules_paths == ()
 
-    def test_empty_rules_paths_json(self, controller: WorkspaceController) -> None:
-        """空字符串应解析为空 tuple。"""
+    def test_add_workspace_ignores_empty_rules_paths_json(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """iter-139：空字符串不影响工作区规则（从全局同步）。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "", True)
         item = controller.workspaceModel.get_workspace(ws_id)
         assert item is not None
         assert item.rules_paths == ()
+
+    def test_sync_all_workspaces_rules_on_global_change(
+        self,
+        controller: WorkspaceController,
+        rules_controller: RulesController,
+        tmp_path: Path,
+    ) -> None:
+        """iter-139：全局规则变化时已存在的工作区应同步刷新 rules_paths/use_builtin。"""
+        # 先新建一个工作区（全局规则为空，工作区 rules_paths=()）
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        item = controller.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+        assert item.rules_paths == ()
+
+        # 添加自定义规则文件到全局配置
+        rules_file = tmp_path / "custom.yaml"
+        rules_file.write_text("rules: []", encoding="utf-8")
+        rules_controller._config.rules_paths = [str(rules_file)]
+        rules_controller._reload_ruleset()
+        rules_controller.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+        # 工作区 rules_paths 应被刷新为全局值
+        item = controller.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+        assert item.rules_paths == (str(rules_file),)
+        assert item.use_builtin is True
+        # rules_tags 应包含内置 + 自定义规则文件
+        tags = item.rules_tags
+        assert len(tags) == 2
+        assert tags[0] == {"name": "内置", "is_builtin": True}
+        assert tags[1] == {"name": "custom.yaml", "is_builtin": False}
+
+    def test_sync_all_workspaces_rules_no_change_skip_persist(
+        self,
+        controller: WorkspaceController,
+        rules_controller: RulesController,
+    ) -> None:
+        """iter-139：全局规则未变化时不触发 persist（避免无谓 I/O）。"""
+        controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # 全局规则未变化，再次 emit 信号不应触发 persist
+        from unittest.mock import patch
+
+        with patch.object(controller, "_persist") as mock_persist:
+            rules_controller.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+            mock_persist.assert_not_called()
 
     def test_creates_independent_scan_controller(self, controller: WorkspaceController) -> None:
         """每个工作区应有独立的 ScanController。"""

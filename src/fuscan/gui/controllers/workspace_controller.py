@@ -104,6 +104,14 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 全局 rulesetChanged 时清除所有工作区 manifest，使下次增量扫描回退全量，
         # 确保新规则被实际执行（manifest 指纹只记录 mtime+size，不感知规则变化）
         self._rules_controller.rulesetChanged.connect(self._invalidate_all_manifests)  # pyrefly: ignore [missing-attribute]
+        # iter-139：全局规则变化时同步刷新所有工作区的 rules_paths/use_builtin，
+        # 使 WorkspaceCard 的 rules_tags 标签反映当前全局规则配置。
+        # iter-137 规则全局化后，WorkspaceItem.rules_paths/use_builtin 字段不再
+        # 决定扫描时使用的规则（ScanController 直接读全局 RulesController），
+        # 但 rules_tags 派生属性仍依赖这些字段，需同步以保持 UI 一致。
+        self._rules_controller.rulesetChanged.connect(self._sync_all_workspaces_rules)  # pyrefly: ignore [missing-attribute]
+        self._rules_controller.rulesFileListChanged.connect(self._sync_all_workspaces_rules)  # pyrefly: ignore [missing-attribute]
+        self._rules_controller.useBuiltinChanged.connect(self._sync_all_workspaces_rules)  # pyrefly: ignore [missing-attribute]
         self._model = WorkspaceListModel(self)
         self._scan_controllers: dict[str, ScanController] = {}
         self._current_workspace_id: str = ""
@@ -270,29 +278,33 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         name: str,
         mode_str: str,
         target: str,
-        rules_paths_json: str,
-        use_builtin: bool,
+        rules_paths_json: str,  # noqa: ARG002 废弃参数，保留以兼容 QML 调用签名
+        use_builtin: bool,  # noqa: ARG002 废弃参数，保留以兼容 QML 调用签名
     ) -> str:
         """新建工作区。
 
         :param name: 工作区名称（空串时自动生成）
         :param mode_str: 扫描模式字符串（``"full"``/``"drive"``/``"folder"``）
         :param target: 扫描目标（盘符或文件夹路径，全盘模式忽略）
-        :param rules_paths_json: 规则文件路径列表的 JSON 字符串（如 ``"[]"``）
-        :param use_builtin: 是否启用内置规则
+        :param rules_paths_json: 已废弃（iter-137 规则全局化），保留向后兼容
+        :param use_builtin: 已废弃（iter-137 规则全局化），保留向后兼容
         :return: 新工作区 ID（``"ws-<8位hex>"`` 格式）
+
+        iter-137：规则配置全局化——所有工作区共享同一规则集，扫描时直接读
+        全局 :class:`RulesController`。iter-139：新工作区的 ``rules_paths``/
+        ``use_builtin`` 字段从全局 :class:`RulesController` 同步，使
+        :attr:`WorkspaceItem.rules_tags` 标签反映实际扫描时使用的规则。
+        ``rules_paths_json`` 与 ``use_builtin`` 参数保留仅为向后兼容，
+        实际值从全局读取。
         """
         ws_id = f"ws-{secrets.token_hex(4)}"
-        try:
-            rules_paths = tuple(json.loads(rules_paths_json) if rules_paths_json else ())
-        except (json.JSONDecodeError, TypeError):
-            logger.warning("rules_paths_json 解析失败: %s", rules_paths_json)
-            rules_paths = ()
+        # iter-139：从全局 RulesController 读取规则配置快照
+        global_paths, global_use_builtin = self._read_global_rules_snapshot()
 
         if not name:
             name = f"任务 {self._model.rowCount() + 1}"
 
-        self._create_workspace(ws_id, name, mode_str, target, rules_paths, use_builtin)
+        self._create_workspace(ws_id, name, mode_str, target, global_paths, global_use_builtin)
         # iter-133：用户新建工作区后立即创建 ScanController（用户马上要操作），
         # 与 _load_persisted（启动恢复）的延迟创建策略区分
         self._ensure_scan_controller(ws_id)
@@ -864,6 +876,9 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._try_load_cached_results(first_ws_id)
         # iter-137：将旧版本工作区级 rules_paths 迁移到全局规则配置
         self._migrate_workspace_rules_to_global(workspaces)
+        # iter-139：迁移完成后同步刷新所有工作区的 rules_paths/use_builtin
+        # 为全局值，使 WorkspaceCard 标签反映当前全局规则（而非持久化旧值）
+        self._sync_all_workspaces_rules()
 
     # ----------------------------- iter-137 规则全局化迁移 -----------------------------
 
@@ -912,6 +927,40 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """
         for ws_id, controller in self._scan_controllers.items():
             controller.invalidate_manifest(ws_id)
+
+    def _read_global_rules_snapshot(self) -> tuple[tuple[str, ...], bool]:
+        """读取当前全局 :class:`RulesController` 的规则配置快照。
+
+        :return: ``(rules_paths, use_builtin)``，``rules_paths`` 为
+            ``tuple[str, ...]``，仅包含实际存在的规则文件路径（与
+            :attr:`RulesController.rules_paths` 一致，扫描时实际加载的文件）。
+        """
+        paths = tuple(str(p) for p in self._rules_controller.rules_paths)
+        use_builtin = self._rules_controller.use_builtin
+        return paths, use_builtin
+
+    def _sync_all_workspaces_rules(self) -> None:
+        """全局规则变化时同步刷新所有工作区的 ``rules_paths``/``use_builtin`` 字段。
+
+        iter-139：iter-137 规则全局化后，:attr:`WorkspaceItem.rules_paths`/
+        ``use_builtin`` 字段不再决定扫描时使用的规则（ScanController 直接读
+        全局 :class:`RulesController`），但 :attr:`WorkspaceItem.rules_tags`
+        派生属性仍依赖这些字段。本方法在全局规则变化时将所有工作区的
+        ``rules_paths``/``use_builtin`` 同步为全局值，使 QML ``WorkspaceCard``
+        的规则标签反映当前全局规则配置。
+        """
+        global_paths, global_use_builtin = self._read_global_rules_snapshot()
+        changed = False
+        for item in self._model.all_workspaces():
+            if item.rules_paths != global_paths or item.use_builtin != global_use_builtin:
+                self._model.update_workspace(
+                    item.workspace_id,
+                    rules_paths=global_paths,
+                    use_builtin=global_use_builtin,
+                )
+                changed = True
+        if changed:
+            self._persist()
 
     # ----------------------------- 扫描结果缓存（iter-123） -----------------------------
 

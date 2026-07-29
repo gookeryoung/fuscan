@@ -14,7 +14,7 @@ ignore_paths:
 rules:
   # ---------- 敏感个人信息(PRIVATE INFO) ----------
   - name: P0101-私钥文件头
-    description: 检测 PEM 格式私钥文件头
+    description: 检测 PEM 格式私钥文件头（RSA/EC/DSA/OPENSSH/PGP）
     severity: critical
     match:
       type: content
@@ -46,3 +46,86 @@ rules:
         - type: content
           mode: regex
           pattern: '(价格|内部|商业|薪酬)'
+
+  # ---------- 凭证与密钥（CREDENTIALS） ----------
+  # iter-134：扩展内置凭证模式覆盖 10+ 类常见密钥格式
+  # AWS Access Key ID（20 位字母数字，以 AKIA/ASIA/AGPA/AIDA/AROA/AIPA/ANPA/ANVA 开头）
+  - name: P0201-AWS-Access-Key-ID
+    description: 检测 AWS Access Key ID（AKIA/ASIA 等前缀 + 17 位字母数字）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '\b(AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA)[A-Z0-9]{16}\b'
+  # AWS Secret Access Key（40 位 base64 字符，紧随 access key 后或独立出现）
+  - name: P0202-AWS-Secret-Access-Key
+    description: 检测 AWS Secret Access Key（40 位 base64 字符）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '(?i)aws_secret_access_key\s*[=:]\s*[A-Za-z0-9/+=]{40}'
+  # GitHub Token（ghp_/gho_/ghu_/ghs_/ghr_/github_pat_ 前缀 + 36+ 位 base62）
+  - name: P0203-GitHub-Token
+    description: 检测 GitHub Personal Access Token（ghp_/github_pat_ 等前缀）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{82,}\b'
+  # Slack Token（xoxb-/xoxp-/xoxa-/xoxr- 前缀 + 10+ 位 base64）
+  - name: P0204-Slack-Token
+    description: 检测 Slack Token（xoxb-/xoxp-/xoxa-/xoxr- 前缀）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '\bxox[abpr]-[A-Za-z0-9-]{10,72}\b'
+  # JWT（三段 base64url，以 eyJ 开头）
+  - name: P0205-JWT
+    description: 检测 JSON Web Token（eyJ 开头的三段式 base64url）
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: '\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b'
+  # Stripe Key（sk_live_/rk_live_/sk_test_/rk_test_ 前缀 + 24+ 位字符）
+  - name: P0206-Stripe-Key
+    description: 检测 Stripe API 密钥（sk_live_/rk_live_ 等前缀）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '\b(sk|rk)_(live|test)_[A-Za-z0-9]{24,}\b'
+  # GCP API Key（AIza 前缀 + 35 位字符）
+  - name: P0207-GCP-API-Key
+    description: 检测 Google Cloud Platform API Key（AIza 前缀）
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: '\bAIza[0-9A-Za-z_-]{35}\b'
+  # Azure SAS Token（sv=...&ss=...&sig=... 形式）或 Storage Connection String
+  - name: P0208-Azure-SAS-Token
+    description: 检测 Azure Shared Access Signature（含 sig= 签名参数）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '(?i)sig=[A-Za-z0-9%+/=]{20,}.*(sv=|st=|se=|sr=|sp=)'
+  # Azure Connection String（AccountKey= 后跟 base64）
+  - name: P0209-Azure-Connection-String
+    description: 检测 Azure Storage Connection String 中的 AccountKey
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '(?i)accountkey=[A-Za-z0-9+/=]{50,}'
+  # 通用 API Key / Bearer Token 赋值
+  - name: P0210-Generic-API-Key
+    description: 检测通用 API Key / Bearer Token 赋值语句
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: '(?i)(api[_-]?key|access[_-]?token|auth[_-]?token)\s*[=:]\s*[A-Za-z0-9_\-./+=]{20,}|bearer\s+[A-Za-z0-9_\-./+=]{20,}'

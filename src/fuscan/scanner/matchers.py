@@ -7,12 +7,19 @@
 - :class:`AndMatcher` / :class:`OrMatcher` / :class:`NotMatch` 对应组合规格
 
 工厂函数 :func:`build_matcher` 根据 MatchSpec 实例类型构造对应匹配器。
+
+iter-134 性能优化：
+
+- :func:`compile_regex_cached`：模块级 ``lru_cache`` 包装 ``re.compile``，
+  跨 Scanner 实例共享编译结果（同一 pattern+flags 仅编译一次）
+- :func:`match_batch`：对同一上下文批量应用多个匹配器，便于集中测量与未来扩展
 """
 
 from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
+from functools import lru_cache
 from typing import Pattern
 
 from typing_extensions import override
@@ -38,7 +45,46 @@ __all__ = [
     "OrMatcher",
     "PathMatcher",
     "build_matcher",
+    "compile_regex_cached",
+    "match_batch",
 ]
+
+
+@lru_cache(maxsize=512)
+def compile_regex_cached(pattern: str, case_sensitive: bool) -> Pattern[str]:
+    """编译正则并缓存结果（跨 Scanner 实例共享）。
+
+    同一 ``(pattern, case_sensitive)`` 组合仅编译一次，结果在进程内缓存。
+    多个 Scanner 实例使用同一 RuleSet 时共享编译产物，避免重复 ``re.compile``
+    开销（典型场景：GUI 多工作区扫描、批量 benchmark）。
+
+    :param pattern: 正则表达式字符串
+    :param case_sensitive: 是否区分大小写（False 时附加 ``re.IGNORECASE``）
+    :return: 编译后的 :class:`re.Pattern`
+    :raises ValueError: 正则编译失败
+    """
+    flags = 0 if case_sensitive else re.IGNORECASE
+    try:
+        return re.compile(pattern, flags)
+    except re.error as exc:
+        raise ValueError(f"正则表达式编译失败 {pattern!r}: {exc}") from exc
+
+
+def match_batch(matchers: list[Matcher], context: MatchContext) -> list[MatchResult]:
+    """对同一上下文批量应用多个匹配器，返回所有结果（含未命中）。
+
+    与逐条调用 ``matcher.matches(context)`` 等价，但显式语义化为「批量」，
+    便于：
+
+    - 在热路径集中测量匹配耗时（benchmark 入口）
+    - 未来扩展按 target 预分组、跳过无需内容的规则等优化
+    - 调用方一次性获取全部结果，避免多次循环
+
+    :param matchers: 匹配器列表
+    :param context: 匹配上下文（内容按需懒加载，多匹配器共享）
+    :return: 与 ``matchers`` 等长的 :class:`MatchResult` 列表，顺序一致
+    """
+    return [matcher.matches(context) for matcher in matchers]
 
 
 class Matcher(ABC):
@@ -62,11 +108,9 @@ class LeafMatcher(Matcher):
         # 预编译不区分大小写的 CONTAINS 正则，避免每次匹配重复 re.escape + 编译
         self._compiled_contains_ci: Pattern[str] | None = None
         if spec.mode == MatchMode.REGEX:
-            flags = 0 if spec.case_sensitive else re.IGNORECASE
-            try:
-                self._compiled = re.compile(spec.pattern, flags)
-            except re.error as exc:
-                raise ValueError(f"正则表达式编译失败 {spec.pattern!r}: {exc}") from exc
+            # iter-134：经 compile_regex_cached 复用跨 Scanner 编译结果，
+            # 同一 pattern+flags 在进程内仅编译一次
+            self._compiled = compile_regex_cached(spec.pattern, spec.case_sensitive)
         elif spec.mode == MatchMode.CONTAINS and not spec.case_sensitive and spec.pattern:
             self._compiled_contains_ci = re.compile(re.escape(spec.pattern), re.IGNORECASE)
 

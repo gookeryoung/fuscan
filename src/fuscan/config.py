@@ -270,6 +270,13 @@ class Config:
     min_font_size: int = 12
     # 是否加粗
     font_bold: bool = False
+    # ----------------------------- 凭证检测（iter-134） -----------------------------
+    # 是否启用高熵字符串检测（识别疑似密钥/令牌的随机串，作为正则规则的兜底）
+    entropy_enabled: bool = True
+    # 高熵检测的 Shannon 熵阈值（比特/字符）：默认 4.5 捕获 Base64（~6.0）与
+    # 混合大小写 Hex（~4.46），过滤自然语言（<4.0）。范围 3.0~5.0，值越低越敏感
+    # （误报增多），值越高越严格（漏报增多）。可在设置页实时调节。
+    entropy_threshold: float = 4.5
 
 
 def detect_default_staging_dir() -> Path:

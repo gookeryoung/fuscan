@@ -162,9 +162,7 @@ class TestScannerWhitelistFilter:
         (tmp_path / "secret.txt").write_text("", encoding="utf-8")
         (tmp_path / "clean.md").write_text("", encoding="utf-8")
         rs = _build_ruleset(_filename_rule("敏感名", "secret"))
-        wl = Whitelist(
-            entries=(WhitelistEntry(path_glob=str(tmp_path / "secret.txt"), rule_name="*"),)
-        )
+        wl = Whitelist(entries=(WhitelistEntry(path_glob=str(tmp_path / "secret.txt"), rule_name="*"),))
         scanner = Scanner(rs, whitelist=wl)
         report = scanner.scan(tmp_path)
         # 总文件数 2，命中 0（secret 被白名单过滤），clean.md 未命中

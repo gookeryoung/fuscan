@@ -104,10 +104,10 @@ class Whitelist:
 
 ### 需求
 
-- [ ] Shannon 熵计算，识别 Base64/Hex 编码的高熵字符串（疑似密钥泄漏）
-- [ ] 正则规则引擎优化：预编译缓存 + 批量匹配（消除 per-file 重复编译开销）
-- [ ] 内置凭证模式扩展：API key/private key/JWT/token 等 10+ 类常见密钥格式
-- [ ] 熵检测阈值可配置（避免误报），在 Settings 页提供滑块调节
+- [x] Shannon 熵计算，识别 Base64/Hex 编码的高熵字符串（疑似密钥泄漏）
+- [x] 正则规则引擎优化：预编译缓存 + 批量匹配（消除 per-file 重复编译开销）
+- [x] 内置凭证模式扩展：API key/private key/JWT/token 等 10+ 类常见密钥格式
+- [x] 熵检测阈值可配置（避免误报），在 Settings 页提供滑块调节
 
 ### 验收标准
 

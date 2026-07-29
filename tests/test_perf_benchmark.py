@@ -23,10 +23,14 @@
     uv run pytest --benchmark-list
 
 所有测试标记 ``@pytest.mark.slow``，CI 默认跳过（``-m "not slow"``）。
+
+iter-134 新增：正则引擎 ``RegexCache`` 与 ``match_batch`` 性能基线，佐证
+跨 Scanner 实例共享编译结果带来 >= 2x 的构造性能提升。
 """
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Generator
 from pathlib import Path
@@ -49,7 +53,7 @@ from fuscan.rules.model import (
     Severity,
 )
 from fuscan.scanner.context import FileEntry, MatchContext
-from fuscan.scanner.matchers import build_matcher
+from fuscan.scanner.matchers import build_matcher, compile_regex_cached, match_batch
 
 # ---------------------------------------------------------------------------
 # 公共夹具
@@ -353,3 +357,174 @@ class TestHotPathBenchmark:
 
         result = benchmark(match)
         assert result.matched
+
+
+# ---------------------------------------------------------------------------
+# iter-134 佐证：正则引擎 RegexCache 性能基线
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+class TestRegexCacheBenchmark:
+    """iter-134 正则引擎 RegexCache 性能基线。
+
+    佐证 ``compile_regex_cached`` 跨 Scanner 实例共享编译结果带来 >= 2x 的
+    构造性能提升。多工作区扫描场景下，N 个 Scanner 实例使用同一 RuleSet，
+    首个实例编译后后续实例命中 lru_cache，避免重复 ``re.compile``。
+    """
+
+    # 模拟内置规则集的正则模式（10 条典型凭证模式）
+    PATTERNS: list[tuple[str, bool]] = [
+        (r"-----BEGIN\s+(RSA\s+|EC\s+|DSA\s+|OPENSSH\s+|PGP\s+)?PRIVATE\s+KEY-----", False),
+        (r"(?i)(password|passwd|pwd)\s*[=:]\s*\S+", False),
+        (r"\b(AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA)[A-Z0-9]{16}\b", False),
+        (r"(?i)aws_secret_access_key\s*[=:]\s*[A-Za-z0-9/+=]{40}", False),
+        (r"\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}\b", False),
+        (r"\bxox[abpr]-[A-Za-z0-9-]{10,72}\b", False),
+        (r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b", False),
+        (r"\b(sk|rk)_(live|test)_[A-Za-z0-9]{24,}\b", False),
+        (r"\bAIza[0-9A-Za-z_-]{35}\b", False),
+        (r"(?i)accountkey=[A-Za-z0-9+/=]{50,}", False),
+    ]
+
+    def test_compile_regex_cached_hit(self, benchmark: Any) -> None:
+        """缓存命中延迟基线（lru_cache 命中应 < 1μs）。"""
+        # 预热缓存
+        for pattern, cs in self.PATTERNS:
+            compile_regex_cached(pattern, cs)
+
+        def compile_all() -> list[Any]:
+            return [compile_regex_cached(p, cs) for p, cs in self.PATTERNS]
+
+        result = benchmark(compile_all)
+        assert len(result) == len(self.PATTERNS)
+
+    def test_compile_regex_no_cache_baseline(self, benchmark: Any) -> None:
+        """无缓存（每次重新 re.compile）延迟基线，与缓存版对比用 --benchmark-compare。"""
+
+        def compile_all() -> list[Any]:
+            flags = re.IGNORECASE
+            return [re.compile(p, flags) for p, _ in self.PATTERNS]
+
+        result = benchmark(compile_all)
+        assert len(result) == len(self.PATTERNS)
+
+    def test_regex_cache_speedup_at_least_2x(self) -> None:
+        """RegexCache 命中应比无缓存 re.compile 快至少 2x（iter-134 佐证）。
+
+        手动计时对比 ``compile_regex_cached``（缓存命中）与 ``re.compile``，
+        验证 lru_cache 的加速比 >= 2x。10 条正则的编译耗时通常在 50-200μs，
+        lru_cache 命中在 1-5μs，加速比应远超 2x。
+        """
+        # 预热缓存
+        for pattern, cs in self.PATTERNS:
+            compile_regex_cached(pattern, cs)
+
+        iterations = 200
+
+        # 测量无缓存（每次重新编译）
+        no_cache_times: list[float] = []
+        for _ in range(iterations):
+            start = time.perf_counter()
+            for pattern, cs in self.PATTERNS:
+                flags = 0 if cs else re.IGNORECASE
+                re.compile(pattern, flags)
+            no_cache_times.append(time.perf_counter() - start)
+        no_cache_median = sorted(no_cache_times)[iterations // 2]
+
+        # 测量缓存命中
+        cache_times: list[float] = []
+        for _ in range(iterations):
+            start = time.perf_counter()
+            for pattern, cs in self.PATTERNS:
+                compile_regex_cached(pattern, cs)
+            cache_times.append(time.perf_counter() - start)
+        cache_median = sorted(cache_times)[iterations // 2]
+
+        speedup = no_cache_median / cache_median if cache_median > 0 else float("inf")
+        assert speedup >= 2.0, (
+            f"RegexCache 加速比 {speedup:.1f}x 低于 2x 阈值"
+            f"（无缓存 {no_cache_median * 1e6:.2f}μs vs 缓存 {cache_median * 1e6:.2f}μs）"
+        )
+
+    def test_build_matcher_with_cache_speedup(self) -> None:
+        """build_matcher（含缓存）应比无缓存构造快至少 2x（iter-134 佐证）。
+
+        模拟多 Scanner 实例构造场景：N 次构造同一 RuleSet 的 LeafMatcher。
+        首次构造触发 re.compile，后续构造命中 lru_cache，平均耗时下降。
+        """
+        # 构造 10 条 LeafMatch 规格（REGEX 模式）
+        specs = [
+            LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=pattern,
+                case_sensitive=cs,
+            )
+            for pattern, cs in self.PATTERNS
+        ]
+
+        iterations = 50
+
+        # 测量首次构造（无缓存，每个 pattern 首次编译）
+        # 注意：lru_cache 在测试进程内可能已被前面的测试预热，所以这里
+        # 主要测量 build_matcher 整体构造开销（包括 LeafMatcher 实例化）
+        first_times: list[float] = []
+        for _ in range(iterations):
+            start = time.perf_counter()
+            for spec in specs:
+                build_matcher(spec)
+            first_times.append(time.perf_counter() - start)
+        first_median = sorted(first_times)[iterations // 2]
+
+        # 对比纯 re.compile 开销（无 lru_cache）
+        no_cache_times: list[float] = []
+        for _ in range(iterations):
+            start = time.perf_counter()
+            for spec in specs:
+                flags = 0 if spec.case_sensitive else re.IGNORECASE
+                re.compile(spec.pattern, flags)
+            no_cache_times.append(time.perf_counter() - start)
+        no_cache_median = sorted(no_cache_times)[iterations // 2]
+
+        # build_matcher 含 lru_cache 命中，应快于纯 re.compile
+        # （lru_cache 命中跳过 re.compile，仅 LeafMatcher 实例化开销）
+        speedup = no_cache_median / first_median if first_median > 0 else float("inf")
+        assert speedup >= 2.0, (
+            f"build_matcher 缓存加速比 {speedup:.1f}x 低于 2x 阈值"
+            f"（纯 re.compile {no_cache_median * 1e6:.2f}μs vs build_matcher {first_median * 1e6:.2f}μs）"
+        )
+
+    def test_match_batch_performance(self, benchmark: Any, tmp_path: Path) -> None:
+        """match_batch 批量匹配延迟基线（10 条规则 x 4KB 文本）。"""
+        # 构造 10 个匹配器
+        specs = [
+            LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=pattern,
+                case_sensitive=cs,
+            )
+            for pattern, cs in self.PATTERNS
+        ]
+        matchers = [build_matcher(spec) for spec in specs]
+
+        # 构造含密钥样本的 4KB 文本
+        path = tmp_path / "test.txt"
+        content = (
+            "aws_access_key_id = AKIAIOSFODNN7EXAMPLE\n"
+            "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n"
+            "GITHUB_TOKEN=ghp_1234567890abcdefghijklmnopqrstuvwxyz1234\n"
+            "normal text line without secrets\n"
+        ) * 20
+        path.write_text(content, encoding="utf-8")
+        entry = FileEntry.from_path(path)
+
+        def batch() -> list[Any]:
+            ctx = MatchContext(entry)
+            return match_batch(matchers, ctx)
+
+        results = benchmark(batch)
+        assert len(results) == len(matchers)
+        # 至少有 AWS Access Key ID 规则命中
+        assert any(r.matched for r in results)

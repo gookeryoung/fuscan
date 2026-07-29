@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Callable, Mapping
 
 from fuscan.cache.store import BatchWriteItem
 from fuscan.perf import PerfStats
-from fuscan.rules.model import Rule, RuleSet
+from fuscan.rules.model import Rule, RuleSet, Severity
 from fuscan.scanner._archive_phase import run_archive_phase
 from fuscan.scanner._cache_phase import (
     BatchBuffer,
@@ -46,6 +46,11 @@ from fuscan.scanner._helpers import (
 )
 from fuscan.scanner._pipeline_phase import run_pipeline_phase
 from fuscan.scanner.context import ContentProvider, FileEntry, MatchContext
+from fuscan.scanner.entropy import (
+    DEFAULT_ENTROPY_THRESHOLD,
+    ENTROPY_RULE_NAME,
+    find_high_entropy_strings,
+)
 from fuscan.scanner.matchers import Matcher, build_matcher
 from fuscan.scanner.result import (
     FileFingerprint,
@@ -100,6 +105,8 @@ class Scanner:
         incremental_manifest: IncrementalManifest | None = None,
         prev_report: ScanReport | None = None,
         whitelist: Whitelist | None = None,
+        entropy_enabled: bool = False,
+        entropy_threshold: float | None = None,
     ) -> None:
         self.ruleset = ruleset
         self._content_provider: ContentProvider = content_provider or default_extract_content
@@ -222,6 +229,14 @@ class Scanner:
         # iter-133：误报白名单快照——扫描期间持有不可变快照，UI 增删不影响本次扫描。
         # 在 scan_entries 命中聚合阶段过滤命中白名单的结果（不计入 ScanReport.hits）。
         self._whitelist: Whitelist | None = whitelist
+        # iter-134：高熵字符串检测——作为正则规则的兜底，识别未在规则集中显式定义
+        # 的密钥格式（如自定义生成的 Base64/Hex 串）。启用后在 _scan_entry_uncached/
+        # _scan_entry_cached 的规则匹配后对 content 执行熵检测，命中构造 RuleHit
+        # （rule_name=E001-高熵字符串，severity=WARNING）。
+        self._entropy_enabled: bool = entropy_enabled
+        self._entropy_threshold: float = (
+            entropy_threshold if entropy_threshold is not None else DEFAULT_ENTROPY_THRESHOLD
+        )
 
     def pause(self) -> None:
         """暂停扫描，阻塞扫描线程直到 resume。"""
@@ -652,8 +667,14 @@ class Scanner:
 
         - 规则集不含任何 CONTENT 规则（``_content_rule_names`` 为空）——所有文件均跳过 I/O
         - 文件超过 ``max_file_size`` ——大文件跳过避免一次性读入内存导致卡死
+
+        iter-134：启用 ``entropy_enabled`` 时，对内容执行高熵字符串检测，
+        命中构造 ``E001-高熵字符串`` RuleHit（severity=WARNING）。
         """
-        if not self._content_rule_names or (self._max_file_size > 0 and entry.size > self._max_file_size):
+        # 是否需要读取内容：含 CONTENT 规则或启用熵检测时均需读取
+        need_content = bool(self._content_rule_names) or self._entropy_enabled
+        skip_content = (not need_content) or (self._max_file_size > 0 and entry.size > self._max_file_size)
+        if skip_content:
             context = MatchContext(entry, content_provider=empty_content_provider)
         else:
             context = MatchContext(entry, content_provider=self._content_provider)
@@ -684,7 +705,55 @@ class Scanner:
                     )
                 )
 
+        # iter-134：高熵字符串兜底检测（仅在启用且未跳过内容时执行）
+        if self._entropy_enabled and not skip_content:
+            entropy_hits = self._detect_entropy(entry, context)
+            hits.extend(entropy_hits)
+
         return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)
+
+    def _detect_entropy(self, entry: FileEntry, context: MatchContext) -> list[RuleHit]:
+        """对文件内容执行高熵字符串检测，返回命中列表。
+
+        候选 token 经 :func:`find_high_entropy_strings` 提取并按熵阈值过滤，
+        每个高熵子串构造一个 :class:`RuleHit`（severity=WARNING），便于 GUI
+        在详情区分别高亮各处疑似密钥。检测在 ``self._perf.measure("entropy")``
+        计时下进行，便于性能剖析。
+
+        :param entry: 文件条目（仅用于日志，不读取）
+        :param context: 匹配上下文（懒加载内容）
+        :return: 命中列表；空列表表示无高熵子串或读取失败
+        """
+        try:
+            content = context.content
+        except Exception:
+            logger.debug("熵检测读取内容失败 %s", entry.path, exc_info=True)
+            return []
+        if not content:
+            return []
+        try:
+            with self._perf.measure("entropy"):
+                high_entropy = find_high_entropy_strings(content, threshold=self._entropy_threshold)
+        except Exception:
+            logger.warning("熵检测失败 %s", entry.path, exc_info=True)
+            return []
+        hits: list[RuleHit] = []
+        for token, entropy in high_entropy:
+            # 截断过长的 token 避免 GUI 详情展示过长（保留前后 32 字符 + 中间省略）
+            display_token = token if len(token) <= 80 else f"{token[:32]}...{token[-32:]}"
+            hits.append(
+                RuleHit(
+                    rule_name=ENTROPY_RULE_NAME,
+                    severity=Severity.WARNING,
+                    detail=f"高熵字符串（熵={entropy:.2f}）: {display_token}",
+                    match_text=token,
+                    match_count=1,
+                    target="content",
+                    match_texts=(token,),
+                    match_description="疑似密钥/令牌的高熵随机串",
+                )
+            )
+        return hits
 
     def _extract_with_cache(self, entry: FileEntry) -> tuple[str, str]:
         """缓存模式的提取+哈希（委托 :func:`extract_with_cache`）。
@@ -694,6 +763,35 @@ class Scanner:
         """
         assert self._cache is not None  # 调用方已保证非 None
         return extract_with_cache(entry, self._cache, self._max_file_size, self._perf)
+
+    def _rebuild_from_full_cache(
+        self,
+        entry: FileEntry,
+        applicable: list[tuple[Rule, Matcher, str]],
+        cached: dict[str, RuleHit | None],
+        cached_file_hash: str,
+    ) -> ScanResult:
+        """全部规则已缓存命中时，从缓存重建 ScanResult。
+
+        iter-134：熵检测启用时，即便全部正则规则命中缓存也需读取内容执行熵检测，
+        因为熵检测结果未纳入缓存（每次扫描均重新计算）。该路径相对全量重扫仍快
+        （跳过正则匹配与哈希计算），仅多一次文件 I/O，可接受。
+        """
+        hits, rule_errors = build_hits_from_cache(applicable, cached)
+        if self._entropy_enabled:
+            context = MatchContext(entry, content_provider=self._content_provider)
+            hits.extend(self._detect_entropy(entry, context))
+        # 累积元数据刷新到批量缓冲（无新 scan_results 需写入，hits=()）
+        self._add_to_batch(
+            BatchWriteItem(
+                file_hash=cached_file_hash,
+                size=entry.size,
+                path=entry.path,
+                mtime=entry.mtime,
+                hits=(),
+            )
+        )
+        return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)
 
     def _scan_entry_cached(self, entry: FileEntry) -> ScanResult:
         """缓存模式扫描：先查缓存，命中直接复用，未命中走匹配器并写入缓存。
@@ -732,18 +830,7 @@ class Scanner:
                 cached = self._cache.get_cached_hits(cached_file_hash, rule_hashes)
         if cached_file_hash is not None and cached is not None and all(rh in cached for rh in rule_hashes):
             # 全部规则已缓存命中（含未命中记录），无需读文件
-            hits, rule_errors = build_hits_from_cache(applicable, cached)
-            # 累积元数据刷新到批量缓冲（无新 scan_results 需写入，hits=()）
-            self._add_to_batch(
-                BatchWriteItem(
-                    file_hash=cached_file_hash,
-                    size=entry.size,
-                    path=entry.path,
-                    mtime=entry.mtime,
-                    hits=(),
-                )
-            )
-            return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)
+            return self._rebuild_from_full_cache(entry, applicable, cached, cached_file_hash)
 
         # 常规路径：读文件 + 算哈希 + 查提取内容缓存 + 未命中执行提取
         content, file_hash = self._extract_with_cache(entry)
@@ -813,6 +900,10 @@ class Scanner:
                 hits=tuple(batch_hits),
             )
         )
+
+        # iter-134：高熵字符串兜底检测（内容已读取，直接复用 context）
+        if self._entropy_enabled:
+            hits.extend(self._detect_entropy(entry, context))
 
         return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)
 

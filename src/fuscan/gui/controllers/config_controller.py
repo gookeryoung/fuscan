@@ -168,6 +168,33 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
             set_perf_enabled(value)
             self.save()
 
+    # ----------------------------- 凭证检测（iter-134） -----------------------------
+
+    @Property(bool, notify=configChanged)  # pyrefly: ignore [not-callable]
+    def entropyEnabled(self) -> bool:
+        """是否启用高熵字符串检测（识别疑似密钥/令牌的随机串）。"""
+        return self._config.entropy_enabled
+
+    @Slot(bool)  # pyrefly: ignore [not-callable]
+    def setEntropyEnabled(self, value: bool) -> None:
+        """设置是否启用高熵字符串检测。"""
+        if value != self._config.entropy_enabled:
+            self._config.entropy_enabled = value
+            self.save()
+
+    @Property(float, notify=configChanged)  # pyrefly: ignore [not-callable]
+    def entropyThreshold(self) -> float:
+        """高熵检测阈值（3.0~5.0，默认 4.5）。"""
+        return self._config.entropy_threshold
+
+    @Slot(float)  # pyrefly: ignore [not-callable]
+    def setEntropyThreshold(self, value: float) -> None:
+        """设置高熵检测阈值（钳制到 3.0~5.0 范围）。"""
+        threshold = max(3.0, min(5.0, value))
+        if threshold != self._config.entropy_threshold:
+            self._config.entropy_threshold = threshold
+            self.save()
+
     # ----------------------------- 忽略目录（分类管理） -----------------------------
 
     @Property("QVariantList", notify=ignoreDirsChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
@@ -473,6 +500,9 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._config.font_size = 14
         self._config.font_bold = False
         self._config.min_font_size = 12
+        # iter-134：凭证检测重置为默认（启用 + 阈值 4.5）
+        self._config.entropy_enabled = True
+        self._config.entropy_threshold = 4.5
         set_perf_enabled(False)
         self.save()
         self.fontConfigChanged.emit()  # pyrefly: ignore [missing-attribute]

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -231,6 +232,7 @@ def _make_item(
     error_count: int = 0,
     last_summary: str = "",
     collected_count: int = 0,
+    last_activity_time: float | None = None,
 ) -> WorkspaceItem:
     """构造测试用 WorkspaceItem。"""
     return WorkspaceItem(
@@ -247,6 +249,7 @@ def _make_item(
         error_count=error_count,
         last_summary=last_summary,
         collected_count=collected_count,
+        last_activity_time=last_activity_time if last_activity_time is not None else time.time(),
     )
 
 
@@ -281,22 +284,24 @@ class TestWorkspaceListModel:
         assert model.rowCount(parent) == 0
 
     def test_add_workspace_returns_row(self) -> None:
-        """add_workspace 返回新增行号。"""
+        """add_workspace 返回新增行号（iter-132：插入到顶部 row 0）。"""
         model = WorkspaceListModel()
         row0 = model.add_workspace(_make_item("ws-1"))
         row1 = model.add_workspace(_make_item("ws-2"))
         assert row0 == 0
-        assert row1 == 1
+        assert row1 == 0  # iter-132：新工作区插入到顶部
         assert model.rowCount() == 2
 
     def test_add_workspace_appends_to_items(self) -> None:
+        """iter-132：新工作区插入到列表顶部（最近活动在最上方）。"""
         model = WorkspaceListModel()
         model.add_workspace(_make_item("ws-1", "任务 1"))
         model.add_workspace(_make_item("ws-2", "任务 2"))
         items = list(model.items)
         assert len(items) == 2
-        assert items[0].workspace_id == "ws-1"
-        assert items[1].workspace_id == "ws-2"
+        # ws-2 后插入，排在顶部
+        assert items[0].workspace_id == "ws-2"
+        assert items[1].workspace_id == "ws-1"
 
     def test_data_returns_field_by_role(self) -> None:
         """data() 按 role 返回对应字段值。"""
@@ -358,12 +363,13 @@ class TestWorkspaceListModel:
         assert model.get_workspace("ws-missing") is None
 
     def test_get_by_index(self) -> None:
+        """iter-132：新工作区插入到顶部，ws-2 在 index 0，ws-1 在 index 1。"""
         model = WorkspaceListModel()
         model.add_workspace(_make_item("ws-1", "任务 1"))
         model.add_workspace(_make_item("ws-2", "任务 2"))
         item = model.get_by_index(1)
         assert item is not None
-        assert item.workspace_id == "ws-2"
+        assert item.workspace_id == "ws-1"  # iter-132：ws-1 在 index 1（顶部是 ws-2）
 
     def test_get_by_index_out_of_range(self) -> None:
         model = WorkspaceListModel()
@@ -384,6 +390,51 @@ class TestWorkspaceListModel:
         model.add_workspace(_make_item("ws-1"))
         assert model.remove_workspace("ws-missing") is False
         assert model.rowCount() == 1
+
+    def test_move_to_top_promotes_to_first(self) -> None:
+        """iter-132：move_to_top 将指定工作区移到列表顶部。"""
+        model = WorkspaceListModel()
+        # 插入顺序：ws-1, ws-2, ws-3 → 列表：ws-3, ws-2, ws-1（顶部插入）
+        model.add_workspace(_make_item("ws-1"))
+        model.add_workspace(_make_item("ws-2"))
+        model.add_workspace(_make_item("ws-3"))
+        # ws-1 在底部（index 2），移到顶部
+        assert model.move_to_top("ws-1") is True
+        items = list(model.items)
+        assert items[0].workspace_id == "ws-1"
+        assert items[1].workspace_id == "ws-3"
+        assert items[2].workspace_id == "ws-2"
+
+    def test_move_to_top_already_at_top(self) -> None:
+        """iter-132：已在顶部时返回 False，仅更新时间。"""
+        model = WorkspaceListModel()
+        model.add_workspace(_make_item("ws-1"))
+        model.add_workspace(_make_item("ws-2"))
+        # ws-2 在顶部
+        assert model.move_to_top("ws-2") is False
+        items = list(model.items)
+        assert items[0].workspace_id == "ws-2"
+
+    def test_move_to_top_not_found(self) -> None:
+        """iter-132：不存在的工作区返回 False。"""
+        model = WorkspaceListModel()
+        model.add_workspace(_make_item("ws-1"))
+        assert model.move_to_top("ws-missing") is False
+
+    def test_move_to_top_updates_activity_time(self) -> None:
+        """iter-132：move_to_top 更新 last_activity_time。"""
+        import time
+
+        model = WorkspaceListModel()
+        old_time = 1000.0
+        model.add_workspace(_make_item("ws-1", last_activity_time=old_time))
+        model.add_workspace(_make_item("ws-2"))
+        # ws-1 在 index 1，移到顶部
+        model.move_to_top("ws-1")
+        item = model.get_workspace("ws-1")
+        assert item is not None
+        assert item.last_activity_time > old_time
+        assert item.last_activity_time <= time.time()
 
     def test_update_workspace_success(self) -> None:
         model = WorkspaceListModel()

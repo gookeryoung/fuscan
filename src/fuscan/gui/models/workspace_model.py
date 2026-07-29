@@ -20,6 +20,7 @@ QML 通过 role 读取展示字段，通过 :class:`WorkspaceController` 槽修�
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -141,6 +142,8 @@ class WorkspaceItem:
         - ``"ignore_dirs"``: tuple[str, ...]
 
         未在 dict 中的字段使用全局 :class:`Config` 默认值。
+    :param last_activity_time: 最近活动时间戳（``time.time()``），用于列表排序。
+        新建或启动扫描时更新为当前时间，列表按此字段倒序排列（最新活动在最上方）。
     """
 
     workspace_id: str
@@ -157,6 +160,7 @@ class WorkspaceItem:
     last_summary: str = ""
     collected_count: int = 0
     task_overrides: dict[str, object] = field(default_factory=dict)
+    last_activity_time: float = field(default_factory=time.time)
 
     @property
     def mode_text(self) -> str:
@@ -247,16 +251,19 @@ class WorkspaceListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
     # ----------------------------- 公共 API -----------------------------
 
     def add_workspace(self, item: WorkspaceItem) -> int:
-        """追加工作区到列表末尾，返回新行号。
+        """插入工作区到列表顶部（最近活动在最上方），返回新行号。
+
+        iter-132：新工作区插入到列表顶部（row 0），符合「最新任务在上面」
+        的交互预期。``last_activity_time`` 默认为构造时的 ``time.time()``，
+        新建工作区自然排在最上方。
 
         :param item: 工作区数据
-        :return: 新增行号
+        :return: 新增行号（0 = 顶部）
         """
-        row = len(self._items)
-        self.beginInsertRows(QModelIndex(), row, row)
-        self._items.append(item)
+        self.beginInsertRows(QModelIndex(), 0, 0)
+        self._items.insert(0, item)
         self.endInsertRows()
-        return row
+        return 0
 
     def remove_workspace(self, workspace_id: str) -> bool:
         """按 ID 移除工作区。
@@ -269,6 +276,34 @@ class WorkspaceListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
                 self.beginRemoveRows(QModelIndex(), idx, idx)
                 self._items.pop(idx)
                 self.endRemoveRows()
+                return True
+        return False
+
+    def move_to_top(self, workspace_id: str) -> bool:
+        """将指定工作区移到列表顶部（row 0）。
+
+        iter-132：增量扫描或重新扫描时调用，使最近活动的工作区排在最上方。
+        更新 ``last_activity_time`` 为当前时间。
+
+        :param workspace_id: 工作区 ID
+        :return: 是否成功移动（已在顶部或不存在返回 False）
+        """
+        for idx, item in enumerate(self._items):
+            if item.workspace_id == workspace_id:
+                if idx == 0:
+                    # 已在顶部，仅更新时间
+                    new_item = replace(item, last_activity_time=time.time())
+                    self._items[0] = new_item
+                    self.dataChanged.emit(self.index(0), self.index(0))
+                    return False
+                # 移除当前位置，插入到顶部
+                self.beginRemoveRows(QModelIndex(), idx, idx)
+                self._items.pop(idx)
+                self.endRemoveRows()
+                new_item = replace(item, last_activity_time=time.time())
+                self.beginInsertRows(QModelIndex(), 0, 0)
+                self._items.insert(0, new_item)
+                self.endInsertRows()
                 return True
         return False
 

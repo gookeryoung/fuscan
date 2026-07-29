@@ -35,6 +35,7 @@ __all__ = [
     "TASK_OVERRIDE_KEYS",
     "TASK_OVERRIDE_RANGES",
     "clamp_task_override_int",
+    "coerce_float",
     "coerce_int",
     "coerce_str",
     "coerce_str_tuple",
@@ -82,6 +83,27 @@ def coerce_int(value: object, default: int = 0) -> int:
     if isinstance(value, str):
         try:
             return int(value)
+        except ValueError:
+            return default
+    return default
+
+
+def coerce_float(value: object, default: float = 0.0) -> float:
+    """将任意值安全转换为 ``float``。
+
+    ``None`` 或非数字值返回 ``default``；``bool`` 视为非数字以避免 ``True→1.0`` 的语义混淆。
+
+    :param value: 原始值（可能是 float/int/str/None 等）
+    :param default: 转换失败时的默认值
+    :return: 类型安全的浮点数
+    """
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
         except ValueError:
             return default
     return default
@@ -212,6 +234,8 @@ def serialize_workspace(item: WorkspaceItem) -> dict[str, object]:
         "collected_count": item.collected_count,
         # iter-104 起持久化任务级配置覆盖
         "task_overrides": serialize_task_overrides(item.task_overrides),
+        # iter-132 起持久化最近活动时间，用于列表排序（最新活动在最上方）
+        "last_activity_time": item.last_activity_time,
     }
 
 

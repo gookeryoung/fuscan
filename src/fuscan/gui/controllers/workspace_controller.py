@@ -35,6 +35,7 @@ from fuscan.gui.controllers._persistence import (
     PERSIST_FILENAME,
     TASK_OVERRIDE_KEYS,
     clamp_task_override_int,
+    coerce_float,
     coerce_int,
     coerce_str,
     coerce_str_tuple,
@@ -294,12 +295,16 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         last_summary: str = "",
         collected_count: int = 0,
         task_overrides: dict[str, object] | None = None,
+        last_activity_time: float | None = None,
     ) -> None:
         """创建工作区内部实现（构造 item + ScanController + 连接信号）。
 
         供 :meth:`addWorkspace`（新建）与 :meth:`_load_persisted`（恢复）共用。
         持久化恢复时传入 ``status_text``/计数字段，使重启后仍能展示上次扫描状态。
+        :param last_activity_time: 最近活动时间戳；None 表示使用当前时间（新建场景）
         """
+        import time as _time
+
         item = WorkspaceItem(
             workspace_id=ws_id,
             name=name,
@@ -315,6 +320,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             last_summary=last_summary,
             collected_count=collected_count,
             task_overrides=dict(task_overrides) if task_overrides else {},
+            last_activity_time=last_activity_time if last_activity_time is not None else _time.time(),
         )
         self._model.add_workspace(item)
 
@@ -378,11 +384,16 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str)  # pyrefly: ignore [not-callable]
     def startScan(self, ws_id: str) -> None:
-        """启动指定工作区的扫描。"""
+        """启动指定工作区的扫描。
+
+        iter-132：启动扫描时将工作区移到列表顶部（最近活动在最上方）。
+        """
         controller = self._scan_controllers.get(ws_id)
         if controller is None:
             logger.warning("工作区 %s 不存在", ws_id)
             return
+        self._model.move_to_top(ws_id)
+        self._persist()
         controller.startScan()
 
     @Slot(str)  # pyrefly: ignore [not-callable]
@@ -391,11 +402,14 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         委托给对应工作区的 :class:`ScanController`，加载上次 manifest 与
         ScanReport 后启用增量模式。无上次结果时回退到全量扫描。
+        iter-132：增量扫描同样将工作区移到列表顶部。
         """
         controller = self._scan_controllers.get(ws_id)
         if controller is None:
             logger.warning("工作区 %s 不存在", ws_id)
             return
+        self._model.move_to_top(ws_id)
+        self._persist()
         controller.startIncrementalScan(ws_id)
 
     @Slot(str)  # pyrefly: ignore [not-callable]
@@ -754,13 +768,33 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         iter-124：关闭时不再 emit ``currentWorkspaceChanged``/``activeScanChanged``
         信号，避免 QML 在组件销毁过程中重新求值 ``currentScanController`` binding
         访问到已被 ``deleteLater`` 的对象（Terminal#4-17 null 错误根因）。
+
+        iter-132：``quick_cancel`` 内部已改为 cancel + wait(500) + terminate，
+        确保 QThread 退出，避免进程退出后后台残留。同时取消 ResultRestoreWorker
+        和 ResultListModel 的 FilterWorker。
         """
         for controller in self._scan_controllers.values():
             controller.quick_cancel()
         self._scan_controllers.clear()
-        # fallback 仅快速取消，不 wait/close/deleteLater（进程退出由 OS 回收）
+        # fallback 仅快速取消
         if hasattr(self, "_fallback_controller"):
             self._fallback_controller.quick_cancel()
+        # iter-132：取消未完成的 ResultRestoreWorker
+        from typing import cast
+
+        try:
+            from PySide2.QtCore import QThread
+        except ImportError:  # pragma: no cover
+            from PySide6.QtCore import QThread  # pyrefly: ignore [missing-import]
+
+        for worker in list(self._restore_workers.values()):
+            qt_worker = cast(QThread, worker)
+            if qt_worker.isRunning():
+                qt_worker.quit()
+                qt_worker.wait(500)  # pyrefly: ignore [missing-argument]
+                if qt_worker.isRunning():
+                    qt_worker.terminate()
+        self._restore_workers.clear()
         # 不清空 _current_workspace_id / _active_scan_workspace_id，不 emit 信号：
         # 应用退出阶段 QML 组件正在销毁，重新求值 binding 会触发 null TypeError。
         # 状态清空无意义（进程即将退出），保留原值让 QML binding 求值稳定。
@@ -786,8 +820,14 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """从 ``~/.fuscan/workspaces.json`` 恢复工作区列表。
 
         文件不存在/解析失败时静默跳过（首次启动或文件损坏）。
+        iter-132：按 ``last_activity_time`` 倒序加载，使最近活动的工作区排在顶部。
         """
         workspaces = load_persisted_workspaces(self._persist_file)
+        # iter-132：按 last_activity_time 倒序排列，最新活动的排在最上方
+        workspaces.sort(
+            key=lambda ws: float(ws.get("last_activity_time", 0.0)),
+            reverse=True,
+        )
         for ws in workspaces:
             # iter-113：dict 反序列化返回 object，通过 coerce_* 辅助函数做类型守卫
             ws_id = coerce_str(ws.get("id", ""))
@@ -812,6 +852,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     collected_count=coerce_int(ws.get("collected_count", 0)),
                     # 恢复任务级配置覆盖（iter-104 起持久化）
                     task_overrides=deserialize_task_overrides(ws.get("task_overrides", {})),
+                    # 恢复最近活动时间（iter-132 起持久化，用于列表排序）
+                    last_activity_time=coerce_float(ws.get("last_activity_time", 0.0)),
                 )
                 # iter-128：不再在启动时同步加载所有工作区的缓存结果，
                 # 改为延迟加载——setCurrentWorkspaceId 时按需后台异步恢复。

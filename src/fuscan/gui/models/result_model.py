@@ -202,6 +202,13 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         """清空结果。"""
         self.set_results(())
 
+    def cleanup(self) -> None:
+        """退出时取消未完成的 FilterWorker，避免进程退出后后台残留。
+
+        iter-132：显式取消 worker，不依赖 ``__del__``（解释器关闭时不保证调用）。
+        """
+        self._cancel_worker()
+
     def get_result(self, row: int) -> ScanResult | None:
         """按视图行号返回过滤后的 :class:`ScanResult`，越界返回 None。"""
         if 0 <= row < len(self._filtered):

@@ -1453,13 +1453,25 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._cache = None
 
     def quick_cancel(self) -> None:
-        """退出时快速取消所有 worker（非阻塞）。
+        """退出时快速取消所有 worker。
 
-        仅设置 cancel 标志，不 ``wait()`` / ``close()`` / ``deleteLater()``，
-        进程退出时由 OS 回收线程与文件句柄。10 万结果场景下避免主线程阻塞
-        （原 ``cleanup()`` 每 controller 最多 5s 累计等待）。
+        iter-132：cancel + 短暂 wait(500ms) + terminate 后备。
+        原 iter-127 实现仅设 cancel 标志不 wait，导致 QThread 在后台继续运行，
+        阻止进程退出（用户看到"界面退出后后台一直还在"）。
+        现改为：cancel 后 wait 最多 500ms（大部分 worker < 100ms 退出），
+        超时则 terminate 强制终止。不 close SQLite（进程退出由 OS 回收）。
         """
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
+            self._worker.wait(500)
+            if self._worker.isRunning():
+                self._worker.terminate()
+                self._worker.wait(200)
         if self._stats_worker is not None and self._stats_worker.isRunning():
             self._stats_worker.cancel()
+            self._stats_worker.wait(500)
+            if self._stats_worker.isRunning():
+                self._stats_worker.terminate()
+                self._stats_worker.wait(200)
+        # iter-132：取消未完成的 FilterWorker
+        self._result_model.cleanup()

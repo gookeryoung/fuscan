@@ -410,7 +410,9 @@ class TestStartIncrementalScanWithManifest:
         controller.setScanModeIndex(2)
         controller.setFolderRoot(str(tmp_path))
         controller._last_report = _make_scan_report()
-        controller.setWorkspaceRuleset(None, [], False)  # ruleset 置 None
+        # iter-137：通过全局 RulesController 清空规则集
+        controller._rules_controller.setUseBuiltin(False)
+        assert controller._rules_controller.ruleset is None
         # 创建 manifest 文件
         from fuscan.gui.controllers import scan_controller as sc_module
 
@@ -1147,7 +1149,11 @@ class TestScanControllerPropertiesCoverage:
 
     def test_rules_count_zero_when_no_ruleset(self, controller: ScanController) -> None:
         """ruleset=None 时 rulesCount 应为 0。"""
-        controller.setWorkspaceRuleset(None, [], False)
+        # iter-137：通过全局 RulesController 清空规则集
+        controller._rules_controller.setUseBuiltin(False)
+        assert controller._rules_controller.ruleset is None
+        # 刷新 ScanController 持有的 ruleset 快照
+        controller._ruleset = controller._rules_controller.ruleset
         assert controller.rulesCount == 0
 
     def test_select_next_result(self, controller: ScanController, tmp_path: Path) -> None:

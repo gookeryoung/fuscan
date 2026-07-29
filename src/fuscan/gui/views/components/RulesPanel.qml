@@ -1,0 +1,338 @@
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+import QtQuick.Dialogs 1.3 as Dialogs
+import fuscan.theme 1.0
+import fuscan.controllers 1.0
+
+// 规则面板：全局规则配置区（iter-137）
+// 从 RulesPage.qml 提取，供 HomePage 内嵌与 RulesPage 独立页共用。
+// 包含：标题栏（标题 + 导入/导出 + 规则数）+ 左右分栏（规则文件列表 + 规则列表）
+Item {
+    id: rulesPanel
+    property ThemeController theme: Theme
+    property RulesControllerType rulesController: RulesController
+
+    // 规则文件选择对话框（QML FileDialog，替代 QWidget QFileDialog）
+    Dialogs.FileDialog {
+        id: rulesFileDialog
+        title: "选择规则文件"
+        nameFilters: ["YAML 文件 (*.yaml *.yml)", "所有文件 (*.*)"]
+        onAccepted: {
+            var pathStr = rulesFileDialog.fileUrl.toString()
+            // file:/// 前缀转本地路径
+            if (pathStr.startsWith("file:///")) {
+                pathStr = decodeURIComponent(pathStr.substring(8))
+            }
+            rulesController.loadFileFromPath(pathStr)
+        }
+    }
+
+    // iter-122：规则集导入对话框
+    Dialogs.FileDialog {
+        id: importFileDialog
+        title: "导入规则集"
+        nameFilters: ["YAML/JSON 文件 (*.yaml *.yml *.json)", "所有文件 (*.*)"]
+        onAccepted: {
+            var pathStr = importFileDialog.fileUrl.toString()
+            if (pathStr.startsWith("file:///")) {
+                pathStr = decodeURIComponent(pathStr.substring(8))
+            }
+            rulesController.importRuleset(pathStr)
+        }
+    }
+
+    // iter-122：规则集导出对话框
+    Dialogs.FileDialog {
+        id: exportFileDialog
+        title: "导出规则集"
+        nameFilters: ["YAML 文件 (*.yaml *.yml)", "JSON 文件 (*.json)", "所有文件 (*.*)"]
+        selectExisting: false
+        defaultSuffix: "yaml"
+        onAccepted: {
+            var pathStr = exportFileDialog.fileUrl.toString()
+            if (pathStr.startsWith("file:///")) {
+                pathStr = decodeURIComponent(pathStr.substring(8))
+            }
+            rulesController.exportRuleset(pathStr)
+        }
+    }
+
+    // iter-122：导入/导出操作结果通知（Toast 风格）
+    Rectangle {
+        id: ioToast
+        property bool success: false
+        property string message: ""
+        visible: message.length > 0
+        anchors.top: parent.top
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.topMargin: 16
+        width: Math.min(toastLabel.implicitWidth + 32, parent.width - 32)
+        height: toastLabel.implicitHeight + 16
+        radius: 6
+        color: success ? theme.colorSuccess : theme.colorDanger
+        opacity: 0.95
+        z: 100
+
+        Label {
+            id: toastLabel
+            anchors.centerIn: parent
+            text: ioToast.message
+            color: "#FFFFFF"
+            font.pixelSize: 12
+            elide: Text.ElideRight
+        }
+
+        // 3 秒后自动消失
+        Timer {
+            id: toastTimer
+            interval: 3000
+            repeat: false
+            onTriggered: ioToast.message = ""
+        }
+
+        Connections {
+            target: rulesController
+            onRulesIoCompleted: function(ok, msg) {
+                ioToast.success = ok
+                ioToast.message = msg
+                toastTimer.restart()
+            }
+        }
+    }
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: 12
+
+        // 标题行：标题 + 导入/导出 + 规则数
+        RowLayout {
+            Layout.fillWidth: true
+            Label {
+                text: "全局规则"
+                font.pixelSize: 16
+                font.bold: true
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+            }
+            Item { Layout.fillWidth: true }
+            IconButton {
+                text: "导入"
+                tooltip: "从 YAML/JSON 文件导入规则集"
+                accent: "ghost"
+                onClicked: importFileDialog.open()
+            }
+            IconButton {
+                text: "导出"
+                tooltip: "导出当前规则集到 YAML/JSON 文件"
+                accent: "ghost"
+                enabled: rulesController.ruleCount > 0
+                onClicked: exportFileDialog.open()
+            }
+            Label {
+                text: "共 " + rulesController.ruleCount + " 条规则"
+                font.pixelSize: 12
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                Layout.leftMargin: 8
+            }
+        }
+
+        // 主区域：左右分栏
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 12
+
+            // ---------- 左侧：规则文件列表 ----------
+            Rectangle {
+                Layout.fillHeight: true
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+                color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                border.width: 1
+                radius: 8
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 8
+
+                    Label {
+                        text: "规则文件"
+                        font.pixelSize: 14
+                        font.bold: true
+                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    }
+
+                    // 内置规则勾选
+                    RowLayout {
+                        Layout.fillWidth: true
+                        CheckBox {
+                            text: "内置通用规则"
+                            checked: rulesController.useBuiltin
+                            onCheckedChanged: rulesController.setUseBuiltin(checked)
+                        }
+                    }
+
+                    // 规则文件列表
+                    ListView {
+                        id: rulesFileList
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        // iter-106 P1：预渲染屏幕外 delegate，避免滚动时重建
+                        cacheBuffer: 500
+                        model: rulesController.rulesFileModel
+                        currentIndex: rulesController.selectedFileIndex
+                        onCurrentIndexChanged: rulesController.setSelectedFileIndex(currentIndex)
+                        delegate: ItemDelegate {
+                            width: rulesFileList.width
+                            height: 36
+                            // QVariantList of dict 通过 modelData 访问字段
+                            text: modelData.fileName
+                            font.pixelSize: 12
+                            highlighted: ListView.isCurrentItem
+                            // ItemDelegate 在 Qt Quick Controls 2 不会自动设置
+                            // ListView.currentIndex，需在 onClicked 显式同步选中
+                            onClicked: rulesFileList.currentIndex = index
+                            background: Rectangle {
+                                color: ListView.isCurrentItem
+                                    ? (theme.isDark ? theme.colorBgSelectedDark : theme.colorBgSelected)
+                                    : (parent.hovered
+                                        ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
+                                        : "transparent")
+                                Behavior on color { ColorAnimation { duration: 120 } }
+                            }
+                            contentItem: Label {
+                                text: parent.text
+                                font: parent.font
+                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                elide: Text.ElideMiddle
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: 12
+                                rightPadding: 12
+                            }
+                        }
+                    }
+
+                    // 操作按钮
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+                        IconButton {
+                            iconSource: "qrc:/icons/up_arrow.svg"
+                            tooltip: "上移"
+                            accent: "ghost"
+                            enabled: rulesController.canMoveUp
+                            onClicked: rulesController.moveUp()
+                        }
+                        IconButton {
+                            iconSource: "qrc:/icons/down_arrow.svg"
+                            tooltip: "下移"
+                            accent: "ghost"
+                            enabled: rulesController.canMoveDown
+                            onClicked: rulesController.moveDown()
+                        }
+                        IconButton {
+                            iconSource: "qrc:/icons/minus.svg"
+                            tooltip: "移除选中规则文件"
+                            accent: "ghost"
+                            enabled: rulesController.canRemove
+                            onClicked: rulesController.removeSelected()
+                        }
+                        Item { Layout.fillWidth: true }
+                        IconButton {
+                            iconSource: "qrc:/icons/load_list.svg"
+                            text: "加载"
+                            tooltip: "加载规则文件"
+                            accent: "ghost"
+                            onClicked: rulesFileDialog.open()
+                        }
+                    }
+                }
+            }
+
+            // ---------- 右侧：规则列表 ----------
+            Rectangle {
+                Layout.fillHeight: true
+                Layout.fillWidth: true
+                Layout.preferredWidth: 2
+                color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                border.width: 1
+                radius: 8
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 8
+
+                    Label {
+                        text: "规则列表"
+                        font.pixelSize: 14
+                        font.bold: true
+                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    }
+
+                    ListView {
+                        id: ruleListView
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        // iter-106 P1：预渲染屏幕外 delegate，避免滚动时重建
+                        cacheBuffer: 1000
+                        model: rulesController.ruleModel
+                        delegate: ItemDelegate {
+                            width: ruleListView.width
+                            height: 56
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                spacing: 2
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label {
+                                        text: model.name
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                    Rectangle {
+                                        radius: 8
+                                        height: 18
+                                        width: severityLabel.width + 12
+                                        color: model.severityColor
+                                        Label {
+                                            id: severityLabel
+                                            anchors.centerIn: parent
+                                            text: model.severityText
+                                            font.pixelSize: 10
+                                            color: "#FFFFFF"
+                                        }
+                                    }
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: model.description
+                                    font.pixelSize: 11
+                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    elide: Text.ElideRight
+                                    visible: model.description.length > 0
+                                }
+                                // 底部分隔线（最后一项不显示）
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 1
+                                    color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                    visible: index < ruleListView.count - 1
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

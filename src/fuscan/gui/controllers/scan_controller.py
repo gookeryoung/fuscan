@@ -159,11 +159,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 任务级配置覆盖（iter-104）：键为 Config 字段名，值为该任务专属覆盖值
         # 通过 _effective_<field>() 方法优先读取覆盖值，回退到全局 Config
         self._task_overrides: dict[str, object] = {}
-        # 工作区专属规则集（iter-107 规则与工作区绑定）
-        # 由 WorkspaceController.setWorkspaceRuleset 注入，本控制器不再依赖
-        # 全局 RulesController.ruleset，避免工作区之间规则相互污染
-        self._workspace_rules_paths: tuple[str, ...] = ()
-        self._workspace_use_builtin: bool = True
+        # iter-137：规则配置全局化——本控制器不再持有工作区专属 ruleset 副本，
+        # 启动时从全局 RulesController.ruleset 取占位，startScan 时再取最新
+        # （保证规则变更立即生效）。缓存上下文构建时直接读取全局 rules_paths/use_builtin
         # iter-113：最近一次批量替换的 (源文件路径, 备份文件路径) 配对元组，供 undoLastBatchReplace 撤销。
         # 初始为空元组表示无可撤销记录；每次批量替换后由 replaceAllFilteredResults 更新。
         # 存储 (src, backup) 配对而非仅 backup_path，因为 backup_path 与 src 不在同一目录，
@@ -222,14 +220,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 选中结果
         self._selected_result_index: int = -1
 
-        # iter-107：ScanController 不再监听全局 RulesController.rulesetChanged，
-        # ruleset 由 WorkspaceController.setWorkspaceRuleset 在工作区创建/规则
-        # 更新时注入。为保证向后兼容（独立构造的 ScanController 仍可读取全局
-        # ruleset），此处做一次性快照；WorkspaceController 注入后会覆盖。
+        # iter-137：规则配置全局化——启动时一次性快照全局 RulesController.ruleset
+        # 作为占位（避免 None 状态），startScan 时再次取最新（保证规则变更立即生效）
         self._ruleset = self._rules_controller.ruleset
-        # 同步初始 rules_paths/use_builtin（缓存上下文用）
-        self._workspace_rules_paths = tuple(str(p) for p in self._rules_controller.rules_paths)
-        self._workspace_use_builtin = self._rules_controller.use_builtin
 
     # ----------------------------- 扫描状态 -----------------------------
 
@@ -917,6 +910,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         if self._scan_state == STATE_SCANNING:
             return
+        # iter-137：每次扫描前重新取最新全局 ruleset，保证规则变更立即生效
+        self._ruleset = self._rules_controller.ruleset
         if self._ruleset is None:
             logger.warning("未加载规则集，无法开始扫描")
             return
@@ -1006,6 +1001,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         if self._scan_state == STATE_SCANNING:
             return
+        # iter-137：每次扫描前重新取最新全局 ruleset，保证规则变更立即生效
+        self._ruleset = self._rules_controller.ruleset
         if self._ruleset is None:
             logger.warning("未加载规则集，无法开始增量扫描")
             return
@@ -1314,31 +1311,6 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     # ----------------------------- 内部方法 -----------------------------
 
-    @Slot(object, list, bool)  # pyrefly: ignore [not-callable]
-    def setWorkspaceRuleset(
-        self,
-        ruleset: object | None,
-        rules_paths: list[str],
-        use_builtin: bool,
-    ) -> None:
-        """注入工作区专属 :class:`RuleSet`（iter-107 规则与工作区绑定）。
-
-        :param ruleset: 工作区专属 RuleSet 实例（加载失败为 ``None``）
-        :param rules_paths: 工作区规则文件路径列表
-        :param use_builtin: 是否启用内置规则
-
-        由 :class:`WorkspaceController` 在工作区创建与 :meth:`update_workspace_rules`
-        调用时注入。本控制器据此刷新 ``_ruleset`` 与 ``rulesCount``/``canStartScan``，
-        并在缓存上下文构建时使用工作区专属 rules_paths/use_builtin，避免依赖
-        全局 RulesController 的全局规则集。
-        """
-        # 调用方（WorkspaceController）保证类型正确，此处直接赋值
-        self._ruleset = ruleset  # type: ignore[assignment]
-        self._workspace_rules_paths = tuple(str(p) for p in rules_paths)
-        self._workspace_use_builtin = bool(use_builtin)
-        self.rulesCountChanged.emit()  # pyrefly: ignore [missing-attribute]
-        self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
-
     def _sync_stats_from_report(self, report: ScanReport) -> None:
         """从 ScanReport.stats 同步最终统计到进度字段。
 
@@ -1368,7 +1340,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         )
 
     def _build_cache_context(self) -> tuple[CacheStore | None, dict[Path, str] | None]:
-        """构造扫描缓存上下文（iter-107：使用工作区专属规则路径与内置开关）。"""
+        """构造扫描缓存上下文（iter-137：使用全局规则路径与内置开关）。"""
         if not self._config.cache_enabled:
             return None, None
         if self._cache is None:
@@ -1378,11 +1350,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._cache = CacheStore(cache_path)
         from fuscan.cache import compute_source_files
 
-        # iter-107：使用工作区专属 rules_paths/use_builtin，避免依赖全局 RulesController
-        workspace_paths = [Path(p) for p in self._workspace_rules_paths if Path(p).exists()]
+        # iter-137：直接读取全局 RulesController 的 rules_paths/use_builtin
+        global_paths = self._rules_controller.rules_paths
         source_files = compute_source_files(
-            workspace_paths,
-            use_builtin=self._workspace_use_builtin,
+            global_paths,
+            use_builtin=self._rules_controller.use_builtin,
         )
         return self._cache, source_files
 

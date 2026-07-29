@@ -65,7 +65,6 @@ Pane {
     Component {
         id: homePage
         HomePage {
-            onDefineRulesRequested: contentArea.sidebarRef.currentPage = "rules"
             onViewResultsRequested: contentArea.sidebarRef.currentPage = "results"
             onViewStatsRequested: contentArea.sidebarRef.currentPage = "stats"
             onTaskSettingsRequested: contentArea.sidebarRef.currentPage = "settings"
@@ -83,11 +82,8 @@ Pane {
     Component {
         id: rulesPage
         RulesPage {
-            // iter-107：返回前解除工作区绑定，恢复 RulesController 全局模式
-            onBackRequested: {
-                WorkspaceController.unbindRulesController()
-                contentArea.sidebarRef.currentPage = "home"
-            }
+            // iter-137：规则配置全局化——不再有工作区绑定，直接返回首页
+            onBackRequested: contentArea.sidebarRef.currentPage = "home"
         }
     }
 

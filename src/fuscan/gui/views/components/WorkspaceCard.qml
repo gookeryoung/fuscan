@@ -34,8 +34,8 @@ Rectangle {
     // 是否展开（显示更多操作）
     property bool expanded: false
 
-    // 信号：通知 HomePage 切换到规则页 / 结果页 / 统计页
-    signal defineRulesRequested(string workspaceId)
+    // 信号：通知 HomePage 切换到结果页 / 统计页
+    // iter-137：移除 defineRulesRequested（规则配置全局化，首页下方直接编辑）
     signal viewResultsRequested(string workspaceId)
     signal viewStatsRequested(string workspaceId)
 
@@ -233,13 +233,25 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 8
 
-            // 左侧：定义规则 + 启动/暂停扫描 + 查看结果
+            // 左侧：切换目标 + 启动/暂停扫描 + 查看结果
+            // iter-137：原「定义规则」按钮改为「切换目标」（规则配置全局化）
             IconButton {
-                iconSource: "qrc:/icons/rules.svg"
-                text: "定义规则"
-                tooltip: "编辑该任务的规则集"
+                iconSource: "qrc:/icons/target.svg"
+                text: "切换目标"
+                tooltip: "修改该任务的扫描模式与目标路径"
                 accent: "secondary"
-                onClicked: card.defineRulesRequested(card.workspaceId)
+                // 扫描中/暂停中禁用
+                enabled: statusText !== "扫描中" && statusText !== "已暂停"
+                onClicked: {
+                    // 用当前工作区状态初始化编辑表单
+                    var modeStr = card.modeText === "全盘扫描" ? "full"
+                               : (card.modeText === "盘符扫描" ? "drive" : "folder")
+                    editTargetDialog.editModeIndex = modeStr === "full" ? 0
+                        : (modeStr === "drive" ? 1 : 2)
+                    editTargetDialog.editDrive = modeStr === "drive" ? card.target : ""
+                    editTargetDialog.editFolder = modeStr === "folder" ? card.target : ""
+                    editTargetDialog.open()
+                }
             }
             IconButton {
                 iconSource: statusText === "扫描中" ? "qrc:/icons/pause.svg" : "qrc:/icons/scan.svg"
@@ -354,24 +366,7 @@ Rectangle {
                 Layout.fillWidth: true
                 spacing: 8
 
-                IconButton {
-                    iconSource: "qrc:/icons/target.svg"
-                    text: "切换目标"
-                    tooltip: "修改该任务的扫描模式与目标路径"
-                    accent: "ghost"
-                    // 扫描中/暂停中禁用
-                    enabled: statusText !== "扫描中" && statusText !== "已暂停"
-                    onClicked: {
-                        // 用当前工作区状态初始化编辑表单
-                        var modeStr = card.modeText === "全盘扫描" ? "full"
-                                   : (card.modeText === "盘符扫描" ? "drive" : "folder")
-                        editTargetDialog.editModeIndex = modeStr === "full" ? 0
-                            : (modeStr === "drive" ? 1 : 2)
-                        editTargetDialog.editDrive = modeStr === "drive" ? card.target : ""
-                        editTargetDialog.editFolder = modeStr === "folder" ? card.target : ""
-                        editTargetDialog.open()
-                    }
-                }
+                // iter-137：展开区移除「切换目标」（已挪到第一行）
                 IconButton {
                     iconSource: "qrc:/icons/rescan.svg"
                     text: "重新扫描"

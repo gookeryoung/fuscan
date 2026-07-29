@@ -63,34 +63,10 @@ if TYPE_CHECKING:
     from fuscan.gui.controllers.rules_controller import RulesController
     from fuscan.gui.controllers.whitelist_controller import WhitelistController
     from fuscan.history import HistoryStore
-    from fuscan.rules.model import RuleSet
 
 __all__ = ["WorkspaceController"]
 
 logger = logging.getLogger(__name__)
-
-
-def _load_workspace_ruleset(rules_paths: Sequence[str], use_builtin: bool) -> RuleSet | None:
-    """根据工作区的规则路径与内置规则开关加载 :class:`RuleSet`。
-
-    :param rules_paths: 工作区专属规则文件路径列表
-    :param use_builtin: 是否启用内置规则
-    :return: 合并后的 :class:`RuleSet`；规则加载失败返回 ``None``
-    """
-    from fuscan.config import load_with_builtin
-    from fuscan.rules import RuleError, load_ruleset, merge_multiple_rulesets
-
-    paths = [Path(p) for p in rules_paths if Path(p).exists()]
-    try:
-        if use_builtin:
-            return load_with_builtin(paths)
-        if paths:
-            rulesets = [load_ruleset(p) for p in paths]
-            return merge_multiple_rulesets(*rulesets)
-        return None
-    except RuleError as exc:
-        logger.warning("工作区规则集加载失败: %s", exc)
-        return None
 
 
 class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -124,8 +100,10 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 使白名单变更对所有工作区生效；为 None 时（独立测试）ScanController
         # 内部回退到自建 WhitelistStore，保持向后兼容。
         self._whitelist_controller: WhitelistController | None = whitelist_controller
-        # 反向注入引用：RulesController 绑定工作区时需要查询 WorkspaceItem
-        self._rules_controller.set_workspace_controller(self)
+        # iter-137：规则配置全局化——RulesController 不再绑定工作区，
+        # 全局 rulesetChanged 时清除所有工作区 manifest，使下次增量扫描回退全量，
+        # 确保新规则被实际执行（manifest 指纹只记录 mtime+size，不感知规则变化）
+        self._rules_controller.rulesetChanged.connect(self._invalidate_all_manifests)  # pyrefly: ignore [missing-attribute]
         self._model = WorkspaceListModel(self)
         self._scan_controllers: dict[str, ScanController] = {}
         self._current_workspace_id: str = ""
@@ -215,7 +193,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             if controller is not None:
                 return controller
         # 兜底：返回一个临时实例（仅当未选中工作区或工作区不存在时）
-        # iter-107：fallback 实例使用全局 RulesController 的全局 ruleset 作为占位
+        # iter-137：fallback 实例直接复用全局 RulesController.ruleset（启动时占位），
         # 该实例不会启动扫描（hasCurrentWorkspace=False 时 QML 不显示扫描入口）
         if not hasattr(self, "_fallback_controller"):
             self._fallback_controller = ScanController(
@@ -224,16 +202,6 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 self,
                 skip_store=self._shared_skip_store,
                 whitelist_controller=self._whitelist_controller,
-            )
-            global_paths_str = [str(p) for p in self._rules_controller.rules_paths]
-            global_ruleset = _load_workspace_ruleset(
-                global_paths_str,
-                self._rules_controller.use_builtin,
-            )
-            self._fallback_controller.setWorkspaceRuleset(
-                global_ruleset,
-                global_paths_str,
-                self._rules_controller.use_builtin,
             )
         return self._fallback_controller
 
@@ -421,10 +389,9 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             # 同步任务级配置覆盖到 ScanController（iter-104）
             for key, value in item.task_overrides.items():
                 scan_controller.setTaskOverride(key, value)
-            # 注入工作区专属 ruleset（iter-107 规则与工作区绑定）
-            # ScanController 不再依赖全局 RulesController.ruleset，而是持工作区专属副本
-            workspace_ruleset = _load_workspace_ruleset(item.rules_paths, item.use_builtin)
-            scan_controller.setWorkspaceRuleset(workspace_ruleset, tuple(item.rules_paths), item.use_builtin)
+            # iter-137：规则配置全局化——ScanController 启动时从全局 RulesController
+            # 取 ruleset 占位，startScan 时再次取最新（保证规则变更立即生效），
+            # 不再注入工作区专属 ruleset
             # 连接状态变化信号以回写工作区
             scan_controller.scanStateChanged.connect(  # pyrefly: ignore [missing-attribute]
                 lambda wid=ws_id: self._sync_workspace_state(wid)
@@ -570,67 +537,6 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._persist()
         self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
 
-    @Slot(str, list, bool)  # pyrefly: ignore [not-callable]
-    def updateWorkspaceRules(self, ws_id: str, rules_paths: list[str], use_builtin: bool) -> None:
-        """更新工作区规则配置（iter-107 规则与工作区绑定）。
-
-        :param ws_id: 工作区 ID
-        :param rules_paths: 新的规则文件路径列表
-        :param use_builtin: 是否启用内置规则
-
-        由 :class:`RulesController` 在绑定模式下编辑规则后调用。更新
-        :class:`WorkspaceItem` 的 rules_paths/use_builtin 字段，重新加载工作区
-        专属 :class:`RuleSet` 并推送给对应 :class:`ScanController`，最后持久化。
-        扫描中/暂停中拒绝修改以避免破坏运行时状态。
-        """
-        item = self._model.get_workspace(ws_id)
-        if item is None:
-            logger.warning("工作区 %s 不存在，无法更新规则", ws_id)
-            return
-        if item.status_text in ACTIVE_STATUS_TEXTS:
-            logger.warning("工作区 %s 处于 %s 状态，拒绝修改规则", ws_id, item.status_text)
-            return
-        # 规范化为 tuple[str, ...]
-        normalized_paths = tuple(str(p) for p in rules_paths)
-        # 同步到 model（触发 rulesText/rulesTags role 刷新）
-        self._model.update_workspace(
-            ws_id,
-            rules_paths=normalized_paths,
-            use_builtin=bool(use_builtin),
-        )
-        # 重新加载工作区专属 ruleset 并注入 ScanController
-        workspace_ruleset = _load_workspace_ruleset(normalized_paths, use_builtin)
-        controller = self._ensure_scan_controller(ws_id)
-        if controller is not None:
-            controller.setWorkspaceRuleset(workspace_ruleset, normalized_paths, bool(use_builtin))
-            # iter-136：规则变更后清除 manifest，使下次增量扫描回退为全量，
-            # 确保新规则被实际执行（manifest 指纹只记录 mtime+size，不感知规则变化）
-            controller.invalidate_manifest(ws_id)
-        self._persist()
-        self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
-
-    @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
-    def bindRulesController(self, ws_id: str) -> bool:
-        """将全局 :class:`RulesController` 绑定到指定工作区（iter-107）。
-
-        :param ws_id: 工作区 ID
-        :return: 是否绑定成功
-
-        HomePage 在「定义规则」按钮触发时调用，使 RulesController 进入工作区绑定模式，
-        后续 RulesPage 编辑仅作用于该工作区，不影响全局配置与其他工作区。
-        """
-        if not ws_id:
-            return False
-        return self._rules_controller.bindWorkspace(ws_id)
-
-    @Slot()  # pyrefly: ignore [not-callable]
-    def unbindRulesController(self) -> None:
-        """解除 :class:`RulesController` 的工作区绑定（iter-107）。
-
-        RulesPage 返回时调用，恢复 RulesController 全局模式。
-        """
-        self._rules_controller.unbindWorkspace()
-
     def get_workspace(self, ws_id: str) -> WorkspaceItem | None:
         """按 ID 取 :class:`WorkspaceItem`（供 RulesController 查询绑定工作区）。
 
@@ -754,8 +660,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             避免破坏运行时 worker 状态；空列表视为已成功无需操作返回 True。
 
         清理所有 :class:`ScanController` 资源、清空 model、重置当前/活动工作区 ID，
-        并持久化空列表到 ``workspaces.json``。绑定中的 :class:`RulesController`
-        若指向被清空的工作区，自动解绑恢复全局模式。
+        并持久化空列表到 ``workspaces.json``。
         """
         # 扫描中/暂停中拒绝清空
         if self._active_scan_workspace_id:
@@ -787,9 +692,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if self._active_scan_workspace_id:
             self._active_scan_workspace_id = ""
             self.activeScanChanged.emit()  # pyrefly: ignore [missing-attribute]
-        # 若 RulesController 绑定到已清空的工作区，自动解绑
-        if self._rules_controller.isBound:
-            self._rules_controller.unbindWorkspace()
+        # iter-137：规则配置全局化——不再有工作区绑定，无需解绑
         # 持久化空列表
         self._persist()
         self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -959,6 +862,56 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             # iter-128：启动时仅后台加载第一个工作区的结果（QML 默认选中第一个）
             first_ws_id = self._model.all_workspaces()[0].workspace_id
             self._try_load_cached_results(first_ws_id)
+        # iter-137：将旧版本工作区级 rules_paths 迁移到全局规则配置
+        self._migrate_workspace_rules_to_global(workspaces)
+
+    # ----------------------------- iter-137 规则全局化迁移 -----------------------------
+
+    def _migrate_workspace_rules_to_global(self, workspaces: list[dict[str, object]]) -> None:
+        """将旧版本工作区级 ``rules_paths``/``use_builtin`` 合并到全局 :class:`Config`。
+
+        iter-137 之前每个工作区有独立的 ``rules_paths``，重构后所有工作区共享
+        全局规则集。启动恢复时遍历所有工作区，将不重复的规则文件路径合并到
+        ``Config.rules_paths``；``use_builtin`` 取 OR（任一工作区启用则全局启用）。
+        合并后调用 :meth:`ConfigController.save` 持久化。
+
+        :param workspaces: 从 ``workspaces.json`` 加载的原始 dict 列表
+        """
+        if not workspaces:
+            return
+        config = self._config_controller.config
+        global_paths: list[str] = list(config.rules_paths)
+        global_use_builtin = bool(config.use_builtin)
+        changed = False
+        for ws in workspaces:
+            ws_paths = coerce_str_tuple(ws.get("rules_paths", []))
+            for p in ws_paths:
+                if p and p not in global_paths:
+                    global_paths.append(p)
+                    changed = True
+            # 任一工作区启用内置规则则全局启用
+            if bool(ws.get("use_builtin", False)) and not global_use_builtin:
+                global_use_builtin = True
+                changed = True
+        if changed:
+            config.rules_paths = global_paths
+            config.use_builtin = global_use_builtin
+            self._config_controller.save()
+            logger.info(
+                "已迁移工作区级规则到全局配置：rules_paths=%d 条，use_builtin=%s",
+                len(global_paths),
+                global_use_builtin,
+            )
+
+    def _invalidate_all_manifests(self) -> None:
+        """全局规则变更时清除所有已创建 ScanController 的 manifest（iter-137）。
+
+        全局 :class:`RulesController` 的 ``rulesetChanged`` 信号触发本方法，
+        遍历所有已创建的 :class:`ScanController` 调用 ``invalidate_manifest``，
+        使下次增量扫描回退为全量，确保新规则被实际执行。
+        """
+        for ws_id, controller in self._scan_controllers.items():
+            controller.invalidate_manifest(ws_id)
 
     # ----------------------------- 扫描结果缓存（iter-123） -----------------------------
 

@@ -315,6 +315,7 @@ Item {
         ScrollView {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.preferredHeight: 1  // 与下方规则区弹性分配
             clip: true
             visible: !workspaceController.hasActiveScan
 
@@ -353,11 +354,6 @@ Item {
                     collectedCount: model.collectedCount
                     lastSummary: model.lastSummary
 
-                    onDefineRulesRequested: function(wsId) {
-                        // iter-107：进入规则页前绑定工作区，使规则编辑仅作用于该工作区
-                        workspaceController.bindRulesController(wsId)
-                        homePage.defineRulesRequested(wsId)
-                    }
                     onViewResultsRequested: function(wsId) {
                         workspaceController.setCurrentWorkspaceId(wsId)
                         homePage.viewResultsRequested(wsId)
@@ -384,10 +380,27 @@ Item {
                 }
             }
         }
+
+        // ---------- 全局规则配置区（iter-137） ----------
+        // 规则配置全局化：所有工作区共享同一规则集，首页下方提供编辑入口
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.preferredHeight: 1  // 与上方工作区列表弹性分配
+            visible: !workspaceController.hasActiveScan
+            color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+            border.width: 1
+            radius: theme.radiusLg
+
+            RulesPanel {
+                anchors.fill: parent
+                anchors.margins: 12
+            }
+        }
     }
 
     // 信号：通知 ContentArea 切换页面
-    signal defineRulesRequested(string workspaceId)
     signal viewResultsRequested(string workspaceId)
     signal viewStatsRequested(string workspaceId)
     signal taskSettingsRequested(string workspaceId)

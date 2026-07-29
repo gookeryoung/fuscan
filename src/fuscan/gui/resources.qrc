@@ -3,6 +3,7 @@
   <qresource prefix="/">
     <file alias="qml/components/IconButton.qml">views/components/IconButton.qml</file>
     <file alias="qml/components/ResultDetailPanel.qml">views/components/ResultDetailPanel.qml</file>
+    <file alias="qml/components/RulesPanel.qml">views/components/RulesPanel.qml</file>
     <file alias="qml/components/ScanProgressCard.qml">views/components/ScanProgressCard.qml</file>
     <file alias="qml/components/WorkspaceCard.qml">views/components/WorkspaceCard.qml</file>
     <file alias="qml/ContentArea.qml">views/ContentArea.qml</file>

@@ -713,7 +713,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._current_workspace_id = ""
             self.currentWorkspaceChanged.emit()  # pyrefly: ignore [missing-attribute]
         # active_scan_workspace_id 已在入口校验非空，此处清空兜底
-        if self._active_scan_workspace_id:
+        if self._active_scan_workspace_id:  # pragma: no cover - 入口已拒绝，防御性兜底
             self._active_scan_workspace_id = ""
             self.activeScanChanged.emit()  # pyrefly: ignore [missing-attribute]
         # iter-137：规则配置全局化——不再有工作区绑定，无需解绑

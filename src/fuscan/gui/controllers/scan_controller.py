@@ -1207,16 +1207,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return
         try:
             from PySide2.QtGui import QGuiApplication  # type: ignore
-
-            clipboard = QGuiApplication.clipboard()
-            clipboard.setText(str(result.path))
-            self._set_status("已复制", "已复制路径到剪贴板")
         except ImportError:  # pragma: no cover
             from PySide6.QtGui import QGuiApplication  # type: ignore
-
-            clipboard = QGuiApplication.clipboard()
-            clipboard.setText(str(result.path))
-            self._set_status("已复制", "已复制路径到剪贴板")
+        clipboard = QGuiApplication.clipboard()
+        clipboard.setText(str(result.path))
+        self._set_status("已复制", "已复制路径到剪贴板")
 
     # ----------------------------- 内部槽（worker 信号） -----------------------------
 

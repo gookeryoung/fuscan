@@ -2575,3 +2575,506 @@ def _build_simple_report():
             total_matches=1,
         ),
     )
+
+
+class TestIter143CoverageGaps:
+    """iter-143：补充 workspace_controller.py 未覆盖分支。
+
+    覆盖目标：currentScanController fallback / _ensure_scan_controller except /
+    removeWorkspace controller=None / startScan controller=None /
+    updateWorkspaceTarget controller=None / get_workspace / taskOverridesJson
+    item=None / setTaskOverride ignore_dirs 类型 / setTaskOverride controller=None /
+    clearTaskOverride controller=None & global_value=None / clearAllWorkspaces 空列表 /
+    cleanup fallback & restore_workers / _load_persisted 重复 & except /
+    _migrate_workspace_rules / _try_load_cached_results controller=None /
+    _on_restore_done / _on_restore_failed / _cleanup_restore_worker /
+    _archive_scan_history except。
+    """
+
+    def test_get_workspace_method(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """controller.get_workspace 返回 WorkspaceItem 或 None（iter-143 覆盖行 570）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        item = controller.get_workspace(ws_id)
+        assert item is not None
+        assert item.workspace_id == ws_id
+        # 不存在的工作区返回 None
+        assert controller.get_workspace("nonexistent") is None
+
+    def test_current_scan_controller_fallback_when_workspace_missing(
+        self,
+        controller: WorkspaceController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """_ensure_scan_controller 返回 None 时 currentScanController 返回 fallback（iter-143 覆盖 213->218）。"""
+        # 设置一个 _current_workspace_id 但 mock _ensure_scan_controller 返回 None
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setCurrentWorkspaceId(ws_id)
+        # mock _ensure_scan_controller 返回 None（模拟工作区刚被移除但 ID 仍保留）
+        monkeypatch.setattr(controller, "_ensure_scan_controller", lambda _wid: None)
+
+        sc = controller.currentScanController
+        # 返回 fallback 实例（首次创建）
+        assert sc is not None
+
+    def test_ensure_scan_controller_exception_cleans_up(
+        self,
+        controller: WorkspaceController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ScanController 初始化抛异常时应 cleanup+deleteLater+raise（iter-143 覆盖 429-433）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # 移除已创建的 ScanController，强制下次 _ensure_scan_controller 重新创建
+        existing = controller._scan_controllers.pop(ws_id, None)  # type: ignore[attr-defined]
+        if existing is not None:
+            existing.cleanup()
+            existing.deleteLater()
+
+        cleanup_called: list[bool] = []
+        delete_later_called: list[bool] = []
+
+        def raise_set_mode_index(_index: int) -> None:
+            raise RuntimeError("初始化失败")
+
+        # patch ScanController.setScanModeIndex 让 try 块内抛异常
+        from fuscan.gui.controllers.scan_controller import ScanController as _SC
+
+        def patched_set_mode(self_sc: object, index: int) -> None:
+            cleanup_called.append(True)  # 标记 cleanup 可调用
+            raise_set_mode_index(index)
+
+        monkeypatch.setattr(_SC, "setScanModeIndex", patched_set_mode)
+        # patch cleanup 和 deleteLater 捕获调用
+        original_cleanup = _SC.cleanup
+
+        def patched_cleanup(self_sc: object) -> None:
+            cleanup_called.append(True)
+            original_cleanup(self_sc)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(_SC, "cleanup", patched_cleanup)
+
+        def patched_delete_later(self_sc: object) -> None:
+            delete_later_called.append(True)
+
+        monkeypatch.setattr(_SC, "deleteLater", patched_delete_later)
+
+        with pytest.raises(RuntimeError, match="初始化失败"):
+            controller._ensure_scan_controller(ws_id)  # type: ignore[attr-defined]
+        # cleanup 和 deleteLater 被调用
+        assert delete_later_called == [True]
+
+    def test_remove_workspace_without_scan_controller(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """removeWorkspace 时 _scan_controllers 中无对应项应安全跳过（iter-143 覆盖 443->446）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # addWorkspace 已创建 ScanController，手动移除模拟"未创建"场景
+        existing = controller._scan_controllers.pop(ws_id, None)  # type: ignore[attr-defined]
+        if existing is not None:
+            existing.cleanup()
+            existing.deleteLater()
+        assert ws_id not in controller._scan_controllers  # type: ignore[attr-defined]
+        # 移除不应抛异常
+        controller.removeWorkspace(ws_id)
+        assert controller.get_workspace(ws_id) is None
+
+    def test_start_scan_nonexistent_workspace_warns(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """startScan 不存在工作区应记录 warning 并返回（iter-143 覆盖 490-492）。"""
+        # 不应抛异常
+        controller.startScan("nonexistent-ws")
+
+    def test_update_workspace_target_when_controller_not_created(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """updateWorkspaceTarget 时 ScanController 未创建应安全跳过（iter-143 覆盖 554->561）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # addWorkspace 已创建 ScanController，手动移除模拟"未创建"场景
+        existing = controller._scan_controllers.pop(ws_id, None)  # type: ignore[attr-defined]
+        if existing is not None:
+            existing.cleanup()
+            existing.deleteLater()
+        assert ws_id not in controller._scan_controllers  # type: ignore[attr-defined]
+        # 更新目标不应抛异常
+        controller.updateWorkspaceTarget(ws_id, "folder", "/new/path")
+        item = controller.get_workspace(ws_id)
+        assert item is not None
+        assert item.target == "/new/path"
+
+    def test_task_overrides_json_nonexistent_workspace(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """taskOverridesJson 不存在工作区返回 '{}'（iter-143 覆盖行 582）。"""
+        assert controller.taskOverridesJson("nonexistent-ws") == "{}"
+
+    def test_set_task_override_ignore_dirs_invalid_type(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """setTaskOverride ignore_dirs 非 list[str] 应记录 warning 并返回（iter-143 覆盖 621-622）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # ignore_dirs 为非 list（数字）应被拒绝
+        controller.setTaskOverride(ws_id, "ignore_dirs", "123")  # JSON 123 是 int 不是 list
+        # task_overrides 未变更
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert "ignore_dirs" not in overrides
+
+    def test_set_task_override_when_controller_not_created(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """setTaskOverride 时 ScanController 未创建应安全跳过同步（iter-143 覆盖 640->642）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # addWorkspace 已创建 ScanController，手动移除模拟"未创建"场景
+        existing = controller._scan_controllers.pop(ws_id, None)  # type: ignore[attr-defined]
+        if existing is not None:
+            existing.cleanup()
+            existing.deleteLater()
+        assert ws_id not in controller._scan_controllers  # type: ignore[attr-defined]
+        # 不应抛异常
+        controller.setTaskOverride(ws_id, "scan_archives", "false")
+        # task_overrides 已更新
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert overrides.get("scan_archives") is False
+
+    def test_clear_task_override_when_controller_not_created(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """clearTaskOverride 时 ScanController 未创建应安全跳过（iter-143 覆盖 668->672）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # 先设置覆盖（会创建 ScanController）
+        controller.setTaskOverride(ws_id, "scan_archives", "false")
+        # 手动移除 ScanController 模拟"未创建"场景
+        existing = controller._scan_controllers.pop(ws_id, None)  # type: ignore[attr-defined]
+        if existing is not None:
+            existing.cleanup()
+            existing.deleteLater()
+        assert ws_id not in controller._scan_controllers  # type: ignore[attr-defined]
+        # 清除不应抛异常
+        controller.clearTaskOverride(ws_id, "scan_archives")
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert "scan_archives" not in overrides
+
+    def test_clear_task_override_global_value_is_none(
+        self,
+        controller: WorkspaceController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """clearTaskOverride 时 global_value is None 应跳过 setTaskOverride（iter-143 覆盖 670->672）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setTaskOverride(ws_id, "scan_archives", "false")
+        # 创建 ScanController（通过访问 currentScanController 触发延迟构造）
+        _ = controller.currentScanController
+
+        # mock get_config_value 返回 None（模拟未知字段）
+        monkeypatch.setattr(controller._config_controller, "get_config_value", lambda _key: None)
+
+        # 不应抛异常
+        controller.clearTaskOverride(ws_id, "scan_archives")
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert "scan_archives" not in overrides
+
+    def test_clear_all_workspaces_empty_list_with_current_id(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """clearAllWorkspaces 空列表但 _current_workspace_id 非空应清空并 emit（iter-143 覆盖 699-700）。"""
+        # 设置 _current_workspace_id 但不添加工作区（model 为空）
+        controller._current_workspace_id = "ws-orphan"  # type: ignore[attr-defined]
+        # model 为空
+        assert controller.workspaceModel.rowCount() == 0
+        result = controller.clearAllWorkspaces()
+        assert result is True
+        # _current_workspace_id 已清空
+        assert controller.currentWorkspaceId == ""
+
+    def test_cleanup_with_fallback_controller(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """cleanup 时已创建 _fallback_controller 应被快速取消（iter-143 覆盖行 801）。"""
+        # 触发 fallback 创建：未选中工作区时访问 currentScanController
+        _ = controller.currentScanController
+        assert hasattr(controller, "_fallback_controller")  # type: ignore[attr-defined]
+        # cleanup 不应抛异常
+        controller.cleanup()
+        # cleanup 后 fallback_controller 仍存在（quick_cancel 不删除引用）
+        assert hasattr(controller, "_fallback_controller")  # type: ignore[attr-defined]
+
+    def test_cleanup_with_running_restore_worker(
+        self,
+        controller: WorkspaceController,
+        config_dir: Path,
+    ) -> None:
+        """cleanup 时 _restore_workers 中有运行中 worker 应 quit+wait+terminate（iter-143 覆盖 811-816）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+
+        class FakeRestoreWorker:
+            def __init__(self) -> None:
+                self._running = True
+                self.quit_called = False
+                self.wait_called = False
+                self.terminate_called = False
+
+            def isRunning(self) -> bool:
+                return self._running
+
+            def quit(self) -> None:
+                self.quit_called = True
+                self._running = False
+
+            def wait(self, _msecs: int = 0) -> bool:
+                self.wait_called = True
+                return True
+
+            def terminate(self) -> None:
+                self.terminate_called = True
+
+            def deleteLater(self) -> None:
+                pass
+
+        fake_worker = FakeRestoreWorker()
+        controller._restore_workers[ws_id] = fake_worker  # type: ignore[attr-defined]
+        controller.cleanup()
+        assert fake_worker.quit_called is True
+        assert fake_worker.wait_called is True
+
+    def test_load_persisted_skips_duplicate_ws_id(
+        self,
+        config_dir: Path,
+        config_controller: ConfigController,
+        rules_controller: RulesController,
+    ) -> None:
+        """_load_persisted 时持久化文件中重复 ws_id 应跳过（iter-143 覆盖行 855）。"""
+        persist_file = config_dir / "workspaces.json"
+        persist_data: dict[str, object] = {
+            "version": 1,
+            "workspaces": [
+                {
+                    "id": "ws-dup",
+                    "name": "任务 1",
+                    "mode": "folder",
+                    "target": "/tmp",
+                    "rules_paths": [],
+                    "use_builtin": True,
+                },
+                {
+                    "id": "ws-dup",  # 重复 ID
+                    "name": "任务 2",
+                    "mode": "folder",
+                    "target": "/other",
+                    "rules_paths": [],
+                    "use_builtin": True,
+                },
+            ],
+        }
+        persist_file.write_text(json.dumps(persist_data), encoding="utf-8")
+
+        controller = WorkspaceController(config_controller, rules_controller)
+        # 只应加载第一个 ws-dup
+        assert controller.workspaceModel.rowCount() == 1
+        item = controller.get_workspace("ws-dup")
+        assert item is not None
+        assert item.name == "任务 1"
+
+    def test_load_persisted_handles_single_workspace_failure(
+        self,
+        config_dir: Path,
+        config_controller: ConfigController,
+        rules_controller: RulesController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """_load_persisted 时单条工作区恢复失败应记录 warning 不阻塞其余（iter-143 覆盖 882-883）。"""
+        persist_file = config_dir / "workspaces.json"
+        persist_data: dict[str, object] = {
+            "version": 1,
+            "workspaces": [
+                {
+                    "id": "ws-bad",
+                    "name": "坏任务",
+                    "mode": "folder",
+                    "target": "/tmp",
+                    "rules_paths": [],
+                    "use_builtin": True,
+                },
+                {
+                    "id": "ws-good",
+                    "name": "好任务",
+                    "mode": "folder",
+                    "target": "/tmp",
+                    "rules_paths": [],
+                    "use_builtin": True,
+                },
+            ],
+        }
+        persist_file.write_text(json.dumps(persist_data), encoding="utf-8")
+
+        # mock _create_workspace 对 ws-bad 抛异常,对其他正常调用原始实现
+        original_create = WorkspaceController._create_workspace
+
+        def fake_create(self: WorkspaceController, **kwargs: object) -> None:
+            if kwargs.get("ws_id") == "ws-bad":
+                raise ValueError("模拟恢复失败")
+            # 正常工作区调用原始 _create_workspace
+            original_create(self, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(WorkspaceController, "_create_workspace", fake_create)
+
+        # 重新构造 controller（会调用 _load_persisted）
+        new_controller = WorkspaceController(config_controller, rules_controller)
+        # ws-bad 失败,ws-good 成功
+        assert new_controller.get_workspace("ws-bad") is None
+        assert new_controller.get_workspace("ws-good") is not None
+
+    def test_migrate_workspace_rules_paths_to_global(
+        self,
+        controller: WorkspaceController,
+        config_controller: ConfigController,
+    ) -> None:
+        """_migrate_workspace_rules_to_global 应合并 rules_paths 到全局（iter-143 覆盖 916-918）。"""
+        # 全局初始无 rules_paths
+        config_controller.config.rules_paths = []
+        # 模拟从持久化加载的 workspaces 数据
+        workspaces = [
+            {"id": "ws-1", "rules_paths": ["/path/to/rule1.yaml"], "use_builtin": True},
+            {"id": "ws-2", "rules_paths": ["/path/to/rule2.yaml", "/path/to/rule1.yaml"], "use_builtin": True},
+        ]
+        controller._migrate_workspace_rules_to_global(workspaces)  # type: ignore[attr-defined]
+        # 去重后两条路径
+        assert "/path/to/rule1.yaml" in config_controller.config.rules_paths
+        assert "/path/to/rule2.yaml" in config_controller.config.rules_paths
+        assert len(config_controller.config.rules_paths) == 2
+
+    def test_migrate_workspace_rules_use_builtin_to_global(
+        self,
+        controller: WorkspaceController,
+        config_controller: ConfigController,
+    ) -> None:
+        """_migrate_workspace_rules_to_global 应 OR 合并 use_builtin（iter-143 覆盖 921-927）。"""
+        config_controller.config.use_builtin = False
+        config_controller.config.rules_paths = []
+        workspaces: list[dict[str, object]] = [
+            {"id": "ws-1", "rules_paths": [], "use_builtin": False},
+            {"id": "ws-2", "rules_paths": [], "use_builtin": True},  # 任一启用则全局启用
+        ]
+        controller._migrate_workspace_rules_to_global(workspaces)  # type: ignore[attr-defined]
+        assert config_controller.config.use_builtin is True
+
+    def test_migrate_workspace_rules_no_change(
+        self,
+        controller: WorkspaceController,
+        config_controller: ConfigController,
+    ) -> None:
+        """_migrate_workspace_rules_to_global 无变更时不调用 save（iter-143 覆盖 changed=False 分支）。"""
+        config_controller.config.use_builtin = True
+        config_controller.config.rules_paths = []
+        # 所有工作区都已迁移（rules_paths 已在全局，use_builtin 已 True）
+        workspaces: list[dict[str, object]] = [
+            {"id": "ws-1", "rules_paths": [], "use_builtin": True},
+        ]
+        save_called: list[bool] = []
+        original_save = config_controller.save
+        config_controller.save = lambda: save_called.append(True)  # type: ignore[assignment]
+        try:
+            controller._migrate_workspace_rules_to_global(workspaces)  # type: ignore[attr-defined]
+            assert save_called == []  # 无变更不调用 save
+        finally:
+            config_controller.save = original_save  # type: ignore[assignment]
+
+    def test_try_load_cached_results_controller_is_none(
+        self,
+        controller: WorkspaceController,
+        config_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """_try_load_cached_results 时 controller is None 应安全返回（iter-143 覆盖行 1020）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # 创建 cache 文件使其存在
+        cache_file = config_dir / "results" / f"{ws_id}.json"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text("{}", encoding="utf-8")
+        # mock _ensure_scan_controller 返回 None
+        monkeypatch.setattr(controller, "_ensure_scan_controller", lambda _wid: None)
+        # 不应抛异常
+        controller._try_load_cached_results(ws_id)  # type: ignore[attr-defined]
+        # 未启动恢复（_restoring_workspaces 为空）
+        assert ws_id not in controller._restoring_workspaces  # type: ignore[attr-defined]
+
+    def test_on_restore_done_controller_is_none(
+        self,
+        controller: WorkspaceController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """_on_restore_done 时 controller is None 应安全跳过（iter-143 覆盖 1038->1042）。"""
+        ws_id = "ws-test"
+        monkeypatch.setattr(controller, "_ensure_scan_controller", lambda _wid: None)
+        # 不应抛异常
+        controller._on_restore_done(ws_id, object())  # type: ignore[attr-defined]
+        # 仍标记为已恢复
+        assert ws_id in controller._restored_workspaces  # type: ignore[attr-defined]
+
+    def test_on_restore_done_non_scan_report(
+        self,
+        controller: WorkspaceController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """_on_restore_done 时 report 不是 ScanReport 应安全跳过 restoreFromReport（iter-143 覆盖 1038->1042）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        sc = controller.currentScanController  # 创建 ScanController
+        restore_called: list[bool] = []
+        monkeypatch.setattr(sc, "restoreFromReport", lambda _report: restore_called.append(True))
+
+        # 传入非 ScanReport 对象
+        controller._on_restore_done(ws_id, "not a report")  # type: ignore[attr-defined]
+        # 未调用 restoreFromReport
+        assert restore_called == []
+        # 仍标记为已恢复
+        assert ws_id in controller._restored_workspaces  # type: ignore[attr-defined]
+
+    def test_on_restore_failed_controller_is_none(
+        self,
+        controller: WorkspaceController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """_on_restore_failed 时 controller is None 应安全跳过（iter-143 覆盖 1048->1050）。"""
+        ws_id = "ws-test"
+        monkeypatch.setattr(controller, "_ensure_scan_controller", lambda _wid: None)
+        # 不应抛异常
+        controller._on_restore_failed(ws_id, "模拟失败")  # type: ignore[attr-defined]
+        # 清除恢复态
+        assert ws_id not in controller._restoring_workspaces  # type: ignore[attr-defined]
+
+    def test_cleanup_restore_worker_no_worker(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """_cleanup_restore_worker 时 worker 不存在应安全跳过（iter-143 覆盖 1056->exit）。"""
+        # _restore_workers 中无此项
+        controller._cleanup_restore_worker("ws-nonexistent")  # type: ignore[attr-defined]
+        # 不应抛异常,无副作用
+
+    def test_archive_scan_history_handles_exception(
+        self,
+        controller: WorkspaceController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """_archive_scan_history 时 build_history_entry 抛异常应记录 warning 不传播（iter-143 覆盖 1077-1079）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        sc = controller.currentScanController
+
+        # mock build_history_entry 抛异常
+        def raise_exc(_ws_id: str, _name: str) -> None:
+            raise RuntimeError("归档失败")
+
+        monkeypatch.setattr(sc, "build_history_entry", raise_exc)
+
+        # 不应抛异常
+        controller._archive_scan_history(ws_id, sc)  # type: ignore[attr-defined]

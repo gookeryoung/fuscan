@@ -1950,3 +1950,437 @@ class TestCleanupWithWorkers:
         controller.cleanup()
         assert cache.closed is True
         assert controller._cache is None
+
+
+class TestIter143CoverageGaps:
+    """iter-143：补充 scan_controller.py 未覆盖分支。
+
+    覆盖目标：Property getters（restoring/archiveEntryCount/effectiveMax*）、
+    filterSeverities/setResultSort 选中索引越界、moveSelectedToStaging 同步
+    last_report、markAsFalsePositive 三分支、_on_scan_progress phase 切换、
+    _on_stats_finished stats_worker is None、_on_scan_finished speed > 0、
+    _set_restoring noop、_set_status 无 summary、quick_cancel 各分支。
+    """
+
+    def test_restoring_property_default_false(self, controller: ScanController) -> None:
+        """restoring Property 默认 False（iter-143 覆盖行 271）。"""
+        assert controller.restoring is False
+
+    def test_archive_entry_count_default_zero(self, controller: ScanController) -> None:
+        """archiveEntryCount Property 默认 0（iter-143 覆盖行 377）。"""
+        assert controller.archiveEntryCount == 0
+
+    def test_effective_max_workers_property(self, controller: ScanController) -> None:
+        """effectiveMaxWorkers Property 返回 config 值（iter-143 覆盖行 575）。"""
+        assert controller.effectiveMaxWorkers == controller._effective_max_workers()
+
+    def test_effective_max_file_size_mb_property(self, controller: ScanController) -> None:
+        """effectiveMaxFileSizeMB Property 返回 MB 单位值（iter-143 覆盖行 583）。"""
+        expected = controller._effective_max_file_size() // (1024 * 1024)
+        assert controller.effectiveMaxFileSizeMB == expected
+
+    def test_effective_max_depth_property_default_zero(self, controller: ScanController) -> None:
+        """effectiveMaxDepth 默认 None 归一化为 0（iter-143 覆盖行 592-593）。"""
+        # Config 默认 max_depth=0（无限），effective_max_depth 返回 None，Property 归一化为 0
+        assert controller.effectiveMaxDepth == 0
+
+    def test_effective_max_depth_property_with_value(
+        self,
+        controller: ScanController,
+        config_controller: ConfigController,
+    ) -> None:
+        """effectiveMaxDepth 设非零值时返回该值（iter-143 覆盖行 592-593 depth or 0 分支）。"""
+        config_controller.setMaxDepth(5)
+        assert controller.effectiveMaxDepth == 5
+
+    def test_filter_severities_resets_selected_index_when_out_of_range(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> None:
+        """filterSeverities 过滤后选中索引越界应重置为 -1（iter-143 覆盖行 734）。"""
+        h_critical = RuleHit(rule_name="敏感内容", severity=Severity.CRITICAL, detail="d1")
+        h_warning = RuleHit(rule_name="API 密钥", severity=Severity.WARNING, detail="d2")
+        results = (
+            ScanResult(path=tmp_path / "a.txt", size=10, hits=(h_critical,)),
+            ScanResult(path=tmp_path / "b.txt", size=20, hits=(h_warning,)),
+        )
+        controller._result_model.set_results(results)
+        controller.setSelectedResultIndex(1)  # 选中第 2 条（WARNING）
+        # 过滤仅保留 CRITICAL，第 2 条被过滤，选中索引越界
+        controller.setResultFilterSeverities(["严重"])
+        assert controller.selectedResultIndex == -1
+
+    def test_set_result_sort_resets_selected_index_when_out_of_range(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> None:
+        """setResultSort 后选中索引越界应重置为 -1（iter-143 覆盖行 746）。"""
+        results = (
+            ScanResult(
+                path=tmp_path / "a.txt",
+                size=10,
+                hits=(RuleHit(rule_name="r", severity=Severity.CRITICAL, detail="d"),),
+            ),
+            ScanResult(
+                path=tmp_path / "b.txt",
+                size=20,
+                hits=(RuleHit(rule_name="r", severity=Severity.CRITICAL, detail="d"),),
+            ),
+        )
+        controller._result_model.set_results(results)
+        controller.setSelectedResultIndex(1)
+        # 过滤后仅 1 条，排序时选中索引 1 越界
+        controller.setResultFilterText("a.txt")
+        controller.setResultSort("filePath", True)
+        assert controller.selectedResultIndex == -1
+
+    def test_move_to_staging_syncs_last_report(
+        self,
+        controller: ScanController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """moveSelectedToStaging 成功后 _last_report.hits 同步移除该条目（iter-143 覆盖 926->937）。"""
+        result = _make_scan_result(tmp_path / "test.txt")
+        controller._result_model.set_results((result,))
+        controller._last_report = _make_scan_report(results=(result,))
+        controller.setSelectedResultIndex(0)
+
+        # mock move_to_staging 返回成功前缀
+        monkeypatch.setattr(
+            "fuscan.gui.controllers.scan_controller.move_to_staging",
+            lambda **kwargs: f"已移至暂存: {tmp_path}/quarantine/test.txt",
+        )
+
+        msg = controller.moveSelectedToStaging()
+        assert msg.startswith("已移至暂存")
+        # _last_report.hits 中已移除该条目
+        assert all(str(h.path) != str(result.path) for h in controller._last_report.hits)
+        # 选中索引重置
+        assert controller.selectedResultIndex == -1
+
+    def test_move_to_staging_failure_skips_sync(
+        self,
+        controller: ScanController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """moveSelectedToStaging 失败时不修改 _last_report（iter-143 覆盖 924->939）。"""
+        result = _make_scan_result(tmp_path / "test.txt")
+        controller._result_model.set_results((result,))
+        controller._last_report = _make_scan_report(results=(result,))
+        controller.setSelectedResultIndex(0)
+
+        # mock move_to_staging 返回失败消息
+        monkeypatch.setattr(
+            "fuscan.gui.controllers.scan_controller.move_to_staging",
+            lambda **kwargs: "移至暂存失败: 模拟错误",
+        )
+
+        msg = controller.moveSelectedToStaging()
+        assert msg.startswith("移至暂存失败")
+        # _last_report.hits 未修改
+        assert len(controller._last_report.hits) == 1
+        # 选中索引未重置
+        assert controller.selectedResultIndex == 0
+
+    def test_move_to_staging_no_last_report_skips_sync(
+        self,
+        controller: ScanController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """moveSelectedToStaging 成功但 _last_report is None 时跳过同步（iter-143 覆盖 926->937 False 分支）。"""
+        result = _make_scan_result(tmp_path / "test.txt")
+        controller._result_model.set_results((result,))
+        controller._last_report = None
+        controller.setSelectedResultIndex(0)
+
+        # mock remove_result_by_path 返回 False（removed=False 走 if False 分支）
+        monkeypatch.setattr(
+            "fuscan.gui.controllers.scan_controller.move_to_staging",
+            lambda **kwargs: f"已移至暂存: {tmp_path}/quarantine/test.txt",
+        )
+        # 让 remove_result_by_path 返回 False 触发 926 if False 分支
+        monkeypatch.setattr(controller._result_model, "remove_result_by_path", lambda _path: False)
+
+        msg = controller.moveSelectedToStaging()
+        assert msg.startswith("已移至暂存")
+        # _last_report 仍为 None
+        assert controller._last_report is None
+        # 选中索引仍重置（937 行在 if 块外）
+        assert controller.selectedResultIndex == -1
+
+    def test_mark_as_false_positive_no_selection(self, controller: ScanController) -> None:
+        """markAsFalsePositive 未选中结果返回 '未选中结果'（iter-143 覆盖 961-966）。"""
+        msg = controller.markAsFalsePositive()
+        assert msg == "未选中结果"
+
+    def test_mark_as_false_positive_archive_entry(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+    ) -> None:
+        """markAsFalsePositive 压缩包内部条目返回错误（iter-143 覆盖 961-966）。"""
+        archive_path = tmp_path / "a.zip"
+        result = ScanResult(
+            path=tmp_path / "a.zip!inner/file.txt",
+            size=100,
+            hits=(RuleHit(rule_name="r", severity=Severity.CRITICAL, detail="d"),),
+            archive_path=archive_path,
+        )
+        controller._result_model.set_results((result,))
+        controller.setSelectedResultIndex(0)
+
+        msg = controller.markAsFalsePositive()
+        assert msg == "压缩包内部条目不支持标记误报"
+
+    def test_mark_as_false_positive_success_with_pending_ws(
+        self,
+        controller: ScanController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """markAsFalsePositive 成功且 _pending_ws_id 设置时调用 invalidate_manifest（iter-143 覆盖 967-971）。"""
+        result = _make_scan_result(tmp_path / "test.txt")
+        controller._result_model.set_results((result,))
+        controller.setSelectedResultIndex(0)
+        controller._pending_ws_id = "ws-test"
+
+        # mock addEntry 返回成功消息
+        monkeypatch.setattr(
+            controller._whitelist_controller,
+            "addEntry",
+            lambda path_glob, rule_name, note: f"已标记为误报: {path_glob} ({rule_name})",
+        )
+        # mock invalidate_manifest 捕获调用
+        invalidated: list[str] = []
+        monkeypatch.setattr(controller, "invalidate_manifest", invalidated.append)
+
+        msg = controller.markAsFalsePositive(rule_filter="敏感内容")
+        assert msg.startswith("已标记为误报")
+        assert invalidated == ["ws-test"]
+
+    def test_mark_as_false_positive_success_without_pending_ws(
+        self,
+        controller: ScanController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """markAsFalsePositive 成功但 _pending_ws_id 为空时不调用 invalidate_manifest（iter-143 覆盖 969->971）。"""
+        result = _make_scan_result(tmp_path / "test.txt")
+        controller._result_model.set_results((result,))
+        controller.setSelectedResultIndex(0)
+        # _pending_ws_id 为空字符串（falsy）
+        controller._pending_ws_id = ""
+
+        monkeypatch.setattr(
+            controller._whitelist_controller,
+            "addEntry",
+            lambda path_glob, rule_name, note: f"已标记为误报: {path_glob} ({rule_name})",
+        )
+        invalidated: list[str] = []
+        monkeypatch.setattr(controller, "invalidate_manifest", invalidated.append)
+
+        msg = controller.markAsFalsePositive()
+        assert msg.startswith("已标记为误报")
+        # _pending_ws_id 为空，不调用 invalidate_manifest
+        assert invalidated == []
+
+    def test_on_scan_progress_phase_switch_to_scan(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """_on_scan_progress phase 从 walk 切到 scan 应标记 walk_done（iter-143 覆盖 1236->1240）。"""
+        # 初始 phase=setup，先发 walk 进度
+        walk_info = ProgressInfo(phase="walk", total=10, scanned=0)
+        controller._on_scan_progress(walk_info)
+        assert controller._walk_done is False
+        # 切到 scan 阶段
+        scan_info = ProgressInfo(phase="scan", total=10, scanned=5, matched=1)
+        controller._on_scan_progress(scan_info)
+        assert controller._walk_done is True
+        assert controller._walk_indeterminate is False
+
+    def test_on_stats_finished_with_none_stats_worker(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """_on_stats_finished 时 _stats_worker 为 None 跳过 manifest 读取（iter-143 覆盖 1267->1269）。"""
+        # 不通过 startScan，直接设 ruleset 后调用 _on_stats_finished
+        controller._ruleset = _build_ruleset()
+        controller._stats_worker = None  # type: ignore[bad-assignment]
+        controller._pending_manifest = None
+
+        controller._on_stats_finished([_make_walk_result(tmp_path)])
+
+        # _pending_manifest 仍为 None（未读取 stats_worker.manifest）
+        assert controller._pending_manifest is None
+
+    def test_on_scan_finished_with_speed(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """_on_scan_finished 时 speed > 0 状态摘要应含速度（iter-143 覆盖 1364->1366）。"""
+        stats_instances, scan_instances = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+        stats_instances[0].emit_finished([_make_walk_result(tmp_path)])
+        scan_worker = scan_instances[0]
+
+        result = _make_scan_result(tmp_path / "test.txt")
+        report = ScanReport(
+            root=tmp_path,
+            results=(result,),
+            stats=ScanStats(
+                total_files=10,
+                scanned_files=10,
+                matched_files=1,
+                skipped_files=0,
+                errors=0,
+                duration_seconds=0.5,  # speed = 10/0.5 = 20 > 0
+                total_matches=1,
+            ),
+            cancelled=False,
+        )
+        scan_worker.emit_finished(report)
+        assert "速度" in controller.statusSummary
+
+    def test_set_restoring_noop_when_same(self, controller: ScanController) -> None:
+        """_set_restoring 重复设置相同值不 emit 信号（iter-143 覆盖 1501->exit）。"""
+        emitted: list[None] = []
+        controller.restoringChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
+        controller._set_restoring(True)
+        assert len(emitted) == 1
+        # 重复设置 True 不 emit
+        controller._set_restoring(True)
+        assert len(emitted) == 1
+
+    def test_set_status_without_summary_keeps_existing(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """_set_status 不传 summary 时保留既有 _status_summary（iter-143 覆盖 1548->1550）。"""
+        controller._set_status("初始", "初始摘要")
+        assert controller.statusSummary == "初始摘要"
+        # 不传 summary，_status_summary 应保持不变
+        controller._set_status("新文本")
+        assert controller.statusText == "新文本"
+        assert controller.statusSummary == "初始摘要"
+
+    def test_quick_cancel_with_running_scan_worker(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """quick_cancel 时 _worker.isRunning() True 应 cancel+wait（iter-143 覆盖 1614-1615）。"""
+        stats_instances, scan_instances = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+        # 完成 stats 阶段以创建 scan worker
+        stats_instances[0].emit_finished([_make_walk_result(tmp_path)])
+        scan_worker = scan_instances[0]
+
+        controller.quick_cancel()
+        assert scan_worker.cancel_called is True
+        assert scan_worker.wait_called is True
+
+    def test_quick_cancel_with_running_stats_worker(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """quick_cancel 时 _stats_worker.isRunning() True 应 cancel+wait（iter-143 覆盖 1619-1621）。"""
+        stats_instances, _ = fake_workers
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+        stats_worker = stats_instances[0]
+
+        controller.quick_cancel()
+        assert stats_worker.cancel_called is True
+        assert stats_worker.wait_called is True
+
+    def test_quick_cancel_terminates_stubborn_scan_worker(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """quick_cancel 时 _worker wait 后仍 isRunning 应 terminate（iter-143 覆盖 1616-1618）。"""
+
+        class StubbornScanWorker:
+            """wait 后仍 isRunning=True 的 scan worker 桩。"""
+
+            def __init__(self) -> None:
+                self.cancel_called = False
+                self.wait_called = False
+                self.terminate_called = False
+
+            def cancel(self) -> None:
+                self.cancel_called = True
+
+            def wait(self, _msecs: int = 0) -> bool:
+                self.wait_called = True
+                return False  # 仍 running
+
+            def terminate(self) -> None:
+                self.terminate_called = True
+
+            def isRunning(self) -> bool:
+                return True  # 始终 running
+
+            def deleteLater(self) -> None:
+                pass
+
+        stubborn = StubbornScanWorker()
+        controller._worker = stubborn  # type: ignore[bad-assignment]
+        controller.quick_cancel()
+        assert stubborn.cancel_called is True
+        assert stubborn.wait_called is True
+        assert stubborn.terminate_called is True
+
+    def test_quick_cancel_terminates_stubborn_stats_worker(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """quick_cancel 时 _stats_worker wait 后仍 isRunning 应 terminate（iter-143 覆盖 1622-1624）。"""
+
+        class StubbornStatsWorker:
+            """wait 后仍 isRunning=True 的 stats worker 桩。"""
+
+            def __init__(self) -> None:
+                self.cancel_called = False
+                self.wait_called = False
+                self.terminate_called = False
+
+            def cancel(self) -> None:
+                self.cancel_called = True
+
+            def wait(self, _msecs: int = 0) -> bool:
+                self.wait_called = True
+                return False
+
+            def terminate(self) -> None:
+                self.terminate_called = True
+
+            def isRunning(self) -> bool:
+                return True
+
+            def deleteLater(self) -> None:
+                pass
+
+        stubborn = StubbornStatsWorker()
+        controller._stats_worker = stubborn  # type: ignore[bad-assignment]
+        controller.quick_cancel()
+        assert stubborn.cancel_called is True
+        assert stubborn.wait_called is True
+        assert stubborn.terminate_called is True

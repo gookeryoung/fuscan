@@ -1819,7 +1819,7 @@ def _make_history_entry(
     matched_files: int = 3,
     hit_paths: tuple[str, ...] = ("/a", "/b", "/c"),
     rule_names: tuple[str, ...] = ("rule1",),
-    status: str = STATUS_COMPLETED,
+    status: str = STATUS_COMPLETED,  # pyrefly: ignore [unbound-name]
     summary: str = "命中 3 个文件",
 ) -> ScanHistoryEntry:
     """构造测试用 ScanHistoryEntry。"""

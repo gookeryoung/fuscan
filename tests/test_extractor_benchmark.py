@@ -9,14 +9,19 @@
   - 纯文本/源代码/配置文件/标记与数据/样式表 5 个子提取器
 - T2 快速（``FAST``）：10-50ms/MB，Rust 加速后端或 lxml C 扩展解析
   - EML 邮件、PDF（pdf_oxide）、XLSX/XLS（calamine，iter-92）、
-    DOCX/PPTX/ODT/ODS（lxml 直接解析，iter-110）
+    DOCX/PPTX/ODT/ODS（lxml 直接解析，iter-110）、
+    RTF/MSG/DOC/PPT（kreuzberg Rust 核心，iter-126）
 - T3 中速（``MEDIUM``）：50-200ms/MB，单次 XML 解析 + 树遍历或正则扫描
-  - RTF/WPS/MSG、DOC/PPT（正则 UTF-16LE 扫描，iter-110）、
-    DOCX/PPTX/ODT/ODS 的 ElementTree/python-docx 回退路径
+  - WPS（委托 DOCX/XLSX/PPTX，综合 T3）、
+    DOCX/ODT/ODS 的 ElementTree/python-docx 回退路径、
+    RTF/MSG/DOC/PPT 的纯 Python 回退路径（striprtf/extract-msg/olefile）
 - T4 慢速（``SLOW``）：200-1000ms/MB，单元格遍历或字节级扫描
-  - （已空，原 ODS/PPTX/DOC/PPT 已升级至 T2/T3）
+  - PPTX 的 python-pptx 回退路径
 - T5 极慢（``VERY_SLOW``）：> 1000ms/MB，复杂页面布局分析
   - PDF（pypdf 回退）
+
+注意：DOCX/PPTX/ODT/ODS/RTF/MSG/DOC/PPT 的 ``speed_tier`` 随 lxml/kreuzberg
+可用性动态变化，tier 声明测试用动态断言（根据依赖判断期望档位），非写死值。
 
 基准测试设计原则：
 
@@ -352,9 +357,12 @@ class TestTier3Medium:
     """T3 中速档次基准测试：单次 XML 解析 + 树遍历。"""
 
     def test_docx_extractor_tier(self) -> None:
-        """DocxExtractor 声明为 T3 中速。"""
+        """DocxExtractor 声明为 T2 快速（lxml）或 T3 中速（python-docx 回退）。"""
+        from fuscan.extractors.office import _lxml_available
+
+        expected = SpeedTier.FAST if _lxml_available() else SpeedTier.MEDIUM
         extractor = DocxExtractor()
-        _assert_tier(extractor, SpeedTier.MEDIUM)
+        _assert_tier(extractor, expected)
 
     def test_docx_extraction_speed(self) -> None:
         """典型 DOCX 文档提取应在 2s 内完成（T3 中速基准）。"""
@@ -366,9 +374,12 @@ class TestTier3Medium:
         assert "password" in content
 
     def test_odt_extractor_tier(self) -> None:
-        """OdtExtractor 声明为 T3 中速。"""
+        """OdtExtractor 声明为 T2 快速（lxml）或 T3 中速（ElementTree 回退）。"""
+        from fuscan.extractors._odf_xml import _LXML_AVAILABLE
+
+        expected = SpeedTier.FAST if _LXML_AVAILABLE else SpeedTier.MEDIUM
         extractor = OdtExtractor()
-        _assert_tier(extractor, SpeedTier.MEDIUM)
+        _assert_tier(extractor, expected)
 
     def test_odt_extraction_speed(self) -> None:
         """典型 ODT 文档提取应在 2s 内完成（T3 中速基准）。"""
@@ -380,9 +391,12 @@ class TestTier3Medium:
         assert "password" in content
 
     def test_ods_extractor_tier(self) -> None:
-        """OdsExtractor 声明为 T3 中速（iter-109 改用 zipfile+xml）。"""
+        """OdsExtractor 声明为 T2 快速（lxml）或 T3 中速（ElementTree 回退，iter-109）。"""
+        from fuscan.extractors._odf_xml import _LXML_AVAILABLE
+
+        expected = SpeedTier.FAST if _LXML_AVAILABLE else SpeedTier.MEDIUM
         extractor = OdsExtractor()
-        _assert_tier(extractor, SpeedTier.MEDIUM)
+        _assert_tier(extractor, expected)
 
     def test_ods_extraction_speed(self) -> None:
         """典型 ODS 表格提取应在 2s 内完成（T3 中速基准）。"""
@@ -394,9 +408,12 @@ class TestTier3Medium:
         assert "password" in content
 
     def test_rtf_extractor_tier(self) -> None:
-        """RtfExtractor 声明为 T3 中速。"""
+        """RtfExtractor 声明为 T2 快速（kreuzberg）或 T3 中速（striprtf 回退）。"""
+        from fuscan.extractors._kreuzberg import is_available as kreuzberg_available
+
+        expected = SpeedTier.FAST if kreuzberg_available() else SpeedTier.MEDIUM
         extractor = RtfExtractor()
-        _assert_tier(extractor, SpeedTier.MEDIUM)
+        _assert_tier(extractor, expected)
 
     def test_rtf_extraction_speed(self) -> None:
         """典型 RTF 文档提取应在 2s 内完成（T3 中速基准）。"""
@@ -422,9 +439,12 @@ class TestTier3Medium:
         assert "password" in content
 
     def test_msg_extractor_tier(self) -> None:
-        """MsgExtractor 声明为 T3 中速。"""
+        """MsgExtractor 声明为 T2 快速（kreuzberg）或 T3 中速（extract-msg 回退）。"""
+        from fuscan.extractors._kreuzberg import is_available as kreuzberg_available
+
+        expected = SpeedTier.FAST if kreuzberg_available() else SpeedTier.MEDIUM
         extractor = MsgExtractor()
-        _assert_tier(extractor, SpeedTier.MEDIUM)
+        _assert_tier(extractor, expected)
         # MSG 样本难以程序化生成，仅验证档次声明
 
 
@@ -436,9 +456,12 @@ class TestTier4Slow:
     """T4 慢速档次基准测试：单元格遍历或字节级扫描。"""
 
     def test_pptx_extractor_tier(self) -> None:
-        """PptxExtractor 声明为 T4 慢速。"""
+        """PptxExtractor 声明为 T2 快速（lxml）或 T4 慢速（python-pptx 回退）。"""
+        from fuscan.extractors.office import _lxml_available
+
+        expected = SpeedTier.FAST if _lxml_available() else SpeedTier.SLOW
         extractor = PptxExtractor()
-        _assert_tier(extractor, SpeedTier.SLOW)
+        _assert_tier(extractor, expected)
 
     def test_pptx_extraction_speed(self) -> None:
         """典型 PPTX 演示文稿（5 张幻灯片）提取应在 5s 内完成（T4 慢速基准）。"""
@@ -450,18 +473,22 @@ class TestTier4Slow:
         assert "password" in content
 
     def test_doc_extractor_tier(self) -> None:
-        """DocExtractor 声明为 T4 慢速（仅档次声明，样本无法程序化生成）。"""
+        """DocExtractor 声明为 T2 快速（kreuzberg）或 T3 中速（olefile 回退，样本无法程序化生成）。"""
+        from fuscan.extractors._kreuzberg import is_available as kreuzberg_available
         from fuscan.extractors.legacy_office import DocExtractor
 
+        expected = SpeedTier.FAST if kreuzberg_available() else SpeedTier.MEDIUM
         extractor = DocExtractor()
-        _assert_tier(extractor, SpeedTier.SLOW)
+        _assert_tier(extractor, expected)
 
     def test_ppt_extractor_tier(self) -> None:
-        """PptExtractor 声明为 T4 慢速（仅档次声明，样本无法程序化生成）。"""
+        """PptExtractor 声明为 T2 快速（kreuzberg）或 T3 中速（olefile 回退，样本无法程序化生成）。"""
+        from fuscan.extractors._kreuzberg import is_available as kreuzberg_available
         from fuscan.extractors.legacy_office import PptExtractor
 
+        expected = SpeedTier.FAST if kreuzberg_available() else SpeedTier.MEDIUM
         extractor = PptExtractor()
-        _assert_tier(extractor, SpeedTier.SLOW)
+        _assert_tier(extractor, expected)
 
 
 # ----------------------------- T5 极慢：复杂布局分析 -----------------------------

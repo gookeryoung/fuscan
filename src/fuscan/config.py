@@ -3,39 +3,35 @@
 在用户主目录 ``~/.fuscan/config.yaml`` 存储窗口状态、历史扫描路径、
 规则文件列表、通用规则开关等配置，应用启动时自动恢复，关闭时自动保存。
 
+资产路径常量（``ASSETS_DIR`` / ``MANUAL_PDF_PATH`` / ``BUILTIN_RULES_PATH``）
+见 :mod:`fuscan.paths`；内置规则加载便利函数见 :mod:`fuscan.rules.builtin`；
+暂存/备份目录探测见 :mod:`fuscan.processing.storage`。
+
 公共 API：
 
 - :func:`load_config`：从 YAML 加载配置
 - :func:`save_config`：保存配置到 YAML
 - :data:`CONFIG_PATH`：默认配置文件路径
+- :data:`DEFAULT_MAX_FILE_SIZE`：大文件跳过默认阈值（唯一权威来源）
+- :data:`IGNORE_DIR_CATEGORIES`：忽略目录分类预设（UI 层元数据）
 """
 
 from __future__ import annotations
 
 import logging
-import shutil
 from dataclasses import asdict, dataclass, field, fields
-from functools import lru_cache
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import yaml
 
-from fuscan.rules import RuleSet, load_ruleset, merge_multiple_rulesets
-
 __all__ = [
-    "BUILTIN_RULES_PATH",
     "CONFIG_DIR",
     "CONFIG_PATH",
     "DEFAULT_MAX_FILE_SIZE",
     "IGNORE_DIR_CATEGORIES",
-    "MANUAL_PDF_PATH",
     "Config",
-    "default_backup_dir",
-    "detect_default_staging_dir",
-    "load_builtin_ruleset",
     "load_config",
-    "load_with_builtin",
     "save_config",
 ]
 
@@ -44,9 +40,6 @@ logger = logging.getLogger(__name__)
 # 文件目录配置
 CONFIG_DIR = Path.home() / ".fuscan"
 CONFIG_PATH = CONFIG_DIR / "config.yaml"
-ASSETS_DIR = Path(__file__).parent / "assets"
-BUILTIN_RULES_PATH = ASSETS_DIR / "rules" / "builtin.yaml"
-MANUAL_PDF_PATH = ASSETS_DIR / "docs" / "fuscan-用户手册.pdf"
 
 # 历史记录最大保留条数
 MAX_HISTORY = 15
@@ -279,53 +272,6 @@ class Config:
     entropy_threshold: float = 4.5
 
 
-def detect_default_staging_dir() -> Path:
-    """探测默认暂存区目录：剩余空间最大的盘符下 ``.fuscan-cache``。
-
-    遍历本机所有本地盘符（不含网络映射盘），选择 ``shutil.disk_usage().free``
-    最大的盘符，返回 ``<drive>/.fuscan-cache``。盘符枚举失败或无可用盘符时
-    回退到用户主目录下的 ``~/.fuscan-cache``。
-
-    :return: 默认暂存区目录路径（路径可能尚不存在，调用方按需 ``mkdir``）
-    """
-    # 延迟导入避免顶层依赖：walker 依赖 scanner.context，与 config 无循环依赖，
-    # 但保留惰性导入使 config 模块在无 scanner 包时仍可独立用于配置读写测试。
-    from fuscan.scanner.walker import list_drives
-
-    fallback = Path.home() / ".fuscan-cache"
-    try:
-        drives = list_drives(include_network=False)
-    except OSError:
-        logger.warning("盘符枚举失败，暂存区回退到主目录", exc_info=True)
-        return fallback
-    if not drives:
-        return fallback
-
-    best_drive = drives[0]
-    best_free = -1
-    for drive in drives:
-        try:
-            free = shutil.disk_usage(drive).free
-        except OSError:
-            continue
-        if free > best_free:
-            best_free = free
-            best_drive = drive
-    return best_drive / ".fuscan-cache"
-
-
-def default_backup_dir() -> Path:
-    """返回默认备份区目录：``~/.fuscan/backup``。
-
-    与暂存区不同，备份区存放的是「替换内容」前的源文件副本（``.bak`` 后缀），
-    体量较小且用户事后可手动清理，故无需探测剩余空间最大的盘符，
-    直接放在用户主目录下的 ``.fuscan`` 配置目录中，便于统一管理。
-
-    :return: 默认备份区目录路径（路径可能尚不存在，调用方按需 ``mkdir``）
-    """
-    return CONFIG_DIR / "backup"
-
-
 def load_config(path: Path | None = None) -> Config:
     """从 YAML 文件加载配置。
 
@@ -367,38 +313,3 @@ def save_config(config: Config, path: Path | None = None) -> None:
             yaml.dump(data, fh, allow_unicode=True, default_flow_style=False, sort_keys=False)
     except OSError as exc:
         logger.warning("配置保存失败: %s", exc)
-
-
-@lru_cache(maxsize=1)
-def load_builtin_ruleset() -> RuleSet:
-    """加载内置通用规则集。
-
-    内置规则文件 ``builtin.yaml`` 在一次进程内不变，``lru_cache`` 缓存首次
-    解析结果，避免启动时被 :func:`load_with_builtin` 重复调用 N+1 次
-    （RulesController 1 次 + 每个工作区 N 次）导致的重复磁盘 I/O 与 YAML 解析。
-
-    :return: 内置 RuleSet 实例
-    :raises RuleError: 内置规则文件加载或解析失败
-    """
-    return load_ruleset(BUILTIN_RULES_PATH)
-
-
-def load_with_builtin(user_paths: Sequence[Path] | None = None) -> RuleSet:
-    """加载内置规则并与一个或多个用户规则按顺序合并。
-
-    内置规则作为基础，用户规则按列表顺序依次合并覆盖（后面的覆盖前面的同名规则）。
-    ignore_paths 取并集。
-    若 ``user_paths`` 为 None 或空，仅返回内置规则集。
-
-    :param user_paths: 用户规则文件路径列表（按优先级从低到高排列）
-    :return: 合并后的 RuleSet
-    :raises RuleError: 规则文件加载或解析失败
-    """
-    builtin = load_builtin_ruleset()
-    if not user_paths:
-        logger.debug("仅加载内置规则集")
-        return builtin
-
-    user_rulesets = [load_ruleset(p) for p in user_paths]
-    logger.debug("合并规则: 内置 %d 条 + 用户 %d 个文件", len(builtin.rules), len(user_rulesets))
-    return merge_multiple_rulesets(builtin, *user_rulesets)

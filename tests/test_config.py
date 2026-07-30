@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from fuscan.config import Config, detect_default_staging_dir, load_config, save_config
+from fuscan.config import Config, load_config, save_config
+from fuscan.processing.storage import detect_default_staging_dir
 
 
 class TestConfig:
@@ -300,11 +301,11 @@ class TestDetectDefaultStagingDir:
                 return _Usage(free=10 * 1024 * 1024)
             return _Usage(free=500 * 1024 * 1024)
 
-        # 延迟导入路径与 config.detect_default_staging_dir 内一致
-        import fuscan.config as config_mod
+        # 延迟导入路径与 processing.storage.detect_default_staging_dir 内一致
+        import fuscan.processing.storage as storage_mod
 
         monkeypatch.setattr("fuscan.scanner.walker.list_drives", fake_list_drives, raising=False)
-        monkeypatch.setattr(config_mod.shutil, "disk_usage", fake_disk_usage)
+        monkeypatch.setattr(storage_mod.shutil, "disk_usage", fake_disk_usage)
 
         result = detect_default_staging_dir()
         assert result == Path("D:\\") / ".fuscan-cache"
@@ -346,10 +347,10 @@ class TestDetectDefaultStagingDir:
                 raise OSError("C: 不可访问")
             return _Usage(free=500 * 1024 * 1024)
 
-        import fuscan.config as config_mod
+        import fuscan.processing.storage as storage_mod
 
         monkeypatch.setattr("fuscan.scanner.walker.list_drives", fake_list_drives, raising=False)
-        monkeypatch.setattr(config_mod.shutil, "disk_usage", fake_disk_usage)
+        monkeypatch.setattr(storage_mod.shutil, "disk_usage", fake_disk_usage)
 
         result = detect_default_staging_dir()
         assert result == Path("D:\\") / ".fuscan-cache"

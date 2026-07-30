@@ -13,9 +13,9 @@ import json
 from pathlib import Path
 
 from fuscan import __version__
+from fuscan.export.report import export_report, save_report
 from fuscan.rules.model import Severity
 from fuscan.scanner import ScanReport, ScanResult
-from fuscan.scanner.export import export_report, save_report
 from fuscan.scanner.result import RuleHit, ScanStats
 
 

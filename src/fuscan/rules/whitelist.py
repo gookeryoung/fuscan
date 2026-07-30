@@ -4,7 +4,7 @@
 扫描器在命中聚合阶段过滤命中白名单的结果，不计入 ScanReport.hits。
 
 存储方式：JSON 文件（默认 ``~/.fuscan/whitelist.json``），原子写入
-（临时文件 + ``Path.replace``）。与 :mod:`fuscan.skip_store` 同样的持久化策略。
+（临时文件 + ``Path.replace``）。与 :mod:`fuscan.processing.skip_store` 同样的持久化策略。
 
 路径匹配采用 glob 通配符（``fnmatch``），支持：
 
@@ -217,7 +217,7 @@ class WhitelistStore:
     2. ``add`` / ``remove`` / ``clear`` 修改后立即原子写回磁盘
     3. ``snapshot`` 返回不可变 :class:`Whitelist` 供扫描器一次性读取
 
-    与 :class:`~fuscan.skip_store.SkipStore` 同样的持久化与线程安全策略，
+    与 :class:`~fuscan.processing.skip_store.SkipStore` 同样的持久化与线程安全策略，
     区别在于存储的是 (路径 glob, 规则名) 组合而非单一路径。
     """
 

@@ -18,7 +18,7 @@ from typing import Sequence
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from fuscan.config import load_builtin_ruleset
+from fuscan.rules import load_builtin_ruleset
 from fuscan.rules.model import Rule, RuleSet, Severity
 from fuscan.scanner import Scanner
 from fuscan.scanner.result import RuleHit, ScanResult

@@ -1,6 +1,6 @@
 """扫描报告导出单元测试。
 
-覆盖 ``fuscan.scanner.export`` 模块的 PDF/Excel 二进制导出与 ``save_report``
+覆盖 ``fuscan.export.report`` 模块的 PDF/Excel 二进制导出与 ``save_report``
 按扩展名分发的文件保存逻辑。测试用例从 ``test_scanner.py`` 迁移而来，
 原 ``ScanReport.to_pdf``/``to_excel``/``save_report`` 方法已拆分到本模块。
 """
@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
+from fuscan.export.report import export_excel, export_pdf, save_report
 from fuscan.rules.model import Severity
 from fuscan.scanner import ScanReport, ScanResult
-from fuscan.scanner.export import export_excel, export_pdf, save_report
 from fuscan.scanner.result import RuleHit, ScanStats
 
 
@@ -103,7 +103,7 @@ class TestExportPdf:
 
     def test_truncate_text_helper(self) -> None:
         """iter-138：_truncate_text 辅助函数应正确截断超长文本。"""
-        from fuscan.scanner.export import _truncate_text
+        from fuscan.export.report import _truncate_text
 
         # 短文本原样返回
         assert _truncate_text("short") == "short"

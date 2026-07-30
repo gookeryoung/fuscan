@@ -9,7 +9,7 @@
 模块级 ``format_size`` 为字节数人类可读格式化，原属 GUI 层，提升至数据层后
 供 dataclass 与 GUI 共享。
 
-二进制导出（PDF/Excel）已拆分到 :mod:`fuscan.scanner.export`，本模块仅保留
+二进制导出（PDF/Excel）已拆分到 :mod:`fuscan.export.report`，本模块仅保留
 数据结构与文本序列化（csv/json/text）。
 """
 

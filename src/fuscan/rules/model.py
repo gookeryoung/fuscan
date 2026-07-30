@@ -123,7 +123,7 @@ class Rule:
     将该规则命中的文本替换为 ``replace_with``。``replace_with`` 为空字符串
     表示未定义替换内容，触发替换时向用户提示「规则 X 未定义替换内容」。
 
-    替换流程在 :mod:`fuscan.replacer` 中实现：先备份源文件到备份区（重命名
+    替换流程在 :mod:`fuscan.processing.replacer` 中实现：先备份源文件到备份区（重命名
     为 ``.bak``），再对原文件按规则逐条执行 ``match_texts → replace_with``
     的文本替换。仅支持纯文本文件，二进制格式（PDF/DOCX 等）在替换入口拒绝。
     """

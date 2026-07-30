@@ -25,10 +25,10 @@ from pathlib import Path
 from typing import Sequence
 
 from fuscan import __version__
-from fuscan.config import load_config, load_with_builtin
-from fuscan.rules import RuleError, RuleSet, load_ruleset, merge_multiple_rulesets
+from fuscan.config import load_config
+from fuscan.export.cli_output import output_report
+from fuscan.rules import RuleError, RuleSet, load_ruleset, load_with_builtin, merge_multiple_rulesets
 from fuscan.scanner import Scanner, ScanReport
-from fuscan.scanner.export import export_excel, export_pdf
 
 __all__ = ["build_parser", "main"]
 
@@ -233,7 +233,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         )
         report = _run_scan(scanner, scan_path, args)
 
-    _output_report(report, args.output_format, args.output_file)
+    output_report(report, args.output_format, args.output_file)
     _print_summary(report)
 
     # --perf-save 持久化性能统计到 JSON（iter-66）
@@ -384,40 +384,6 @@ def _cmd_cache(args: argparse.Namespace) -> int:
 
     print(f"未知缓存操作: {action}", file=sys.stderr)
     return 1  # pragma: no cover
-
-
-def _write_output(content: str, output_file: Path | None) -> None:
-    """输出报告到文件或 stdout。"""
-    if output_file is None:
-        sys.stdout.write(content)
-        if not content.endswith("\n"):
-            sys.stdout.write("\n")
-        return
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    output_file.write_text(content, encoding="utf-8")
-
-
-def _output_report(report: ScanReport, fmt: str, output_file: Path | None) -> None:
-    """按格式输出扫描报告，支持文本与二进制格式。
-
-    - text/json/csv：文本格式，通过 ``to_format`` 调度，stdout 或文件
-    - pdf/excel：二进制格式，必须输出到文件（``-f`` 参数）
-    """
-    if fmt == "pdf":
-        if output_file is None:
-            logger.error("PDF 格式必须配合 -f/--output-file 输出到文件")
-            return
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        output_file.write_bytes(export_pdf(report))
-        return
-    if fmt == "excel":
-        if output_file is None:
-            logger.error("Excel 格式必须配合 -f/--output-file 输出到文件")
-            return
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        output_file.write_bytes(export_excel(report))
-        return
-    _write_output(report.to_format(fmt), output_file)
 
 
 def _print_summary(report: ScanReport) -> None:

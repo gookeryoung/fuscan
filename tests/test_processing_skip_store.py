@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fuscan.skip_store import SkipStore, default_skip_store_path
+from fuscan.processing.skip_store import SkipStore, default_skip_store_path
 
 
 class TestSkipStoreBasic:

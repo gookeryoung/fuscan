@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from fuscan.config import load_builtin_ruleset
+from fuscan.rules import load_builtin_ruleset
 from fuscan.rules.model import LeafMatch, MatchTarget, Severity
 from fuscan.scanner.context import FileEntry, MatchContext
 from fuscan.scanner.matchers import Matcher, build_matcher

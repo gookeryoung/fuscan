@@ -26,6 +26,7 @@ except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
 from fuscan.config import CONFIG_DIR, Config
+from fuscan.export.report import export_report
 from fuscan.gui.controllers._result_detail import (
     build_detail_hits_model,
     can_replace_result,
@@ -53,13 +54,12 @@ from fuscan.gui.scan_mode import (
     SCAN_MODE_STR_TO_INDEX,
     scan_mode_index_to_str,
 )
-from fuscan.replacer import ReplaceStatus
+from fuscan.gui.workers import FileStatsWorker, ScanWorker
+from fuscan.processing.replacer import ReplaceStatus
+from fuscan.processing.skip_store import SkipStore
 from fuscan.rules.model import Severity
 from fuscan.scanner import ScanReport
-from fuscan.scanner.export import export_report
 from fuscan.scanner.result import IncrementalManifest, ProgressInfo, ScanResult, WalkResult, format_size
-from fuscan.skip_store import SkipStore
-from fuscan.workers import FileStatsWorker, ScanWorker
 
 if TYPE_CHECKING:
     from fuscan.cache import CacheStore
@@ -785,7 +785,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     def _resolve_backup_dir(self) -> Path:
         """解析当前生效的备份目录 Path。"""
-        from fuscan.config import default_backup_dir
+        from fuscan.processing.storage import default_backup_dir
 
         return Path(self._config.backup_dir) if self._config.backup_dir else default_backup_dir()
 
@@ -821,7 +821,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         backup_dir = self._resolve_backup_dir()
         scan_root = self._resolve_scan_root()
 
-        from fuscan.replacer import replace_batch
+        from fuscan.processing.replacer import replace_batch
 
         batch_result = replace_batch(
             results=filtered,
@@ -859,7 +859,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if not self._last_batch_backup_paths:
             return "无可撤销的批量替换"
 
-        from fuscan.replacer import restore_from_backup
+        from fuscan.processing.replacer import restore_from_backup
 
         succeeded = 0
         failed = 0
@@ -893,7 +893,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         backup_dir = self._resolve_backup_dir()
         scan_root = self._resolve_scan_root()
         # 复用 _resolve_backup_path 计算备份路径
-        from fuscan.replacer import _resolve_backup_path, restore_from_backup
+        from fuscan.processing.replacer import _resolve_backup_path, restore_from_backup
 
         backup_path = _resolve_backup_path(
             src=result.path,

@@ -21,14 +21,14 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fuscan.config import default_backup_dir, detect_default_staging_dir
 from fuscan.gui.severity_utils import severity_color_hex, severity_text
-from fuscan.replacer import ReplaceStatus, is_text_file, replace_in_file
+from fuscan.processing.replacer import ReplaceStatus, is_text_file, replace_in_file
+from fuscan.processing.storage import default_backup_dir, detect_default_staging_dir
 
 if TYPE_CHECKING:
+    from fuscan.processing.skip_store import SkipStore
     from fuscan.rules.model import RuleSet
     from fuscan.scanner.result import ScanResult
-    from fuscan.skip_store import SkipStore
 
 __all__ = [
     "build_detail_hits_model",

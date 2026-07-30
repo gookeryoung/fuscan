@@ -336,7 +336,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     def _reload_ruleset(self) -> None:
         """重新加载规则集（按 use_builtin + rules_paths 合并）。"""
-        from fuscan.config import load_with_builtin
+        from fuscan.rules import load_with_builtin
 
         paths = [Path(p) for p in self._config.rules_paths if Path(p).exists()]
         use_builtin = self._config.use_builtin

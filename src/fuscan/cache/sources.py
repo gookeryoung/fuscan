@@ -22,7 +22,7 @@ def compute_source_files(rules_paths: list[Path], use_builtin: bool) -> dict[Pat
     """
     sources: dict[Path, str] = {}
     if use_builtin:
-        from fuscan.config import BUILTIN_RULES_PATH
+        from fuscan.paths import BUILTIN_RULES_PATH
 
         if BUILTIN_RULES_PATH.exists():
             sources[BUILTIN_RULES_PATH] = hash_bytes(BUILTIN_RULES_PATH.read_bytes())

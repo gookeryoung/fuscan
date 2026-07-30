@@ -43,6 +43,7 @@ try:
         effective_max_workers,
         effective_scan_archives,
     )
+    from fuscan.processing.skip_store import SkipStore
     from fuscan.rules.model import (
         LeafMatch,
         MatchMode,
@@ -52,7 +53,6 @@ try:
         Severity,
     )
     from fuscan.scanner.result import RuleHit, ScanResult
-    from fuscan.skip_store import SkipStore
 
     PYSIDE_AVAILABLE = True
 except ImportError:

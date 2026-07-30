@@ -123,7 +123,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._active_scan_workspace_id: str = ""
         # iter-133：全局共享 SkipStore——所有 ScanController 复用同一实例，
         # 避免每个工作区独立读 ~/.fuscan/skips.json 造成的 N 次重复 I/O。
-        from fuscan.skip_store import SkipStore
+        from fuscan.processing.skip_store import SkipStore
 
         self._shared_skip_store: SkipStore = SkipStore()
         # iter-133：HistoryStore 延迟初始化——首次访问时构造，
@@ -1033,7 +1033,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 标记恢复中，启动后台线程
         self._restoring_workspaces.add(ws_id)
         controller._set_restoring(True)
-        from fuscan.workers.restore_worker import ResultRestoreWorker
+        from fuscan.gui.workers.restore_worker import ResultRestoreWorker
 
         worker = ResultRestoreWorker(ws_id, cache_file)
         worker.restore_done.connect(self._on_restore_done)  # pyrefly: ignore [missing-attribute]

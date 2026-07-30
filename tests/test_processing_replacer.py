@@ -1,4 +1,4 @@
-"""replacer 模块单元测试。
+"""``processing.replacer`` 模块单元测试。
 
 覆盖：
 
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from fuscan.replacer import (
+from fuscan.processing.replacer import (
     BatchReplaceResult,
     ReplaceResult,
     ReplaceStatus,
@@ -326,7 +326,7 @@ class TestReplaceInFile:
         ruleset = RuleSet(version="1.0", rules=(rule,))
 
         # 拦截 _atomic_write_text 抛 OSError
-        from fuscan import replacer as replacer_module
+        from fuscan.processing import replacer as replacer_module
 
         def _raise_oserror(path: Path, content: str) -> None:
             raise OSError("disk full")
@@ -421,7 +421,7 @@ class TestReplaceInFileNonUtf8:
         hit = _make_hit(rule, ("password",))
         ruleset = RuleSet(version="1.0", rules=(rule,))
 
-        from fuscan import replacer as replacer_module
+        from fuscan.processing import replacer as replacer_module
 
         def _raise_oserror(path: Path, raw: bytes) -> None:
             raise OSError("write error")
@@ -588,7 +588,7 @@ class TestReplaceBatch:
         )
 
         # 拦截 replace_in_file：仅 src3 失败，其他放行
-        from fuscan import replacer as replacer_module
+        from fuscan.processing import replacer as replacer_module
 
         original_replace = replacer_module.replace_in_file
 
@@ -706,7 +706,7 @@ class TestRestoreFromBackup:
         backup.write_text("original\n", encoding="utf-8")
         dest = tmp_path / "a.txt"
 
-        from fuscan import replacer as replacer_module
+        from fuscan.processing import replacer as replacer_module
 
         def _raise_oserror(src: Path, dst: Path) -> None:
             raise OSError("permission denied")

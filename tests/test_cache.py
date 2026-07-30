@@ -32,7 +32,7 @@ from fuscan.cache import (
 )
 from fuscan.cache._helpers import iso_days_ago, now_iso
 from fuscan.cache.schema import CURRENT_VERSION, migrate
-from fuscan.config import BUILTIN_RULES_PATH
+from fuscan.paths import BUILTIN_RULES_PATH
 from fuscan.rules.model import (
     AndMatch,
     LeafMatch,
@@ -2191,6 +2191,6 @@ class TestComputeSourceFiles:
 
     def test_builtin_path_missing_skipped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """内置规则文件不存在时静默跳过（``use_builtin=True`` 也不报错）。"""
-        monkeypatch.setattr("fuscan.config.BUILTIN_RULES_PATH", tmp_path / "absent.yaml")
+        monkeypatch.setattr("fuscan.paths.BUILTIN_RULES_PATH", tmp_path / "absent.yaml")
         sources = compute_source_files([], use_builtin=True)
         assert sources == {}

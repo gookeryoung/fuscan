@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from fuscan.rules.builtin import BUILTIN_RULES_PATH, load_builtin_ruleset, load_with_builtin
 from fuscan.rules.errors import RuleError, RuleLoadError, RuleParseError
 from fuscan.rules.merge import merge_multiple_rulesets, merge_rulesets
 from fuscan.rules.model import (
@@ -35,6 +36,7 @@ from fuscan.rules.serializer import save_ruleset, serialize_match, serialize_rul
 from fuscan.rules.templates import get_template_descriptions, get_template_names, load_template
 
 __all__ = [
+    "BUILTIN_RULES_PATH",
     "AndMatch",
     "LeafMatch",
     "MatchMode",
@@ -50,8 +52,10 @@ __all__ = [
     "Severity",
     "get_template_descriptions",
     "get_template_names",
+    "load_builtin_ruleset",
     "load_ruleset",
     "load_template",
+    "load_with_builtin",
     "merge_multiple_rulesets",
     "merge_rulesets",
     "parse_match",

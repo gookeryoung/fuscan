@@ -1236,8 +1236,8 @@ class TestStatsWorkerManifestProperty:
 
     def test_manifest_none_before_run(self, tmp_path: Path) -> None:
         """构造 FileStatsWorker 但未调 run() 时 manifest 属性返回 None。"""
+        from fuscan.gui.workers.stats_worker import FileStatsWorker
         from fuscan.rules.model import LeafMatch, MatchMode, MatchTarget, Rule, RuleSet
-        from fuscan.workers.stats_worker import FileStatsWorker
 
         match = LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.CONTAINS, pattern="test")
         rule = Rule(name="test", match=match, severity=Severity.INFO)

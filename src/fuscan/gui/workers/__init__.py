@@ -11,8 +11,8 @@
 
 from __future__ import annotations
 
-from fuscan.workers.export_worker import ExportWorker
-from fuscan.workers.scan_worker import ScanWorker
-from fuscan.workers.stats_worker import FileStatsWorker
+from fuscan.gui.workers.export_worker import ExportWorker
+from fuscan.gui.workers.scan_worker import ScanWorker
+from fuscan.gui.workers.stats_worker import FileStatsWorker
 
 __all__ = ["ExportWorker", "FileStatsWorker", "ScanWorker"]

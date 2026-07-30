@@ -20,7 +20,8 @@ except ImportError:  # pragma: no cover
     from PySide6.QtGui import QDesktopServices  # pyrefly: ignore [missing-import]
 
 from fuscan import __author__, __description__, __license__, __version__
-from fuscan.config import CONFIG_DIR, MANUAL_PDF_PATH
+from fuscan.config import CONFIG_DIR
+from fuscan.paths import MANUAL_PDF_PATH
 
 __all__ = ["AboutController"]
 

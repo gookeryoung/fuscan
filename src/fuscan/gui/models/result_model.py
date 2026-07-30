@@ -38,8 +38,8 @@ from fuscan.rules.model import Severity
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from fuscan.gui.workers.filter_worker import FilterWorker
     from fuscan.scanner.result import ScanResult
-    from fuscan.workers.filter_worker import FilterWorker
 
 __all__ = ["ResultListModel"]
 
@@ -373,7 +373,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         self._filter_generation += 1
         gen = self._filter_generation
         # 延迟导入避免循环依赖（FilterWorker 依赖本模块的 filter_and_sort）
-        from fuscan.workers.filter_worker import FilterWorker
+        from fuscan.gui.workers.filter_worker import FilterWorker
 
         worker = FilterWorker(
             results=self._results,

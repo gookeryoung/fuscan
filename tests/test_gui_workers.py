@@ -27,6 +27,9 @@ pytestmark = pytest.mark.gui
 
 try:
     from fuscan.gui.models.result_model import SORT_FILE_PATH, SORT_SEVERITY
+    from fuscan.gui.workers import ExportWorker, FileStatsWorker, ScanWorker
+    from fuscan.gui.workers.filter_worker import FilterWorker
+    from fuscan.gui.workers.restore_worker import ResultRestoreWorker
     from fuscan.rules.model import (
         LeafMatch,
         MatchMode,
@@ -37,9 +40,6 @@ try:
     )
     from fuscan.scanner import ScanReport, ScanResult, ScanStats
     from fuscan.scanner.result import ProgressInfo, RuleHit, WalkResult
-    from fuscan.workers import ExportWorker, FileStatsWorker, ScanWorker
-    from fuscan.workers.filter_worker import FilterWorker
-    from fuscan.workers.restore_worker import ResultRestoreWorker
 
     PYSIDE_AVAILABLE = True
 except ImportError:
@@ -193,8 +193,8 @@ def reset_fake_scanner() -> None:
 @pytest.fixture()
 def patch_scanner(monkeypatch: pytest.MonkeyPatch) -> type[FakeScanner]:
     """替换 ScanWorker/FileStatsWorker 中的 Scanner 为 FakeScanner。"""
-    monkeypatch.setattr("fuscan.workers.scan_worker.Scanner", FakeScanner)
-    monkeypatch.setattr("fuscan.workers.stats_worker.Scanner", FakeScanner)
+    monkeypatch.setattr("fuscan.gui.workers.scan_worker.Scanner", FakeScanner)
+    monkeypatch.setattr("fuscan.gui.workers.stats_worker.Scanner", FakeScanner)
     return FakeScanner
 
 
@@ -212,7 +212,7 @@ class TestExportWorker:
         """run() 成功时 emit finished_ok 携带路径。"""
         saved: list[tuple[ScanReport, Path]] = []
         monkeypatch.setattr(
-            "fuscan.workers.export_worker.save_report",
+            "fuscan.gui.workers.export_worker.save_report",
             lambda report, path: saved.append((report, path)),
         )
         report = _make_scan_report(tmp_path)
@@ -237,7 +237,7 @@ class TestExportWorker:
     ) -> None:
         """run() 抛 OSError 时 emit failed 携带错误信息。"""
         monkeypatch.setattr(
-            "fuscan.workers.export_worker.save_report",
+            "fuscan.gui.workers.export_worker.save_report",
             lambda report, path: (_ for _ in ()).throw(OSError("磁盘已满")),
         )
         report = _make_scan_report(tmp_path)
@@ -537,7 +537,7 @@ class TestScanWorkerRun:
             def scan(self, root: Path) -> ScanReport:
                 raise RuntimeError("scanner boom")
 
-        monkeypatch.setattr("fuscan.workers.scan_worker.Scanner", BoomScanner)
+        monkeypatch.setattr("fuscan.gui.workers.scan_worker.Scanner", BoomScanner)
         worker = ScanWorker(ruleset=ruleset, roots=[tmp_path])
 
         finished: list[ScanReport] = []
@@ -806,7 +806,7 @@ class TestStatsWorkerRun:
             def collect_entries(self, root: Path) -> WalkResult:
                 raise RuntimeError("stats boom")
 
-        monkeypatch.setattr("fuscan.workers.stats_worker.Scanner", BoomScanner)
+        monkeypatch.setattr("fuscan.gui.workers.stats_worker.Scanner", BoomScanner)
         worker = FileStatsWorker(ruleset=ruleset, roots=[tmp_path])
 
         finished: list[list[WalkResult]] = []

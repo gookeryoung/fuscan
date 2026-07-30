@@ -117,7 +117,7 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
         )
         # 同步全局 QGuiApplication 字体（影响 QML 控件默认继承）
         try:
-            from PySide2.QtGui import QFont, QGuiApplication  # type: ignore[import-not-found]
+            from PySide2.QtGui import QFont, QGuiApplication
         except ImportError:  # pragma: no cover
             from PySide6.QtGui import QFont, QGuiApplication  # pyrefly: ignore [missing-import]
         app = QGuiApplication.instance()

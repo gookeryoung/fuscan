@@ -1207,9 +1207,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if result is None:
             return
         try:
-            from PySide2.QtGui import QGuiApplication  # type: ignore
+            from PySide2.QtGui import QGuiApplication
         except ImportError:  # pragma: no cover
-            from PySide6.QtGui import QGuiApplication  # type: ignore
+            from PySide6.QtGui import QGuiApplication  # pyrefly: ignore [missing-import]
         clipboard = QGuiApplication.clipboard()
         clipboard.setText(str(result.path))
         self._set_status("已复制", "已复制路径到剪贴板")

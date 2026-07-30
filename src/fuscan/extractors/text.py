@@ -145,6 +145,12 @@ class TextExtractor(Extractor):
         return "纯文本"
 
     @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：charset-normalizer + 内置解码。"""
+        return "charset-normalizer"
+
+    @override
     def extract(self, path: Path) -> str:
         """提取纯文本内容，自动检测编码并应用大小限制。"""
         try:
@@ -256,6 +262,12 @@ class PlainTextExtractor(TextExtractor):
     def display_name(self) -> str:
         return "纯文本（TXT）"
 
+    @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：charset-normalizer + 内置解码。"""
+        return "charset-normalizer"
+
 
 class SourceCodeExtractor(TextExtractor):
     """源代码子提取器：处理编程语言、脚本、配置文件、标记数据与样式表。
@@ -275,6 +287,12 @@ class SourceCodeExtractor(TextExtractor):
     @property
     def display_name(self) -> str:
         return "源代码（CODE）"
+
+    @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：charset-normalizer + 内置解码。"""
+        return "charset-normalizer"
 
 
 def _detect_encoding_from_header(header: bytes) -> str | None:

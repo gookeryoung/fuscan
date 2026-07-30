@@ -59,6 +59,12 @@ class DocxExtractor(Extractor):
         return "Word（DOCX）"
 
     @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：lxml 可用时优先使用，回退 python-docx。"""
+        return "lxml" if _lxml_available() else "python-docx"
+
+    @override
     def extract(self, path: Path) -> str:
         """提取 DOCX 段落、表格与页眉页脚文本。"""
         try:
@@ -139,6 +145,12 @@ class PptxExtractor(Extractor):
     def display_name(self) -> str:
         """返回提取器的中文显示名称。"""
         return "PowerPoint（PPTX）"
+
+    @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：lxml 可用时优先使用，回退 python-pptx。"""
+        return "lxml" if _lxml_available() else "python-pptx"
 
     @override
     def extract(self, path: Path) -> str:

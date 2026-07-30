@@ -43,6 +43,7 @@ _ROLE_ENABLED = b"enabled"
 _ROLE_FORMAT_LABEL = b"formatLabel"
 _ROLE_CATEGORY = b"category"
 _ROLE_FORMAT_TAGS = b"formatTags"
+_ROLE_ENGINE_INFO = b"engineInfo"
 
 _ROLES: dict[int, bytes] = {
     Qt.UserRole + 1: _ROLE_CLASS_NAME,
@@ -54,6 +55,7 @@ _ROLES: dict[int, bytes] = {
     Qt.UserRole + 7: _ROLE_FORMAT_LABEL,
     Qt.UserRole + 8: _ROLE_CATEGORY,
     Qt.UserRole + 9: _ROLE_FORMAT_TAGS,
+    Qt.UserRole + 10: _ROLE_ENGINE_INFO,
 }
 
 # 提取 display_name 中全角括号内的格式标签（如 "Word（DOCX）" → "DOCX"）
@@ -141,6 +143,7 @@ class _ExtractorRow:
         "class_name",
         "display_name",
         "enabled",
+        "engine_info",
         "extensions",
         "format_label",
         "format_tags",
@@ -154,6 +157,7 @@ class _ExtractorRow:
         extensions: tuple[str, ...],
         speed_tier: SpeedTier,
         enabled: bool,
+        engine_info: str = "",
     ) -> None:
         self.class_name = class_name
         # 提取全角括号内的格式标签（如 "Word（DOCX）" → "DOCX"）；
@@ -170,6 +174,7 @@ class _ExtractorRow:
         self.extensions = extensions
         self.speed_tier = speed_tier
         self.enabled = enabled
+        self.engine_info = engine_info
         self.category = _classify(class_name)
         # 代表性格式标签列表：扩展名较多的提取器使用预设多标签（如 HTML/C/CPP/PY），
         # 其余默认为 ``(format_label,)`` 单标签（iter-103）
@@ -219,6 +224,9 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
         if role == Qt.UserRole + 9:
             # 返回 list（QML 端 Repeater 可直接用 modelData 访问）
             return list(row.format_tags)
+        if role == Qt.UserRole + 10:
+            # iter-139：返回引擎信息字符串（如 "pypdf" / "python-calamine"）
+            return row.engine_info
         return ""
 
     # ----------------------------- 公共 API -----------------------------
@@ -240,7 +248,7 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
         disabled_set = set(disabled_extractors or [])
         self.beginResetModel()
         rows: list[_ExtractorRow] = []
-        for class_name, display_name, extensions, speed_tier in default_registry.list_extractors():
+        for class_name, display_name, extensions, speed_tier, engine_info in default_registry.list_extractors():
             rows.append(
                 _ExtractorRow(
                     class_name=class_name,
@@ -248,6 +256,7 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
                     extensions=extensions,
                     speed_tier=speed_tier,
                     enabled=class_name not in disabled_set,
+                    engine_info=engine_info,
                 )
             )
         # 压缩包虚拟行：扩展名走白名单，扫描由 ArchiveScanner 在 scan_archives=True 时执行。
@@ -260,6 +269,7 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
                     extensions=(ext,),
                     speed_tier=SpeedTier.MEDIUM,
                     enabled=class_name not in disabled_set,
+                    engine_info="zipfile/tarfile/rarfile/py7zr",
                 )
             )
         # 按 (category_order, display_name) 排序，保证同类相邻且类内稳定

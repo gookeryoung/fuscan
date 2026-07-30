@@ -471,3 +471,55 @@ class TestMoveSelectedToStaging:
 
         msg = controller.moveSelectedToStaging()
         assert "失败" in msg
+
+    def test_move_success_removes_result_from_list(
+        self,
+        controller: ScanController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """iter-139：移至暂存成功后应从结果列表移除该条目。"""
+        controller._ruleset = _build_replace_ruleset()
+
+        scan_root = tmp_path / "scan"
+        scan_root.mkdir()
+        src_file = scan_root / "secret.txt"
+        src_file.write_text("this is a secret value", encoding="utf-8")
+
+        result = ScanResult(
+            path=src_file,
+            size=src_file.stat().st_size,
+            hits=(
+                RuleHit(
+                    rule_name="可替换规则",
+                    severity=Severity.CRITICAL,
+                    detail="命中 secret",
+                    match_text="secret",
+                    match_texts=("secret",),
+                    match_count=1,
+                    target="content",
+                ),
+            ),
+        )
+        controller._result_model.set_results((result,))
+        controller._last_report = ScanReport(
+            root=scan_root,
+            results=(result,),
+            stats=ScanStats(total_files=1, scanned_files=1, matched_files=1),
+        )
+        controller.setSelectedResultIndex(0)
+
+        staging_dir = tmp_path / "staging"
+        monkeypatch.setattr(controller._config, "staging_dir", str(staging_dir))
+
+        msg = controller.moveSelectedToStaging()
+        assert "已移至暂存" in msg
+
+        # 结果列表应已清空（原本只有这一条）
+        assert controller._result_model.total_count == 0
+        assert controller._result_model.rowCount() == 0
+        # _last_report 的 hits 也应同步移除
+        assert controller._last_report is not None
+        assert all(str(h.path) != str(src_file) for h in controller._last_report.results)
+        # 选中索引应重置
+        assert controller.selectedResultIndex == -1

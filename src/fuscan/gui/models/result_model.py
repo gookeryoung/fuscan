@@ -36,6 +36,8 @@ from fuscan.gui.severity_utils import severity_color_hex, severity_text
 from fuscan.rules.model import Severity
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from fuscan.scanner.result import ScanResult
     from fuscan.workers.filter_worker import FilterWorker
 
@@ -214,6 +216,24 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         if 0 <= row < len(self._filtered):
             return self._filtered[row]
         return None
+
+    def remove_result_by_path(self, path: Path) -> bool:
+        """按文件路径移除一条结果（iter-139）。
+
+        用于「移至暂存」成功后从结果列表移除该条目，避免用户仍能看到
+        已隔离的文件。压缩包内部条目按 ``archive_path`` 匹配（路径形如
+        ``archive.zip!inner.txt``，``ScanResult.path`` 即为此形式）。
+
+        :param path: 待移除结果的文件路径（与 :attr:`ScanResult.path` 比较）
+        :return: 实际移除了结果返回 ``True``，未找到匹配项返回 ``False``
+        """
+        target_str = str(path)
+        new_results = tuple(r for r in self._results if str(r.path) != target_str)
+        if len(new_results) == len(self._results):
+            return False
+        self._results = new_results
+        self._schedule_filter_refresh()
+        return True
 
     @property
     def results(self) -> tuple[ScanResult, ...]:

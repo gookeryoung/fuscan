@@ -361,6 +361,46 @@ class TestRulesetChange:
         # 默认启用内置规则，ruleset 应非 None
         assert controller._ruleset is not None
 
+    def test_ruleset_changed_signal_updates_cache(
+        self,
+        config_controller: ConfigController,
+        rules_controller: RulesController,
+    ) -> None:
+        """iter-139：rulesetChanged 信号应更新 ScanController 缓存的 ruleset。"""
+        controller = ScanController(config_controller, rules_controller)
+        # 触发 rulesetChanged 信号，模拟规则文件变更
+        rules_controller.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+        # 缓存应已更新（引用 rules_controller 最新的 ruleset）
+        assert controller._ruleset is rules_controller.ruleset
+        # 若 ruleset 内容未变，引用应与原对象相同；若变则不同
+        assert controller._ruleset is not None
+
+    def test_can_start_scan_reads_latest_ruleset(
+        self,
+        config_controller: ConfigController,
+        rules_controller: RulesController,
+        tmp_path: Path,
+    ) -> None:
+        """iter-139：canStartScan 应读取 rules_controller 最新 ruleset，而非陈旧缓存。"""
+        # 准备一个扫描根目录（folder 模式）
+        scan_root = tmp_path / "scan"
+        scan_root.mkdir()
+
+        controller = ScanController(config_controller, rules_controller)
+        controller.setScanModeIndex(2)
+        controller.setFolderRoot(str(scan_root))
+        # 默认启用内置规则，可启动
+        assert controller.canStartScan is True
+        assert controller.rulesCount > 0
+
+        # 模拟规则集被清空：直接置空 rules_controller._ruleset 并触发信号
+        rules_controller._ruleset = None
+        rules_controller.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+        # canStartScan 应反映最新状态：无规则集时为 False
+        assert controller.canStartScan is False
+        assert controller.rulesCount == 0
+
 
 class TestOpenLocation:
     def test_open_location_invalid_index_noop(self, controller: ScanController) -> None:

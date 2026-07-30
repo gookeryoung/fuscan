@@ -119,9 +119,13 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     @Property("QVariantList", notify=rulesFileListChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
-    def rulesFileModel(self) -> list[dict[str, str]]:
-        """规则文件列表（QML 直接 ListView 绑定）。"""
-        return [{"fileName": Path(p).name, "path": p} for p in self._config.rules_paths]
+    def rulesFileModel(self) -> list[dict[str, object]]:
+        """规则文件列表（QML 直接 ListView 绑定）。
+
+        iter-139：每项包含 ``fileName``/``path``/``exists`` 三个字段，
+        QML delegate 据此显示「缺失」标记（文件被删除/移动后仍保留在配置中）。
+        """
+        return [{"fileName": Path(p).name, "path": p, "exists": Path(p).exists()} for p in self._config.rules_paths]
 
     @Property(int, notify=selectionChanged)  # pyrefly: ignore [not-callable]
     def selectedFileIndex(self) -> int:

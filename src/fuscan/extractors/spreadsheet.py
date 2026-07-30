@@ -122,6 +122,12 @@ class XlsxExtractor(Extractor):
         return "Excel（XLSX）"
 
     @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：python-calamine (Rust + PyO3)。"""
+        return "python-calamine"
+
+    @override
     def extract(self, path: Path) -> str:
         """提取 XLSX 工作簿所有工作表的单元格文本。"""
         try:
@@ -170,6 +176,14 @@ class OdsExtractor(Extractor):
     def display_name(self) -> str:
         """返回提取器的中文显示名称。"""
         return "ODS 表格"
+
+    @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：lxml 可用时优先使用，回退 ElementTree。"""
+        from fuscan.extractors._odf_xml import _LXML_AVAILABLE
+
+        return "lxml" if _LXML_AVAILABLE else "ElementTree"
 
     @override
     def extract(self, path: Path) -> str:

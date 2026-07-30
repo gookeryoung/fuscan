@@ -89,6 +89,12 @@ class XlsExtractor(Extractor):
         return "Excel（XLS）"
 
     @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：python-calamine (Rust + PyO3)。"""
+        return "python-calamine"
+
+    @override
     def extract(self, path: Path) -> str:
         """提取 XLS 工作表单元格文本。"""
         try:
@@ -134,6 +140,12 @@ class DocExtractor(Extractor):
     def display_name(self) -> str:
         """返回提取器的中文显示名称。"""
         return "Word（DOC）"
+
+    @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：kreuzberg 可用时优先，回退 olefile。"""
+        return "kreuzberg" if kreuzberg_available() else "olefile"
 
     @override
     def extract(self, path: Path) -> str:
@@ -215,6 +227,12 @@ class PptExtractor(Extractor):
     def display_name(self) -> str:
         """返回提取器的中文显示名称。"""
         return "PowerPoint（PPT）"
+
+    @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：kreuzberg 可用时优先，回退 olefile。"""
+        return "kreuzberg" if kreuzberg_available() else "olefile"
 
     @override
     def extract(self, path: Path) -> str:

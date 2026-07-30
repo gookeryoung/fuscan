@@ -62,6 +62,12 @@ class EmlExtractor(Extractor):
         return "邮件（EML）"
 
     @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：标准库 email 模块。"""
+        return "email（标准库）"
+
+    @override
     def extract(self, path: Path) -> str:
         """提取 EML 邮件主题、发件人与正文。"""
         try:
@@ -157,6 +163,12 @@ class MsgExtractor(Extractor):
     def display_name(self) -> str:
         """返回提取器的中文显示名称。"""
         return "Outlook 邮件（MSG）"
+
+    @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：kreuzberg 可用时优先，回退 extract-msg。"""
+        return "kreuzberg" if kreuzberg_available() else "extract-msg"
 
     @override
     def extract(self, path: Path) -> str:

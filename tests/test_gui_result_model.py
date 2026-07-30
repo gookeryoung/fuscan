@@ -135,6 +135,54 @@ class TestGetResult:
         assert model.get_result(100) is None
 
 
+class TestRemoveResultByPath:
+    """iter-139：移至暂存后按路径移除结果。"""
+
+    def test_remove_existing_path_returns_true(self, model: ResultListModel, tmp_path: Path) -> None:
+        """移除已存在路径返回 True，结果数减 1。"""
+        target = tmp_path / "a.txt"
+        removed = model.remove_result_by_path(target)
+        assert removed is True
+        assert model.total_count == 1
+        assert model.filtered_count == 1
+
+    def test_remove_nonexistent_path_returns_false(self, model: ResultListModel) -> None:
+        """移除不存在的路径返回 False，结果不变。"""
+        removed = model.remove_result_by_path(Path("not_exist.txt"))
+        assert removed is False
+        assert model.total_count == 2
+        assert model.filtered_count == 2
+
+    def test_remove_updates_filtered_view(self, model: ResultListModel, tmp_path: Path) -> None:
+        """移除后过滤视图同步刷新，get_result 不再返回该路径。"""
+        target = tmp_path / "a.txt"
+        model.remove_result_by_path(target)
+        # 遍历过滤视图，确认目标路径已不存在
+        for i in range(model.rowCount()):
+            result = model.get_result(i)
+            assert result is not None
+            assert result.path != target
+
+    def test_remove_last_result_empties_model(self, model: ResultListModel, tmp_path: Path) -> None:
+        """依次移除所有结果后模型为空。"""
+        model.remove_result_by_path(tmp_path / "a.txt")
+        model.remove_result_by_path(tmp_path / "b.txt")
+        assert model.total_count == 0
+        assert model.filtered_count == 0
+        assert model.rowCount() == 0
+
+    def test_remove_preserves_filter_conditions(self, model: ResultListModel, tmp_path: Path) -> None:
+        """移除操作应保留当前过滤条件（仅路径 a.txt 命中过滤词）。"""
+        model.set_filter_text("a.txt")
+        assert model.filtered_count == 1
+        # 移除 b.txt（不在过滤视图中），过滤视图不变
+        model.remove_result_by_path(tmp_path / "b.txt")
+        assert model.filtered_count == 1
+        # 移除 a.txt（在过滤视图中），过滤视图清空
+        model.remove_result_by_path(tmp_path / "a.txt")
+        assert model.filtered_count == 0
+
+
 class TestResultsProperty:
     def test_results_returns_tuple(self, model: ResultListModel) -> None:
         results = model.results

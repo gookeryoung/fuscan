@@ -68,6 +68,12 @@ class PdfExtractor(Extractor):
         return "PDF"
 
     @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：实际使用的 PDF 解析引擎。"""
+        return "pdf_oxide" if _PDF_OXIDE_AVAILABLE else "pypdf"
+
+    @override
     def extract(self, path: Path) -> str:
         """提取 PDF 文本内容，加密文档返回空字符串。"""
         try:

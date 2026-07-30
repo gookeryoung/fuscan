@@ -124,6 +124,115 @@ class TestOpenManual:
         about.openManual()
 
 
+class TestOpenFailedSignal:
+    """iter-139：openFailed 信号触发场景。"""
+
+    def test_open_manual_emits_signal_when_pdf_missing(
+        self,
+        about: AboutController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """PDF 不存在时应发送 openFailed 信号，消息包含文件名。"""
+        from fuscan.gui.controllers import about_controller
+
+        non_existent = tmp_path / "non_existent.pdf"
+        monkeypatch.setattr(about_controller, "MANUAL_PDF_PATH", non_existent)
+
+        messages: list[str] = []
+        about.openFailed.connect(messages.append)  # pyrefly: ignore [missing-attribute]
+        about.openManual()
+        assert len(messages) == 1
+        assert "non_existent.pdf" in messages[0]
+
+    def test_open_manual_emits_signal_when_open_fails(
+        self,
+        about: AboutController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """openUrl 与 os.startfile 均失败时应发送 openFailed 信号。"""
+        from fuscan.gui.controllers import about_controller
+
+        pdf = tmp_path / "manual.pdf"
+        pdf.write_bytes(b"%PDF-1.4 test")
+        monkeypatch.setattr(about_controller, "MANUAL_PDF_PATH", pdf)
+        # openUrl 失败
+        monkeypatch.setattr(about_controller.QDesktopServices, "openUrl", lambda _url: False)
+        # Windows 兜底也失败（或非 Windows 平台直接跳过）
+        monkeypatch.setattr(about_controller.sys, "platform", "win32")
+        monkeypatch.setattr(
+            about_controller.os, "startfile", lambda _p: (_ for _ in ()).throw(OSError("no association")), raising=False
+        )
+
+        messages: list[str] = []
+        about.openFailed.connect(messages.append)  # pyrefly: ignore [missing-attribute]
+        about.openManual()
+        assert len(messages) == 1
+        assert "无法打开用户手册" in messages[0]
+
+    def test_open_manual_no_signal_when_open_succeeds(
+        self,
+        about: AboutController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """openUrl 成功时不应发送 openFailed 信号。"""
+        from fuscan.gui.controllers import about_controller
+
+        pdf = tmp_path / "manual.pdf"
+        pdf.write_bytes(b"%PDF-1.4 test")
+        monkeypatch.setattr(about_controller, "MANUAL_PDF_PATH", pdf)
+        monkeypatch.setattr(about_controller.QDesktopServices, "openUrl", lambda _url: True)
+
+        messages: list[str] = []
+        about.openFailed.connect(messages.append)  # pyrefly: ignore [missing-attribute]
+        about.openManual()
+        assert messages == []
+
+    def test_open_config_dir_emits_signal_when_missing(
+        self,
+        about: AboutController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """配置目录不存在时应发送 openFailed 信号。"""
+        from fuscan.gui.controllers import about_controller
+
+        non_existent = tmp_path / "non_existent_config_dir"
+        monkeypatch.setattr(about_controller, "CONFIG_DIR", non_existent)
+
+        messages: list[str] = []
+        about.openFailed.connect(messages.append)  # pyrefly: ignore [missing-attribute]
+        about.openConfigDir()
+        assert len(messages) == 1
+        assert "配置目录不存在" in messages[0]
+
+    def test_open_config_dir_emits_signal_when_open_fails(
+        self,
+        about: AboutController,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """openUrl 与 os.startfile 均失败时应发送 openFailed 信号。"""
+        from fuscan.gui.controllers import about_controller
+
+        config_dir = tmp_path / "fuscan_config"
+        config_dir.mkdir()
+        monkeypatch.setattr(about_controller, "CONFIG_DIR", config_dir)
+        monkeypatch.setattr(about_controller.QDesktopServices, "openUrl", lambda _url: False)
+        monkeypatch.setattr(about_controller.sys, "platform", "win32")
+        monkeypatch.setattr(
+            about_controller.os, "startfile", lambda _p: (_ for _ in ()).throw(OSError("no association")), raising=False
+        )
+
+        messages: list[str] = []
+        about.openFailed.connect(messages.append)  # pyrefly: ignore [missing-attribute]
+        about.openConfigDir()
+        assert len(messages) == 1
+        assert "无法打开配置目录" in messages[0]
+
+
 class TestOpenConfigDir:
     """``openConfigDir`` Slot。"""
 

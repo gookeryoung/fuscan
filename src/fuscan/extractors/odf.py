@@ -50,6 +50,14 @@ class OdtExtractor(Extractor):
         return "ODT 文档"
 
     @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：lxml 可用时优先使用，回退 ElementTree。"""
+        from fuscan.extractors._odf_xml import _LXML_AVAILABLE
+
+        return "lxml" if _LXML_AVAILABLE else "ElementTree"
+
+    @override
     def extract(self, path: Path) -> str:
         """提取 ODT 文档的段落与标题文本。"""
         try:

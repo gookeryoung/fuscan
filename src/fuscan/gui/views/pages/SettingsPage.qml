@@ -474,10 +474,13 @@ Item {
                                             Layout.rightMargin: 8
                                             width: speedRow.width
                                             height: speedRow.height
-                                            // ToolTip：hover 时显示完整速度档次（如「T2 快速」）
+                                            // ToolTip：hover 时显示完整速度档次（如「T2 快速（引擎：lxml）」）
                                             ToolTip.visible: speedIndicatorMouseArea.containsMouse
                                             ToolTip.delay: 300
                                             ToolTip.text: "解析速度：" + model.speedTierText
+                                                + (model.engineInfo.length > 0
+                                                    ? "（引擎：" + model.engineInfo + "）"
+                                                    : "")
                                             Row {
                                                 id: speedRow
                                                 spacing: 2

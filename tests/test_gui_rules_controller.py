@@ -111,6 +111,24 @@ class TestRulesFileList:
         assert model[0]["fileName"] == rules_file.name
         assert model[0]["path"] == str(rules_file)
 
+    def test_rules_file_model_includes_exists_field(
+        self, controller_with_file: RulesController, rules_file: Path
+    ) -> None:
+        """iter-139：rulesFileModel 每项应包含 exists 字段标记文件是否存在。"""
+        model = controller_with_file.rulesFileModel
+        assert len(model) == 1
+        assert model[0]["exists"] is True
+
+    def test_rules_file_model_marks_missing_file(self, config_controller: ConfigController, tmp_path: Path) -> None:
+        """iter-139：规则文件不存在时 exists 字段应为 False。"""
+        missing = tmp_path / "missing.yaml"
+        config_controller.config.rules_paths = [str(missing)]
+        config_controller.save()
+        controller = RulesController(config_controller)
+        model = controller.rulesFileModel
+        assert len(model) == 1
+        assert model[0]["exists"] is False
+
     def test_selected_file_index_default_negative(self, config_controller: ConfigController) -> None:
         controller = RulesController(config_controller)
         assert controller.selectedFileIndex == -1

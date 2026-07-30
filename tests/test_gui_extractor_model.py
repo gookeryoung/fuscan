@@ -69,6 +69,7 @@ class TestRoleNames:
         assert roles[Qt.UserRole + 7] == b"formatLabel"
         assert roles[Qt.UserRole + 8] == b"category"
         assert roles[Qt.UserRole + 9] == b"formatTags"
+        assert roles[Qt.UserRole + 10] == b"engineInfo"
 
 
 class TestData:
@@ -200,6 +201,29 @@ class TestData:
             cat = model.data(model.index(i), Qt.UserRole + 8)
             assert isinstance(cat, str)
             assert cat, f"行 {i} 的 category 为空"
+
+    def test_data_returns_engine_info_str(self, model: ExtractorListModel) -> None:
+        """engineInfo role 应返回字符串（iter-139 新增）。"""
+        for i in range(model.rowCount()):
+            info = model.data(model.index(i), Qt.UserRole + 10)
+            assert isinstance(info, str), f"行 {i} 的 engineInfo 不是字符串"
+
+    def test_data_returns_engine_info_for_pdf(self, model: ExtractorListModel) -> None:
+        """PdfExtractor 的 engineInfo 应为 pdf_oxide 或 pypdf（取决于可用后端）。"""
+        for i in range(model.rowCount()):
+            if model.data(model.index(i), Qt.UserRole + 1) == "PdfExtractor":
+                info = model.data(model.index(i), Qt.UserRole + 10)
+                assert info in {"pdf_oxide", "pypdf"}
+                return
+        pytest.fail("PdfExtractor 应在默认注册表中")
+
+    def test_data_returns_engine_info_for_xlsx(self, model: ExtractorListModel) -> None:
+        """XlsxExtractor 的 engineInfo 应为 python-calamine。"""
+        for i in range(model.rowCount()):
+            if model.data(model.index(i), Qt.UserRole + 1) == "XlsxExtractor":
+                assert model.data(model.index(i), Qt.UserRole + 10) == "python-calamine"
+                return
+        pytest.fail("XlsxExtractor 应在默认注册表中")
 
     def test_data_unknown_role_returns_empty(self, model: ExtractorListModel) -> None:
         idx = model.index(0)

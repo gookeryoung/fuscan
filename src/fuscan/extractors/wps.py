@@ -51,6 +51,12 @@ class WpsExtractor(Extractor):
         return "WPS 文档（WPS）"
 
     @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：委托到 DOCX/XLSX/PPTX 提取器。"""
+        return "委托 DOCX/XLSX/PPTX"
+
+    @override
     def extract(self, path: Path) -> str:
         """提取 WPS 文档文本，按 OOXML 子类型分发到对应提取逻辑。"""
         try:

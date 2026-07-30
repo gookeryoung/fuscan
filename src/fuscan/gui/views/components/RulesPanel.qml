@@ -218,6 +218,8 @@ Item {
                             // 触发 "Property has already been assigned a value"）
                             font.bold: ListView.isCurrentItem
                             highlighted: ListView.isCurrentItem
+                            // iter-139：文件缺失时禁用选中（仍可点击但视觉提示不可用）
+                            enabled: modelData.exists
                             // ItemDelegate 在 Qt Quick Controls 2 不会自动设置
                             // ListView.currentIndex，需在 onClicked 显式同步选中
                             onClicked: rulesFileList.currentIndex = index
@@ -244,16 +246,40 @@ Item {
                                     color: theme.colorPrimary
                                 }
                             }
-                            contentItem: Label {
-                                text: parent.text
-                                font: parent.font
-                                color: parent.highlighted
-                                    ? theme.colorPrimary
-                                    : (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
-                                elide: Text.ElideMiddle
-                                verticalAlignment: Text.AlignVCenter
-                                leftPadding: 12
-                                rightPadding: 12
+                            contentItem: RowLayout {
+                                spacing: 6
+                                Label {
+                                    text: parent.parent.text
+                                    font: parent.parent.font
+                                    color: parent.parent.highlighted
+                                        ? theme.colorPrimary
+                                        : (modelData.exists
+                                            ? (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
+                                            : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary))
+                                    elide: Text.ElideMiddle
+                                    verticalAlignment: Text.AlignVCenter
+                                    Layout.fillWidth: true
+                                    leftPadding: 12
+                                }
+                                // iter-139：缺失文件显示"缺失"标记
+                                Rectangle {
+                                    visible: !modelData.exists
+                                    radius: 4
+                                    height: 16
+                                    width: missingLabel.implicitWidth + 8
+                                    color: theme.colorDanger
+                                    Layout.alignment: Qt.AlignVCenter
+                                    Layout.rightMargin: 12
+                                    Label {
+                                        id: missingLabel
+                                        anchors.centerIn: parent
+                                        text: "缺失"
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        color: "#FFFFFF"
+                                    }
+                                }
+                                Item { Layout.fillWidth: !modelData.exists; Layout.rightMargin: 12 }
                             }
                         }
                     }

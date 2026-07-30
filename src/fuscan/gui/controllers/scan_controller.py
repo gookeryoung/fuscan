@@ -233,6 +233,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._config_controller.configChanged.connect(  # pyrefly: ignore [missing-attribute]
             self._emit_effective_config_changed
         )
+        # iter-139：规则集变更时同步 emit canStartScanChanged/rulesCountChanged，
+        # 避免 canStartScan/rulesCount 读到陈旧缓存值导致规则加载后仍无法启动扫描。
+        self._rules_controller.rulesetChanged.connect(  # pyrefly: ignore [missing-attribute]
+            self._on_ruleset_changed
+        )
 
     # ----------------------------- 扫描状态 -----------------------------
 
@@ -266,10 +271,15 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(bool, notify=canStartScanChanged)  # pyrefly: ignore [not-callable]
     def canStartScan(self) -> bool:
-        """是否可开始扫描（规则集已加载 + 目标已选）。"""
+        """是否可开始扫描（规则集已加载 + 目标已选）。
+
+        iter-139：直接读 ``self._rules_controller.ruleset`` 而非缓存值，
+        确保规则加载/移除后立即反映到 canStartScan（用户反馈：加载规则后
+        仍无法启动扫描，因为读的是 ``__init__`` 时的快照）。
+        """
         if self._scan_state == STATE_SCANNING:
             return False
-        if self._ruleset is None:
+        if self._rules_controller.ruleset is None:
             return False
         return self._can_build_roots()
 
@@ -501,6 +511,18 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """
         self.effectiveConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
 
+    def _on_ruleset_changed(self) -> None:
+        """rulesController.rulesetChanged → 同步缓存与 QML 绑定信号。
+
+        iter-139：规则集变更时同步 ``self._ruleset`` 缓存（供 startScan
+        快速访问、避免每次读取属性的开销），并 emit canStartScanChanged
+        与 rulesCountChanged 让 QML 侧绑定重算。修复用户反馈：加载规则后
+        canStartScan 仍为 False 因读的是 ``__init__`` 时的快照。
+        """
+        self._ruleset = self._rules_controller.ruleset
+        self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.rulesCountChanged.emit()  # pyrefly: ignore [missing-attribute]
+
     def _effective_scan_archives(self) -> bool:
         """任务级覆盖优先的 scan_archives。"""
         return effective_scan_archives(self._task_overrides, self._config)
@@ -556,8 +578,13 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(int, notify=rulesCountChanged)  # pyrefly: ignore [not-callable]
     def rulesCount(self) -> int:
-        """当前规则集规则数。"""
-        return len(self._ruleset.rules) if self._ruleset is not None else 0
+        """当前规则集规则数。
+
+        iter-139：直接读 ``self._rules_controller.ruleset`` 而非缓存值，
+        与 :attr:`canStartScan` 同步确保规则变更后 UI 立即更新。
+        """
+        ruleset = self._rules_controller.ruleset
+        return len(ruleset.rules) if ruleset is not None else 0
 
     @Property(QObject, notify=scanStateChanged)  # pyrefly: ignore [not-callable]
     def resultModel(self) -> ResultListModel:
@@ -906,18 +933,41 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         4. 调用 :class:`SkipStore.add` 标记为跳过，后续扫描自动跳过
         5. 返回操作消息供 QML 显示
 
+        iter-139：移至暂存成功后从 :class:`ResultListModel` 与
+        ``_last_report.hits`` 中移除该条目，避免用户仍能在结果列表中
+        看到已隔离的文件。选中索引重置为 -1，emit ``selectedResultChanged``
+        让 QML 详情面板清空。
+
         - 未选中结果 → ``未选中结果``
         - 压缩包内部条目 → ``压缩包内部条目不支持移至暂存``
         - 复制成功 → ``已移至暂存: <隔离路径>`` 并标记跳过
         - 复制失败 → ``移至暂存失败: <错误>``
         """
+        selected = self._get_selected_result()
         last_root = self._last_report.root if self._last_report is not None else None
-        return move_to_staging(
-            result=self._get_selected_result(),
+        msg = move_to_staging(
+            result=selected,
             staging_dir_str=self._config.staging_dir,
             last_report_root=last_root,
             skip_store=self._skip_store,
         )
+        # iter-139：成功后从结果列表与 last_report 中移除该条目
+        if msg.startswith("已移至暂存") and selected is not None:
+            removed = self._result_model.remove_result_by_path(selected.path)
+            if removed and self._last_report is not None:
+                # 同步从 _last_report.hits 中移除，保持与结果模型一致
+                target_str = str(selected.path)
+                new_hits = tuple(h for h in self._last_report.hits if str(h.path) != target_str)
+                self._last_report = ScanReport(
+                    root=self._last_report.root,
+                    results=new_hits,
+                    stats=self._last_report.stats,
+                    cancelled=self._last_report.cancelled,
+                )
+            # 重置选中索引，触发 QML 详情面板清空
+            self._selected_result_index = -1
+            self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
+        return msg
 
     @Slot(str, result=str)  # pyrefly: ignore [not-callable]
     def markAsFalsePositive(self, rule_filter: str = "") -> str:

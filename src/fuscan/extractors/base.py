@@ -191,6 +191,17 @@ class Extractor(ABC):
         """提取器的中文显示名称，供 GUI 勾选区展示。默认返回类名，子类可覆盖。"""
         return type(self).__name__
 
+    @property
+    def engine_info(self) -> str:
+        """提取器使用的解析引擎名称（iter-139，供 GUI tooltip 展示）。
+
+        如 ``"pypdf"`` / ``"python-docx"`` / ``"python-calamine"`` /
+        ``"olefile+ole"`` / ``"内置解码"`` 等。默认返回空字符串，子类应覆盖。
+        用于 SettingsPage 解析速度 tooltip 中展示具体引擎，便于用户
+        排查依赖缺失或性能问题。
+        """
+        return ""
+
     @abstractmethod
     def extract(self, path: Path) -> str:
         """提取文件文本内容。
@@ -239,14 +250,15 @@ class ExtractorRegistry:
         """已注册的所有扩展名。"""
         return tuple(sorted(self._extractors.keys()))
 
-    def list_extractors(self) -> list[tuple[str, str, tuple[str, ...], SpeedTier]]:
+    def list_extractors(self) -> list[tuple[str, str, tuple[str, ...], SpeedTier, str]]:
         """列出所有已注册的提取器信息，供 GUI 勾选区展示。
 
-        :return: ``[(class_name, display_name, supported_extensions, speed_tier), ...]``
+        :return: ``[(class_name, display_name, supported_extensions, speed_tier, engine_info), ...]``
                  列表，按 display_name 排序。同一提取器实例支持多个扩展名时合并为一项。
                  ``speed_tier`` 为 :class:`SpeedTier` 枚举值（iter-90）。
+                 ``engine_info`` 为解析引擎名称字符串（iter-139，供 GUI tooltip 展示）。
         """
-        seen: dict[int, tuple[str, str, tuple[str, ...], SpeedTier]] = {}
+        seen: dict[int, tuple[str, str, tuple[str, ...], SpeedTier, str]] = {}
         for _ext, extractor in self._extractors.items():
             obj_id = id(extractor)
             if obj_id not in seen:
@@ -256,6 +268,7 @@ class ExtractorRegistry:
                     extractor.display_name,
                     tuple(sorted(e.lower().lstrip(".") for e in exts)),
                     extractor.speed_tier,
+                    extractor.engine_info,
                 )
         return sorted(seen.values(), key=lambda x: x[1])
 

@@ -1301,18 +1301,20 @@ class TestExtractorRegistry:
         assert display_names == sorted(display_names)
 
     def test_list_extractors_entry_format(self) -> None:
-        """list_extractors 返回元组格式为 (class_name, display_name, extensions, speed_tier)。
+        """list_extractors 返回元组格式为 (class_name, display_name, extensions, speed_tier, engine_info)。
 
         iter-90 起新增 speed_tier 字段（SpeedTier 枚举）。
+        iter-139 起新增 engine_info 字段（str，描述底层解析引擎）。
         """
         from fuscan.extractors.base import SpeedTier
 
         extractors = default_registry.list_extractors()
-        for class_name, display_name, exts, tier in extractors:
+        for class_name, display_name, exts, tier, engine_info in extractors:
             assert isinstance(class_name, str) and class_name
             assert isinstance(display_name, str) and display_name
             assert isinstance(exts, tuple) and exts
             assert isinstance(tier, SpeedTier)
+            assert isinstance(engine_info, str)
             # 扩展名均为小写无点
             for e in exts:
                 assert e == e.lower().lstrip(".")
@@ -1337,6 +1339,44 @@ class TestExtractorRegistry:
         }
         for cls, expected in names.items():
             assert cls().display_name == expected, f"{cls.__name__}.display_name 应为 {expected}"
+
+    def test_engine_info_returns_non_empty_str(self) -> None:
+        """iter-139：各提取器 engine_info 应返回非空字符串。"""
+        classes = [
+            TextExtractor,
+            PdfExtractor,
+            DocxExtractor,
+            PptxExtractor,
+            XlsxExtractor,
+            OdsExtractor,
+            OdtExtractor,
+            WpsExtractor,
+            RtfExtractor,
+            EmlExtractor,
+            MsgExtractor,
+            XlsExtractor,
+            DocExtractor,
+            PptExtractor,
+        ]
+        for cls in classes:
+            info = cls().engine_info
+            assert isinstance(info, str) and info, f"{cls.__name__}.engine_info 应为非空字符串"
+
+    def test_engine_info_specific_values(self) -> None:
+        """iter-139：固定后端的提取器 engine_info 应返回预期引擎名。"""
+        # XLSX/XLS 固定使用 calamine
+        assert XlsxExtractor().engine_info == "python-calamine"
+        assert XlsExtractor().engine_info == "python-calamine"
+        # PDF 在 pdf_oxide 与 pypdf 之间切换
+        assert PdfExtractor().engine_info in {"pdf_oxide", "pypdf"}
+        # DOC/PPT 在 kreuzberg 与 olefile 之间切换
+        assert DocExtractor().engine_info in {"kreuzberg", "olefile"}
+        assert PptExtractor().engine_info in {"kreuzberg", "olefile"}
+        # DOCX/PPTX/ODS/ODT 在 lxml 与回退之间切换
+        assert DocxExtractor().engine_info in {"lxml", "python-docx"}
+        assert PptxExtractor().engine_info in {"lxml", "python-pptx"}
+        assert OdsExtractor().engine_info in {"lxml", "ElementTree"}
+        assert OdtExtractor().engine_info in {"lxml", "ElementTree"}
 
 
 # ---------------------------------------------------------------------------

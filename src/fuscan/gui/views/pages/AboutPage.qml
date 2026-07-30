@@ -10,6 +10,46 @@ Item {
     property ThemeController theme: Theme
     property AboutControllerType aboutController: AboutController
 
+    // iter-139：打开手册/配置目录失败时的 Toast 提示
+    Rectangle {
+        id: openToast
+        property string message: ""
+        visible: message.length > 0
+        anchors.top: parent.top
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.topMargin: 16
+        width: Math.min(toastLabel.implicitWidth + 32, parent.width - 32)
+        height: toastLabel.implicitHeight + 16
+        radius: 6
+        color: theme.colorDanger
+        opacity: 0.95
+        z: 100
+
+        Label {
+            id: toastLabel
+            anchors.centerIn: parent
+            text: openToast.message
+            color: "#FFFFFF"
+            font.pixelSize: 12
+            elide: Text.ElideRight
+        }
+
+        Timer {
+            id: toastTimer
+            interval: 3000
+            repeat: false
+            onTriggered: openToast.message = ""
+        }
+
+        Connections {
+            target: aboutController
+            function onOpenFailed(msg) {
+                openToast.message = msg
+                toastTimer.restart()
+            }
+        }
+    }
+
     ScrollView {
         anchors.fill: parent
         clip: true

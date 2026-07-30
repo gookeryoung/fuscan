@@ -47,6 +47,12 @@ class RtfExtractor(Extractor):
         return "RTF"
 
     @override
+    @property
+    def engine_info(self) -> str:
+        """iter-139：kreuzberg 可用时优先，回退 striprtf。"""
+        return "kreuzberg" if kreuzberg_available() else "striprtf"
+
+    @override
     def extract(self, path: Path) -> str:
         """提取 RTF 文件纯文本内容。
 

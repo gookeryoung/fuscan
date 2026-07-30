@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -1603,19 +1604,56 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         原 iter-127 实现仅设 cancel 标志不 wait，导致 QThread 在后台继续运行，
         阻止进程退出（用户看到"界面退出后后台一直还在"）。
         现改为：cancel 后 wait 最多 500ms（大部分 worker < 100ms 退出），
-        超时则 terminate 强制终止。不 close SQLite（进程退出由 OS 回收）。
+        超时则 terminate 强制终止。
+
+        iter-147 修复：原实现不 close SQLite（注释说"进程退出由 OS 回收"），
+        但 workspace_controller.cleanup 用 quick_cancel 而非 cleanup，导致
+        cache.close() 永不被调用，WAL 文件无限膨胀（iter-145 cache.db
+        15.7GB 根因）。现改为：cancel + wait + terminate + deleteLater 统一模式，
+        末尾启动 daemon thread 异步关闭 cache，避免主线程阻塞（SQLite WAL
+        checkpoint 可能慢），同时消除 quick_cancel/cleanup 路径不一致。
         """
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
-            self._worker.wait(500)
+            self._worker.wait(200)
             if self._worker.isRunning():
                 self._worker.terminate()
-                self._worker.wait(200)
+                self._worker.wait(100)
+            self._worker.deleteLater()
+            self._worker = None
         if self._stats_worker is not None and self._stats_worker.isRunning():
             self._stats_worker.cancel()
-            self._stats_worker.wait(500)
+            self._stats_worker.wait(200)
             if self._stats_worker.isRunning():
                 self._stats_worker.terminate()
-                self._stats_worker.wait(200)
+                self._stats_worker.wait(100)
+            self._stats_worker.deleteLater()
+            self._stats_worker = None
         # iter-132：取消未完成的 FilterWorker
         self._result_model.cleanup()
+        # iter-147：异步关闭 cache，避免 WAL 文件膨胀
+        # 用 daemon thread 避免 cache.close() 阻塞主线程（SQLite WAL checkpoint
+        # 可能慢）；cache 实例设为 None 避免重复关闭，daemon thread 进程退出时
+        # 由 OS 回收（若 close 未完成）
+        self._close_cache_async()
+
+    def _close_cache_async(self) -> None:
+        """启动 daemon thread 异步关闭 cache（iter-147）。
+
+         避免在主线程（特别是退出路径）阻塞于 SQLite WAL checkpoint。
+         cache.close() 内部有 RLock 保护，与已终止 worker 的残留访问竞争安全
+        （worker 的 except 会捕获 sqlite3.Error）。
+        """
+        if self._cache is None:
+            return
+        cache = self._cache
+        self._cache = None
+
+        def _close() -> None:
+            try:
+                cache.close()
+            except (sqlite3.Error, OSError):
+                logger.warning("异步关闭缓存失败", exc_info=True)
+
+        t = threading.Thread(target=_close, name="cache-close", daemon=True)
+        t.start()

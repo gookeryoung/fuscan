@@ -811,9 +811,10 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             qt_worker = cast(QThread, worker)
             if qt_worker.isRunning():
                 qt_worker.quit()
-                qt_worker.wait(500)  # pyrefly: ignore [missing-argument]
+                qt_worker.wait(200)  # pyrefly: ignore [missing-argument]
                 if qt_worker.isRunning():
                     qt_worker.terminate()
+                    qt_worker.wait(100)  # pyrefly: ignore [missing-argument]
         self._restore_workers.clear()
         # 不清空 _current_workspace_id / _active_scan_workspace_id，不 emit 信号：
         # 应用退出阶段 QML 组件正在销毁，重新求值 binding 会触发 null TypeError。

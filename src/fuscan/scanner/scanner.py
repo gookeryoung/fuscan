@@ -190,7 +190,10 @@ class Scanner:
         # 并发扫描时每 N 个 future 完成才调用一次 _emit_progress（内部仍有 150ms 节流），
         # 减少 time.perf_counter() + 比较的函数调用开销。
         # 顺序扫描保持每文件 emit（用户期望实时反馈）。
-        self._progress_emit_batch: int = 5 if (max_workers and max_workers > 1) else 1
+        # iter-147：并发模式 batch 从 5 提高到 10，进一步降低高吞吐场景下
+        # 的进度回调开销（_emit_progress 内部仍有 150ms 节流，batch=10 时
+        # 实际 emit 频率不变，但减少 perf_counter 调用与 tuple 构造次数）。
+        self._progress_emit_batch: int = 10 if (max_workers and max_workers > 1) else 1
         # 扫描进度上下文（scan() 期间设置，供 _emit_progress 使用）
         self._progress_start: float = 0.0
         self._progress_total: int = 0

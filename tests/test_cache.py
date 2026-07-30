@@ -1153,6 +1153,54 @@ class TestCacheStoreConcurrency:
         assert write_elapsed < 10.0, f"写操作耗时 {write_elapsed:.2f}s，可能被并发读阻塞"
         store.close()
 
+    def test_get_read_conn_reuses_same_thread_connection(self, tmp_path: Path) -> None:
+        """iter-147：同线程多次调用 _get_read_conn 应返回同一连接。
+
+        修复原 BUG：原实现每次调用都 sqlite3.connect 创建新连接并覆盖
+        _read_local.conn，导致 _read_conns 列表无限膨胀（每次扫描每文件
+        查询都新增连接）。修复后先检查 _read_local.ref 复用已有连接。
+        """
+        store = CacheStore(tmp_path / "cache.db")
+        conn1 = store._get_read_conn()
+        conn2 = store._get_read_conn()
+        conn3 = store._get_read_conn()
+        assert conn1 is conn2 is conn3
+        # WeakSet 应只包含一个条目（同线程复用，不重复创建）
+        assert len(store._read_conns) == 1
+        store.close()
+
+    def test_read_conns_weakset_auto_cleanup_after_thread_exit(self, tmp_path: Path) -> None:
+        """iter-147：worker 线程退出后 WeakSet 自动清理连接包装。
+
+        sqlite3.Connection 不支持 weakref，用 _ConnRef 包装间接实现弱引用。
+        worker 线程退出后 threading.local 数据 slot 被清理，_ConnRef 失去
+        强引用被 GC，WeakSet 自动移除条目，避免原 list 强引用导致连接永不释放。
+        """
+        import gc
+
+        store = CacheStore(tmp_path / "cache.db")
+
+        def worker() -> None:
+            # worker 线程内创建读连接，不持有返回值（仅 _read_local 持有强引用）
+            store._get_read_conn()
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+        # worker 退出后 threading.local 数据 slot 被清理，_ConnRef 失去强引用
+        gc.collect()
+        # WeakSet 应自动移除已 GC 的 _ConnRef（正常路径下不残留）
+        assert len(store._read_conns) == 0
+        store.close()
+
+    def test_close_handles_empty_weakset(self, tmp_path: Path) -> None:
+        """iter-147：close() 在 WeakSet 为空时不抛异常（幂等安全）。"""
+        store = CacheStore(tmp_path / "cache.db")
+        # 未创建任何读连接，WeakSet 为空
+        store.close()
+        # 重复 close 幂等
+        store.close()
+
 
 # ---------------------------------------------------------------- migrate
 

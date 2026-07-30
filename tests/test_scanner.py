@@ -1328,15 +1328,15 @@ class TestScannerConcurrency:
         assert sc_one._progress_emit_batch == 1
 
     def test_iter111_progress_emit_batch_concurrent(self) -> None:
-        """iter-111：并发扫描的进度 emit 批处理阈值为 5（减少回调开销）。"""
+        """iter-111/147：并发扫描的进度 emit 批处理阈值为 10（减少回调开销）。"""
         rs = _build_ruleset(_filename_rule("r", "x"))
         sc = Scanner(rs, max_workers=4)
-        assert sc._progress_emit_batch == 5
+        assert sc._progress_emit_batch == 10
 
     def test_iter111_concurrent_progress_emitted_at_least_once(self, tmp_path: Path) -> None:
         """iter-111：并发扫描下批处理 emit 应至少触发一次最终进度上报。
 
-        20 个文件 + 批处理阈值 5：理论上触发 4 次 emit + 1 次尾部补发。
+        20 个文件 + 批处理阈值 10（iter-147）：理论上触发 2 次 emit + 1 次尾部补发。
         节流（150ms）会过滤掉中间 emit，最终 force=True 的进度必到达。
         """
         for i in range(20):
@@ -1352,9 +1352,9 @@ class TestScannerConcurrency:
     def test_iter111_concurrent_batch_tail_flush(self, tmp_path: Path) -> None:
         """iter-111：批处理尾部补发应在 future 总数非 emit_batch 整数倍时生效。
 
-        7 个文件 + emit_batch=5：emit 在第 5 个触发一次，剩 2 个在循环结束后
-        补发一次。最终 force=True 进度由 scan_entries 末尾发送，扫描中段
-        至少有一次进度回调反映非整除的尾部状态。
+        7 个文件 + emit_batch=10（iter-147）：7 < 10 不触发批次 emit，
+        全部在循环结束后尾部补发一次。最终 force=True 进度由 scan_entries
+        末尾发送，扫描中段至少有一次进度回调反映非整除的尾部状态。
         """
         for i in range(7):
             (tmp_path / f"f{i}.txt").write_text("x", encoding="utf-8")
@@ -1363,7 +1363,7 @@ class TestScannerConcurrency:
         # progress_interval=0 保证不节流，所有 emit 都到达
         sc = Scanner(rs, max_workers=4, on_progress=received.append, progress_interval=0.0)
         sc.scan(tmp_path)
-        # 至少触发：1 次 walk 阶段 + 1 次 emit 批次 + 1 次尾部补发 + 1 次 force 最终
+        # 至少触发：1 次 walk 阶段 + 1 次尾部补发 + 1 次 force 最终
         assert len(received) >= 2
         assert received[-1].scanned >= 7
 

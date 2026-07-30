@@ -41,6 +41,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+import weakref
 from collections import OrderedDict
 from pathlib import Path
 from typing import TYPE_CHECKING, Collection, Mapping
@@ -120,6 +121,28 @@ def _apply_pragmas(conn: sqlite3.Connection, read_only: bool) -> None:
             logger.warning("PRAGMA wal_autocheckpoint 不支持，降级到默认", exc_info=True)
 
 
+class _ConnRef:
+    """``sqlite3.Connection`` 的弱引用包装（iter-147）。
+
+    ``sqlite3.Connection`` 是 C 扩展类型，未设 ``tp_weaklistoffset``，
+    不支持 ``weakref.ref``。用本包装类间接实现弱引用跟踪：
+
+    - ``_read_local`` 持有强引用 ``_ConnRef``（线程本地）
+    - ``_read_conns: WeakSet[_ConnRef]`` 持有弱引用
+
+    worker 线程正常退出时 ``threading.local`` 数据 slot 被清理，
+    ``_ConnRef`` 失去强引用被 GC，``WeakSet`` 自动移除条目，
+    连接对象随之 GC 释放 OS 句柄。daemon worker 被 OS 强杀时
+    ``threading.local`` 不会清理，依赖 :meth:`CacheStore.close`
+    主动关闭残留连接（由 FIX-2 统一 cleanup 路径保证 ``close`` 被调用）。
+    """
+
+    __slots__ = ("__weakref__", "conn")
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+
 class CacheStore:
     """线程安全的 SQLite 扫描结果缓存。
 
@@ -167,8 +190,12 @@ class CacheStore:
         self._extract_cache: OrderedDict[str, str] = OrderedDict()
         # 线程本地只读连接：每线程一个，WAL 模式下读完全并行
         self._read_local: threading.local = threading.local()
-        # 已创建的读连接列表（close 时统一关闭，用 _lru_lock 保护追加）
-        self._read_conns: list[sqlite3.Connection] = []
+        # iter-147：读连接弱引用集合（close 时统一关闭，用 _lru_lock 保护）。
+        # 用 WeakSet[_ConnRef] 替代原 list[sqlite3.Connection]：worker 线程正常
+        # 退出后 threading.local 数据 slot 被清理，_ConnRef 失去强引用被 GC，
+        # WeakSet 自动移除条目，避免原 list 强引用导致连接永不释放、list 膨胀。
+        # daemon worker 被 OS 强杀时依赖 close() 主动关闭（FIX-2 保证）。
+        self._read_conns: weakref.WeakSet[_ConnRef] = weakref.WeakSet()
         db_path.parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False 允许跨线程使用连接，所有访问经 RLock 序列化
         self._conn: sqlite3.Connection = sqlite3.connect(
@@ -185,13 +212,20 @@ class CacheStore:
             raise
 
     def _get_read_conn(self) -> sqlite3.Connection:
-        """返回当前线程的只读连接（惰性创建）。
+        """返回当前线程的只读连接（惰性创建并复用）。
 
         每个线程首次调用时创建独立连接，配置 WAL + ``query_only = ON``
         防止误写。WAL 模式下读不阻塞写，读连接可完全并行执行查询。
 
-        连接创建后登记到 ``_read_conns`` 列表，``close`` 时统一关闭。
+        iter-147 修复：原实现每次调用都创建新连接并覆盖 ``_read_local.conn``，
+        导致 ``_read_conns`` 列表无限膨胀（每次扫描每文件查询都新增连接）。
+        现改为先检查 ``_read_local.ref`` 是否已存在，有则复用，避免重复创建。
+        连接经 :class:`_ConnRef` 包装后登记到 ``_read_conns`` 弱引用集合，
+        worker 线程退出后自动 GC 释放，``close`` 时统一关闭残留连接。
         """
+        ref = getattr(self._read_local, "ref", None)
+        if ref is not None and ref.conn is not None:
+            return ref.conn
         conn = sqlite3.connect(
             str(self._db_path),
             check_same_thread=False,
@@ -199,9 +233,10 @@ class CacheStore:
         )
         conn.row_factory = sqlite3.Row
         _apply_pragmas(conn, read_only=True)
-        self._read_local.conn = conn
+        wrapper = _ConnRef(conn)
+        self._read_local.ref = wrapper
         with self._lru_lock:
-            self._read_conns.append(conn)
+            self._read_conns.add(wrapper)
         return conn
 
     def _init_db(self) -> None:
@@ -417,7 +452,9 @@ class CacheStore:
     def close(self) -> None:
         """关闭数据库连接。重复调用安全（幂等）。
 
-        关闭主写连接与所有线程本地读连接。
+        关闭主写连接与所有线程本地读连接。iter-147 改为遍历 :class:`_ConnRef`
+        弱引用集合，关闭仍存在的 ``ref.conn``；正常路径下 worker 退出后
+        ``_ConnRef`` 已被 GC，此处仅关闭残留连接。
         """
         with self._lock:
             if self._closed:
@@ -427,14 +464,21 @@ class CacheStore:
                 self._hit_cache.clear()
                 self._path_cache.clear()
                 self._extract_cache.clear()
-                read_conns = list(self._read_conns)
+                refs = list(self._read_conns)
                 self._read_conns.clear()
-            # 关闭所有读连接
-            for conn in read_conns:
+            # 关闭所有仍存在的读连接（_ConnRef 可能已被 GC，跳过 None）
+            closed_count = 0
+            for ref in refs:
+                conn = ref.conn
+                if conn is None:
+                    continue
                 try:
                     conn.close()
+                    closed_count += 1
                 except sqlite3.Error:
                     logger.warning("关闭读连接失败", exc_info=True)
+            if closed_count:
+                logger.debug("已关闭 %d 个读连接", closed_count)
             self._conn.close()
 
     def __enter__(self) -> CacheStore:

@@ -1951,6 +1951,74 @@ class TestCleanupWithWorkers:
         assert cache.closed is True
         assert controller._cache is None
 
+    def test_quick_cancel_closes_cache_async(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """iter-147：quick_cancel 异步关闭 cache（消除 quick_cancel/cleanup 不一致）。
+
+        原 quick_cancel 不关 cache（注释说"进程退出由 OS 回收"），但
+        workspace_controller.cleanup 用 quick_cancel 而非 cleanup，导致
+        cache.close() 永不被调用，WAL 文件无限膨胀（iter-145 cache.db 15.7GB）。
+        修复后 quick_cancel 末尾启动 daemon thread 异步关闭 cache。
+        """
+        import threading
+
+        closed_event = threading.Event()
+
+        class FakeCacheStore:
+            def close(self) -> None:
+                closed_event.set()
+
+        cache = FakeCacheStore()
+        controller._cache = cache  # type: ignore[bad-assignment]
+        controller.quick_cancel()
+        # _cache 立即设为 None（同步），避免重复关闭
+        assert controller._cache is None
+        # daemon thread 异步关闭 cache，等待最多 2s
+        assert closed_event.wait(timeout=2.0), "cache.close() 未在 daemon thread 中被调用"
+
+    def test_quick_cancel_no_cache_noop(self, controller: ScanController) -> None:
+        """iter-147：quick_cancel 在 _cache 为 None 时不抛异常。"""
+        controller._cache = None
+        controller.quick_cancel()
+        assert controller._cache is None
+
+    def test_quick_cancel_sets_worker_none(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """iter-147：quick_cancel 后 _worker/_stats_worker 设为 None（消除残留）。"""
+
+        class StubbornWorker:
+            def __init__(self) -> None:
+                self.terminated = False
+
+            def cancel(self) -> None:
+                pass
+
+            def wait(self, _msecs: int = 0) -> bool:
+                return False
+
+            def terminate(self) -> None:
+                self.terminated = True
+
+            def isRunning(self) -> bool:
+                return True
+
+            def deleteLater(self) -> None:
+                pass
+
+        worker = StubbornWorker()
+        stats = StubbornWorker()
+        controller._worker = worker  # type: ignore[bad-assignment]
+        controller._stats_worker = stats  # type: ignore[bad-assignment]
+        controller.quick_cancel()
+        assert controller._worker is None
+        assert controller._stats_worker is None
+        assert worker.terminated is True
+        assert stats.terminated is True
+
 
 class TestIter143CoverageGaps:
     """iter-143：补充 scan_controller.py 未覆盖分支。

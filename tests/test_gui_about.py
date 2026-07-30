@@ -113,13 +113,19 @@ class TestOpenManual:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """openUrl 返回 False 时仅记录 warning，不抛异常。"""
+        """openUrl 返回 False 时仅记录 warning，不抛异常。
+
+        注意：mock sys.platform 为 linux 跳过 Windows ``os.startfile`` 兜底，
+        避免在 Windows 运行测试时真实调用 ``os.startfile`` 弹出 PDF 阅读器/浏览器。
+        Windows 兜底路径由 ``test_open_manual_emits_signal_when_open_fails`` 覆盖。
+        """
         from fuscan.gui.controllers import about_controller
 
         pdf = tmp_path / "manual.pdf"
         pdf.write_bytes(b"%PDF-1.4 test")
         monkeypatch.setattr(about_controller, "MANUAL_PDF_PATH", pdf)
         monkeypatch.setattr(about_controller.QDesktopServices, "openUrl", lambda _url: False)
+        monkeypatch.setattr(about_controller.sys, "platform", "linux")
         # 不应抛异常
         about.openManual()
 
@@ -280,12 +286,18 @@ class TestOpenConfigDir:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """openUrl 返回 False 时仅记录 warning，不抛异常。"""
+        """openUrl 返回 False 时仅记录 warning，不抛异常。
+
+        注意：mock sys.platform 为 linux 跳过 Windows ``os.startfile`` 兜底，
+        避免在 Windows 运行测试时真实调用 ``os.startfile`` 弹出资源管理器。
+        Windows 兜底路径由 ``test_open_config_dir_emits_signal_when_open_fails`` 覆盖。
+        """
         from fuscan.gui.controllers import about_controller
 
         config_dir = tmp_path / "fuscan_config"
         config_dir.mkdir()
         monkeypatch.setattr(about_controller, "CONFIG_DIR", config_dir)
         monkeypatch.setattr(about_controller.QDesktopServices, "openUrl", lambda _url: False)
+        monkeypatch.setattr(about_controller.sys, "platform", "linux")
         # 不应抛异常
         about.openConfigDir()

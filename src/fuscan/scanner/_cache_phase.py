@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from fuscan.cache.hashes import hash_bytes
 from fuscan.cache.store import BatchWriteItem
 from fuscan.extractors import extract_content_from_bytes_with_retry
-from fuscan.scanner._helpers import BATCH_THRESHOLD
+from fuscan.scanner._helpers import BATCH_THRESHOLD, rebuild_hit_from_cache
 from fuscan.scanner.result import RuleHit
 
 if TYPE_CHECKING:
@@ -117,18 +117,7 @@ def build_hits_from_cache(
     for rule, _, rule_hash in applicable:
         result = cached.get(rule_hash)
         if result is not None:
-            hits.append(
-                RuleHit(
-                    rule_name=rule.name,
-                    severity=result.severity,
-                    detail=result.detail,
-                    match_text=result.match_text,
-                    match_count=result.match_count,
-                    target=result.target,
-                    match_texts=result.match_texts,
-                    match_description=result.match_description,
-                )
-            )
+            hits.append(rebuild_hit_from_cache(rule, result))
     return hits, 0
 
 

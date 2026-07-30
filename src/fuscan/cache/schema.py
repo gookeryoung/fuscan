@@ -30,10 +30,6 @@ from __future__ import annotations
 import logging
 import sqlite3
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
 
 __all__ = ["CACHE_COMPAT_VERSION", "CURRENT_VERSION", "SCHEMA_SQL", "migrate"]
 

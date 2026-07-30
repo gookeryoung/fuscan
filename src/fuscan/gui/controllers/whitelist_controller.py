@@ -18,7 +18,6 @@ from __future__ import annotations
 import datetime
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 try:
     from PySide2.QtCore import Property, QObject, Signal, Slot
@@ -26,9 +25,6 @@ except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
 from fuscan.rules.whitelist import Whitelist, WhitelistEntry, WhitelistStore
-
-if TYPE_CHECKING:
-    pass
 
 __all__ = ["WhitelistController"]
 

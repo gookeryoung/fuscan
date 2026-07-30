@@ -866,6 +866,83 @@ class TestArchiveEntryResultFields:
         assert len(results) == 10, "cancel_check=None 应扫描全部条目"
 
 
+class TestArchiveScannerHitFields:
+    """iter-146 回归：压缩包扫描命中应填充 ``match_texts``/``match_description``。
+
+    BUG-1：archive/scanner.py 三处 RuleHit 构造缺失 ``match_texts`` 与
+    ``match_description`` 字段，导致压缩包扫描结果丢失多匹配文本与描述，
+    缓存写入的也是缺字段 RuleHit。修复后无缓存/缓存新匹配/缓存命中三条路径
+    均应完整保留两字段。
+    """
+
+    @staticmethod
+    def _content_rule_with_desc(name: str, pattern: str, description: str) -> Rule:
+        return Rule(
+            name=name,
+            severity=Severity.CRITICAL,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.CONTAINS,
+                pattern=pattern,
+                description=description,
+            ),
+        )
+
+    def test_uncached_hit_includes_match_texts_and_description(self, tmp_path: Path) -> None:
+        """无缓存路径：命中 RuleHit 应含 match_texts 与 match_description。"""
+        zip_path = _make_zip(tmp_path / "a.zip", {"secret.txt": "password=abc"})
+        rs = _build_ruleset(self._content_rule_with_desc("pwd", "password", "敏感凭证关键词"))
+        scanner = ArchiveScanner(rs)
+        results = scanner.scan_archive(zip_path)
+        hits = [r for r in results if r.has_hit]
+        assert len(hits) == 1
+        hit = hits[0].hits[0]
+        assert hit.match_texts == ("password",)
+        assert hit.match_description == "敏感凭证关键词"
+
+    def test_cached_new_match_includes_match_texts_and_description(self, tmp_path: Path) -> None:
+        """缓存首次扫描（新匹配）：命中 RuleHit 应含两字段并写入缓存。"""
+        from fuscan.cache import CacheStore
+
+        zip_path = _make_zip(tmp_path / "a.zip", {"secret.txt": "password=abc"})
+        rs = _build_ruleset(self._content_rule_with_desc("pwd", "password", "敏感凭证关键词"))
+        cache = CacheStore(tmp_path / "cache.db")
+        try:
+            cache.register_ruleset(rs)
+            scanner = ArchiveScanner(rs, cache=cache)
+            results = scanner.scan_archive(zip_path)
+            hits = [r for r in results if r.has_hit]
+            assert len(hits) == 1
+            hit = hits[0].hits[0]
+            assert hit.match_texts == ("password",)
+            assert hit.match_description == "敏感凭证关键词"
+        finally:
+            cache.close()
+
+    def test_cached_hit_from_cache_preserves_match_texts_and_description(self, tmp_path: Path) -> None:
+        """缓存命中（第二次扫描）：从缓存重建的 RuleHit 应完整保留两字段。"""
+        from fuscan.cache import CacheStore
+
+        zip_path = _make_zip(tmp_path / "a.zip", {"secret.txt": "password=abc"})
+        rs = _build_ruleset(self._content_rule_with_desc("pwd", "password", "敏感凭证关键词"))
+        cache = CacheStore(tmp_path / "cache.db")
+        try:
+            cache.register_ruleset(rs)
+            # 第一次扫描写入缓存
+            scanner1 = ArchiveScanner(rs, cache=cache)
+            scanner1.scan_archive(zip_path)
+            # 第二次扫描应命中缓存
+            scanner2 = ArchiveScanner(rs, cache=cache)
+            results2 = scanner2.scan_archive(zip_path)
+            hits = [r for r in results2 if r.has_hit]
+            assert len(hits) == 1
+            hit = hits[0].hits[0]
+            assert hit.match_texts == ("password",)
+            assert hit.match_description == "敏感凭证关键词"
+        finally:
+            cache.close()
+
+
 class TestArchiveScannerCache:
     """压缩包缓存模式测试。"""
 

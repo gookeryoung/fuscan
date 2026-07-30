@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 try:
     from PySide2.QtCore import Property, QObject, Signal, Slot
@@ -25,9 +24,6 @@ except ImportError:  # pragma: no cover
 from fuscan.config import DEFAULT_MAX_FILE_SIZE, IGNORE_DIR_CATEGORIES, Config, load_config, save_config
 from fuscan.gui.models.extractor_model import ExtractorListModel
 from fuscan.perf import set_perf_enabled
-
-if TYPE_CHECKING:
-    pass
 
 __all__ = ["ConfigController"]
 

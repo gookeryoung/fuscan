@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from types import TracebackType
 
 from typing_extensions import override
 
@@ -104,20 +103,6 @@ class RarReader(ArchiveReader):
         except Exception as exc:
             raise ArchiveError(f"RAR 条目读取失败: {entry_name}: {exc}") from exc
 
-    def close(self) -> None:
-        """关闭 RAR 文件句柄。"""
-        try:
-            self._rar.close()
-        except Exception:  # pragma: no cover - 关闭异常无需上报
-            logger.debug("关闭 RAR 文件句柄失败: %s", self._path, exc_info=True)
-
-    def __enter__(self) -> RarReader:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        self.close()
+    @override
+    def _close_resource(self) -> None:
+        self._rar.close()

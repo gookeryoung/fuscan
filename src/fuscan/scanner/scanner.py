@@ -38,10 +38,12 @@ from fuscan.scanner._cache_phase import (
 from fuscan.scanner._helpers import (
     GIL_YIELD_INTERVAL,
     PROGRESS_LIST_MAX,
+    build_hit_from_match,
     default_extract_content,
     default_extract_content_with_hash,
     empty_content_provider,
     normalize_max_file_size,
+    rebuild_hit_from_cache,
     spec_needs_content,
 )
 from fuscan.scanner._pipeline_phase import run_pipeline_phase
@@ -735,18 +737,7 @@ class Scanner:
                 logger.warning("规则 %s 求值失败 %s", rule.name, entry.path, exc_info=True)
                 continue
             if result.matched:
-                hits.append(
-                    RuleHit(
-                        rule_name=rule.name,
-                        severity=rule.severity,
-                        detail=result.detail,
-                        match_text=result.match_text,
-                        match_count=result.match_count,
-                        target=result.target,
-                        match_texts=result.match_texts,
-                        match_description=result.match_description,
-                    )
-                )
+                hits.append(build_hit_from_match(rule, result))
 
         # iter-134：高熵字符串兜底检测（仅在启用且未跳过内容时执行）
         if self._entropy_enabled and not skip_content:
@@ -893,19 +884,8 @@ class Scanner:
             if rule_hash in cached:
                 result = cached[rule_hash]
                 if result is not None:
-                    # 缓存命中（匹配）——填回 rule_name（缓存中为空字符串）
-                    hits.append(
-                        RuleHit(
-                            rule_name=rule.name,
-                            severity=result.severity,
-                            detail=result.detail,
-                            match_text=result.match_text,
-                            match_count=result.match_count,
-                            target=result.target,
-                            match_texts=result.match_texts,
-                            match_description=result.match_description,
-                        )
-                    )
+                    # 缓存命中（匹配）——填回 rule_name/severity（缓存中为空/占位）
+                    hits.append(rebuild_hit_from_cache(rule, result))
                 # else: 缓存记录为未命中，跳过
                 continue
             # 未缓存——执行匹配器
@@ -917,16 +897,7 @@ class Scanner:
                 logger.warning("规则 %s 求值失败 %s", rule.name, entry.path, exc_info=True)
                 continue
             if match_result.matched:
-                hit = RuleHit(
-                    rule_name=rule.name,
-                    severity=rule.severity,
-                    detail=match_result.detail,
-                    match_text=match_result.match_text,
-                    match_count=match_result.match_count,
-                    target=match_result.target,
-                    match_texts=match_result.match_texts,
-                    match_description=match_result.match_description,
-                )
+                hit = build_hit_from_match(rule, match_result)
                 hits.append(hit)
                 batch_hits.append((rule_hash, hit))
             else:

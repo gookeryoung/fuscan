@@ -6,9 +6,12 @@
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
+from types import TracebackType
+from typing import TypeVar
 
 __all__ = [
     "ArchiveEntry",
@@ -19,6 +22,10 @@ __all__ = [
     "get_reader",
     "is_archive",
 ]
+
+logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T", bound="ArchiveReader")
 
 
 class ArchiveError(Exception):
@@ -52,7 +59,12 @@ class ArchiveEntry:
 
 
 class ArchiveReader(ABC):
-    """压缩文件读取器抽象基类。"""
+    """压缩文件读取器抽象基类。
+
+    子类须实现 :meth:`_close_resource` 关闭底层句柄；:meth:`close` 与
+    :meth:`__enter__`/:meth:`__exit__` 由基类统一提供，避免 3 个子类重复
+    try/except 包装与上下文管理器样板（iter-146 抽取）。
+    """
 
     @property
     @abstractmethod
@@ -69,6 +81,37 @@ class ArchiveReader(ABC):
 
         :raises ArchiveError: 读取失败（加密、损坏等）
         """
+
+    @abstractmethod
+    def _close_resource(self) -> None:
+        """关闭底层资源句柄（由 :meth:`close` 包装异常处理）。
+
+        子类实现应仅包含「关闭句柄」的裸调用，无需 try/except —— 基类
+        :meth:`close` 统一捕获异常并记录 debug 日志。
+        """
+
+    def close(self) -> None:
+        """关闭资源，捕获并记录异常（不抛出）。
+
+        关闭异常属于「清理路径异常」，无需上报调用方；基类统一捕获并记录
+        debug 日志，子类如需额外清理（如释放缓存）可覆盖本方法并在末尾
+        调用 ``super().close()``。
+        """
+        try:
+            self._close_resource()
+        except Exception:  # pragma: no cover - 关闭异常无需上报
+            logger.debug("关闭压缩文件句柄失败: %s", getattr(self, "_path", "<unknown>"), exc_info=True)
+
+    def __enter__(self: _T) -> _T:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.close()
 
 
 class ArchiveReaderFactory:

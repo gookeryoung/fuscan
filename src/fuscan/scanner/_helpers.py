@@ -8,6 +8,8 @@
 - :data:`BATCH_THRESHOLD`：批量写入阈值
 - :data:`PROGRESS_LIST_MAX`：进度收集列表上限
 - :data:`GIL_YIELD_INTERVAL`：GIL 让步间隔
+- :func:`build_hit_from_match`：从 :class:`MatchResult` 构造 :class:`RuleHit`
+- :func:`rebuild_hit_from_cache`：从缓存 :class:`RuleHit` 重建（填回 rule_name）
 - :func:`default_extract_content`：默认内容提供器
 - :func:`default_extract_content_with_hash`：带哈希的内容提供器
 - :func:`empty_content_provider`：空内容提供器
@@ -28,7 +30,8 @@ from fuscan.extractors import (
     extract_content_from_bytes_with_retry,
     extract_content_with_fallback,
 )
-from fuscan.rules.model import MatchSpec, MatchTarget
+from fuscan.rules.model import MatchSpec, MatchTarget, Rule
+from fuscan.scanner.result import MatchResult, RuleHit
 
 if TYPE_CHECKING:
     from fuscan.scanner.context import FileEntry
@@ -38,11 +41,13 @@ __all__ = [
     "DEFAULT_MAX_FILE_SIZE",
     "GIL_YIELD_INTERVAL",
     "PROGRESS_LIST_MAX",
+    "build_hit_from_match",
     "cancel_all_futures",
     "default_extract_content",
     "default_extract_content_with_hash",
     "empty_content_provider",
     "normalize_max_file_size",
+    "rebuild_hit_from_cache",
     "spec_needs_content",
 ]
 
@@ -68,6 +73,51 @@ PROGRESS_LIST_MAX: int = 50
 # 让 UI 线程有机会处理 Qt 事件队列。20 个文件约对应 1-5ms 扫描时间，
 # sleep(0) 开销约 1μs，对吞吐影响可忽略。
 GIL_YIELD_INTERVAL: int = 20
+
+
+def build_hit_from_match(rule: Rule, result: MatchResult) -> RuleHit:
+    """从 :class:`MatchResult` 构造 :class:`RuleHit`，字段映射集中在此处。
+
+    扫描器与压缩包扫描器在「匹配器命中后构造 RuleHit」路径共用本函数，
+    避免字段遗漏（iter-146 修复 archive 路径缺失 ``match_texts``/
+    ``match_description`` 的 BUG）与字段名漂移。
+
+    :param rule: 命中的规则（提供 ``name``/``severity``）
+    :param result: 匹配器求值结果（提供 ``detail``/``match_text`` 等）
+    :return: 完整字段的 :class:`RuleHit`
+    """
+    return RuleHit(
+        rule_name=rule.name,
+        severity=rule.severity,
+        detail=result.detail,
+        match_text=result.match_text,
+        match_count=result.match_count,
+        target=result.target,
+        match_texts=result.match_texts,
+        match_description=result.match_description,
+    )
+
+
+def rebuild_hit_from_cache(rule: Rule, cached: RuleHit) -> RuleHit:
+    """从缓存 :class:`RuleHit` 重建并填回 ``rule_name``。
+
+    缓存中 ``rule_name`` 存为空字符串（避免冗余存储，rule_hash 已唯一标识），
+    重建时由当前规则集提供 ``rule_name``/``severity``，其余字段从缓存恢复。
+
+    :param rule: 当前规则集中的规则（提供 ``name``/``severity``）
+    :param cached: 缓存中读出的 :class:`RuleHit`
+    :return: 填回 ``rule_name``/``severity`` 的 :class:`RuleHit`
+    """
+    return RuleHit(
+        rule_name=rule.name,
+        severity=rule.severity,
+        detail=cached.detail,
+        match_text=cached.match_text,
+        match_count=cached.match_count,
+        target=cached.target,
+        match_texts=cached.match_texts,
+        match_description=cached.match_description,
+    )
 
 
 def default_extract_content(entry: FileEntry) -> str:

@@ -21,7 +21,12 @@ from fuscan.cache.hashes import hash_bytes
 from fuscan.config import DEFAULT_MAX_FILE_SIZE
 from fuscan.extractors import ExtractorError, extract_content_from_bytes_with_retry
 from fuscan.rules.model import Rule, RuleSet
-from fuscan.scanner._helpers import empty_content_provider, spec_needs_content
+from fuscan.scanner._helpers import (
+    build_hit_from_match,
+    empty_content_provider,
+    rebuild_hit_from_cache,
+    spec_needs_content,
+)
 from fuscan.scanner.context import FileEntry, MatchContext
 from fuscan.scanner.matchers import Matcher, build_matcher
 from fuscan.scanner.result import RuleHit, ScanResult
@@ -237,16 +242,7 @@ class ArchiveScanner:
                 )
                 continue
             if result.matched:
-                hits.append(
-                    RuleHit(
-                        rule_name=rule.name,
-                        severity=rule.severity,
-                        detail=result.detail,
-                        match_text=result.match_text,
-                        match_count=result.match_count,
-                        target=result.target,
-                    )
-                )
+                hits.append(build_hit_from_match(rule, result))
 
         return ScanResult(
             path=file_entry.path,
@@ -303,16 +299,7 @@ class ArchiveScanner:
             if rule_hash in cached:
                 result = cached[rule_hash]
                 if result is not None:
-                    hits.append(
-                        RuleHit(
-                            rule_name=rule.name,
-                            severity=result.severity,
-                            detail=result.detail,
-                            match_text=result.match_text,
-                            match_count=result.match_count,
-                            target=result.target,
-                        )
-                    )
+                    hits.append(rebuild_hit_from_cache(rule, result))
                 continue
             try:
                 match_result = matcher.matches(context)
@@ -326,14 +313,7 @@ class ArchiveScanner:
                 )
                 continue
             if match_result.matched:
-                hit = RuleHit(
-                    rule_name=rule.name,
-                    severity=rule.severity,
-                    detail=match_result.detail,
-                    match_text=match_result.match_text,
-                    match_count=match_result.match_count,
-                    target=match_result.target,
-                )
+                hit = build_hit_from_match(rule, match_result)
                 hits.append(hit)
                 self._cache.put_result(file_hash, rule_hash, hit)
             else:

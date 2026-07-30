@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
 from typing_extensions import override
@@ -175,22 +174,17 @@ class SevenZReader(ArchiveReader):
         self._bytes_cache[entry_name] = content
         return content
 
+    @override
+    def _close_resource(self) -> None:
+        self._sevenz.close()
+
+    @override
     def close(self) -> None:
-        """关闭 7Z 文件句柄。"""
-        try:
-            self._sevenz.close()
-        except Exception:  # pragma: no cover - 关闭异常无需上报
-            logger.debug("关闭 7Z 文件句柄失败: %s", self._path, exc_info=True)
+        """关闭 7Z 文件句柄并释放字节缓存。
+
+        覆盖基类：在基类 ``close`` 包装的 ``_close_resource`` 之外，额外清空
+        ``_bytes_cache`` 释放大块内存（py7zr 惰性读取缓存的解压字节）。
+        """
+        super().close()
         # 释放字节缓存，避免长期持有大块内存
         self._bytes_cache.clear()
-
-    def __enter__(self) -> SevenZReader:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        self.close()

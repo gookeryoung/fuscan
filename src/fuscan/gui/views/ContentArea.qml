@@ -15,99 +15,54 @@ Pane {
         color: "transparent"
     }
 
-    StackView {
+    // iter-144：用 StackLayout 替代 StackView.replace，所有页面常驻不重建，
+    // 切换仅改 currentIndex（O(1)），消除重页面（SettingsPage/HomePage）反复
+    // 构造导致的卡滞。代价是失去淡入淡出动画与启动时多构造几个页面对象，
+    // 但切换流畅性优先级更高；SettingsPage 的 Qt.fontFamilies() 已由
+    // Component.onCompleted 延迟到首帧后异步执行，不阻塞首屏。
+    // 符合 PySide SKILL 硬约束「复用控件（hide/show + 刷数据），禁止反复创建销毁」。
+    readonly property var _pageIndex: ({
+        "home": 0,
+        "addTask": 1,
+        "rules": 2,
+        "results": 3,
+        "stats": 4,
+        "settings": 5,
+        "about": 6
+    })
+
+    StackLayout {
         id: stack
         anchors.fill: parent
         anchors.margins: 24
-        clip: true  // 限制动画渲染在 StackView 边界内，避免溢出影响 sidebar
-        initialItem: homePage
+        currentIndex: contentArea._pageIndex[contentArea.activePage] ?? 0
 
-        // 淡入淡出切换动画（替代默认水平滑动，避免动画溢出到 sidebar）
-        replaceEnter: Transition {
-            OpacityAnimator { from: 0.0; to: 1.0; duration: 180; easing.type: Easing.OutCubic }
-        }
-        replaceExit: Transition {
-            OpacityAnimator { from: 1.0; to: 0.0; duration: 120; easing.type: Easing.InCubic }
-        }
-
-        // 根据 activePage 切换页面（replace 复用，避免重复创建）
-        Connections {
-            target: contentArea
-            function onActivePageChanged() {
-                switch (contentArea.activePage) {
-                    case "home":
-                        stack.replace(homePage)
-                        break
-                    case "addTask":
-                        stack.replace(addTaskPage)
-                        break
-                    case "rules":
-                        stack.replace(rulesPage)
-                        break
-                    case "results":
-                        stack.replace(resultsPage)
-                        break
-                    case "stats":
-                        stack.replace(statsPage)
-                        break
-                    case "settings":
-                        stack.replace(settingsPage)
-                        break
-                    case "about":
-                        stack.replace(aboutPage)
-                        break
-                }
-            }
-        }
-    }
-
-    // ========== 页面 Component ==========
-    Component {
-        id: homePage
         HomePage {
             onViewResultsRequested: contentArea.sidebarRef.currentPage = "results"
             onViewStatsRequested: contentArea.sidebarRef.currentPage = "stats"
             onTaskSettingsRequested: contentArea.sidebarRef.currentPage = "settings"
         }
-    }
 
-    Component {
-        id: addTaskPage
         AddTaskPage {
             onCreated: contentArea.sidebarRef.currentPage = "home"
             onCancelRequested: contentArea.sidebarRef.currentPage = "home"
         }
-    }
 
-    Component {
-        id: rulesPage
         RulesPage {
             // iter-137：规则配置全局化——不再有工作区绑定，直接返回首页
             onBackRequested: contentArea.sidebarRef.currentPage = "home"
         }
-    }
 
-    Component {
-        id: resultsPage
         ResultsPage {
             onBackRequested: contentArea.sidebarRef.currentPage = "home"
         }
-    }
 
-    Component {
-        id: statsPage
         StatsPage {
             onBackRequested: contentArea.sidebarRef.currentPage = "home"
         }
-    }
 
-    Component {
-        id: settingsPage
         SettingsPage {}
-    }
 
-    Component {
-        id: aboutPage
         AboutPage {}
     }
 }

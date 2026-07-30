@@ -616,3 +616,205 @@ class TestIter129AsyncPath:
         assert m.rowCount() == _ASYNC_THRESHOLD + 5
         # 第一条路径应为 new_00000
         assert "new_00000" in str(m.filtered_results[0].path).lower()
+
+
+# ----------------------------- iter-149 倒排索引与排序缓存 -----------------------------
+
+
+class TestIter149BuildIndices:
+    """``build_indices`` 纯函数（无 Qt 依赖）。"""
+
+    def test_empty_results_returns_empty_indices(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import build_indices
+
+        sev_idx, rule_idx = build_indices(())
+        assert sev_idx == {}
+        assert rule_idx == {}
+
+    def test_severity_index_grouped_by_severity(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import build_indices
+
+        # 严重度索引按 max_severity 分组（与原 filter_and_sort 过滤语义一致：
+        # filter_severities 只比较 max_severity，不是是否包含某级命中）
+        # 4 条 max_severity：0=CRITICAL, 1=WARNING, 2=WARNING, 3=CRITICAL
+        results = _build_filter_results(tmp_path)
+        sev_idx, _ = build_indices(results)
+        assert set(sev_idx[Severity.CRITICAL]) == {0, 3}
+        assert set(sev_idx[Severity.WARNING]) == {1, 2}
+        # 没有任何条目 max_severity 为 INFO（README 含 INFO+WARNING 命中，max 仍是 WARNING）
+        assert Severity.INFO not in sev_idx or sev_idx[Severity.INFO] == []
+
+    def test_rule_index_grouped_by_rule(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import build_indices
+
+        results = _build_filter_results(tmp_path)
+        _, rule_idx = build_indices(results)
+        # "敏感内容"：0 (secret.txt) + 3 (db.yaml)
+        assert set(rule_idx["敏感内容"]) == {0, 3}
+        # "API 密钥"：1 (app.py) + 2 (README) + 3 (db.yaml)
+        assert set(rule_idx["API 密钥"]) == {1, 2, 3}
+        # "提示信息"：2 (README) + 3 (db.yaml)
+        assert set(rule_idx["提示信息"]) == {2, 3}
+
+
+class TestIter149FilterViaIndex:
+    """``filter_via_index`` 纯函数（无 Qt 依赖）。"""
+
+    def _build_indices(self, tmp_path: Path) -> tuple[dict[Severity, list[int]], dict[str, list[int]], int]:
+        from fuscan.gui.models.result_model import build_indices
+
+        results = _build_filter_results(tmp_path)
+        sev, rule = build_indices(results)
+        return sev, rule, len(results)
+
+    def test_no_filter_returns_none(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import filter_via_index
+
+        sev_idx, rule_idx, n = self._build_indices(tmp_path)
+        assert filter_via_index(sev_idx, rule_idx, frozenset(), frozenset(), n) is None
+
+    def test_filter_only_severity(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import filter_via_index
+
+        sev_idx, rule_idx, n = self._build_indices(tmp_path)
+        out = filter_via_index(sev_idx, rule_idx, frozenset(), frozenset({Severity.CRITICAL}), n)
+        assert sorted(out) == [0, 3]
+
+    def test_filter_only_rule(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import filter_via_index
+
+        sev_idx, rule_idx, n = self._build_indices(tmp_path)
+        out = filter_via_index(sev_idx, rule_idx, frozenset({"敏感内容"}), frozenset(), n)
+        assert sorted(out) == [0, 3]
+
+    def test_filter_rule_plus_severity_intersection(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import filter_via_index
+
+        sev_idx, rule_idx, n = self._build_indices(tmp_path)
+        # "API 密钥" 命中 {1, 2, 3}（规则索引）；Severity.WARNING 命中 {1, 2}（max_severity）
+        # 交集 = {1, 2}
+        out = filter_via_index(sev_idx, rule_idx, frozenset({"API 密钥"}), frozenset({Severity.WARNING}), n)
+        assert sorted(out) == [1, 2]
+
+    def test_no_match_returns_empty_list(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import filter_via_index
+
+        sev_idx, rule_idx, n = self._build_indices(tmp_path)
+        # CRITICAL + "提示信息"：CRITICAL={0,3}，提示信息={2,3}，交集=3
+        # 但如果找一个不存在的规则：
+        out = filter_via_index(sev_idx, rule_idx, frozenset({"不存在的规则"}), frozenset(), n)
+        assert out == []
+
+
+class TestIter149SortCache:
+    """排序缓存：相同结果集+相同过滤排序条件不重复计算。"""
+
+    def test_cache_hit_avoids_filter_and_sort(self, tmp_path: Path, monkeypatch) -> None:
+        m = ResultListModel()
+        results = _build_filter_results(tmp_path)
+        m.set_results(results)
+        # 初次调用：缓存未命中，应调用 filter_and_sort
+        first_filtered = m.filtered_results
+        assert len(first_filtered) == 4
+
+        # 用 monkeypatch 让 filter_and_sort 抛异常，若缓存命中则不调函数、不抛异常
+        def should_not_be_called(*_a, **_kw):  # type: ignore[no-untyped-def]
+            raise AssertionError("filter_and_sort 被调用，缓存未生效")
+
+        from fuscan.gui.models import result_model as rm_mod
+
+        monkeypatch.setattr(rm_mod, "filter_and_sort", should_not_be_called)
+        # 触发相同条件的刷新（手动调 _schedule_filter_refresh）
+        m._schedule_filter_refresh()  # type: ignore[attr-defined]
+        # 不抛异常说明缓存命中
+        assert m.filtered_results == first_filtered
+
+    def test_change_filter_text_invalidates_cache(self, tmp_path: Path) -> None:
+        m = ResultListModel()
+        m.set_results(_build_filter_results(tmp_path))
+        before = m.filtered_count
+        m.set_filter_text("config")
+        after = m.filtered_count
+        assert before == 4 and after == 2
+
+    def test_change_sort_invalidates_cache(self, tmp_path: Path) -> None:
+        m = ResultListModel()
+        m.set_results(_build_filter_results(tmp_path))
+        first_paths = [str(r.path) for r in m.filtered_results]
+        # 默认 severity 降序，切换为 filePath 升序
+        m.set_sort("filePath", ascending=True)
+        second_paths = [str(r.path) for r in m.filtered_results]
+        assert first_paths != second_paths
+
+    def test_set_results_clears_cache(self, tmp_path: Path) -> None:
+        m = ResultListModel()
+        results = _build_filter_results(tmp_path)
+        m.set_results(results)
+        _ = m.filtered_results
+        # 旧缓存 key 基于 id(results) + 默认过滤排序条件
+        old_keys = list(m._sort_cache.keys())  # type: ignore[attr-defined]
+        assert len(old_keys) == 1
+        assert old_keys[0][0] == id(results)
+
+        # 替换结果集后，同步路径会基于新 results 写入新缓存
+        results2 = tuple(
+            ScanResult(
+                path=tmp_path / f"new_{i}.txt",
+                size=i,
+                hits=(RuleHit(rule_name="X", severity=Severity.INFO, detail="x"),),
+                errors=0,
+            )
+            for i in range(2)
+        )
+        m.set_results(results2)
+        new_keys = list(m._sort_cache.keys())  # type: ignore[attr-defined]
+        assert len(new_keys) == 1
+        # 新缓存 key 的 tuple[0] 是 id(results2)，已不等于旧 key
+        assert new_keys[0][0] == id(results2)
+        assert new_keys[0][0] != old_keys[0][0]
+
+
+class TestIter149IndexAppliedForLargeSet:
+    """大结果集（>= ``_INDEX_THRESHOLD``）应启用索引裁剪。"""
+
+    def test_large_model_builds_indices(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import _INDEX_THRESHOLD
+
+        m = ResultListModel()
+        results = _build_large_results(tmp_path, n=_INDEX_THRESHOLD)
+        m.set_results(results)
+        assert m._severity_index  # type: ignore[attr-defined]
+        assert m._rule_index  # type: ignore[attr-defined]
+
+    def test_small_model_does_not_build_indices(self, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import _INDEX_THRESHOLD
+
+        m = ResultListModel()
+        # 小结果集不构建索引
+        small = _build_large_results(tmp_path, n=max(100, _INDEX_THRESHOLD // 2))
+        m.set_results(small)
+        assert m._severity_index == {}  # type: ignore[attr-defined]
+        assert m._rule_index == {}  # type: ignore[attr-defined]
+
+    def test_remove_result_updates_indices(self, tmp_path: Path) -> None:
+        """``remove_result_by_path`` 后索引仍可用（过滤规则仍得到正确结果）。
+
+        _build_large_results 每 3 条循环：[敏感内容, API密钥, 提示信息]。
+        """
+        from fuscan.gui.models.result_model import _INDEX_THRESHOLD
+
+        m = ResultListModel()
+        n = _INDEX_THRESHOLD + 10  # 2010
+        results = _build_large_results(tmp_path, n=n)
+        m.set_results(results)
+        first_path = results[0].path  # i=0 属于「敏感内容」
+        first_count = m.rowCount()
+        ok = m.remove_result_by_path(first_path)
+        assert ok is True
+        assert m.rowCount() == first_count - 1
+        # 索引仍有效：set_filter_rules 过滤敏感内容的数量应为总数 1/3（≈669）
+        m.set_filter_rules(("敏感内容",))
+        # 2010 条原 670 条敏感内容，remove 1 条敏感内容剩 669
+        assert m.filtered_count == (n // 3) - 1
+        # 检查每个过滤后结果确实含敏感内容 rule_name
+        assert all("敏感内容" in r.rule_names for r in m.filtered_results)

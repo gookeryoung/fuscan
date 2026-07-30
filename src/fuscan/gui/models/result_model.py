@@ -24,6 +24,7 @@ iter-112 起在 Model 内部维护过滤+排序视图：
 
 from __future__ import annotations
 
+import collections
 import contextlib
 from typing import TYPE_CHECKING
 
@@ -76,6 +77,75 @@ _SORT_FIELDS: frozenset[str] = frozenset({SORT_DEFAULT, SORT_FILE_PATH, SORT_HIT
 
 # iter-129：结果数超过此阈值时过滤+排序移至后台线程，避免主线程阻塞
 _ASYNC_THRESHOLD = 10000
+
+# iter-149：结果数超过此阈值时启用倒排索引裁剪（小结果集索引开销抵不过线性扫描）
+_INDEX_THRESHOLD = 2000
+
+
+def build_indices(
+    results: tuple[ScanResult, ...],
+) -> tuple[dict[Severity, list[int]], dict[str, list[int]]]:
+    """构建严重度与规则名的倒排索引。
+
+    对大结果集（> ``_INDEX_THRESHOLD``）启用索引可将 ``filter_rules`` /
+    ``filter_severities`` 过滤从 O(n) 降到 O(k)（k 为匹配条目数）。
+
+    :param results: 原始结果元组
+    :return: ``(severity_index, rule_index)``
+
+      - ``severity_index``：严重度枚举 → 原始索引列表
+      - ``rule_index``：规则名 → 原始索引列表
+
+    """
+    severity_index: dict[Severity, list[int]] = collections.defaultdict(list)
+    rule_index: dict[str, list[int]] = collections.defaultdict(list)
+    for idx, result in enumerate(results):
+        severity_index[result.max_severity].append(idx)
+        for rule_name in result.rule_names:
+            rule_index[rule_name].append(idx)
+    return severity_index, rule_index
+
+
+def filter_via_index(
+    severity_index: dict[Severity, list[int]],
+    rule_index: dict[str, list[int]],
+    filter_rules: frozenset[str],
+    filter_severities: frozenset[Severity],
+    _total_count: int,
+) -> list[int] | None:
+    """通过倒排索引取交集返回候选原始索引列表。
+
+    :param severity_index: ``build_indices`` 返回的严重度索引（按 ``max_severity`` 分组）
+    :param rule_index: ``build_indices`` 返回的规则名索引
+    :param filter_rules: 规则名过滤集合（空集合表示不过滤该维度）
+    :param filter_severities: 严重度过滤集合（空集合表示不过滤该维度）
+    :param _total_count: 原始结果总数（保留占位，目前未使用，用于语义清晰）
+    :return: 候选原始索引列表；若所有维度都不过滤返回 ``None``（表示全量）
+
+    """
+    if not filter_severities and not filter_rules:
+        return None
+
+    candidates: set[int] | None = None
+
+    if filter_severities:
+        sev_set: set[int] = set()
+        for sev in filter_severities:
+            sev_set.update(severity_index.get(sev, ()))
+        candidates = sev_set
+
+    if filter_rules:
+        rule_set: set[int] = set()
+        for rule in filter_rules:
+            rule_set.update(rule_index.get(rule, ()))
+        if candidates is None:
+            candidates = rule_set
+        else:
+            candidates &= rule_set
+
+    if candidates is None:
+        return None
+    return list(candidates)
 
 
 def filter_and_sort(
@@ -143,6 +213,18 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         self._results: tuple[ScanResult, ...] = ()
         self._filtered: tuple[ScanResult, ...] = ()
 
+        # iter-149：倒排索引（set_results 时重建，remove_result_by_path 增量更新）
+        self._severity_index: dict[Severity, list[int]] = {}
+        self._rule_index: dict[str, list[int]] = {}
+
+        # iter-149：排序缓存，key = (id(self._results), filter_text, filter_rules,
+        # filter_severities, sort_field, sort_ascending)，value = 过滤+排序后最终 tuple
+        # 同一结果集、相同过滤排序条件直接命中，跳过 filter_and_sort
+        self._sort_cache: dict[
+            tuple[int, str, frozenset[str], frozenset[Severity], str, bool],
+            tuple[ScanResult, ...],
+        ] = {}
+
         # 过滤条件：空字符串/空集合表示该维度不过滤
         self._filter_text: str = ""
         self._filter_rules: frozenset[str] = frozenset()
@@ -202,8 +284,18 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         替换后自动重新应用当前过滤+排序条件，视图同步刷新。
         iter-129：``beginResetModel``/``endResetModel`` 由 ``_schedule_filter_refresh``
         或 ``_on_filter_done`` 统一管理，避免双重 reset。
+        iter-149：结果量 >= ``_INDEX_THRESHOLD`` 时预构建倒排索引，并清空排序缓存。
         """
         self._results = results
+        # 倒排索引：结果量达阈值才构建（小结果集索引开销抵不过收益）
+        if len(results) >= _INDEX_THRESHOLD:
+            self._severity_index, self._rule_index = build_indices(results)
+        else:
+            empty_sev: dict[Severity, list[int]] = {}
+            empty_rule: dict[str, list[int]] = {}
+            self._severity_index, self._rule_index = empty_sev, empty_rule
+        # 结果集变化，排序缓存全部失效
+        self._sort_cache.clear()
         self._schedule_filter_refresh()
 
     def clear(self) -> None:
@@ -238,6 +330,14 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         if len(new_results) == len(self._results):
             return False
         self._results = new_results
+        # iter-149：结果集变化，同步重建索引并清空排序缓存
+        if len(new_results) >= _INDEX_THRESHOLD:
+            self._severity_index, self._rule_index = build_indices(new_results)
+        else:
+            empty_sev: dict[Severity, list[int]] = {}
+            empty_rule: dict[str, list[int]] = {}
+            self._severity_index, self._rule_index = empty_sev, empty_rule
+        self._sort_cache.clear()
         self._schedule_filter_refresh()
         return True
 
@@ -346,6 +446,40 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
 
     # ----------------------------- 内部实现 -----------------------------
 
+    def _sort_cache_key(self) -> tuple[int, str, frozenset[str], frozenset[Severity], str, bool]:
+        """构建排序缓存 key。"""
+        return (
+            id(self._results),
+            self._filter_text,
+            self._filter_rules,
+            self._filter_severities,
+            self._sort_field,
+            self._sort_ascending,
+        )
+
+    def _candidate_results(
+        self,
+    ) -> tuple[ScanResult, ...]:
+        """通过倒排索引裁剪出规则/严重度的候选子集（供 filter_and_sort 使用）。
+
+        若结果量不足 ``_INDEX_THRESHOLD``、无索引或索引未启用时返回全量
+        ``self._results``。只负责规则/严重度两维度的裁剪，``filter_text``
+        仍由 ``filter_and_sort`` 内部处理。
+        """
+        if not self._severity_index or not self._rule_index:
+            return self._results
+        candidate_idx = filter_via_index(
+            self._severity_index,
+            self._rule_index,
+            self._filter_rules,
+            self._filter_severities,
+            len(self._results),
+        )
+        if candidate_idx is None:
+            return self._results
+        results = self._results
+        return tuple(results[i] for i in candidate_idx)
+
     def _schedule_filter_refresh(self) -> None:
         """根据结果量选择同步或异步路径刷新 ``_filtered`` 视图。
 
@@ -353,22 +487,38 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         - 结果数 >= ``_ASYNC_THRESHOLD``：取消旧 worker，启动新 ``FilterWorker``
           后台执行，完成后通过 :meth:`_on_filter_done` 回调到主线程 reset
 
+        iter-149：调度前先查排序缓存（相同结果集+相同条件直接复用），再用倒排索引
+        裁剪规则/严重度维度（候选子集缩小后再 filter_text+排序）。
+
         ``beginResetModel`` / ``endResetModel`` 仅在此处与 ``_on_filter_done`` 中调用，
         setters 不再手动管理，避免双重 reset。
         """
         # 取消上一个未完成的 worker：disconnect 信号后 wait 短暂等待退出
         self._cancel_worker()
 
+        # 1. 排序缓存命中：直接返回，避免任何计算
+        cache_key = self._sort_cache_key()
+        cached = self._sort_cache.get(cache_key)
+        if cached is not None:
+            self.beginResetModel()
+            self._filtered = cached
+            self.endResetModel()
+            return
+
+        # 2. 倒排索引裁剪：规则/严重度两维度裁剪为候选子集（filter_text 仍在 filter_and_sort 中完成）
+        candidates = self._candidate_results()
+
         if len(self._results) < _ASYNC_THRESHOLD:
             # 同步路径：小结果集直接计算，立即刷新
             new_filtered = filter_and_sort(
-                self._results,
+                candidates,
                 self._filter_text,
                 self._filter_rules,
                 self._filter_severities,
                 self._sort_field,
                 self._sort_ascending,
             )
+            self._sort_cache[cache_key] = new_filtered
             self.beginResetModel()
             self._filtered = new_filtered
             self.endResetModel()
@@ -382,7 +532,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         from fuscan.gui.workers.filter_worker import FilterWorker
 
         worker = FilterWorker(
-            results=self._results,
+            results=candidates,
             filter_text=self._filter_text,
             filter_rules=self._filter_rules,
             filter_severities=self._filter_severities,
@@ -390,7 +540,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             sort_ascending=self._sort_ascending,
         )
         worker.done.connect(  # pyrefly: ignore [missing-attribute]
-            lambda filtered, g=gen: self._on_filter_done(g, filtered)
+            lambda filtered, g=gen, key=cache_key: self._on_filter_done(g, key, filtered)
         )
         self._filter_worker = worker
         worker.start()
@@ -409,10 +559,16 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             worker.wait(500)
         self._filter_worker = None
 
-    def _on_filter_done(self, generation: int, filtered: tuple[ScanResult, ...]) -> None:
+    def _on_filter_done(
+        self,
+        generation: int,
+        cache_key: tuple[int, str, frozenset[str], frozenset[Severity], str, bool],
+        filtered: tuple[ScanResult, ...],
+    ) -> None:
         """``FilterWorker.done`` 信号回调：替换视图并 reset model。
 
         :param generation: 提交 worker 时的 generation 编号
+        :param cache_key: 提交 worker 时的排序缓存 key，用于结果回写
         :param filtered: 后台过滤+排序后的结果元组
 
         若 generation 不匹配当前 ``_filter_generation``，说明用户在 worker 运行期间
@@ -424,6 +580,9 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         if generation != self._filter_generation:
             # 过期结果，丢弃
             return
+        # 回写排序缓存（仅当 key 仍与当前状态匹配；若用户又换了条件则本次不缓存）
+        if cache_key == self._sort_cache_key():
+            self._sort_cache[cache_key] = filtered
         self.beginResetModel()
         self._filtered = filtered
         self.endResetModel()

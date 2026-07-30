@@ -53,6 +53,7 @@ class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
     ) -> None:
         """初始化过滤线程。"""
         super().__init__()
+
         self._results = results
         self._filter_text = filter_text
         self._filter_rules = filter_rules

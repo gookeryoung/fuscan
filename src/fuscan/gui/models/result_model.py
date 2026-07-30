@@ -101,6 +101,7 @@ def filter_and_sort(
     """
     if not results:
         return ()
+
     # 阶段 1：过滤
     view = list(results)
     if filter_text:
@@ -110,6 +111,7 @@ def filter_and_sort(
         view = [r for r in view if any(name in filter_rules for name in r.rule_names)]
     if filter_severities:
         view = [r for r in view if r.max_severity in filter_severities]
+
     # 阶段 2：排序
     if sort_field == SORT_DEFAULT:
         return tuple(view)
@@ -137,15 +139,19 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
 
     def __init__(self, parent: object | None = None) -> None:
         super().__init__(parent)
+
         self._results: tuple[ScanResult, ...] = ()
         self._filtered: tuple[ScanResult, ...] = ()
+
         # 过滤条件：空字符串/空集合表示该维度不过滤
         self._filter_text: str = ""
         self._filter_rules: frozenset[str] = frozenset()
         self._filter_severities: frozenset[Severity] = frozenset()
+
         # 排序条件：iter-137 默认按严重度降序（严重 → 轻微）
         self._sort_field: str = SORT_SEVERITY
         self._sort_ascending: bool = False
+
         # iter-129：后台过滤+排序（大结果集时启用）
         # generation 每次提交过滤任务时 +1，worker 回调时校验，丢弃过期结果
         self._filter_generation: int = 0

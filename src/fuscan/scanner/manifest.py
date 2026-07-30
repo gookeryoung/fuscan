@@ -66,10 +66,15 @@ __all__ = [
 class FileFingerprint:
     """文件指纹：增量扫描变更检测。
 
-    用 ``(mtime, size)`` 二元组判断文件是否变更：
+    用 ``(mtime, size)`` 二元组判断文件是否变更（快速路径，默认使用）：
     - mtime 变化 → 文件被修改
     - size 变化 → 文件被修改
     - 两者都相同 → 文件未变更（跳过 I/O）
+
+    可选 ``sha1_prefix``（16 字节 hex 前缀，约等于前 8 字节 sha1 的十六进制）
+    为三元组的第三维，用于"mtime+size 碰撞"的篡改防御场景
+    （如恶意程序 touch -r 保持 mtime 不变但改内容，罕见但可按需开启）。
+    为 ``None`` 时表示未启用 hash 校验，**不破坏与旧 JSON 的向后兼容**。
 
     mtime 为 ``os.stat().st_mtime``（浮点秒），精度足以区分常规编辑；
     size 为字节数，捕获内容增删。两者均相同的文件视为未变更。
@@ -77,6 +82,7 @@ class FileFingerprint:
 
     mtime: float
     size: int
+    sha1_prefix: str | None = None
 
 
 class IncrementalManifest:
@@ -98,10 +104,21 @@ class IncrementalManifest:
         self.fingerprints: dict[str, FileFingerprint] = fingerprints or {}
 
     def to_json(self) -> str:
-        """序列化为 JSON 字符串。"""
+        """序列化为 JSON 字符串。
+
+        ``sha1_prefix`` 为 ``None`` 时省略该键（保证老版本 fuscan 可读），
+        为非 None 时写入，实现**向前兼容**：新格式 manifest 读入老版本
+        fuscan 会忽略未知键，指纹仍可正常比对 mtime+size。
+        """
+        fps_out: dict[str, dict[str, object]] = {}
+        for k, v in self.fingerprints.items():
+            entry: dict[str, object] = {"mtime": v.mtime, "size": v.size}
+            if v.sha1_prefix is not None:
+                entry["sha1_prefix"] = v.sha1_prefix
+            fps_out[k] = entry
         data = {
             "root": str(self.root),
-            "fingerprints": {k: {"mtime": v.mtime, "size": v.size} for k, v in self.fingerprints.items()},
+            "fingerprints": fps_out,
         }
         return _json_dumps(data)
 
@@ -112,15 +129,24 @@ class IncrementalManifest:
         :param json_str: :meth:`to_json` 输出的 JSON 字符串或字节串
         :return: :class:`IncrementalManifest` 实例
         :raises ValueError: JSON 格式非法
+
+        向后兼容：旧格式 JSON 无 ``sha1_prefix`` 键时读入为 ``None``，
+        新格式有则填入。不合法的值（非字符串/非 None）回退为 ``None``。
         """
         data = _json_loads(json_str)
         root = Path(data.get("root", ""))
         fps_data = data.get("fingerprints", {})
-        fingerprints = {
-            str(k): FileFingerprint(mtime=float(v.get("mtime", 0.0)), size=int(v.get("size", 0)))
-            for k, v in fps_data.items()
-            if isinstance(v, dict)
-        }
+        fingerprints: dict[str, FileFingerprint] = {}
+        for k, v in fps_data.items():
+            if not isinstance(v, dict):
+                continue
+            raw_sha = v.get("sha1_prefix", None)
+            sha1_prefix: str | None = raw_sha if isinstance(raw_sha, str) and raw_sha else None
+            fingerprints[str(k)] = FileFingerprint(
+                mtime=float(v.get("mtime", 0.0)),
+                size=int(v.get("size", 0)),
+                sha1_prefix=sha1_prefix,
+            )
         return cls(root=root, fingerprints=fingerprints)
 
     @staticmethod

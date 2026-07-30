@@ -315,6 +315,9 @@ class ScanStats:
     # 压缩包内条目数（archive 阶段扫描的条目，已含在 scanned_files 中）。
     # 单独统计以便在摘要中注明，避免 scanned_files > total_files 时产生误解
     archive_entries: int = 0
+    # 增量扫描时未变更文件数：从 prev_report 复用上次命中结果、未重新读取内容
+    # 做 I/O 的文件数。全量扫描时为 0；增量扫描越大，此值越接近 total_files。
+    unchanged_files: int = 0
     # 各阶段性能统计（PerfStats 始终启用）：
     # {stage_name: {"total_ms": float, "count": int, "max_ms": float}}
     # None 表示未采集（如测试构造的 ScanStats）；空 dict 表示扫描无数据
@@ -322,8 +325,14 @@ class ScanStats:
 
     @property
     def speed(self) -> float:
-        """扫描吞吐量（文件/秒），duration为0时返回0.0。"""
-        return self.scanned_files / self.duration_seconds if self.duration_seconds > 0 else 0.0
+        """扫描吞吐量（文件/秒），duration为0时返回0.0。
+
+        增量扫描场景下用 ``scanned_files + unchanged_files``（逻辑总处理数）
+        除以耗时，反映用户实际体验的吞吐：未变更文件虽没做 I/O，但
+        从 manifest 比对+合并结果也视为完成处理。
+        """
+        total_processed = self.scanned_files + self.unchanged_files
+        return total_processed / self.duration_seconds if self.duration_seconds > 0 else 0.0
 
     def summary(self, *, cancelled: bool = False) -> str:
         """返回状态栏摘要文本。
@@ -337,8 +346,11 @@ class ScanStats:
         scan_part = f"扫描 {self.scanned_files}"
         if self.archive_entries > 0:
             scan_part += f"（含压缩包内条目 {self.archive_entries}）"
+        unchanged_part = ""
+        if self.unchanged_files > 0:
+            unchanged_part = f" | 复用 {self.unchanged_files}"
         return (
-            f"{prefix}: 总计 {self.total_files} | {scan_part} | "
+            f"{prefix}: 总计 {self.total_files} | {scan_part}{unchanged_part} | "
             f"跳过 {self.skipped_files} | 用户跳过 {self.user_skipped} | "
             f"命中 {self.matched_files} | 条数 {self.total_matches} | "
             f"错误 {self.errors} | 耗时 {self.duration_seconds:.2f}s"

@@ -489,3 +489,176 @@ class TestIncrementalMerge:
         # 未删除文件命中保留
         assert any(r.path == file_b for r in report2.results)
         assert report2.stats.matched_files == 1
+
+
+class TestIter150Sha1PrefixCompat:
+    """FileFingerprint.sha1_prefix 字段与 JSON 前/向后兼容测试。"""
+
+    def test_new_fingerprint_sha1_none_default(self) -> None:
+        """新构造无 sha1_prefix 时默认 None，与旧二元组语义一致。"""
+        fp = FileFingerprint(mtime=1000.0, size=10)
+        assert fp.sha1_prefix is None
+        assert FileFingerprint(mtime=1000.0, size=10) == FileFingerprint(mtime=1000.0, size=10, sha1_prefix=None)
+
+    def test_sha1_none_omitted_in_json(self) -> None:
+        """sha1_prefix 为 None 时 to_json 省略键，老版本 fuscan 可读。"""
+        fps = {"a.txt": FileFingerprint(mtime=1000.0, size=10)}
+        manifest = IncrementalManifest(root=Path("/root"), fingerprints=fps)
+        json_str = manifest.to_json()
+        # 不应包含 "sha1_prefix" 字样
+        assert "sha1_prefix" not in json_str
+        # 从 JSON 还原后 sha1 仍为 None
+        restored = IncrementalManifest.from_json(json_str)
+        assert restored.fingerprints["a.txt"].sha1_prefix is None
+
+    def test_sha1_kept_roundtrip(self) -> None:
+        """sha1_prefix 非 None 时 to_json 写入，from_json 可还原。"""
+        fps = {
+            "a.txt": FileFingerprint(mtime=1000.0, size=10, sha1_prefix="abcd1234ef567890"),
+            "b.txt": FileFingerprint(mtime=2000.0, size=20),  # sha1=None
+        }
+        manifest = IncrementalManifest(root=Path("/root"), fingerprints=fps)
+        json_str = manifest.to_json()
+        assert '"sha1_prefix": "abcd1234ef567890"' in json_str
+        restored = IncrementalManifest.from_json(json_str)
+        assert restored.fingerprints["a.txt"].sha1_prefix == "abcd1234ef567890"
+        assert restored.fingerprints["b.txt"].sha1_prefix is None
+
+    def test_old_json_no_sha1_reads_none(self) -> None:
+        """旧格式 JSON（无 sha1_prefix）经 from_json 读入后 sha1 为 None。"""
+        import json as _json
+
+        old_format = _json.dumps(
+            {
+                "root": "/root",
+                "fingerprints": {
+                    "a.txt": {"mtime": 1000.0, "size": 10},
+                    "b.txt": {"mtime": 2000.0, "size": 20},
+                },
+            }
+        )
+        restored = IncrementalManifest.from_json(old_format)
+        assert len(restored.fingerprints) == 2
+        for fp in restored.fingerprints.values():
+            assert fp.sha1_prefix is None
+        # mtime/size 保持正确
+        assert restored.fingerprints["a.txt"].mtime == 1000.0
+        assert restored.fingerprints["b.txt"].size == 20
+
+    def test_invalid_sha1_value_falls_back_to_none(self) -> None:
+        """非法 sha1 值（非字符串/空串）读入后回退为 None，不抛异常。"""
+        import json as _json
+
+        bad = _json.dumps(
+            {
+                "root": "/r",
+                "fingerprints": {
+                    "a.txt": {"mtime": 1.0, "size": 1, "sha1_prefix": 123},  # 非字符串
+                    "b.txt": {"mtime": 2.0, "size": 2, "sha1_prefix": ""},  # 空字符串
+                },
+            }
+        )
+        restored = IncrementalManifest.from_json(bad)
+        assert restored.fingerprints["a.txt"].sha1_prefix is None
+        assert restored.fingerprints["b.txt"].sha1_prefix is None
+
+
+class TestIter150ScanStatsUnchanged:
+    """ScanStats.unchanged_files 字段与增量扫描统计联动。"""
+
+    def test_full_scan_unchanged_zero(self, tmp_path: Path) -> None:
+        """全量扫描 unchanged_files == 0。"""
+        (tmp_path / "a.txt").write_text("x", encoding="utf-8")
+        rs = _build_ruleset(_filename_rule("r", "a"))
+        scanner = Scanner(rs, scan_extensions=("txt",))
+        report = scanner.scan(tmp_path)
+        assert report.stats.unchanged_files == 0
+
+    def test_incremental_full_unchanged(self, tmp_path: Path) -> None:
+        """100% 未变更增量扫描：unchanged_files == 文件总数，summary 显示复用。"""
+        (tmp_path / "a.txt").write_text("x", encoding="utf-8")
+        (tmp_path / "b.txt").write_text("y", encoding="utf-8")
+        rs = _build_ruleset(_filename_rule("r", "txt"))
+        scanner1 = Scanner(rs, scan_extensions=("txt",))
+        report1 = scanner1.scan(tmp_path)
+        manifest = scanner1.current_manifest
+        assert manifest is not None
+
+        scanner2 = Scanner(rs, scan_extensions=("txt",), incremental_manifest=manifest, prev_report=report1)
+        walk_result = scanner2.collect_entries(tmp_path)
+        report2 = scanner2.scan_entries(tmp_path, walk_result)
+        # 两个 txt 文件全未变更
+        assert report2.stats.unchanged_files == 2
+        # summary 应含「复用 2」
+        assert "复用 2" in report2.stats.summary()
+        # speed 计算包含 unchanged_files（2 逻辑处理文件 / 耗时）
+        # duration>0 时至少 > 0
+        if report2.stats.duration_seconds > 0:
+            assert report2.stats.speed > 0
+
+    def test_partial_unchanged_counts_correctly(self, tmp_path: Path) -> None:
+        """部分变更场景：1 改 + 1 未改 → unchanged_files == 1。"""
+        file_a = tmp_path / "a.txt"
+        file_b = tmp_path / "b.txt"
+        file_a.write_text("x", encoding="utf-8")
+        file_b.write_text("y", encoding="utf-8")
+        rs = _build_ruleset(_filename_rule("r", "txt"))
+        scanner1 = Scanner(rs, scan_extensions=("txt",))
+        report1 = scanner1.scan(tmp_path)
+        manifest = scanner1.current_manifest
+        assert manifest is not None
+
+        st = file_a.stat()
+        os.utime(file_a, (st.st_mtime + 100, st.st_mtime + 100))
+
+        scanner2 = Scanner(rs, scan_extensions=("txt",), incremental_manifest=manifest, prev_report=report1)
+        walk_result = scanner2.collect_entries(tmp_path)
+        report2 = scanner2.scan_entries(tmp_path, walk_result)
+        assert report2.stats.unchanged_files == 1
+        assert "复用 1" in report2.stats.summary()
+
+
+class TestIter150Benchmark:
+    """增量扫描基准：100% unchanged 场景 >= 1000 files/s。"""
+
+    N = 3000  # 文件数；1000 files/s 目标意味着总耗时 <= 3s 即可达标
+
+    @pytest.mark.benchmark(min_rounds=3, max_time=10.0, warmup=False)
+    def test_incremental_throughput_ge_1000_files_per_sec(self, tmp_path: Path, benchmark) -> None:
+        """增量全量未变更（walk+manifest 比对 + 合并）：功能验证 + throughput >= 1000。
+
+        ``--benchmark-disable`` 时 benchmark.stats 为 None，仅验证功能正确性；
+        启用 benchmark 时才校验吞吐量数字，避免禁用模式下 AttributeError。
+        """
+        n = self.N
+        for i in range(n):
+            (tmp_path / f"f_{i:05d}.txt").write_text(f"c{i}", encoding="utf-8")
+        rs = _build_ruleset(_filename_rule("r", "000000000"))
+        s1 = Scanner(rs, scan_extensions=("txt",), max_workers=1)
+        prev = s1.scan(tmp_path)
+        manifest = s1.current_manifest
+        assert manifest is not None
+        assert prev.stats.total_files >= n
+
+        def run_incremental() -> None:
+            s = Scanner(
+                rs,
+                scan_extensions=("txt",),
+                max_workers=1,
+                incremental_manifest=manifest,
+                prev_report=prev,
+            )
+            wr = s.collect_entries(tmp_path)
+            rep = s.scan_entries(tmp_path, wr)
+            assert len(wr.entries) == 0, "100% 未变更场景 entries 应为空"
+            assert rep.stats.unchanged_files == n
+
+        benchmark(run_incremental)
+        # 仅在 benchmark 收集到统计时校验 throughput 数字
+        stats = getattr(benchmark, "stats", None)
+        if stats is not None and getattr(stats, "mean", None) is not None:
+            avg_s = stats.mean  # 单位：秒
+            throughput = n / avg_s if avg_s > 0 else float("inf")
+            assert throughput >= 1000, (
+                f"增量吞吐量 {throughput:.0f} files/s 未达 >= 1000 目标 (N={n}, mean={avg_s * 1000:.2f}ms)"
+            )

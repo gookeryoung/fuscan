@@ -370,20 +370,20 @@ class Scanner:
                     if not self._should_scan(entry):
                         skipped += 1
                         continue
+                    # iter-150：rel_key 仅计算一次（之前两分支各算一次，
+                    # 大目录下省几十万次 path.relative_to + 字符串替换）
+                    rel = IncrementalManifest.rel_key(entry.path, root)
                     # 增量模式：指纹匹配的未变更文件跳过（不加入扫描队列），
                     # 仅累计 _unchanged_count 供 scan_entries 合并统计
                     if prev_fps:
-                        rel = IncrementalManifest.rel_key(entry.path, root)
                         prev_fp = prev_fps.get(rel)
                         if prev_fp is not None and prev_fp.mtime == entry.mtime and prev_fp.size == entry.size:
                             self._unchanged_count += 1
-                            # 未变更文件指纹直接复用（mtime/size 未变）
+                            # 未变更文件指纹直接复用（mtime/size 未变，sha1_prefix 也沿用）
                             new_fingerprints[rel] = prev_fp
                             continue
                     # 变更/新文件/全量模式：记录当前指纹供下次增量扫描
-                    new_fingerprints[IncrementalManifest.rel_key(entry.path, root)] = FileFingerprint(
-                        mtime=entry.mtime, size=entry.size
-                    )
+                    new_fingerprints[rel] = FileFingerprint(mtime=entry.mtime, size=entry.size)
                     entries.append(entry)
                     if total % 200 == 0:
                         # 实时同步进度上下文，使 _emit_progress 反映 walk 阶段累计值。
@@ -577,6 +577,8 @@ class Scanner:
             user_skipped=user_skipped,
             # iter-137：压缩包内条目数，用于摘要注明
             archive_entries=archive_entries,
+            # iter-150：增量扫描未变更文件数（本次从 prev_report 复用的文件数）
+            unchanged_files=self._unchanged_count,
             # PerfStats 始终启用，导出各阶段统计供 GUI/CLI 展示与持久化
             perf_summary=self._perf.to_dict(),
         )

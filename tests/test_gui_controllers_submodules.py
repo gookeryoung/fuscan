@@ -21,6 +21,22 @@ pytestmark = pytest.mark.gui
 
 try:
     from fuscan.config import Config
+    from fuscan.gui.controllers._batch_actions import (
+        mark_as_false_positive,
+        replace_all_filtered_results,
+        undo_last_batch_replace,
+        undo_selected_replace,
+    )
+    from fuscan.gui.controllers._history import build_history_entry
+    from fuscan.gui.controllers._history_view import (
+        build_scan_comparison_json,
+        build_workspace_history_json,
+    )
+    from fuscan.gui.controllers._manifest import (
+        invalidate_manifest,
+        load_manifest,
+        save_manifest,
+    )
     from fuscan.gui.controllers._persistence import (
         coerce_float,
         coerce_int,
@@ -28,6 +44,10 @@ try:
         coerce_str_tuple,
         deserialize_task_overrides,
         serialize_task_overrides,
+    )
+    from fuscan.gui.controllers._restore import (
+        delete_cached_results,
+        save_cached_results,
     )
     from fuscan.gui.controllers._result_detail import (
         build_detail_hits_model,
@@ -43,6 +63,7 @@ try:
         effective_max_workers,
         effective_scan_archives,
     )
+    from fuscan.history import STATUS_CANCELLED, STATUS_COMPLETED, ScanHistoryEntry
     from fuscan.processing.skip_store import SkipStore
     from fuscan.rules.model import (
         LeafMatch,
@@ -52,6 +73,8 @@ try:
         RuleSet,
         Severity,
     )
+    from fuscan.scanner import ScanReport, ScanStats
+    from fuscan.scanner.manifest import FileFingerprint, IncrementalManifest
     from fuscan.scanner.result import RuleHit, ScanResult
 
     PYSIDE_AVAILABLE = True
@@ -1107,3 +1130,859 @@ class TestLoadPersistedWorkspacesFaultTolerance:
         assert len(result) == 2
         assert result[0] == {"id": "ws1"}
         assert result[1] == {"id": "ws2"}
+
+
+# ----------------------------- _batch_actions -----------------------------
+
+
+def _make_replaceable_result(src: Path, rule_name: str = "可替换规则") -> ScanResult:
+    """构造含可替换命中规则的结果（写入源文件含 password 关键词）。"""
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_text("password=abc\n", encoding="utf-8")
+    hit = RuleHit(
+        rule_name=rule_name,
+        severity=Severity.WARNING,
+        detail="匹配",
+        match_texts=("password",),
+    )
+    return ScanResult(path=src, size=src.stat().st_size, hits=(hit,))
+
+
+def _make_scan_report_for_history(
+    results: tuple[ScanResult, ...] = (),
+    cancelled: bool = False,
+) -> ScanReport:
+    """构造测试用 ScanReport（用于 build_history_entry 测试）。"""
+    return ScanReport(
+        root=Path("/tmp"),
+        results=results,
+        stats=ScanStats(
+            total_files=10,
+            scanned_files=10,
+            matched_files=len(results),
+            skipped_files=0,
+            errors=0,
+            duration_seconds=1.0,
+            total_matches=len(results),
+        ),
+        cancelled=cancelled,
+    )
+
+
+class TestReplaceAllFilteredResults:
+    """测试 replace_all_filtered_results 批量替换纯函数。"""
+
+    def test_no_ruleset_no_override_returns_message_none(self) -> None:
+        """规则集未加载且无自定义替换 → 返回提示与 None（不更新撤销状态）。"""
+        msg, last_batch = replace_all_filtered_results(
+            filtered=(),
+            ruleset=None,
+            backup_dir=Path("/tmp/backup"),
+            scan_root=Path("/tmp"),
+            backup_preserve_relative=False,
+            override_replace_with=None,
+        )
+        assert msg == "规则集未加载"
+        assert last_batch is None
+
+    def test_empty_filtered_returns_message_none(self) -> None:
+        """有规则集但无待替换结果 → 返回提示与 None。"""
+        msg, last_batch = replace_all_filtered_results(
+            filtered=(),
+            ruleset=_make_ruleset_with_replace(),
+            backup_dir=Path("/tmp/backup"),
+            scan_root=Path("/tmp"),
+            backup_preserve_relative=False,
+            override_replace_with=None,
+        )
+        assert msg == "无待替换的结果"
+        assert last_batch is None
+
+    def test_success_returns_message_and_backup_paths(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """成功批量替换返回聚合消息与非空撤销配对。"""
+        src1 = tmp_path / "scan" / "a.txt"
+        src2 = tmp_path / "scan" / "b.txt"
+        results = (
+            _make_replaceable_result(src1),
+            _make_replaceable_result(src2),
+        )
+        msg, last_batch = replace_all_filtered_results(
+            filtered=results,
+            ruleset=_make_ruleset_with_replace(),
+            backup_dir=tmp_path / "backup",
+            scan_root=tmp_path / "scan",
+            backup_preserve_relative=False,
+            override_replace_with=None,
+        )
+        assert "成功 2/2" in msg
+        assert last_batch is not None
+        assert len(last_batch) == 2
+        # 源文件应被替换
+        assert src1.read_text(encoding="utf-8") == "***=abc\n"
+        assert src2.read_text(encoding="utf-8") == "***=abc\n"
+
+    def test_override_mode_works_without_ruleset(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """override_replace_with 非空时 ruleset 可为 None。"""
+        src = tmp_path / "scan" / "a.txt"
+        results = (_make_replaceable_result(src, rule_name="只检测规则"),)
+        msg, last_batch = replace_all_filtered_results(
+            filtered=results,
+            ruleset=None,
+            backup_dir=tmp_path / "backup",
+            scan_root=tmp_path / "scan",
+            backup_preserve_relative=False,
+            override_replace_with="[REDACTED]",
+        )
+        assert "替换成功" in msg or "成功 1/1" in msg
+        assert last_batch is not None
+        assert len(last_batch) == 1
+        assert src.read_text(encoding="utf-8") == "[REDACTED]=abc\n"
+
+
+class TestUndoLastBatchReplace:
+    """测试 undo_last_batch_replace 批量撤销纯函数。"""
+
+    def test_empty_paths_returns_message(self) -> None:
+        """无可撤销记录 → 返回提示消息。"""
+        assert undo_last_batch_replace(()) == "无可撤销的批量替换"
+
+    def test_success_restores_files(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """成功从 .bak 恢复所有文件。"""
+        src1 = tmp_path / "scan" / "a.txt"
+        src2 = tmp_path / "scan" / "b.txt"
+        results = (
+            _make_replaceable_result(src1),
+            _make_replaceable_result(src2),
+        )
+        # 先批量替换生成备份
+        _msg, last_batch = replace_all_filtered_results(
+            filtered=results,
+            ruleset=_make_ruleset_with_replace(),
+            backup_dir=tmp_path / "backup",
+            scan_root=tmp_path / "scan",
+            backup_preserve_relative=False,
+            override_replace_with=None,
+        )
+        assert last_batch is not None
+        assert src1.read_text(encoding="utf-8") == "***=abc\n"
+
+        # 撤销
+        summary = undo_last_batch_replace(last_batch)
+        assert "恢复 2" in summary
+        assert "失败" not in summary
+        # 源文件应恢复
+        assert src1.read_text(encoding="utf-8") == "password=abc\n"
+        assert src2.read_text(encoding="utf-8") == "password=abc\n"
+
+    def test_partial_failure_includes_failed_count(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """备份文件丢失 → 部分失败消息。"""
+        src1 = tmp_path / "scan" / "a.txt"
+        src2 = tmp_path / "scan" / "b.txt"
+        results = (
+            _make_replaceable_result(src1),
+            _make_replaceable_result(src2),
+        )
+        _msg, last_batch = replace_all_filtered_results(
+            filtered=results,
+            ruleset=_make_ruleset_with_replace(),
+            backup_dir=tmp_path / "backup",
+            scan_root=tmp_path / "scan",
+            backup_preserve_relative=False,
+            override_replace_with=None,
+        )
+        assert last_batch is not None
+        # 删除第一个备份，模拟撤销失败
+        last_batch[0][1].unlink()
+
+        summary = undo_last_batch_replace(last_batch)
+        assert "恢复 1" in summary
+        assert "1 个失败" in summary
+
+
+class TestUndoSelectedReplace:
+    """测试 undo_selected_replace 单文件撤销纯函数。"""
+
+    def test_none_result_returns_message(self) -> None:
+        """未选中结果 → 返回提示消息。"""
+        assert (
+            undo_selected_replace(
+                result=None,
+                backup_dir=Path("/tmp/backup"),
+                scan_root=Path("/tmp"),
+                backup_preserve_relative=False,
+            )
+            == "未选中结果"
+        )
+
+    def test_success_restores_selected(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """成功从 .bak 恢复当前选中结果。"""
+        src = tmp_path / "scan" / "a.txt"
+        result = _make_replaceable_result(src)
+        # 先单文件替换生成备份（preserve_relative=True 使备份路径确定，
+        # 避免 _resolve_backup_path 的同名冲突序号分支导致两次解析路径不一致）
+        replace_selected(
+            result=result,
+            ruleset=_make_ruleset_with_replace(),
+            backup_dir_str=str(tmp_path / "backup"),
+            backup_preserve_relative=True,
+            last_report_root=tmp_path / "scan",
+        )
+        assert src.read_text(encoding="utf-8") == "***=abc\n"
+
+        # 撤销当前选中
+        msg = undo_selected_replace(
+            result=result,
+            backup_dir=tmp_path / "backup",
+            scan_root=tmp_path / "scan",
+            backup_preserve_relative=True,
+        )
+        assert msg.startswith("已从备份恢复")
+        assert src.read_text(encoding="utf-8") == "password=abc\n"
+
+
+class TestMarkAsFalsePositive:
+    """测试 mark_as_false_positive 误报标记校验纯函数。"""
+
+    def test_none_result_returns_error(self) -> None:
+        """未选中结果 → 返回空字段与错误消息。"""
+        path_glob, rule_name, error_msg = mark_as_false_positive(result=None, rule_filter="")
+        assert path_glob == ""
+        assert rule_name == ""
+        assert error_msg == "未选中结果"
+
+    def test_archive_result_returns_error(self, tmp_path: Path) -> None:
+        """压缩包内部条目 → 返回错误消息（路径含 ! 无法 glob）。"""
+        hit = RuleHit(rule_name="r", severity=Severity.WARNING, detail="匹配")
+        result = _make_result(
+            tmp_path / "a.zip!inner.txt",
+            hits=(hit,),
+            archive_path=tmp_path / "a.zip",
+        )
+        _path, _rule, error_msg = mark_as_false_positive(result=result, rule_filter="")
+        assert error_msg == "压缩包内部条目不支持标记误报"
+
+    def test_empty_rule_filter_defaults_star(self, tmp_path: Path) -> None:
+        """rule_filter 为空 → rule_name 默认 *（全部规则标记误报）。"""
+        src = tmp_path / "scan" / "a.txt"
+        result = _make_replaceable_result(src)
+        path_glob, rule_name, error_msg = mark_as_false_positive(result=result, rule_filter="")
+        assert error_msg is None
+        assert rule_name == "*"
+        assert path_glob == str(src)
+
+    def test_specific_rule_filter(self, tmp_path: Path) -> None:
+        """rule_filter 指定规则名 → rule_name 为该规则名（strip 后）。"""
+        src = tmp_path / "scan" / "a.txt"
+        result = _make_replaceable_result(src)
+        path_glob, rule_name, error_msg = mark_as_false_positive(result=result, rule_filter="  敏感规则  ")
+        assert error_msg is None
+        assert rule_name == "敏感规则"
+        assert path_glob == str(src)
+
+
+# ----------------------------- _manifest -----------------------------
+
+
+def _make_manifest(root: Path | None = None) -> IncrementalManifest:
+    """构造测试用 IncrementalManifest。"""
+    return IncrementalManifest(
+        root=root or Path("/tmp"),
+        fingerprints={
+            "a.txt": FileFingerprint(mtime=1000.0, size=10),
+            "b.txt": FileFingerprint(mtime=2000.0, size=20),
+        },
+    )
+
+
+class TestLoadManifest:
+    """测试 load_manifest 清单加载纯函数。"""
+
+    def test_missing_file_returns_none(self, tmp_path: Path) -> None:
+        """文件不存在 → 返回 None。"""
+        assert load_manifest("nonexistent", tmp_path / "manifests") is None
+
+    def test_loads_instance(self, tmp_path: Path) -> None:
+        """文件存在 → 返回 IncrementalManifest 实例。"""
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir(parents=True)
+        manifest = _make_manifest(root=tmp_path)
+        (manifests_dir / "ws-ok.json").write_text(manifest.to_json(), encoding="utf-8")
+
+        loaded = load_manifest("ws-ok", manifests_dir)
+        assert loaded is not None
+        assert isinstance(loaded, IncrementalManifest)
+        assert loaded.fingerprints["a.txt"].mtime == 1000.0
+        assert loaded.fingerprints["a.txt"].size == 10
+        assert loaded.fingerprints["b.txt"].size == 20
+
+    def test_invalid_json_returns_none(self, tmp_path: Path) -> None:
+        """JSON 解析失败 → 返回 None（不抛异常）。"""
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir(parents=True)
+        (manifests_dir / "bad.json").write_text("{not valid json", encoding="utf-8")
+
+        assert load_manifest("bad", manifests_dir) is None
+
+
+class TestSaveManifest:
+    """测试 save_manifest 清单持久化纯函数。"""
+
+    def test_writes_file_roundtrip(self, tmp_path: Path) -> None:
+        """保存后可用 load_manifest 读回相同指纹。"""
+        manifests_dir = tmp_path / "manifests"
+        manifest = _make_manifest(root=tmp_path)
+
+        save_manifest("ws-1", manifest, manifests_dir)
+        assert (manifests_dir / "ws-1.json").exists()
+
+        loaded = load_manifest("ws-1", manifests_dir)
+        assert loaded is not None
+        assert loaded.fingerprints["a.txt"].mtime == 1000.0
+        assert loaded.fingerprints["b.txt"].size == 20
+
+    def test_creates_missing_dir(self, tmp_path: Path) -> None:
+        """manifests_dir 不存在时自动创建。"""
+        manifests_dir = tmp_path / "nested" / "manifests"
+        assert not manifests_dir.exists()
+
+        save_manifest("ws-2", _make_manifest(), manifests_dir)
+        assert manifests_dir.exists()
+        assert (manifests_dir / "ws-2.json").exists()
+
+
+class TestInvalidateManifest:
+    """测试 invalidate_manifest 清单删除纯函数。"""
+
+    def test_missing_file_noop(self, tmp_path: Path) -> None:
+        """文件不存在 → 不抛异常。"""
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir(parents=True)
+        # 不应抛异常
+        invalidate_manifest("nonexistent", manifests_dir)
+
+    def test_deletes_file(self, tmp_path: Path) -> None:
+        """文件存在 → 删除。"""
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir(parents=True)
+        manifest_file = manifests_dir / "ws-del.json"
+        manifest_file.write_text("{}", encoding="utf-8")
+        assert manifest_file.exists()
+
+        invalidate_manifest("ws-del", manifests_dir)
+        assert not manifest_file.exists()
+
+    def test_unlink_failure_logs_warning(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """unlink 抛 OSError → 记录警告日志，不抛异常。"""
+        manifests_dir = tmp_path / "manifests"
+        manifests_dir.mkdir(parents=True)
+        manifest_file = manifests_dir / "ws-fail.json"
+        manifest_file.write_text("{}", encoding="utf-8")
+
+        def _raise_oserror(_path: Path) -> None:
+            raise OSError("permission denied")
+
+        monkeypatch.setattr(Path, "unlink", _raise_oserror)
+
+        with caplog.at_level("WARNING", logger="fuscan.gui.controllers._manifest"):
+            invalidate_manifest("ws-fail", manifests_dir)
+        assert any("增量清单清除失败" in r.message for r in caplog.records)
+
+
+# ----------------------------- _history -----------------------------
+
+
+class TestBuildHistoryEntry:
+    """测试 build_history_entry 历史条目构建纯函数。"""
+
+    def test_none_report_returns_none(self) -> None:
+        """report 为 None → 返回 None。"""
+        assert build_history_entry(None, "ws-1", "工作区A", "已完成") is None
+
+    def test_completed_report_returns_entry(self, tmp_path: Path) -> None:
+        """未取消的 report → STATUS_COMPLETED 条目。"""
+        result = _make_replaceable_result(tmp_path / "secret.txt")
+        report = _make_scan_report_for_history(results=(result,), cancelled=False)
+
+        entry = build_history_entry(report, "ws-2", "工作区B", "已完成")
+        assert entry is not None
+        assert isinstance(entry, ScanHistoryEntry)
+        assert entry.workspace_id == "ws-2"
+        assert entry.workspace_name == "工作区B"
+        assert entry.status == STATUS_COMPLETED
+        assert entry.total_files == 10
+        assert entry.matched_files == 1
+        assert entry.summary == "已完成"
+        # hit_paths 为排序后的路径元组
+        assert entry.hit_paths == (str(tmp_path / "secret.txt"),)
+        # rule_names 为排序后的规则名元组
+        assert entry.rule_names == ("可替换规则",)
+
+    def test_cancelled_report_returns_cancelled_status(self) -> None:
+        """取消的 report → STATUS_CANCELLED 条目。"""
+        report = _make_scan_report_for_history(results=(), cancelled=True)
+
+        entry = build_history_entry(report, "ws-3", "工作区C", "已取消")
+        assert entry is not None
+        assert entry.status == STATUS_CANCELLED
+        assert entry.hit_paths == ()
+        assert entry.rule_names == ()
+        assert entry.summary == "已取消"
+
+    def test_hit_paths_sorted(self, tmp_path: Path) -> None:
+        """多个命中路径应排序后归档。"""
+        src_b = tmp_path / "b.txt"
+        src_a = tmp_path / "a.txt"
+        results = (
+            _make_replaceable_result(src_b, rule_name="规则B"),
+            _make_replaceable_result(src_a, rule_name="规则A"),
+        )
+        report = _make_scan_report_for_history(results=results)
+
+        entry = build_history_entry(report, "ws-4", "工作区D", "已完成")
+        assert entry is not None
+        assert entry.hit_paths == (str(tmp_path / "a.txt"), str(tmp_path / "b.txt"))
+        assert entry.rule_names == ("规则A", "规则B")
+
+
+# ----------------------------- _restore -----------------------------
+
+
+def _make_report_with_hits(
+    root: Path,
+    hits_count: int = 1,
+) -> ScanReport:
+    """构造测试用 ScanReport（含指定数量的命中结果）。"""
+    results = tuple(
+        ScanResult(
+            path=root / f"hit_{i}.txt",
+            size=10,
+            hits=(
+                RuleHit(
+                    rule_name="敏感规则",
+                    severity=Severity.WARNING,
+                    detail="匹配",
+                    match_texts=("password",),
+                ),
+            ),
+        )
+        for i in range(hits_count)
+    )
+    return ScanReport(
+        root=root,
+        results=results,
+        stats=ScanStats(
+            total_files=hits_count,
+            scanned_files=hits_count,
+            matched_files=hits_count,
+            total_matches=hits_count,
+        ),
+    )
+
+
+class TestSaveCachedResults:
+    """测试 save_cached_results 缓存持久化纯函数。"""
+
+    def test_none_report_no_op(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """report 为 None → 直接返回，不创建目录或文件。"""
+        cache_file = tmp_path / "results" / "ws-1.json"
+        save_cached_results(report=None, cache_file=cache_file, cached_results_dir=tmp_path / "results")
+        assert not cache_file.exists()
+        # 不应触发 mkdir
+        assert not (tmp_path / "results").exists()
+
+    def test_save_creates_dir_and_file(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """有 hits 的 report → 自动创建目录并写入 JSON。"""
+        cache_file = tmp_path / "results" / "ws-1.json"
+        report = _make_report_with_hits(root=tmp_path, hits_count=2)
+
+        save_cached_results(
+            report=report,
+            cache_file=cache_file,
+            cached_results_dir=tmp_path / "results",
+        )
+        assert cache_file.exists()
+        # 文件内容应为合法 JSON
+        import json as _json
+
+        data = _json.loads(cache_file.read_text(encoding="utf-8"))
+        assert len(data["hits"]) == 2
+
+    def test_save_empty_hits_skips_when_cache_has_hits(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """iter-135：本次无命中但缓存已有非空结果 → 跳过覆盖。"""
+        cache_file = tmp_path / "results" / "ws-1.json"
+        # 先写一份有命中的缓存
+        report_with_hits = _make_report_with_hits(root=tmp_path, hits_count=3)
+        save_cached_results(
+            report=report_with_hits,
+            cache_file=cache_file,
+            cached_results_dir=tmp_path / "results",
+        )
+        original_bytes = cache_file.read_bytes()
+
+        # 再保存空结果
+        empty_report = ScanReport(
+            root=tmp_path,
+            results=(),
+            stats=ScanStats(total_files=10, scanned_files=10),
+        )
+        save_cached_results(
+            report=empty_report,
+            cache_file=cache_file,
+            cached_results_dir=tmp_path / "results",
+        )
+        # 文件应保持不变
+        assert cache_file.read_bytes() == original_bytes
+
+    def test_save_empty_hits_overwrites_when_cache_empty(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """本次无命中且缓存也无命中 → 正常覆盖。"""
+        cache_file = tmp_path / "results" / "ws-1.json"
+        # 先写一份无命中的缓存
+        empty_report_1 = ScanReport(
+            root=tmp_path,
+            results=(),
+            stats=ScanStats(total_files=5, scanned_files=5),
+        )
+        save_cached_results(
+            report=empty_report_1,
+            cache_file=cache_file,
+            cached_results_dir=tmp_path / "results",
+        )
+        assert cache_file.exists()
+
+        # 再保存另一份无命中结果（root 不同）
+        empty_report_2 = ScanReport(
+            root=tmp_path / "another",
+            results=(),
+            stats=ScanStats(total_files=10, scanned_files=10),
+        )
+        save_cached_results(
+            report=empty_report_2,
+            cache_file=cache_file,
+            cached_results_dir=tmp_path / "results",
+        )
+        # 应被覆盖（root 不同）
+        import json as _json
+
+        data = _json.loads(cache_file.read_text(encoding="utf-8"))
+        assert data["root"] == str(tmp_path / "another")
+
+    def test_save_overwrites_when_cache_corrupted(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """缓存文件损坏 → 正常覆盖（异常被吞掉）。"""
+        cache_file = tmp_path / "results" / "ws-1.json"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text("{not a valid json", encoding="utf-8")
+
+        report = _make_report_with_hits(root=tmp_path, hits_count=1)
+        save_cached_results(
+            report=report,
+            cache_file=cache_file,
+            cached_results_dir=tmp_path / "results",
+        )
+        # 文件应被覆盖为合法 JSON
+        import json as _json
+
+        data = _json.loads(cache_file.read_text(encoding="utf-8"))
+        assert len(data["hits"]) == 1
+
+    def test_save_empty_hits_overwrites_when_cache_corrupted(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """iter-135：本次无命中且缓存文件损坏 → 异常被吞掉，正常覆盖。
+
+        此测试覆盖 ``except (OSError, ValueError): pass`` 分支：缓存读取失败时
+        不应阻塞写入流程，按正常覆盖逻辑写入新的空结果。
+        """
+        cache_file = tmp_path / "results" / "ws-1.json"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text("{not a valid json", encoding="utf-8")
+
+        empty_report = ScanReport(
+            root=tmp_path,
+            results=(),
+            stats=ScanStats(total_files=5, scanned_files=5),
+        )
+        save_cached_results(
+            report=empty_report,
+            cache_file=cache_file,
+            cached_results_dir=tmp_path / "results",
+        )
+        # 文件应被覆盖为合法 JSON（空结果）
+        import json as _json
+
+        data = _json.loads(cache_file.read_text(encoding="utf-8"))
+        assert data["root"] == str(tmp_path)
+        assert data["hits"] == []
+
+    def test_save_failure_logs_warning(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """write_bytes 抛 OSError → 记录警告日志，不抛异常。"""
+        cache_file = tmp_path / "results" / "ws-1.json"
+        report = _make_report_with_hits(root=tmp_path, hits_count=1)
+
+        def _raise_oserror(_self: Path, _data: bytes) -> int:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(Path, "write_bytes", _raise_oserror)
+
+        with caplog.at_level("WARNING", logger="fuscan.gui.controllers._restore"):
+            save_cached_results(
+                report=report,
+                cache_file=cache_file,
+                cached_results_dir=tmp_path / "results",
+            )
+        assert any("扫描结果缓存失败" in r.message for r in caplog.records)
+
+
+class TestDeleteCachedResults:
+    """测试 delete_cached_results 缓存清理纯函数。"""
+
+    def test_missing_file_no_op(self, tmp_path: Path) -> None:
+        """文件不存在 → 不抛异常。"""
+        delete_cached_results(tmp_path / "nonexistent.json")
+
+    def test_deletes_existing_file(self, tmp_path: Path) -> None:
+        """文件存在 → 删除。"""
+        cache_file = tmp_path / "ws-del.json"
+        cache_file.write_text("{}", encoding="utf-8")
+        assert cache_file.exists()
+
+        delete_cached_results(cache_file)
+        assert not cache_file.exists()
+
+    def test_unlink_failure_logs_warning(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """unlink 抛 OSError → 记录警告日志，不抛异常。"""
+        cache_file = tmp_path / "ws-fail.json"
+        cache_file.write_text("{}", encoding="utf-8")
+
+        def _raise_oserror(_path: Path) -> None:
+            raise OSError("permission denied")
+
+        monkeypatch.setattr(Path, "unlink", _raise_oserror)
+
+        with caplog.at_level("WARNING", logger="fuscan.gui.controllers._restore"):
+            delete_cached_results(cache_file)
+        assert any("缓存结果删除失败" in r.message for r in caplog.records)
+
+
+# ----------------------------- _history_view -----------------------------
+
+
+def _make_history_entry(
+    scan_id: str = "s1",
+    workspace_name: str = "任务A",
+    finished_at: str = "2026-07-27T10:00:00Z",
+    matched_files: int = 3,
+    hit_paths: tuple[str, ...] = ("/a", "/b", "/c"),
+    rule_names: tuple[str, ...] = ("rule1",),
+    status: str = STATUS_COMPLETED,
+    summary: str = "命中 3 个文件",
+) -> ScanHistoryEntry:
+    """构造测试用 ScanHistoryEntry。"""
+    return ScanHistoryEntry(
+        scan_id=scan_id,
+        workspace_id="ws-1",
+        workspace_name=workspace_name,
+        finished_at=finished_at,
+        matched_files=matched_files,
+        hit_paths=hit_paths,
+        rule_names=rule_names,
+        status=status,
+        summary=summary,
+    )
+
+
+class TestBuildWorkspaceHistoryJson:
+    """测试 build_workspace_history_json 历史列表 JSON 构造纯函数。"""
+
+    def test_empty_entries_returns_empty_array(self) -> None:
+        """空历史 → 返回 ``"[]"``。"""
+        assert build_workspace_history_json(()) == "[]"
+
+    def test_single_entry_payload_fields(self) -> None:
+        """单条历史 → 字段完整、类型正确。"""
+        import json as _json
+
+        entry = _make_history_entry()
+        result = build_workspace_history_json((entry,))
+        payload = _json.loads(result)
+        assert len(payload) == 1
+        item = payload[0]
+        assert item["scan_id"] == "s1"
+        assert item["workspace_name"] == "任务A"
+        assert item["started_at"] == entry.started_at
+        assert item["finished_at"] == "2026-07-27T10:00:00Z"
+        assert item["status"] == STATUS_COMPLETED
+        assert item["total_files"] == 0
+        assert item["scanned_files"] == 0
+        assert item["matched_files"] == 3
+        assert item["skipped_files"] == 0
+        assert item["error_count"] == 0
+        assert item["duration_seconds"] == 0.0
+        assert item["rule_names"] == ["rule1"]
+        assert item["summary"] == "命中 3 个文件"
+
+    def test_multiple_entries_preserve_order(self) -> None:
+        """多条历史 → 按输入顺序输出（调用方负责倒序）。"""
+        import json as _json
+
+        e1 = _make_history_entry(scan_id="s1", finished_at="2026-07-27T10:00:00Z")
+        e2 = _make_history_entry(scan_id="s2", finished_at="2026-07-27T11:00:00Z")
+        payload = _json.loads(build_workspace_history_json((e2, e1)))
+        assert len(payload) == 2
+        assert payload[0]["scan_id"] == "s2"
+        assert payload[1]["scan_id"] == "s1"
+
+    def test_duration_seconds_rounded_to_two_decimals(self) -> None:
+        """duration_seconds 应保留两位小数。"""
+        import json as _json
+
+        entry = ScanHistoryEntry(
+            scan_id="s1",
+            workspace_id="ws-1",
+            duration_seconds=1.23456,
+            summary="",
+        )
+        payload = _json.loads(build_workspace_history_json((entry,)))
+        assert payload[0]["duration_seconds"] == 1.23
+
+    def test_rule_names_tuple_to_list(self) -> None:
+        """rule_names 元组应转为列表。"""
+        import json as _json
+
+        entry = _make_history_entry(rule_names=("ruleB", "ruleA"))
+        payload = _json.loads(build_workspace_history_json((entry,)))
+        assert payload[0]["rule_names"] == ["ruleB", "ruleA"]
+
+    def test_chinese_summary_not_ascii_escaped(self) -> None:
+        r"""中文 summary 不应被 \uXXXX 转义。"""
+        entry = _make_history_entry(summary="命中 3 个文件")
+        result = build_workspace_history_json((entry,))
+        assert "命中 3 个文件" in result
+        assert "\\u" not in result
+
+
+class TestBuildScanComparisonJson:
+    """测试 build_scan_comparison_json 对比 JSON 构造纯函数。"""
+
+    def test_empty_entries_returns_empty_object(self) -> None:
+        """无历史 → 返回 ``"{}"``。"""
+        assert build_scan_comparison_json(()) == "{}"
+
+    def test_single_entry_treats_as_first_scan(self) -> None:
+        """仅一条历史 → previous 为 None，trend 为 ``首次``。"""
+        import json as _json
+
+        entry = _make_history_entry(scan_id="s1", matched_files=3)
+        result = build_scan_comparison_json((entry,))
+        payload = _json.loads(result)
+        assert payload["current"]["scan_id"] == "s1"
+        assert payload["previous"] is None
+        assert payload["trend"] == "首次"
+        assert payload["matched_delta"] == 3
+        assert payload["new_hits_count"] == 3
+        assert payload["resolved_hits_count"] == 0
+        assert payload["persistent_hits_count"] == 0
+        assert "首次扫描" in payload["summary"]
+
+    def test_two_entries_returns_delta(
+        self,
+    ) -> None:
+        """两条历史 → 计算新增/已解决/持续命中。"""
+        import json as _json
+
+        prev = _make_history_entry(
+            scan_id="s1",
+            finished_at="2026-07-27T10:00:00Z",
+            matched_files=3,
+            hit_paths=("/a", "/b", "/c"),
+            rule_names=("rule1",),
+        )
+        curr = _make_history_entry(
+            scan_id="s2",
+            finished_at="2026-07-27T11:00:00Z",
+            matched_files=2,
+            hit_paths=("/a", "/d"),
+            rule_names=("rule1", "rule2"),
+        )
+        payload = _json.loads(build_scan_comparison_json((curr, prev)))
+        assert payload["current"]["scan_id"] == "s2"
+        assert payload["previous"]["scan_id"] == "s1"
+        assert payload["matched_delta"] == -1  # 2 - 3
+        assert payload["trend"] == "改善"
+        assert payload["new_hits_count"] == 1  # /d
+        assert payload["resolved_hits_count"] == 2  # /b, /c
+        assert payload["persistent_hits_count"] == 1  # /a
+        assert "/d" in payload["new_hits"]
+        assert set(payload["resolved_hits"]) == {"/b", "/c"}
+        assert "rule2" in payload["new_rules"]
+        assert payload["dropped_rules"] == []
+
+    def test_new_hits_truncated_to_50(
+        self,
+    ) -> None:
+        """new_hits 超过 50 条应截断。"""
+        prev_hit_paths: tuple[str, ...] = ()
+        curr_hit_paths = tuple(f"/file_{i}" for i in range(60))
+        prev = _make_history_entry(scan_id="s1", hit_paths=prev_hit_paths)
+        curr = _make_history_entry(scan_id="s2", hit_paths=curr_hit_paths, matched_files=60)
+        import json as _json
+
+        payload = _json.loads(build_scan_comparison_json((curr, prev)))
+        assert payload["new_hits_count"] == 60
+        assert len(payload["new_hits"]) == 50
+
+    def test_chinese_summary_not_ascii_escaped(
+        self,
+    ) -> None:
+        r"""中文 summary 不应被 \uXXXX 转义。"""
+        prev = _make_history_entry(scan_id="s1", hit_paths=("/a",))
+        curr = _make_history_entry(scan_id="s2", hit_paths=("/a", "/b"))
+        result = build_scan_comparison_json((curr, prev))
+        # summary 中包含中文（"本次命中" / "上次命中"）
+        assert "本次命中" in result
+        assert "\\u" not in result

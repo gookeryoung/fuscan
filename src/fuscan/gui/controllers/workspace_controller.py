@@ -31,6 +31,12 @@ except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
 from fuscan import config as config_module
+from fuscan.gui.controllers._history_view import (
+    build_scan_comparison_json as _build_scan_comparison_json,
+)
+from fuscan.gui.controllers._history_view import (
+    build_workspace_history_json as _build_workspace_history_json,
+)
 from fuscan.gui.controllers._persistence import (
     PERSIST_FILENAME,
     TASK_OVERRIDE_KEYS,
@@ -43,6 +49,12 @@ from fuscan.gui.controllers._persistence import (
     load_persisted_workspaces,
     save_persisted_workspaces,
     serialize_workspaces,
+)
+from fuscan.gui.controllers._restore import (
+    delete_cached_results as _delete_cached_results_fn,
+)
+from fuscan.gui.controllers._restore import (
+    save_cached_results as _save_cached_results_fn,
 )
 from fuscan.gui.controllers.scan_controller import ScanController
 from fuscan.gui.models.workspace_model import (
@@ -977,41 +989,17 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """将 ScanController 的 ``_last_report`` 持久化到 ``~/.fuscan/results/<ws_id>.json``。
 
         扫描结束（含取消）后调用，重启后通过 :meth:`_load_cached_results` 恢复。
-        持久化失败仅记录日志，不影响主流程。
-
-        iter-127：改用 ``to_json_bytes()`` + ``write_bytes()``，orjson 直接输出
-        UTF-8 bytes，跳过 ``.decode()`` + ``.encode()`` 往返，10 万命中结果
-        序列化速度提升 5-10x。
+        持久化失败仅记录日志，不影响主流程。委托 :func:`._restore.save_cached_results`。
 
         iter-135：本次结果无命中但缓存文件中已有非空结果时不覆盖，避免增量扫描
         回退全量后空结果覆盖之前的完整结果，导致重启后无法恢复且后续增量扫描
         因 ``prev_report.hits`` 为空而无法合并旧命中（恶性循环）。
         """
-        report = controller._last_report  # 同包私有访问
-        if report is None:
-            return
-        # 防御：本次无命中但缓存已有非空结果时跳过覆盖
-        cache_file = self._cached_results_path(ws_id)
-        if not report.hits and cache_file.exists():
-            try:
-                from fuscan.scanner.result import ScanReport
-
-                prev = ScanReport.from_json(cache_file.read_bytes())
-                if prev.hits:
-                    logger.info(
-                        "工作区 %s 本次扫描无命中，保留已有缓存（%d 条命中）",
-                        ws_id,
-                        len(prev.hits),
-                    )
-                    return
-            except (OSError, ValueError):
-                pass  # 缓存读取失败时正常覆盖
-        try:
-            self._cached_results_dir.mkdir(parents=True, exist_ok=True)
-            cache_file.write_bytes(report.to_json_bytes())
-            logger.debug("工作区 %s 扫描结果已缓存（%d 条命中）", ws_id, len(report.hits))
-        except (OSError, ValueError) as exc:
-            logger.warning("工作区 %s 扫描结果缓存失败: %s", ws_id, exc)
+        _save_cached_results_fn(
+            report=controller._last_report,  # 同包私有访问
+            cache_file=self._cached_results_path(ws_id),
+            cached_results_dir=self._cached_results_dir,
+        )
 
     def _try_load_cached_results(self, ws_id: str) -> None:
         """后台异步加载工作区缓存结果（iter-128）。
@@ -1069,14 +1057,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             worker.deleteLater()  # pyrefly: ignore [missing-attribute]
 
     def _delete_cached_results(self, ws_id: str) -> None:
-        """删除指定工作区的缓存扫描结果文件。"""
-        cache_file = self._cached_results_path(ws_id)
-        try:
-            if cache_file.exists():
-                cache_file.unlink()
-                logger.debug("工作区 %s 缓存结果已删除", ws_id)
-        except OSError as exc:
-            logger.warning("工作区 %s 缓存结果删除失败: %s", ws_id, exc)
+        """删除指定工作区的缓存扫描结果文件。委托 :func:`._restore.delete_cached_results`。"""
+        _delete_cached_results_fn(self._cached_results_path(ws_id))
 
     # ----------------------------- 扫描历史（iter-115） -----------------------------
 
@@ -1100,81 +1082,26 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def workspaceHistoryJson(self, ws_id: str) -> str:
         """返回指定工作区的历史记录 JSON 字符串（供 QML 解析展示）。
 
+        委托 :func:`._history_view.build_workspace_history_json`。
+
         :param ws_id: 工作区 ID
         :return: JSON 数组字符串，每个元素为历史条目 dict（按时间倒序）；
             空历史返回 ``"[]"``
         """
-        import json as _json
-
-        entries = self._history_store.workspace_history(ws_id)
-        payload = [
-            {
-                "scan_id": e.scan_id,
-                "workspace_name": e.workspace_name,
-                "started_at": e.started_at,
-                "finished_at": e.finished_at,
-                "status": e.status,
-                "total_files": e.total_files,
-                "scanned_files": e.scanned_files,
-                "matched_files": e.matched_files,
-                "skipped_files": e.skipped_files,
-                "error_count": e.error_count,
-                "duration_seconds": round(e.duration_seconds, 2),
-                "rule_names": list(e.rule_names),
-                "summary": e.summary,
-            }
-            for e in entries
-        ]
-        return _json.dumps(payload, ensure_ascii=False)
+        return _build_workspace_history_json(self._history_store.workspace_history(ws_id))
 
     @Slot(str, result=str)  # pyrefly: ignore [not-callable]
     def compareWithPreviousScan(self, ws_id: str) -> str:
         """对比指定工作区最近一次扫描与上上次扫描，返回对比结果 JSON。
+
+        委托 :func:`._history_view.build_scan_comparison_json`。
 
         :param ws_id: 工作区 ID
         :return: JSON 对象字符串，包含 ``current``/``previous``/``summary``/
             ``new_hits``/``resolved_hits``/``persistent_hits``/``matched_delta``/
             ``trend`` 字段；无历史返回 ``"{}"``
         """
-        import json as _json
-
-        from fuscan.history import compare_scans
-
-        entries = self._history_store.workspace_history(ws_id, limit=2)
-        if not entries:
-            return "{}"
-        current = entries[0]
-        previous = entries[1] if len(entries) >= 2 else None
-        comparison = compare_scans(current, previous)
-        payload = {
-            "current": {
-                "scan_id": comparison.current.scan_id,
-                "finished_at": comparison.current.finished_at,
-                "matched_files": comparison.current.matched_files,
-                "status": comparison.current.status,
-            },
-            "previous": (
-                {
-                    "scan_id": comparison.previous.scan_id,
-                    "finished_at": comparison.previous.finished_at,
-                    "matched_files": comparison.previous.matched_files,
-                    "status": comparison.previous.status,
-                }
-                if comparison.previous is not None
-                else None
-            ),
-            "summary": comparison.summary(),
-            "trend": comparison.trend,
-            "matched_delta": comparison.matched_delta,
-            "new_hits_count": len(comparison.new_hits),
-            "resolved_hits_count": len(comparison.resolved_hits),
-            "persistent_hits_count": len(comparison.persistent_hits),
-            "new_hits": list(comparison.new_hits[:50]),  # 限制返回数量避免过大
-            "resolved_hits": list(comparison.resolved_hits[:50]),
-            "new_rules": list(comparison.new_rules),
-            "dropped_rules": list(comparison.dropped_rules),
-        }
-        return _json.dumps(payload, ensure_ascii=False)
+        return _build_scan_comparison_json(self._history_store.workspace_history(ws_id, limit=2))
 
     @Slot(str, result=int)  # pyrefly: ignore [not-callable]
     def clearWorkspaceHistory(self, ws_id: str) -> int:

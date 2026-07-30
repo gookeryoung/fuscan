@@ -27,6 +27,22 @@ except ImportError:  # pragma: no cover
 
 from fuscan.config import CONFIG_DIR, Config
 from fuscan.export.report import export_report
+from fuscan.gui.controllers._batch_actions import (
+    mark_as_false_positive,
+    replace_all_filtered_results,
+    undo_last_batch_replace,
+    undo_selected_replace,
+)
+from fuscan.gui.controllers._history import build_history_entry as _build_history_entry
+from fuscan.gui.controllers._manifest import (
+    invalidate_manifest as _invalidate_manifest,
+)
+from fuscan.gui.controllers._manifest import (
+    load_manifest as _load_manifest_fn,
+)
+from fuscan.gui.controllers._manifest import (
+    save_manifest as _save_manifest_fn,
+)
 from fuscan.gui.controllers._result_detail import (
     build_detail_hits_model,
     can_replace_result,
@@ -55,11 +71,11 @@ from fuscan.gui.scan_mode import (
     scan_mode_index_to_str,
 )
 from fuscan.gui.workers import FileStatsWorker, ScanWorker
-from fuscan.processing.replacer import ReplaceStatus
 from fuscan.processing.skip_store import SkipStore
 from fuscan.rules.model import Severity
 from fuscan.scanner import ScanReport
-from fuscan.scanner.result import IncrementalManifest, ProgressInfo, ScanResult, WalkResult, format_size
+from fuscan.scanner.manifest import IncrementalManifest
+from fuscan.scanner.result import ProgressInfo, ScanResult, WalkResult, format_size
 
 if TYPE_CHECKING:
     from fuscan.cache import CacheStore
@@ -805,103 +821,56 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         默认 ``...``）。非空时覆盖所有规则的 ``replace_with``，且不要求规则
         ``replace=True``。
 
-        调用 :func:`fuscan.replacer.replace_batch`，传入
-        ``ResultListModel.filtered_results``。返回 :class:`BatchReplaceResult.message`
-        供 QML 显示。
+        委托 :func:`fuscan.gui.controllers._batch_actions.replace_all_filtered_results`
+        执行批量替换，返回 :class:`BatchReplaceResult.message` 供 QML 显示，并
+        记录成功项的 ``(源, 备份)`` 配对供 :meth:`undoLastBatchReplace` 撤销。
 
         :param replace_with: 用户自定义替换文本（空字符串走规则驱动模式）
         :return: 操作消息字符串
         """
-        if self._ruleset is None and not replace_with:
-            return "规则集未加载"
-        filtered = self._result_model.filtered_results
-        if not filtered:
-            return "无待替换的结果"
-
-        backup_dir = self._resolve_backup_dir()
-        scan_root = self._resolve_scan_root()
-
-        from fuscan.processing.replacer import replace_batch
-
-        batch_result = replace_batch(
-            results=filtered,
+        msg, last_batch = replace_all_filtered_results(
+            filtered=self._result_model.filtered_results,
             ruleset=self._ruleset,
-            backup_root=backup_dir,
-            scan_root=scan_root,
-            preserve_relative=self._config.backup_preserve_relative_path,
+            backup_dir=self._resolve_backup_dir(),
+            scan_root=self._resolve_scan_root(),
+            backup_preserve_relative=self._config.backup_preserve_relative_path,
             override_replace_with=replace_with if replace_with else None,
         )
-        logger.info(
-            "批量替换完成: 成功 %d/%d, 跳过 %d, 失败 %d",
-            batch_result.succeeded,
-            batch_result.total,
-            batch_result.skipped,
-            batch_result.failed,
-        )
-        # 记录最近一次批量替换的 (src, backup) 配对，供 undoLastBatchReplace 撤销。
-        # 从 batch_result.details 提取成功项的 (path, backup_path) 配对。
-        self._last_batch_backup_paths = tuple(
-            (src, result.backup_path)
-            for src, result in batch_result.details
-            if result.status == ReplaceStatus.SUCCESS and result.backup_path is not None
-        )
-        return batch_result.message
+        # 前置校验失败时 last_batch 为 None，保留既有撤销记录不清空
+        if last_batch is not None:
+            self._last_batch_backup_paths = last_batch
+        return msg
 
     @Slot(result=str)  # pyrefly: ignore [not-callable]
     def undoLastBatchReplace(self) -> str:
         """撤销最近一次批量替换，从 ``.bak`` 备份恢复所有文件。
 
-        逐个调用 :func:`fuscan.replacer.restore_from_backup`，按 (src, backup) 配对
-        从备份恢复到原源文件路径。无可撤销操作时返回提示。
+        委托 :func:`fuscan.gui.controllers._batch_actions.undo_last_batch_replace`
+        按 ``(源, 备份)`` 配对从备份恢复到原源文件路径。无可撤销操作时返回提示。
+        调用后清除撤销记录，避免重复撤销。
 
         :return: 操作消息字符串
         """
-        if not self._last_batch_backup_paths:
-            return "无可撤销的批量替换"
-
-        from fuscan.processing.replacer import restore_from_backup
-
-        succeeded = 0
-        failed = 0
-        for src_path, backup_path in self._last_batch_backup_paths:
-            msg = restore_from_backup(backup_path, src_path)
-            if msg.startswith("已从备份恢复"):
-                succeeded += 1
-            else:
-                failed += 1
-                logger.warning("撤销失败: %s", msg)
-
-        # 清除撤销记录，避免重复撤销
+        summary = undo_last_batch_replace(self._last_batch_backup_paths)
+        # 清除撤销记录，避免重复撤销（空记录清除为 no-op）
         self._last_batch_backup_paths = ()
-        summary = f"批量撤销完成：恢复 {succeeded} 个文件"
-        if failed:
-            summary += f"，{failed} 个失败"
         return summary
 
     @Slot(result=str)  # pyrefly: ignore [not-callable]
     def undoSelectedReplace(self) -> str:
         """撤销当前选中结果的最近一次替换（从 .bak 恢复）。
 
-        根据选中结果路径反推备份路径（``{src}.bak``），调用
-        :func:`fuscan.replacer.restore_from_backup` 恢复。
+        委托 :func:`fuscan.gui.controllers._batch_actions.undo_selected_replace`，
+        根据选中结果路径反推备份路径（``{src}.bak``）后恢复。
 
         :return: 操作消息字符串
         """
-        result = self._get_selected_result()
-        if result is None:
-            return "未选中结果"
-        backup_dir = self._resolve_backup_dir()
-        scan_root = self._resolve_scan_root()
-        # 复用 _resolve_backup_path 计算备份路径
-        from fuscan.processing.replacer import _resolve_backup_path, restore_from_backup
-
-        backup_path = _resolve_backup_path(
-            src=result.path,
-            backup_root=backup_dir,
-            scan_root=scan_root,
-            preserve_relative=self._config.backup_preserve_relative_path,
+        return undo_selected_replace(
+            result=self._get_selected_result(),
+            backup_dir=self._resolve_backup_dir(),
+            scan_root=self._resolve_scan_root(),
+            backup_preserve_relative=self._config.backup_preserve_relative_path,
         )
-        return restore_from_backup(backup_path, result.path)
 
     @Property(bool, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
     def canReplaceAllFiltered(self) -> bool:
@@ -973,9 +942,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def markAsFalsePositive(self, rule_filter: str = "") -> str:
         """将当前选中结果加入误报白名单。
 
-        将选中文件的路径与命中规则加入 :class:`WhitelistController`，下次扫描起
-        在命中聚合阶段过滤。加入后调用 :meth:`invalidate_manifest` 强制下次
-        扫描为全量（白名单变更后增量扫描的 prev_report 仍含误报命中，需重扫）。
+        委托 :func:`fuscan.gui.controllers._batch_actions.mark_as_false_positive`
+        校验选中结果并计算白名单条目字段，随后调用
+        :meth:`WhitelistController.addEntry` 写入白名单。加入后调用
+        :meth:`invalidate_manifest` 强制下次扫描为全量（白名单变更后增量扫描的
+        prev_report 仍含误报命中，需重扫）。
 
         :param rule_filter: 指定规则名（精确匹配）；空字符串表示该文件全部命中
             规则均标记为误报（``*`` 通配）。默认空字符串。
@@ -987,14 +958,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         - 压缩包内部条目 → ``压缩包内部条目不支持标记误报``（路径含 ``!`` 无法 glob）
         - 成功 → ``已标记为误报: <路径> (<规则>)``
         """
-        result = self._get_selected_result()
-        if result is None:
-            return "未选中结果"
-        if result.archive_path is not None:
-            return "压缩包内部条目不支持标记误报"
-        rule_name = rule_filter.strip() or "*"
-        # 路径 glob 用绝对路径字符串（与 Scanner 中 str(Path) 一致）
-        path_glob = str(result.path)
+        path_glob, rule_name, error_msg = mark_as_false_positive(
+            result=self._get_selected_result(),
+            rule_filter=rule_filter,
+        )
+        if error_msg is not None:
+            return error_msg
         msg = self._whitelist_controller.addEntry(path_glob, rule_name, "")
         # 白名单变更需强制全量重扫，使本工作区下次扫描过滤误报
         if self._pending_ws_id:
@@ -1479,46 +1448,31 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def _load_manifest(self, ws_id: str) -> IncrementalManifest | None:
         """从 ``~/.fuscan/manifests/<ws_id>.json`` 加载增量扫描清单。
 
+        委托 :func:`fuscan.gui.controllers._manifest.load_manifest`。
+
         :param ws_id: 工作区 ID
         :return: :class:`IncrementalManifest` 实例；文件不存在或解析失败返回 ``None``
         """
-        manifest_file = _MANIFESTS_DIR / f"{ws_id}.json"
-        if not manifest_file.exists():
-            return None
-        try:
-            json_str = manifest_file.read_text(encoding="utf-8")
-            return IncrementalManifest.from_json(json_str)
-        except (OSError, ValueError) as exc:
-            logger.warning("工作区 %s 增量清单加载失败: %s", ws_id, exc)
-            return None
+        return _load_manifest_fn(ws_id, _MANIFESTS_DIR)
 
     def _save_manifest(self, ws_id: str, manifest: IncrementalManifest) -> None:
         """持久化增量扫描清单到 ``~/.fuscan/manifests/<ws_id>.json``。
 
+        委托 :func:`fuscan.gui.controllers._manifest.save_manifest`。
+
         :param ws_id: 工作区 ID
         :param manifest: 本次扫描构建的新清单
         """
-        try:
-            _MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
-            manifest_file = _MANIFESTS_DIR / f"{ws_id}.json"
-            manifest_file.write_text(manifest.to_json(), encoding="utf-8")
-            logger.debug("工作区 %s 增量清单已持久化（%d 项指纹）", ws_id, len(manifest.fingerprints))
-        except OSError as exc:
-            logger.warning("工作区 %s 增量清单持久化失败: %s", ws_id, exc)
+        _save_manifest_fn(ws_id, manifest, _MANIFESTS_DIR)
 
     def invalidate_manifest(self, ws_id: str) -> None:
         """删除工作区的增量扫描清单（iter-136）。
 
-        规则变更（新增/修改/删除/导入规则）时由 :meth:`WorkspaceController.updateWorkspaceRules`
+        委托 :func:`fuscan.gui.controllers._manifest.invalidate_manifest`。规则变更
+        （新增/修改/删除/导入规则）时由 :meth:`WorkspaceController.updateWorkspaceRules`
         调用，使下次增量扫描因 manifest 不存在而回退为全量扫描，确保新规则被实际执行。
         """
-        manifest_file = _MANIFESTS_DIR / f"{ws_id}.json"
-        if manifest_file.exists():
-            try:
-                manifest_file.unlink()
-                logger.info("工作区 %s 规则已变更，增量清单已清除", ws_id)
-            except OSError as exc:
-                logger.warning("工作区 %s 增量清单清除失败: %s", ws_id, exc)
+        _invalidate_manifest(ws_id, _MANIFESTS_DIR)
 
     def _get_selected_result(self) -> ScanResult | None:
         """获取当前选中的 :class:`ScanResult`。"""
@@ -1527,38 +1481,19 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def build_history_entry(self, workspace_id: str, workspace_name: str) -> ScanHistoryEntry | None:
         """从最近一次 :class:`ScanReport` 构建扫描历史条目（iter-115）。
 
-        在扫描完成/取消后由 :class:`WorkspaceController` 调用，将本次扫描
-        关键指标归档到 :class:`fuscan.history.HistoryStore`。无 ``_last_report``
-        时返回 ``None``。
+        委托 :func:`fuscan.gui.controllers._history.build_history_entry`。在扫描
+        完成/取消后由 :class:`WorkspaceController` 调用，将本次扫描关键指标归档到
+        :class:`fuscan.history.HistoryStore`。无 ``_last_report`` 时返回 ``None``。
 
         :param workspace_id: 工作区 ID
         :param workspace_name: 工作区名称快照
         :return: :class:`fuscan.history.ScanHistoryEntry` 或 ``None``
         """
-        if self._last_report is None:
-            return None
-        from fuscan.history import STATUS_CANCELLED, STATUS_COMPLETED, ScanHistoryEntry
-
-        report = self._last_report
-        stats = report.stats
-        status = STATUS_CANCELLED if report.cancelled else STATUS_COMPLETED
-        # 命中文件路径排序元组（用于对比）
-        hit_paths = tuple(sorted(str(r.path) for r in report.hits))
-        # 规则名排序元组
-        rule_names = tuple(sorted(report.rule_names))
-        return ScanHistoryEntry(
+        return _build_history_entry(
+            report=self._last_report,
             workspace_id=workspace_id,
             workspace_name=workspace_name,
-            status=status,
-            total_files=stats.total_files,
-            scanned_files=stats.scanned_files,
-            matched_files=stats.matched_files,
-            skipped_files=stats.skipped_files,
-            error_count=stats.errors,
-            duration_seconds=stats.duration_seconds,
-            hit_paths=hit_paths,
-            rule_names=rule_names,
-            summary=self._status_summary,
+            status_summary=self._status_summary,
         )
 
     def _set_restoring(self, value: bool) -> None:

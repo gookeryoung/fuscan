@@ -20,11 +20,8 @@ from fuscan.rules.model import (
     Severity,
 )
 from fuscan.scanner import Scanner, ScanReport, ScanResult
-from fuscan.scanner.result import (
-    FileFingerprint,
-    IncrementalManifest,
-    RuleHit,
-)
+from fuscan.scanner.manifest import FileFingerprint, IncrementalManifest
+from fuscan.scanner.result import RuleHit
 
 
 def _build_ruleset(*rules: Rule) -> RuleSet:

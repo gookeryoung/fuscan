@@ -3,7 +3,8 @@
 公共 API：
 
 - 数据结构： :class:`FileEntry`, :class:`MatchContext`, :class:`MatchResult`,
-  :class:`RuleHit`, :class:`ScanResult`, :class:`ScanReport`, :class:`ScanStats`
+  :class:`RuleHit`, :class:`ScanResult`, :class:`ScanReport`, :class:`ScanStats`,
+  :class:`FileFingerprint`, :class:`IncrementalManifest`
 - 扫描器： :class:`Scanner`, :class:`FileWalker`
 - 匹配器： :class:`Matcher` 与具体实现， :func:`build_matcher`
 - 内容提供器： :class:`ContentProvider`, :func:`default_content_provider`
@@ -19,6 +20,7 @@ from fuscan.scanner.context import (
     MatchContext,
     default_content_provider,
 )
+from fuscan.scanner.manifest import FileFingerprint, IncrementalManifest
 from fuscan.scanner.matchers import (
     AndMatcher,
     ContentMatcher,
@@ -47,8 +49,10 @@ __all__ = [
     "ContentProvider",
     "FileEntry",
     "FileNameMatcher",
+    "FileFingerprint",
     "FileWalker",
     "HashingContentProvider",
+    "IncrementalManifest",
     "MatchContext",
     "MatchResult",
     "Matcher",

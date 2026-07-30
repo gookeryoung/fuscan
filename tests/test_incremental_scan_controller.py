@@ -30,9 +30,8 @@ try:
     from fuscan.gui.controllers.scan_controller import ScanController
     from fuscan.rules.model import Severity
     from fuscan.scanner import ScanReport, ScanResult, ScanStats
+    from fuscan.scanner.manifest import FileFingerprint, IncrementalManifest
     from fuscan.scanner.result import (
-        FileFingerprint,
-        IncrementalManifest,
         ProgressInfo,
         RuleHit,
         WalkResult,

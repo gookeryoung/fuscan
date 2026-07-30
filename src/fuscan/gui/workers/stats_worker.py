@@ -22,7 +22,8 @@ except ImportError:  # pragma: no cover
     from PySide6.QtCore import QObject, QThread, Signal  # pyrefly: ignore [missing-import]
 
 from fuscan.rules.model import RuleSet
-from fuscan.scanner.result import IncrementalManifest, ProgressInfo, WalkResult
+from fuscan.scanner.manifest import IncrementalManifest
+from fuscan.scanner.result import ProgressInfo, WalkResult
 from fuscan.scanner.scanner import Scanner
 
 __all__ = ["FileStatsWorker"]

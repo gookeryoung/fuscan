@@ -51,10 +51,9 @@ from fuscan.scanner.entropy import (
     ENTROPY_RULE_NAME,
     find_high_entropy_strings,
 )
+from fuscan.scanner.manifest import FileFingerprint, IncrementalManifest
 from fuscan.scanner.matchers import Matcher, build_matcher
 from fuscan.scanner.result import (
-    FileFingerprint,
-    IncrementalManifest,
     ProgressInfo,
     RuleHit,
     ScanReport,

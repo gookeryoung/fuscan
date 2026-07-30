@@ -17,8 +17,6 @@ dependencies = [
     "typing-extensions>=4.0; python_version < '3.13'",
     "python-docx>=1.1.0",
     "python-pptx>=0.6.23",
-    # lxml 是 python-docx/pptx 的传递依赖，但 _odf_xml.py 与 _ooxml_xml.py 直接依赖
-    # lxml.etree 做 XML 解析（XPath C 层匹配 / iterparse 流式），故显式声明
     "lxml>=4.9.0",
     "pypdf>=4.0.0",
     "pdf_oxide>=0.3",
@@ -87,9 +85,7 @@ packages = ["src/fuscan"]
 "src/fuscan/gui/qtquickcontrols2.conf" = "fuscan/gui/qtquickcontrols2.conf"
 
 [tool.fspack]
-# iter-139：fspack 打包配置——排除开发内部目录，不打包到发行版
-# .trae: 开发工具配置 | .github: CI 配置 | .benchmarks: 性能基准测试数据
-# tests: 测试代码 | docs: 文档源码 | scripts: 开发脚本
+include = ["rules"]
 exclude = [".trae", ".github", ".benchmarks", "tests", "docs", "scripts"]
 pyc_strip = true
 no_site = true

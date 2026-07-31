@@ -148,7 +148,7 @@ class PdfExtractor(Extractor):
         """
         try:
             doc = _PdfiumDocument(io.BytesIO(data))  # type: ignore[union-attr]
-        except Exception as exc:
+        except Exception:
             logger.info("pypdfium2 无法打开 PDF，回退 pypdf")
             return self._extract_with_pypdf(data)
 

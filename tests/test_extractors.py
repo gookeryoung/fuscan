@@ -790,8 +790,9 @@ class TestPdfExtractor:
 
     @pytest.fixture(autouse=True)
     def _force_pypdf_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """强制走 pypdf 回退路径，绕过 pdf_oxide（iter-91）。"""
+        """强制走 pypdf 回退路径，绕过 pdf_oxide 和 pypdfium2（iter-167）。"""
         monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
+        monkeypatch.setattr("fuscan.extractors.pdf._PDFIUM_AVAILABLE", False)
 
     def test_supported_extensions(self) -> None:
         assert PdfExtractor().supported_extensions == ("pdf",)
@@ -1065,6 +1066,113 @@ class TestPdfExtractorOxideBackend:
             lambda data: FakeDoc(),
         )
         assert extractor.extract_from_bytes(b"fake but callable") == ""
+
+
+# ---------------------------------------------------------------------------
+# PdfExtractor pypdfium2 中间层回退测试（iter-167）
+# ---------------------------------------------------------------------------
+
+
+class TestPdfExtractorPdfiumBackend:
+    """pypdfium2（pdfium C++）中间层回退测试。
+
+    当 pdf_oxide 不可用时，pypdfium2 作为 T3 中速回退。
+    仅在 pypdfium2 已安装且 pdf_oxide 未安装时运行。
+    """
+
+    def test_pdfium_speed_tier_is_medium(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """pdf_oxide 不可用、pypdfium2 可用时 speed_tier 返回 T3 中速。"""
+        from fuscan.extractors.pdf import _PDFIUM_AVAILABLE
+
+        if not _PDFIUM_AVAILABLE:
+            pytest.skip("pypdfium2 未安装")
+        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
+        assert PdfExtractor().speed_tier == SpeedTier.MEDIUM
+
+    def test_pdfium_engine_info(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """pdf_oxide 不可用、pypdfium2 可用时 engine_info 返回 pypdfium2。"""
+        from fuscan.extractors.pdf import _PDFIUM_AVAILABLE
+
+        if not _PDFIUM_AVAILABLE:
+            pytest.skip("pypdfium2 未安装")
+        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
+        assert PdfExtractor().engine_info == "pypdfium2"
+
+    def test_pdfium_extract_real_pdf(self, pdf_sample: bytes, monkeypatch: pytest.MonkeyPatch) -> None:
+        """pypdfium2 后端提取真实 PDF 应包含 password 关键词。"""
+        from fuscan.extractors.pdf import _PDFIUM_AVAILABLE
+
+        if not _PDFIUM_AVAILABLE:
+            pytest.skip("pypdfium2 未安装")
+        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
+        extractor = PdfExtractor()
+        content = extractor.extract_from_bytes(pdf_sample)
+        assert "password" in content.lower()
+
+    def test_pdfium_invalid_bytes_falls_back_to_pypdf(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """pypdfium2 无法打开 PDF 时应回退 pypdf。"""
+        from fuscan.extractors.pdf import _PDFIUM_AVAILABLE
+
+        if not _PDFIUM_AVAILABLE:
+            pytest.skip("pypdfium2 未安装")
+        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
+
+        import sys
+
+        # mock pypdfium2 打开失败，pypdf 可用
+        fake_pdfium = type("pypdfium2", (), {})
+        fake_pdfium.PdfDocument = staticmethod(lambda _: (_ for _ in ()).throw(ValueError("bad")))
+        fake_pypdf_module = type(
+            "pypdf",
+            (),
+            {
+                "PdfReader": staticmethod(
+                    lambda _: type(
+                        "FakeReader",
+                        (),
+                        {
+                            "is_encrypted": False,
+                            "pages": [type("FakePage", (), {"extract_text": lambda s: "password here"})()],
+                        },
+                    )()
+                ),
+            },
+        )
+        fake_pypdf_errors = type("errors", (), {"PdfReadError": Exception})
+
+        monkeypatch.setitem(sys.modules, "pypdfium2", fake_pdfium)
+        monkeypatch.setitem(sys.modules, "pypdf", fake_pypdf_module)
+        monkeypatch.setitem(sys.modules, "pypdf.errors", fake_pypdf_errors)
+
+        content = PdfExtractor().extract_from_bytes(b"not a valid pdf")
+        assert "password here" in content
+
+
+class TestPdfExtractorEnginePriority:
+    """引擎优先级链测试（iter-167）。
+
+    验证 pdf_oxide → pypdfium2 → pypdf 的降级逻辑。
+    """
+
+    def test_engine_oxide_wins_when_available(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """pdf_oxide 可用时优先使用 pdf_oxide。"""
+        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", True)
+        monkeypatch.setattr("fuscan.extractors.pdf._PDFIUM_AVAILABLE", True)
+        assert PdfExtractor().engine_info == "pdf_oxide"
+
+    def test_engine_pdfium_when_oxide_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """pdf_oxide 不可用、pypdfium2 可用时使用 pypdfium2。"""
+        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
+        monkeypatch.setattr("fuscan.extractors.pdf._PDFIUM_AVAILABLE", True)
+        assert PdfExtractor().engine_info == "pypdfium2"
+        assert PdfExtractor().speed_tier == SpeedTier.MEDIUM
+
+    def test_engine_pypdf_fallback_when_both_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """两者均不可用时回退 pypdf。"""
+        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
+        monkeypatch.setattr("fuscan.extractors.pdf._PDFIUM_AVAILABLE", False)
+        assert PdfExtractor().engine_info == "pypdf"
+        assert PdfExtractor().speed_tier == SpeedTier.VERY_SLOW
 
 
 # ---------------------------------------------------------------------------

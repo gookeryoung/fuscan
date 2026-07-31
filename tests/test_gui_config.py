@@ -585,15 +585,23 @@ class TestCategoryEnabled:
         model = controller.extractorModel
         # 取第一个提取器所在的类别
         first_category = model._rows[0].category  # type: ignore[attr-defined]
+        # 获取该类别下的所有提取器类名
+        category_class_names = {
+            row.class_name
+            for row in model._rows
+            if row.category == first_category  # type: ignore[attr-defined]
+        }
         # 先禁用该类别
         controller.setCategoryEnabled(first_category, False)
         # disabled_extractors 应包含该类别下的提取器
-        assert len(controller.config.disabled_extractors) > 0
+        disabled_set = set(controller.config.disabled_extractors)
+        assert category_class_names.issubset(disabled_set)
 
         # 再启用
         controller.setCategoryEnabled(first_category, True)
         # disabled_extractors 应不再包含该类别下的提取器
-        assert len(controller.config.disabled_extractors) == 0
+        disabled_set = set(controller.config.disabled_extractors)
+        assert not category_class_names.intersection(disabled_set)
 
     def test_category_enabled_state_all_selected(self, controller: ConfigController) -> None:
         """全部启用时 categoryEnabledState 返回 1（全选）。"""

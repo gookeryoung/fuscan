@@ -28,6 +28,7 @@ import yaml
 __all__ = [
     "CONFIG_DIR",
     "CONFIG_PATH",
+    "DEFAULT_DISABLED_EXTRACTORS",
     "DEFAULT_MAX_FILE_SIZE",
     "IGNORE_DIR_CATEGORIES",
     "Config",
@@ -196,6 +197,24 @@ def _default_ignore_dirs() -> list[str]:
     return [d for _, dirs in IGNORE_DIR_CATEGORIES for d in dirs]
 
 
+# 默认禁用的提取器类名列表：
+# - 文本：仅勾选纯文本（PlainTextExtractor），源代码/HTML/XML 等（SourceCodeExtractor）默认关闭
+# - 压缩包：仅勾选 ZIP、RAR，7z（SevenZArchiveExtractor）默认关闭
+# - 邮件：仅勾选 EML（EmlExtractor），MSG（MsgExtractor）默认关闭
+# - Office 文档：全部默认勾选
+# - PDF/RTF：全部默认勾选
+DEFAULT_DISABLED_EXTRACTORS: tuple[str, ...] = (
+    "SourceCodeExtractor",
+    "SevenZArchiveExtractor",
+    "MsgExtractor",
+)
+
+
+def _default_disabled_extractors() -> list[str]:
+    """返回默认禁用提取器的可变列表副本。"""
+    return list(DEFAULT_DISABLED_EXTRACTORS)
+
+
 @dataclass
 class Config:
     """应用配置。"""
@@ -234,9 +253,9 @@ class Config:
     cache_enabled: bool = True
     # 是否启用性能详细日志（PerfTimer 持久化到缓存数据库）
     perf_log_enabled: bool = False
-    # 已禁用的提取器类名列表：默认空列表表示全部启用，
+    # 已禁用的提取器类名列表：默认按用户预设（仅启用 TXT/ZIP/RAR/EML/Office/PDF），
     # 用户在主界面勾选区取消的提取器类名追加到此列表，对应文件类型不扫描。
-    disabled_extractors: list[str] = field(default_factory=list)
+    disabled_extractors: list[str] = field(default_factory=_default_disabled_extractors)
     # 缓存数据库路径（None 表示默认 ~/.fuscan/cache.db）
     cache_path: str | None = None
     # 暂存区目录：用户点击「移动至暂存区」后文件被移动到此目录。

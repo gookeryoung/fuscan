@@ -20,6 +20,9 @@ dependencies = [
     "lxml>=4.9.0",
     "pypdf>=4.0.0",
     "pdf_oxide>=0.3",
+    # iter-167：pypdfium2（pdfium C++）作为 pdf_oxide 不可用时的中间层回退
+    # 性能接近 pdf_oxide 且兼容 Win7（无 Rust 依赖）
+    "pypdfium2>=4.0",
     "rarfile>=4.1",
     "charset-normalizer>=3.3.0",
     "striprtf>=0.0.26",

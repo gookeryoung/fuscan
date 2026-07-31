@@ -73,9 +73,14 @@ class TestConfig:
         assert config.perf_log_enabled is False
 
     def test_default_disabled_extractors(self) -> None:
-        """默认不禁用任何提取器（iter-72）。"""
+        """默认禁用 SourceCodeExtractor/SevenZArchiveExtractor/MsgExtractor。"""
         config = Config()
-        assert config.disabled_extractors == []
+        from fuscan.config import DEFAULT_DISABLED_EXTRACTORS
+
+        assert config.disabled_extractors == list(DEFAULT_DISABLED_EXTRACTORS)
+        assert "SourceCodeExtractor" in config.disabled_extractors
+        assert "SevenZArchiveExtractor" in config.disabled_extractors
+        assert "MsgExtractor" in config.disabled_extractors
 
 
 class TestLoadConfig:

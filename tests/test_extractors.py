@@ -1068,6 +1068,19 @@ class TestPdfExtractorOxideBackend:
         assert extractor.extract_from_bytes(b"fake but callable") == ""
 
 
+def _make_pdf_sample(tmp_path: Path) -> bytes:
+    """用 reportlab 生成含 password 关键词的 PDF 样本。"""
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import Paragraph, SimpleDocTemplate
+
+    path = tmp_path / "sample.pdf"
+    styles = getSampleStyleSheet()
+    doc = SimpleDocTemplate(str(path), pagesize=letter)
+    doc.build([Paragraph("This document contains a secret password.", styles["Normal"])])
+    return path.read_bytes()
+
+
 # ---------------------------------------------------------------------------
 # PdfExtractor pypdfium2 中间层回退测试（iter-167）
 # ---------------------------------------------------------------------------
@@ -1098,13 +1111,14 @@ class TestPdfExtractorPdfiumBackend:
         monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
         assert PdfExtractor().engine_info == "pypdfium2"
 
-    def test_pdfium_extract_real_pdf(self, pdf_sample: bytes, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_pdfium_extract_real_pdf(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """pypdfium2 后端提取真实 PDF 应包含 password 关键词。"""
         from fuscan.extractors.pdf import _PDFIUM_AVAILABLE
 
         if not _PDFIUM_AVAILABLE:
             pytest.skip("pypdfium2 未安装")
         monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
+        pdf_sample = _make_pdf_sample(tmp_path)
         extractor = PdfExtractor()
         content = extractor.extract_from_bytes(pdf_sample)
         assert "password" in content.lower()

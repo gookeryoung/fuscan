@@ -3,11 +3,11 @@
 iter-91：优先使用 ``pdf_oxide``（Rust + PyO3，0.8ms/文档，释放 GIL），
 import 失败时回退到 ``pypdf``（纯 Python，12.1ms/文档）。
 
-``pdf_oxide`` 优势：
-- 15 倍于 pypdf 的提取速度
-- Rust 核心执行期间释放 GIL，不饿死主线程
-- 100% 通过率（3,830 个测试 PDF）
-- MIT/Apache-2.0 许可证
+iter-167：新增 ``pypdfium2``（Google pdfium C++ 引擎，通过 cffi 绑定）
+作为中间层回退。pdf_oxide 在 Win7 等旧系统上可能因 Rust 运行时缺失而
+无法加载，pypdfium2 提供接近 pdf_oxide 的性能（C++ 原生），且兼容 Win7。
+
+三层降级链：pdf_oxide → pypdfium2 → pypdf
 """
 
 from __future__ import annotations
@@ -36,13 +36,23 @@ except ImportError:  # pragma: no cover - 环境依赖：仅 pdf_oxide 未安装
     _PDF_OXIDE_AVAILABLE = False
     _PdfOxideDocument = None  # type: ignore[assignment, unused-ignore]
 
+# 模块级检测 pypdfium2 是否可用（iter-167）
+# pypdfium2 封装 Google pdfium C++ 引擎，性能接近 pdf_oxide 且兼容 Win7
+try:
+    from pypdfium2 import PdfDocument as _PdfiumDocument
+
+    _PDFIUM_AVAILABLE = True
+except ImportError:  # pragma: no cover - 环境依赖
+    _PDFIUM_AVAILABLE = False
+    _PdfiumDocument = None  # type: ignore[assignment, unused-ignore]
+
 
 class PdfExtractor(Extractor):
     """PDF 文档文本提取器。
 
-    优先使用 ``pdf_oxide``（Rust + PyO3），回退到 ``pypdf``。
-    :attr:`speed_tier` 根据可用后端动态返回：``pdf_oxide`` → T2 快速，
-    ``pypdf`` → T5 极慢。
+    三层降级链：pdf_oxide（Rust + PyO3）→ pypdfium2（C++ cffi）→ pypdf（纯 Python）。
+    :attr:`speed_tier` 根据可用后端动态返回：pdf_oxide → T2 快速，
+    pypdfium2 → T3 中速，pypdf → T5 极慢。
     """
 
     @property
@@ -54,12 +64,17 @@ class PdfExtractor(Extractor):
     @property
     @override
     def speed_tier(self) -> SpeedTier:
-        """PDF 提取速度档次：pdf_oxide 可用时 T2 快速，否则 T5 极慢。
+        """PDF 提取速度档次（iter-167）。
 
-        iter-91：pdf_oxide（Rust + PyO3）0.8ms/文档 + 释放 GIL → T2；
-        pypdf（纯 Python）12.1ms/文档 + 持有 GIL → T5。
+        - pdf_oxide（Rust + PyO3）：0.8ms/文档 + 释放 GIL → T2 快速
+        - pypdfium2（pdfium C++）：接近原生性能 + 释放 GIL → T3 中速
+        - pypdf（纯 Python）：12.1ms/文档 + 持有 GIL → T5 极慢
         """
-        return SpeedTier.FAST if _PDF_OXIDE_AVAILABLE else SpeedTier.VERY_SLOW
+        if _PDF_OXIDE_AVAILABLE:
+            return SpeedTier.FAST
+        if _PDFIUM_AVAILABLE:
+            return SpeedTier.MEDIUM
+        return SpeedTier.VERY_SLOW
 
     @override
     @property
@@ -70,8 +85,12 @@ class PdfExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：实际使用的 PDF 解析引擎。"""
-        return "pdf_oxide" if _PDF_OXIDE_AVAILABLE else "pypdf"
+        """iter-139/167：实际使用的 PDF 解析引擎。"""
+        if _PDF_OXIDE_AVAILABLE:
+            return "pdf_oxide"
+        if _PDFIUM_AVAILABLE:
+            return "pypdfium2"
+        return "pypdf"
 
     @override
     def extract(self, path: Path) -> str:
@@ -86,10 +105,12 @@ class PdfExtractor(Extractor):
     def extract_from_bytes(self, data: bytes) -> str:
         """从内存字节提取 PDF 文本，加密文档返回空字符串。
 
-        优先调用 ``pdf_oxide`` 后端（iter-91）；不可用时回退 ``pypdf``。
+        iter-167：三层降级链 pdf_oxide → pypdfium2 → pypdf。
         """
         if _PDF_OXIDE_AVAILABLE:
             return self._extract_with_pdf_oxide(data)
+        if _PDFIUM_AVAILABLE:
+            return self._extract_with_pdfium2(data)
         return self._extract_with_pypdf(data)
 
     def _extract_with_pdf_oxide(self, data: bytes) -> str:
@@ -117,6 +138,42 @@ class PdfExtractor(Extractor):
                 return ""
             logger.warning("PDF 文本提取失败", exc_info=True)
             return ""
+
+    def _extract_with_pdfium2(self, data: bytes) -> str:
+        """使用 pypdfium2（Google pdfium C++）提取 PDF 文本（iter-167）。
+
+        pypdfium2 基于 Google pdfium C++ 引擎，通过 cffi 绑定，
+        性能接近 pdf_oxide 且兼容 Win7（无 Rust 依赖）。
+        当 pdf_oxide 不可用时作为中间层回退。
+        """
+        try:
+            doc = _PdfiumDocument(io.BytesIO(data))  # type: ignore[union-attr]
+        except Exception as exc:
+            logger.info("pypdfium2 无法打开 PDF，回退 pypdf")
+            return self._extract_with_pypdf(data)
+
+        try:
+            parts: list[str] = []
+            for page_index in range(len(doc)):
+                try:
+                    page = doc.get_page(page_index)
+                    textpage = page.get_textpage()
+                    text = textpage.get_text_range() or ""
+                    if text:
+                        parts.append(text)
+                except Exception:
+                    logger.warning("pypdfium2 页面提取失败", exc_info=True)
+                    continue
+            return "\n".join(parts)
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "encrypt" in msg or "password" in msg:
+                logger.info("PDF 已加密，跳过")
+                return ""
+            logger.warning("pypdfium2 提取失败，回退 pypdf", exc_info=True)
+            return self._extract_with_pypdf(data)
+        finally:
+            doc.close()
 
     def _extract_with_pypdf(self, data: bytes) -> str:
         """使用 pypdf 回退提取 PDF 文本。"""

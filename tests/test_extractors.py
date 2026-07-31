@@ -1135,7 +1135,7 @@ class TestPdfExtractorPdfiumBackend:
 
         # mock pypdfium2 打开失败，pypdf 可用
         fake_pdfium = type("pypdfium2", (), {})
-        fake_pdfium.PdfDocument = staticmethod(lambda _: (_ for _ in ()).throw(ValueError("bad")))
+        fake_pdfium.PdfDocument = staticmethod(lambda _: (_ for _ in ()).throw(ValueError("bad")))  # pyrefly: ignore [missing-attribute]
         fake_pypdf_module = type(
             "pypdf",
             (),

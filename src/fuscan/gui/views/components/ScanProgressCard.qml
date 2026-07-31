@@ -339,6 +339,21 @@ Rectangle {
                 font.bold: true
                 font.pixelSize: 12
             }
+            // iter-151：增量扫描显示复用与变更文件数（仅当有复用时显示，避免空载噪音）
+            Label {
+                text: "复用 " + workspaceController.activeScanController.reusedFiles
+                color: theme.colorPrimary
+                font.bold: true
+                font.pixelSize: 12
+                visible: workspaceController.activeScanController.reusedFiles > 0
+            }
+            Label {
+                text: "重扫 " + workspaceController.activeScanController.changedFiles
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                font.bold: true
+                font.pixelSize: 12
+                visible: workspaceController.activeScanController.reusedFiles > 0
+            }
             Item { Layout.fillWidth: true }
 
             // 暂停/继续按钮：扫描中显示「暂停」，已暂停显示「继续」

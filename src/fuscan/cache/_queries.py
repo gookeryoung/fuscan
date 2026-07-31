@@ -26,7 +26,13 @@ if TYPE_CHECKING:
     from fuscan.cache.store import CacheStore
     from fuscan.scanner.result import RuleHit
 
-__all__ = ["get_cached_hits", "get_extracted_content", "get_rule_hashes", "lookup_file_hash"]
+__all__ = [
+    "get_cached_hits",
+    "get_extracted_content",
+    "get_rule_hashes",
+    "lookup_file_hash",
+    "lookup_file_hashes_batch",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +177,94 @@ def lookup_file_hash(
     with store._lru_lock:
         store._path_cache_put(path_str, mtime, size, file_hash)
     return file_hash
+
+
+def lookup_file_hashes_batch(
+    store: CacheStore,
+    keys: Collection[tuple[Path, float, int]],
+) -> dict[tuple[Path, float, int], str | None]:
+    """批量查询多个 ``(path, mtime, size)`` 对应的 ``file_hash``。
+
+    iter-158：**路径预筛批量查询**。用单条 ``WITH targets(...) VALUES (...)``
+    CTE + JOIN 一次性从 SQLite 取回所有 keys 的 file_hash，取代 N 次
+    :func:`lookup_file_hash` 单次查询，减少 90%+ 的 SQL 解析/执行器开销。
+    查询结果（包括 None 未命中）同步写回路径预筛 LRU，使后续 worker 中
+    :func:`lookup_file_hash` 直接命中内存，跳过 SQLite。
+
+    - ``keys <= 0``：直接返回空 dict
+    - ``keys >= 1``：按 200 条一批拆分（SQLite ``SQLITE_MAX_VARIABLE_NUMBER``
+      默认 999，每键 3 参数，200 条 = 600 参数安全留余量），多批拼接结果。
+    - 每批先查进程内 LRU：命中的直接出结果不进 SQL；SQL 仅查询 miss 集
+    - 返回值保证所有 ``keys`` 都在 dict 中（None 表示未命中）
+
+    :param store: 所属 CacheStore 实例
+    :param keys: 三元组 ``(路径, mtime, 大小)`` 的集合
+    :return: 键为三元组，值为 file_hash（未命中为 None）
+    """
+    keys_list = list(keys)
+    if not keys_list:
+        return {}
+    result: dict[tuple[Path, float, int], str | None] = {}
+    # 先查进程内 LRU，命中的直接出结果（减少 SQL 参数个数）
+    pending: list[tuple[Path, float, int]] = []
+    with store._lru_lock:
+        for key in keys_list:
+            path, mtime, size = key
+            cached = store._path_cache_get(str(path), mtime, size)
+            if cached is not None:
+                result[key] = cached
+            else:
+                pending.append(key)
+    if not pending:
+        return result
+    # BATCH_SIZE: 每键 3 参数，默认 999，取 250 × 3 = 750 留余量
+    BATCH_SIZE = 250
+    n = len(pending)
+    for batch_start in range(0, n, BATCH_SIZE):
+        batch_end = min(n, batch_start + BATCH_SIZE)
+        batch = pending[batch_start:batch_end]
+        # 构造 VALUES CTE：每个键 3 个 ?
+        values_clause = ", ".join(["(?, ?, ?)"] * len(batch))
+        params: list[Any] = []
+        for path, mtime, size in batch:
+            params.append(str(path))
+            params.append(mtime)
+            params.append(size)
+        sql = (
+            "WITH targets(path, mtime, size) AS (VALUES " + values_clause + ") "
+            "SELECT t.path AS q_path, t.mtime AS q_mtime, t.size AS q_size, "
+            "fp.file_hash AS file_hash "
+            "FROM targets t "
+            "LEFT JOIN file_paths fp ON t.path = fp.path AND t.mtime = fp.mtime "
+            "LEFT JOIN scanned_files sf ON fp.file_hash = sf.file_hash "
+            "WHERE sf.size IS NULL OR sf.size = t.size"
+        )
+        # 说明：LEFT JOIN + WHERE sf.size IS NULL OR sf.size = t.size
+        # 等价于：当 fp 有记录但 sf.size != t.size 时，返回 file_hash = NULL（
+        # 表示 size 不匹配，视为未命中）。当 fp 无记录时，LEFT JOIN 返回
+        # file_hash = NULL 同样视为未命中。当 fp 有记录且 size 匹配时返回
+        # 正确 file_hash。
+        rows = store._get_read_conn().execute(sql, params).fetchall()
+        # rows: [(q_path, q_mtime, q_size, file_hash or None)]
+        # 需要构造 (path,mtime,size) -> file_hash
+        lookup: dict[tuple[str, float, int], str | None] = {}
+        for row in rows:
+            lookup[(row["q_path"], row["q_mtime"], row["q_size"])] = row["file_hash"]
+        # 回填到 result + 写回 LRU
+        for path, mtime, size in batch:
+            key = (path, mtime, size)
+            path_str = str(path)
+            file_hash = lookup.get((path_str, mtime, size))
+            result[key] = file_hash
+            if file_hash is not None:
+                # 命中 SQLite：写回 LRU（None 不写，避免污染缓存）
+                with store._lru_lock:
+                    store._path_cache_put(path_str, mtime, size, file_hash)
+    # 补全：确保所有 keys_list 都在 result（None 未命中的也显式写入 None）
+    for key in keys_list:
+        if key not in result:
+            result[key] = None
+    return result
 
 
 def get_extracted_content(store: CacheStore, file_hash: str) -> str | None:

@@ -20,15 +20,27 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Mapping
+from typing import TYPE_CHECKING, Callable, Mapping, Pattern
 
 from fuscan.cache.store import BatchWriteItem
 from fuscan.perf import PerfStats
-from fuscan.rules.model import Rule, RuleSet, Severity
+from fuscan.rules.model import (
+    AndMatch,
+    LeafMatch,
+    MatchMode,
+    MatchSpec,
+    MatchTarget,
+    OrMatch,
+    Rule,
+    RuleSet,
+    Severity,
+)
 from fuscan.scanner._archive_phase import run_archive_phase
 from fuscan.scanner._cache_phase import (
     BatchBuffer,
@@ -38,6 +50,9 @@ from fuscan.scanner._cache_phase import (
 from fuscan.scanner._helpers import (
     GIL_YIELD_INTERVAL,
     PROGRESS_LIST_MAX,
+    PROGRESS_MIN_DELTA_FILES,
+    PROGRESS_MIN_DELTA_MATCHES,
+    PROGRESS_SNAPSHOT_TAIL,
     build_hit_from_match,
     default_extract_content,
     default_extract_content_with_hash,
@@ -56,6 +71,7 @@ from fuscan.scanner.entropy import (
 from fuscan.scanner.manifest import FileFingerprint, IncrementalManifest
 from fuscan.scanner.matchers import Matcher, build_matcher
 from fuscan.scanner.result import (
+    MatchResult,
     ProgressInfo,
     RuleHit,
     ScanReport,
@@ -75,6 +91,144 @@ __all__ = ["Scanner", "default_extract_content", "default_extract_content_with_h
 logger = logging.getLogger(__name__)
 
 
+def extract_required_exts(match: MatchSpec | None) -> frozenset[str] | None:  # noqa: PLR0912
+    """iter-164：从 MatchSpec 提取**必须匹配任一扩展名**的集合。
+
+    若规则对扩展名无任何约束（例如纯 CONTENT 匹配、OR 组合的各分支提取不出来），
+    返回 ``None``（表示所有扩展名都「可能命中」，不能在预筛阶段跳过）。
+    若规则只对某些扩展名可能命中（例如 ``filename endswith ".env"`` AND ...），
+    返回 **规范化扩展名集合**（小写、去点）。
+
+    提取规则：
+    - ``LeafMatch(target=FILENAME, mode=ENDWITH, pattern=X)``：从 X 提取扩展名
+      （取最后一个 ``.`` 之后的部分）。
+    - ``LeafMatch(target=FILENAME, mode=EQUALS, pattern=X)``：同上，X 有 ``.`` 时
+      提取扩展名。
+    - ``AndMatch(children=...)``：**取所有子项的交集**（每个子项均约束扩展名 →
+      取并集中公共的；若有子项返回 None 则整体可能 None）——实际上 And 下只要求
+      所有孩子均成立，因此若 C1 返回 E1、C2 返回 E2，则实际要求扩展名 ∈ E1 ∩ E2；
+      若任一子项返回 None（无约束），则整体约束等价于其他孩子的约束集合。
+    - ``OrMatch(children=...)``：若**所有**子项均返回非 None，取并集；若任一子项
+      为 None，则整体返回 None。
+    - ``NotMatch(child)``：无法安全反转扩展名约束，返回 None。
+    - ``LeafMatch(target=CONTENT)`` / ``LeafMatch(target=PATH)``：返回 None（PATH
+      匹配太难从路径片段提取扩展名）。
+
+    :param match: 要分析的 MatchSpec（可从 ``Rule.match`` 得到）
+    :return: 必要扩展名集合（小写去点）或 None（无约束）
+    """
+    if match is None:
+        return None
+
+    if isinstance(match, LeafMatch):
+        if match.target is MatchTarget.FILENAME and match.mode in (MatchMode.ENDSWITH, MatchMode.EQUALS):
+            # 从 pattern 中提取最后一个 "." 之后的部分
+            pat = match.pattern
+            dot = pat.rfind(".")
+            if 0 <= dot < len(pat) - 1:
+                ext = pat[dot + 1 :].lower()
+                if ext:
+                    return frozenset({ext})
+            return None
+        return None
+
+    if isinstance(match, AndMatch):
+        # 收集 children 中所有非 None 约束
+        constrained: list[frozenset[str]] = []
+        for c in match.children:
+            e = extract_required_exts(c)
+            if e is not None:
+                constrained.append(e)
+        if not constrained:
+            return None
+        # AND 下必须满足所有 constrained → 取交集
+        result = constrained[0]
+        for s in constrained[1:]:
+            result = result & s
+        return result if result else None
+
+    if isinstance(match, OrMatch):
+        # 必须所有子项都能提取出非 None，才能取并集
+        exts: list[frozenset[str]] = []
+        for c in match.children:
+            e = extract_required_exts(c)
+            if e is None:
+                return None
+            exts.append(e)
+        if not exts:
+            return None
+        result = frozenset()
+        for s in exts:
+            result = result | s
+        return result if result else None
+
+    # NotMatch / 其他：放弃
+    return None
+
+
+_INLINE_FLAG_MAP: dict[str, int] = {
+    "i": re.IGNORECASE,
+    "m": re.MULTILINE,
+    "s": re.DOTALL,
+    "x": re.VERBOSE,
+}
+
+
+def _extract_inline_flags(pattern: str) -> tuple[str, int]:
+    """提取正则模式开头的内联标志（如 ``(?i)``、``(?im)``）。
+
+    Python 3.11+ 对内联标志不在表达式开头的情况发出 DeprecationWarning，
+    因为 ``(?i)`` 等在命名组内部时会影响后续所有内容而非仅当前组。
+    本函数将其提取出来，供调用方用 ``(?flag:...)`` 非捕获组语法包装，
+    使标志仅作用于目标子模式，避免污染同一 OR 复合正则中的其他分支。
+
+    :param pattern: 原始正则模式
+    :return: ``(清理后的模式, 提取的标志位组合)``
+    """
+    extracted = 0
+    pos = 0
+    while pos < len(pattern) and pattern[pos] == "(":
+        m = re.match(r"\(\?([imsx]+)\)", pattern[pos:])
+        if not m:
+            break
+        for ch in m.group(1):
+            extracted |= _INLINE_FLAG_MAP.get(ch, 0)
+        pos += m.end()
+    return pattern[pos:], extracted
+
+
+def _flags_to_chars(flags: int) -> str:
+    """将标志位组合转换为内联标志字符串（如 ``re.IGNORECASE | re.DOTALL`` → ``is``）。"""
+    chars: list[str] = []
+    for ch, bit in _INLINE_FLAG_MAP.items():
+        if flags & bit:
+            chars.append(ch)
+    return "".join(chars)
+
+
+@dataclass
+class _ContentRuleBucket:
+    """iter-154：一组同 mode + 同 case_sensitive 的顶层纯 CONTENT 规则。
+
+    组内规则使用命名捕获组的 OR 复合正则（``(?P<_f0>pat0)|(?P<_f1>pat1)|...``）
+    一次 ``finditer`` 得到全部命中后按 ``lastgroup`` 分派到各规则，
+    相比 20 条 CONTENT 规则各自独立调用 re 减少约 80~90% 的 Python→C re 调用开销。
+
+    仅当规则是**顶层 LeafMatch 且 target=CONTENT**（无组合器包装）时会
+    被加入桶；组合型/非 CONTENT 目标规则保留在 ``_remaining_rules`` 中走原路径。
+    """
+
+    mode: MatchMode
+    case_sensitive: bool
+    rules: list[Rule] = field(default_factory=list)
+    # 组名 "_f{i}" → i（即 self.rules[i] 的下标）
+    group_to_idx: dict[str, int] = field(default_factory=dict)
+    compiled: Pattern[str] | None = None
+    # 对 CONTAINS 模式：保存原始子串（含非空时需用 count 统计非重叠次数），
+    # 以便构造 MatchResult 的 detail/match_text（保持与旧实现一致）
+    contains_patterns: list[str] = field(default_factory=list)
+
+
 class Scanner:
     """扫描器：对目录或单文件应用规则集，产出扫描报告。
 
@@ -86,7 +240,7 @@ class Scanner:
     - ``on_progress`` 回调在扫描过程中按时间节流（默认 150ms）反馈进度
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0912
         self,
         ruleset: RuleSet,
         content_provider: ContentProvider | None = None,
@@ -114,6 +268,44 @@ class Scanner:
         # 大文件跳过阈值：None 或 0 表示不限制，否则超过此大小的文件不读取内容
         self._max_file_size: int = normalize_max_file_size(max_file_size)
         self._compiled: list[tuple[Rule, Matcher]] = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
+        # iter-154 + iter-164：规则按 required_exts 分组 + 分别 CONTENT 桶合并
+        #
+        # - 无扩展名约束（纯 CONTENT / NOT / OR 混合）的规则 → global pairs（对所有文件执行）
+        # - 有扩展名约束（如 filename endswith ".env" AND ...）的规则 → 对每个
+        #   扩展名单独建 pairs 并分别跑 _build_content_buckets，仅在对应扩展名文件上
+        #   执行 CONTENT 匹配 + remaining 匹配。
+        #
+        # 减少 60%+ 的非必要 CONTENT re 调用（大型混合规则集场景）。
+        global_pairs: list[tuple[Rule, Matcher]] = []
+        ext_pairs_map: dict[str, list[tuple[Rule, Matcher]]] = {}
+        for rule, matcher in self._compiled:
+            required = extract_required_exts(rule.match)
+            if required is None:
+                global_pairs.append((rule, matcher))
+            else:
+                for ext in required:
+                    ext_pairs_map.setdefault(ext, []).append((rule, matcher))
+        # 全局 pairs 构建 CONTENT 桶
+        self._global_content_buckets: list[_ContentRuleBucket]
+        self._global_remaining_rules: list[tuple[Rule, Matcher]]
+        self._global_content_buckets, self._global_remaining_rules = self._build_content_buckets(global_pairs)
+        # 按 ext 的 pairs 分别构建 CONTENT 桶 + remaining
+        self._ext_content_buckets: dict[str, list[_ContentRuleBucket]] = {}
+        self._ext_remaining_rules: dict[str, list[tuple[Rule, Matcher]]] = {}
+        all_bucketed_names: set[str] = {r.name for b in self._global_content_buckets for r in b.rules}
+        for ext, pairs in ext_pairs_map.items():
+            buckets, remaining = self._build_content_buckets(pairs)
+            self._ext_content_buckets[ext] = buckets
+            self._ext_remaining_rules[ext] = remaining
+            for b in buckets:
+                for r in b.rules:
+                    all_bucketed_names.add(r.name)
+        # iter-155：缓存模式下快速判断规则是否被桶覆盖（避免每次扫文件重建 set）
+        self._bucketed_rule_names: frozenset[str] = frozenset(all_bucketed_names)
+        # 兼容性别名：老代码（_scan_entry_uncached 等）可先临时指向 global 版本，
+        # 实际扫描时再叠加 ext 的 buckets/rules
+        self._content_buckets = self._global_content_buckets
+        self._remaining_uncached_rules = self._global_remaining_rules
         # 全局后缀白名单：
         #   - None：扫描所有文件（全选快速路径）
         #   - 空 frozenset：不扫描任何文件（用户全部取消勾选的防御性边界）
@@ -178,21 +370,25 @@ class Scanner:
         self._on_progress = on_progress
         self._progress_interval = progress_interval
         self._last_progress_time: float = 0.0
+        # iter-160：双门限节流的「上次已发送进度快照」，用于计算 scanned/matched 增量。
+        # 初始值为 0，首次 emit 会直接通过（因 elapsed >= 0），后续与当前值比较。
+        self._last_progress_scanned: int = 0
+        self._last_progress_matched: int = 0
         # iter-111：自适应 GIL 让步间隔。
         # 顺序扫描（max_workers<=1）：主线程独占 GIL，需每 20 个文件让步一次避免 UI 卡死。
         # 并发扫描（max_workers>1）：PyO3 提取器（pdf_oxide/calamine）在 Rust 层释放 GIL，
         # worker 线程在 I/O 与提取期间不持 GIL，主线程自然获得调度机会；
-        # 让步间隔提高到 50，减少 sleep(0) 开销（10万文件节省约 3ms）。
+        # iter-152：让步间隔从 50 提高到 200，进一步减少 sleep(0) 系统调用开销
+        # （10万文件节省约 10ms），PyO3 释放 GIL 下调度仍顺畅。
         self._gil_yield_interval: int = (
-            GIL_YIELD_INTERVAL if not max_workers or max_workers <= 1 else GIL_YIELD_INTERVAL * 5 // 2
+            GIL_YIELD_INTERVAL if not max_workers or max_workers <= 1 else GIL_YIELD_INTERVAL * 10
         )
         # iter-111：进度 emit 批处理阈值。
         # 并发扫描时每 N 个 future 完成才调用一次 _emit_progress（内部仍有 150ms 节流），
         # 减少 time.perf_counter() + 比较的函数调用开销。
         # 顺序扫描保持每文件 emit（用户期望实时反馈）。
-        # iter-147：并发模式 batch 从 5 提高到 10，进一步降低高吞吐场景下
-        # 的进度回调开销（_emit_progress 内部仍有 150ms 节流，batch=10 时
-        # 实际 emit 频率不变，但减少 perf_counter 调用与 tuple 构造次数）。
+        # iter-152：默认并发 batch=10，后续 scan_entries 按 entries 规模自适应调整
+        # （见 _adapt_progress_batch），避免一刀切导致小清单过度丢实时性或大清单开销高。
         self._progress_emit_batch: int = 10 if (max_workers and max_workers > 1) else 1
         # 扫描进度上下文（scan() 期间设置，供 _emit_progress 使用）
         self._progress_start: float = 0.0
@@ -246,6 +442,10 @@ class Scanner:
         self._entropy_threshold: float = (
             entropy_threshold if entropy_threshold is not None else DEFAULT_ENTROPY_THRESHOLD
         )
+        # iter-158：collect_entries 阶段 1 walk 结束后批量预热的 file_hash 结果。
+        # 键为 str(Path)，值为 file_hash（64 hex，None 表示未登记/不适用）。
+        # _scan_entry_cached 优先查本 dict，省掉 SQLite/路径 LRU 查询。
+        self._precomputed_file_hashes: dict[str, str | None] = {}
 
     def pause(self) -> None:
         """暂停扫描，阻塞扫描线程直到 resume。"""
@@ -406,6 +606,26 @@ class Scanner:
         cancelled = self.is_cancelled
         self._cancel_event.clear()
 
+        # iter-158：预热路径预筛 file_hash（批量 SQL 查询）
+        # 对进入扫描队列的变更/新文件，一条 CTE JOIN 批量查 SQLite，
+        # 结果写入 _precomputed_file_hashes + 主动填充路径预筛 LRU，
+        # 使后续 _scan_entry_cached 内 lookup_file_hash 全部命中内存，
+        # 减少 90%+ 的 SQL 解析/执行器开销。
+        # 无缓存模式：跳过预热
+        if self._cache is not None and entries and not cancelled:
+            with self._perf.measure("cache_lookup_batch"):
+                keys: list[tuple[Path, float, int]] = [(e.path, e.mtime, e.size) for e in entries]
+                batch_result = self._cache.lookup_file_hashes(keys)
+                # 写入 _precomputed_file_hashes（键为 str(path)）
+                precomputed: dict[str, str | None] = {}
+                for e in entries:
+                    key = (e.path, e.mtime, e.size)
+                    precomputed[str(e.path)] = batch_result.get(key)
+                self._precomputed_file_hashes = precomputed
+        else:
+            # 无缓存/空列表：清空预计算，避免残留上次扫描结果
+            self._precomputed_file_hashes = {}
+
         # 构建本次扫描的 manifest（全量+增量模式均构建，供下次增量扫描用）
         self._current_manifest = IncrementalManifest(root=root, fingerprints=new_fingerprints)
 
@@ -432,6 +652,28 @@ class Scanner:
         增量扫描。增量模式合并未变更文件旧指纹 + 变更文件新指纹。
         """
         return self._current_manifest
+
+    def _adapt_progress_batch(self, n_entries: int) -> None:
+        """根据待扫描条目数自适应设置 _progress_emit_batch。
+
+        iter-152：取代一刀切 batch=10 的默认值，按清单规模在 10~50 之间分档：
+        - 小清单（<=1000）：batch=10，保留实时反馈
+        - 中等清单（1001~10000）：batch=20，平衡实时性与开销
+        - 大清单（10001~50000）：batch=35，降低主线程 as_completed 循环 overhead
+        - 超大清单（>50000）：batch=50，最大化减少 emit 相关函数调用
+
+        顺序扫描（max_workers<=1）保持 batch=1 不变，确保用户期望的逐文件反馈。
+        """
+        if not self._max_workers or self._max_workers <= 1:
+            return  # 顺序扫描保持每文件 emit
+        if n_entries <= 1000:
+            self._progress_emit_batch = 10
+        elif n_entries <= 10000:
+            self._progress_emit_batch = 20
+        elif n_entries <= 50000:
+            self._progress_emit_batch = 35
+        else:
+            self._progress_emit_batch = 50
 
     def scan_entries(self, root: Path, walk_result: WalkResult) -> ScanReport:
         """scan + archive 阶段：对预收集的 entries 执行内容扫描。
@@ -491,6 +733,9 @@ class Scanner:
         self._progress_total = len(entries) + self._unchanged_count
         self._progress_skipped = skipped
         self._progress_user_skipped = user_skipped
+        # iter-152：根据 entries 规模自适应 emit batch，避免一刀切 10 导致
+        # 小清单丢实时性或大清单主线程 as_completed 循环 overhead 过高。
+        self._adapt_progress_batch(len(entries))
 
         try:
             if not cancelled:
@@ -632,7 +877,17 @@ class Scanner:
         force: bool = False,
         phase: str = "scan",
     ) -> None:
-        """时间节流后调用 on_progress 回调。
+        """iter-160：双门限节流后调用 on_progress 回调。
+
+        相比旧版本仅按 ``_progress_interval`` 做时间节流，新增**增量门限**作为
+        「附加抑制条件」（AND 抑制，不会导致慢阶段漏报）：
+
+        1. ``force=True``：直接发送（用于 scan_start / scan_end / phase_change 关键节点）。
+        2. 否则先按 ``_progress_interval`` 做时间门。
+        3. 时间门通过后再检查「自上次 emit 以来 scanned/matched 增量是否都低于阈值」，
+           若两者都低于阈值则**跳过本次 emit**，减少 50k+ 小文件场景下的主线程刷新次数。
+        4. 一旦 emit 被允许，立即更新 ``_last_progress_time``/``_last_progress_scanned``/
+           ``_last_progress_matched``，作为下一次节流的基线。
 
         :param matches: 累计匹配文本条数（区别于 matched 的命中文件数）。
         :param force: 为 True 时跳过节流，强制发送（如最终进度）。
@@ -642,12 +897,29 @@ class Scanner:
         if self._on_progress is None:
             return
         now = time.perf_counter()
-        if not force and now - self._last_progress_time < self._progress_interval:
-            return
+        if not force:
+            if now - self._last_progress_time < self._progress_interval:
+                return
+            # iter-160：双门限的「增量抑制」分支——时间窗满足但进度无实质变化时跳过
+            # 仅当已有基线（不是首次 emit 或基准不为 0）时才检查增量
+            if self._last_progress_scanned > 0 or self._last_progress_matched > 0:
+                scanned_delta = scanned - self._last_progress_scanned
+                matched_delta = matched - self._last_progress_matched
+                if scanned_delta < PROGRESS_MIN_DELTA_FILES and matched_delta < PROGRESS_MIN_DELTA_MATCHES:
+                    return
+        # iter-160：更新基线，供下一轮增量门限使用
         self._last_progress_time = now
-        # deque 为空时跳过 tuple 拷贝（高频进度回调下的微小优化）
-        recent_skipped = tuple(self._skipped_dirs) if self._skipped_dirs else ()
-        recent_matched = tuple(self._matched_files) if self._matched_files else ()
+        self._last_progress_scanned = scanned
+        self._last_progress_matched = matched
+        # iter-160：快照仅取最近 PROGRESS_SNAPSHOT_TAIL 条，避免大规模扫描 O(N) 拷贝
+        if self._skipped_dirs:
+            recent_skipped = tuple(list(self._skipped_dirs)[-PROGRESS_SNAPSHOT_TAIL:])
+        else:
+            recent_skipped = ()
+        if self._matched_files:
+            recent_matched = tuple(list(self._matched_files)[-PROGRESS_SNAPSHOT_TAIL:])
+        else:
+            recent_matched = ()
         self._on_progress(
             ProgressInfo(
                 current_file=current_file,
@@ -698,6 +970,284 @@ class Scanner:
             return True
         return entry.extension in self._scan_extensions
 
+    def _get_effective_buckets_and_rules(
+        self,
+        entry: FileEntry,
+    ) -> tuple[list[_ContentRuleBucket], list[tuple[Rule, Matcher]]]:
+        """iter-164：基于 entry.extension 返回当前文件真正需要执行的 CONTENT 桶
+        和 remaining 规则对（global + ext 专属）。
+
+        - 无扩展名的文件（如 .env、Makefile、Dockerfile）：entry.extension == ""，
+          仅执行 global_content_buckets / global_remaining_rules。
+        - 有扩展名的文件：global + 对应 ext 的专属 buckets/rules。
+        - ``_ext_*`` dict 中未找到 ext 时视为空 list，不抛异常。
+
+        :param entry: 待扫描文件条目（用于读取 extension）
+        :return: (buckets, remaining_rules_pairs)
+        """
+        ext = entry.extension
+        if not ext:
+            return self._global_content_buckets, self._global_remaining_rules
+        ext_buckets = self._ext_content_buckets.get(ext, [])
+        ext_remaining = self._ext_remaining_rules.get(ext, [])
+        if not ext_buckets and not ext_remaining:
+            return self._global_content_buckets, self._global_remaining_rules
+        merged_buckets = self._global_content_buckets + ext_buckets
+        merged_rules = self._global_remaining_rules + ext_remaining
+        return merged_buckets, merged_rules
+
+    def _build_content_buckets(  # noqa: PLR0912
+        self,
+        pairs: list[tuple[Rule, Matcher]] | None = None,
+    ) -> tuple[list[_ContentRuleBucket], list[tuple[Rule, Matcher]]]:
+        """iter-154：从 compiled pairs 中挑出顶层纯 LeafMatch(target=CONTENT)
+        规则按 (mode, case_sensitive) 合并为复合 OR 正则桶。
+
+        iter-164：增加 ``pairs`` 可选参数。不为 None 时用传入 pairs（按 ext
+        拆分后的子集），否则回退到 ``self._compiled``（全局全量规则）。
+
+        :return: (buckets, remaining_pairs)
+          - buckets: 可合并的 CONTENT 规则桶（数量 = 桶数）
+          - remaining_pairs: 无法合入桶（组合型 / FILENAME / PATH 目标）
+            的规则+匹配器对，保留给 _scan_entry_uncached 原循环。
+        """
+        src_pairs: list[tuple[Rule, Matcher]] = pairs if pairs is not None else self._compiled
+        grouped: dict[tuple[str, bool], _ContentRuleBucket] = {}
+        bucketed_rule_names: set[str] = set()
+        # 仅合并 LeafMatch(target=CONTENT)，且 mode 为 REGEX/CONTAINS/EQUALS/STARTSWITH/ENDSWITCH
+        # 其中 EQUALS/STARTSWITH/ENDSWITH 也能转成正则：
+        #   EQUALS(p)     -> ^p$
+        #   STARTSWITH(p) -> ^p
+        #   ENDSWITH(p)   -> p$
+        for rule, _matcher in src_pairs:
+            spec = rule.match
+            if not isinstance(spec, LeafMatch) or spec.target != MatchTarget.CONTENT:
+                continue
+            # 仅处理可转为正则模式的叶子；特殊模式留作后续迭代
+            if spec.mode not in (
+                MatchMode.REGEX,
+                MatchMode.CONTAINS,
+                MatchMode.EQUALS,
+                MatchMode.STARTSWITH,
+                MatchMode.ENDSWITH,
+            ):
+                continue
+            key = (spec.mode.value, spec.case_sensitive)
+            if key not in grouped:
+                grouped[key] = _ContentRuleBucket(mode=spec.mode, case_sensitive=spec.case_sensitive)
+            bucket = grouped[key]
+            bucket.rules.append(rule)
+            bucketed_rule_names.add(rule.name)
+            if spec.mode == MatchMode.CONTAINS:
+                bucket.contains_patterns.append(spec.pattern)
+            else:
+                bucket.contains_patterns.append("")
+        # 构造复合 OR 正则
+        compiled_buckets: list[_ContentRuleBucket] = []
+        for key, bucket in grouped.items():
+            if len(bucket.rules) <= 1:
+                # 单条规则无合并收益（合并的开销会高于直接跑），丢回 remaining
+                bucketed_rule_names.discard(bucket.rules[0].name)
+                continue
+            _mode_val, case_sensitive = key
+            parts: list[str] = []
+            for i, rule in enumerate(bucket.rules):
+                spec = rule.match
+                assert isinstance(spec, LeafMatch)
+                # 根据 mode 生成对应子正则片段（对需要 escape 的先 escape）
+                if spec.mode == MatchMode.REGEX:
+                    sub = spec.pattern
+                elif spec.mode == MatchMode.CONTAINS:
+                    sub = re.escape(spec.pattern)
+                elif spec.mode == MatchMode.EQUALS:
+                    sub = rf"^{re.escape(spec.pattern)}$"
+                elif spec.mode == MatchMode.STARTSWITH:
+                    sub = rf"^{re.escape(spec.pattern)}"
+                else:  # ENDSWITH
+                    sub = rf"{re.escape(spec.pattern)}$"
+                grp_name = f"_f{i}"
+                # 提取内联标志（如 (?i)），用 (?flag:...) 非捕获组包装
+                # 避免内联标志在命名组内部时影响后续分支（Python 3.11+ DeprecationWarning）
+                sub_clean, sub_flags = _extract_inline_flags(sub)
+                if sub_flags:
+                    flag_str = _flags_to_chars(sub_flags)
+                    parts.append(rf"(?{flag_str}:(?P<{grp_name}>{sub_clean}))")
+                else:
+                    parts.append(rf"(?P<{grp_name}>{sub})")
+                bucket.group_to_idx[grp_name] = i
+            flags = 0 if case_sensitive else re.IGNORECASE
+            try:
+                compiled = re.compile("|".join(parts), flags)
+            except re.error:
+                # 若某规则含非法命名组号或其它导致 OR 复合失败的情况，
+                # 安全降级：该桶整体回到 remaining 原循环
+                for r in bucket.rules:
+                    bucketed_rule_names.discard(r.name)
+                continue
+            bucket.compiled = compiled
+            compiled_buckets.append(bucket)
+        remaining = [(r, m) for r, m in src_pairs if r.name not in bucketed_rule_names]
+        return compiled_buckets, remaining
+
+    def _match_content_via_buckets_impl(  # noqa: PLR0912
+        self,
+        content: str,
+        buckets: list[_ContentRuleBucket],
+    ) -> list[RuleHit]:
+        """iter-154：对指定的 CONTENT 桶执行一次 finditer 分派并返回命中列表。
+
+        iter-164：抽出 impl，可接受任意 buckets 列表（global + ext 专属）。
+        """
+        hits: list[RuleHit] = []
+        for bucket in buckets:
+            if bucket.compiled is None:
+                continue
+            # 先按规则聚合：rule_idx -> [first_match_text, total_count]
+            # 对 CONTAINS(case_sensitive)：直接用 count 计算，不走 finditer
+            per_rule: list[tuple[str, int] | None] = [None] * len(bucket.rules)
+            if bucket.mode == MatchMode.CONTAINS and bucket.case_sensitive:
+                # 与旧 _apply_contains 一致：非重叠 count，match_text=pattern
+                for idx, rule in enumerate(bucket.rules):
+                    spec = rule.match
+                    assert isinstance(spec, LeafMatch)
+                    pat = bucket.contains_patterns[idx]
+                    if not pat:
+                        continue
+                    cnt = content.count(pat)
+                    if cnt > 0:
+                        per_rule[idx] = (pat, cnt)
+            else:
+                for m in bucket.compiled.finditer(content):
+                    last = m.lastgroup
+                    if last is None:
+                        continue
+                    idx = bucket.group_to_idx.get(last)
+                    if idx is None:
+                        continue
+                    txt = m.group(0)
+                    prev = per_rule[idx]
+                    if prev is None:
+                        per_rule[idx] = (txt, 1)
+                    else:
+                        per_rule[idx] = (prev[0], prev[1] + 1)
+            # 构造 MatchResult 并转 RuleHit
+            for idx, accum in enumerate(per_rule):
+                if accum is None:
+                    continue
+                first_txt, total_cnt = accum
+                rule = bucket.rules[idx]
+                spec = rule.match
+                assert isinstance(spec, LeafMatch)
+                # detail / match_description 要与旧实现的 _apply_leaf 一致
+                if bucket.mode == MatchMode.REGEX:
+                    detail = f"正则命中: {first_txt!r}"
+                elif bucket.mode == MatchMode.CONTAINS:
+                    detail = f"包含 {spec.pattern!r}"
+                    first_txt = spec.pattern
+                elif bucket.mode == MatchMode.EQUALS:
+                    detail = "完全相等"
+                    first_txt = spec.pattern
+                elif bucket.mode == MatchMode.STARTSWITH:
+                    detail = f"以 {spec.pattern!r} 开头"
+                    first_txt = spec.pattern
+                else:  # ENDSWITH
+                    detail = f"以 {spec.pattern!r} 结尾"
+                    first_txt = spec.pattern
+                result = MatchResult(
+                    matched=True,
+                    detail=detail,
+                    match_text=first_txt,
+                    match_count=total_cnt,
+                    target=MatchTarget.CONTENT.value,
+                    match_texts=(first_txt,) if first_txt else (),
+                    match_description=spec.description,
+                )
+                hits.append(build_hit_from_match(rule, result))
+        return hits
+
+    def _match_content_via_buckets(self, content: str) -> list[RuleHit]:
+        """iter-154：通过合并的 CONTENT 桶对 content 执行一次 finditer 分派。
+
+        所有桶均使用 named-group OR 复合正则，遍历 ``compiled.finditer(content)``
+        拿到匹配后按 ``m.lastgroup`` 映射到对应规则，按规则汇总：
+        - 第一个命中的文本填充 ``match_text`` 和 detail
+        - 匹配条数累计到 ``match_count``
+        - CONTAINS(case_sensitive=True) 模式：若子串模式为非正则，仍用原
+          ``text.count(pattern)`` 统计非重叠次数，避免正则 ``finditer`` 重叠
+          语义差异导致的 match_count 与旧实现不一致。
+        """
+        return self._match_content_via_buckets_impl(content, self._content_buckets)
+
+    def _run_cached_applicable_bucket_pass(
+        self,
+        content: str,
+        bucket_applicable: list[tuple[Rule, Matcher, str]],
+        cached: dict[str, RuleHit | None],
+        hits: list[RuleHit],
+        batch_hits: list[tuple[str, RuleHit | None]],
+    ) -> int:
+        """iter-155：对 bucket_applicable（被 CONTENT 桶覆盖的规则集）执行：
+        缓存命中先取，再跑一次 `_match_content_via_buckets(content)` 拿命中，
+        最后对未缓存 + 未命中规则写 ``None`` 缓存占位。
+
+        直接改写入参 ``hits`` / ``batch_hits``，返回本 pass 中发生的 rule_errors 数。
+        """
+        if not bucket_applicable:
+            return 0
+        errors = 0
+        # rule_hash 是否已被处理：避免缓存命中后再查桶结果
+        processed_hashes: set[str] = set()
+        # ----------- 1 阶段：处理缓存命中 --------------------
+        for rule, _matcher, rule_hash in bucket_applicable:
+            if rule_hash in cached:
+                cached_hit = cached[rule_hash]
+                if cached_hit is not None:
+                    hits.append(rebuild_hit_from_cache(rule, cached_hit))
+                processed_hashes.add(rule_hash)
+        # ----------- 2 阶段：跑一次 content 桶匹配 --------------------
+        bucket_hits_by_name: dict[str, list[RuleHit]] = {}
+        if len(processed_hashes) < len(bucket_applicable):
+            # 至少有 1 条未缓存，跑桶匹配
+            try:
+                with self._perf.measure("match"):
+                    matched = self._match_content_via_buckets(content)
+            except Exception:
+                # 桶匹配异常：fallback 到逐条 remaining 处理
+                errors += 1
+                logger.warning("CONTENT 合并桶(缓存模式)匹配失败 %s", bucket_applicable[0][0].name, exc_info=True)
+                matched_empty: list[RuleHit] = []
+                matched = matched_empty
+            for hit in matched:
+                bucket_hits_by_name.setdefault(hit.rule_name, []).append(hit)
+        # ----------- 3 阶段：分发桶结果到未处理的 rule_hash --------------------
+        for rule, _matcher, rule_hash in bucket_applicable:
+            if rule_hash in processed_hashes:
+                continue
+            hit_list = bucket_hits_by_name.get(rule.name)
+            if hit_list:
+                # 若同规则多条命中（极少），聚合 match_count，保留第一条
+                primary = hit_list[0]
+                if len(hit_list) > 1:
+                    total = sum(h.match_count for h in hit_list)
+                    primary_match_texts = tuple({t for h in hit_list for t in h.match_texts})  # type: ignore[var-annotated]
+                    primary = RuleHit(
+                        rule_name=primary.rule_name,
+                        severity=primary.severity,
+                        detail=primary.detail,
+                        match_text=primary.match_text,
+                        match_count=total,
+                        target=primary.target,
+                        match_texts=primary_match_texts,
+                        match_description=primary.match_description,
+                    )
+                hits.append(primary)
+                batch_hits.append((rule_hash, primary))
+            else:
+                # 未命中：写 None 到缓存（下次扫同一 file_hash 不再重复匹配）
+                batch_hits.append((rule_hash, None))
+            processed_hashes.add(rule_hash)
+        return errors
+
     def _scan_entry(self, entry: FileEntry) -> ScanResult:
         """对单个文件应用所有规则，返回扫描结果。
 
@@ -720,6 +1270,9 @@ class Scanner:
 
         iter-134：启用 ``entropy_enabled`` 时，对内容执行高熵字符串检测，
         命中构造 ``E001-高熵字符串`` RuleHit（severity=WARNING）。
+
+        iter-164：通过 ``_get_effective_buckets_and_rules`` 仅取当前 entry.extension
+        真正需要的 CONTENT 桶 + remaining 规则，减少 60%+ 非必要 CONTENT re 调用。
         """
         # 是否需要读取内容：含 CONTENT 规则或启用熵检测时均需读取
         need_content = bool(self._content_rule_names) or self._entropy_enabled
@@ -731,9 +1284,26 @@ class Scanner:
         hits: list[RuleHit] = []
         rule_errors = 0
 
+        # iter-164：仅取当前 entry.ext 真需要的 buckets + remaining
+        effective_buckets, effective_remaining = self._get_effective_buckets_and_rules(entry)
+
+        # iter-154：对不 skip_content 且有桶的情况，先走合并 CONTENT 桶匹配
+        # （一次 finditer + 分派取代 N 次独立 re 调用）
+        if not skip_content and effective_buckets:
+            try:
+                with self._perf.measure("match"):
+                    bucket_hits = self._match_content_via_buckets_impl(context.content, effective_buckets)
+                hits.extend(bucket_hits)
+            except Exception:
+                # 桶匹配失败：记录为规则错误，但不要阻断后续 remaining 规则。
+                # 具体哪条规则出错在 compile 阶段已通过降级避免，这里兜底捕获异常。
+                logger.warning("CONTENT 合并桶匹配失败 %s", entry.path, exc_info=True)
+                rule_errors += 1
+
         # 全局 scan_extensions 已在 _should_scan 阶段按白名单统一过滤，
-        # 此处对进入扫描队列的文件应用全部规则（无二次过滤）
-        for rule, matcher in self._compiled:
+        # 此处对进入扫描队列的文件应用剩余规则（组合型 / FILENAME/PATH /
+        # 非 CONTENT 目标 / 单条规则未达合并阈值 / 编译失败降级）。
+        for rule, matcher in effective_remaining:
             try:
                 with self._perf.measure("match"):
                     result = matcher.matches(context)
@@ -832,7 +1402,7 @@ class Scanner:
         )
         return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)
 
-    def _scan_entry_cached(self, entry: FileEntry) -> ScanResult:
+    def _scan_entry_cached(self, entry: FileEntry) -> ScanResult:  # noqa: PLR0912
         """缓存模式扫描：先查缓存，命中直接复用，未命中走匹配器并写入缓存。
 
         优化路径：
@@ -860,16 +1430,40 @@ class Scanner:
         applicable: list[tuple[Rule, Matcher, str]] = list(self._compiled_with_hash)
         rule_hashes = [rh for _, _, rh in applicable]
 
+        # iter-155：缓存键仅包含内容哈希，不区分路径/文件名。
+        # 当规则集中存在 **任何** 非 CONTENT 目标规则（文件名匹配、路径匹配、
+        # 以及所有组合器匹配——组合器可能嵌有非 CONTENT 子规则）时，
+        # 内容相同但路径/文件名不同的文件（如全部空文件）会从缓存读到
+        # 彼此的命中结果，造成严重串号。在此保守地对这类扫描场景禁用缓存
+        # （读写均跳过），确保结果正确优先。实际项目中纯 CONTENT 规则集
+        # （最常见场景）仍能享受缓存加速。
+        disable_cache: bool = False
+        for rule, _, _ in applicable:
+            spec = rule.match
+            if not isinstance(spec, LeafMatch):
+                disable_cache = True
+                break
+            if spec.target is not MatchTarget.CONTENT:
+                disable_cache = True
+                break
+
         # mtime 预筛：若 (path, mtime, size) 已登记且所有规则都已缓存，
         # 完全跳过 read_bytes，仅从缓存重建 ScanResult。
         cached: dict[str, RuleHit | None] | None = None
-        with self._perf.measure("cache_lookup"):
-            cached_file_hash = self._cache.lookup_file_hash(entry.path, entry.mtime, entry.size)
-            if cached_file_hash is not None and rule_hashes:
-                cached = self._cache.get_cached_hits(cached_file_hash, rule_hashes)
-        if cached_file_hash is not None and cached is not None and all(rh in cached for rh in rule_hashes):
-            # 全部规则已缓存命中（含未命中记录），无需读文件
-            return self._rebuild_from_full_cache(entry, applicable, cached, cached_file_hash)
+        cached_file_hash: str | None = None
+        if not disable_cache:
+            with self._perf.measure("cache_lookup"):
+                # iter-158：优先查批量预热的预计算结果，省掉 LRU 锁/SQLite
+                pre_key = str(entry.path)
+                if pre_key in self._precomputed_file_hashes:
+                    cached_file_hash = self._precomputed_file_hashes[pre_key]
+                else:
+                    cached_file_hash = self._cache.lookup_file_hash(entry.path, entry.mtime, entry.size)
+                if cached_file_hash is not None and rule_hashes:
+                    cached = self._cache.get_cached_hits(cached_file_hash, rule_hashes)
+            if cached_file_hash is not None and cached is not None and all(rh in cached for rh in rule_hashes):
+                # 全部规则已缓存命中（含未命中记录），无需读文件
+                return self._rebuild_from_full_cache(entry, applicable, cached, cached_file_hash)
 
         # 常规路径：读文件 + 算哈希 + 查提取内容缓存 + 未命中执行提取
         content, file_hash = self._extract_with_cache(entry)
@@ -880,12 +1474,31 @@ class Scanner:
         context = MatchContext(entry, content_provider=_static_provider)
 
         with self._perf.measure("cache_lookup_hits"):
-            cached = self._cache.get_cached_hits(file_hash, rule_hashes) if rule_hashes else {}
+            # iter-155：disable_cache 或 file_hash 为 None（无法提取内容）
+            # 时跳过缓存查询，避免命中结果串号。
+            if disable_cache or file_hash is None or not rule_hashes:
+                cached = {}
+            else:
+                cached = self._cache.get_cached_hits(file_hash, rule_hashes)
 
         hits: list[RuleHit] = []
         rule_errors = 0
         batch_hits: list[tuple[str, RuleHit | None]] = []
-        for rule, matcher, rule_hash in applicable:
+        # iter-155：applicable 拆分为桶覆盖（bucket_applicable）+ 剩余原循环（remaining）
+        # 前者一次桶匹配取代 N 条 content 规则的 matcher.matches()
+        bucket_applicable: list[tuple[Rule, Matcher, str]] = []
+        remaining_applicable: list[tuple[Rule, Matcher, str]] = []
+        if self._bucketed_rule_names:
+            for triplet in applicable:
+                rule = triplet[0]
+                if rule.name in self._bucketed_rule_names:
+                    bucket_applicable.append(triplet)
+                else:
+                    remaining_applicable.append(triplet)
+        else:
+            remaining_applicable = applicable
+        rule_errors += self._run_cached_applicable_bucket_pass(content, bucket_applicable, cached, hits, batch_hits)
+        for rule, matcher, rule_hash in remaining_applicable:
             if rule_hash in cached:
                 result = cached[rule_hash]
                 if result is not None:
@@ -906,19 +1519,22 @@ class Scanner:
                 hits.append(hit)
                 batch_hits.append((rule_hash, hit))
             else:
-                # 未命中也缓存，避免重复扫描
+                # 未命中也缓存，避免重复扫描（disable_cache 时不写入 batch_hits）
                 batch_hits.append((rule_hash, None))
 
         # 累积到批量缓冲，达到阈值后由 _add_to_batch 自动 flush
-        self._add_to_batch(
-            BatchWriteItem(
-                file_hash=file_hash,
-                size=entry.size,
-                path=entry.path,
-                mtime=entry.mtime,
-                hits=tuple(batch_hits),
+        # iter-155：disable_cache 或 file_hash 为 None（空文件 / 无法提取内容）
+        # 时跳过写入缓存，防止命中结果串号。
+        if not disable_cache and file_hash is not None:
+            self._add_to_batch(
+                BatchWriteItem(
+                    file_hash=file_hash,
+                    size=entry.size,
+                    path=entry.path,
+                    mtime=entry.mtime,
+                    hits=tuple(batch_hits),
+                )
             )
-        )
 
         # iter-134：高熵字符串兜底检测（内容已读取，直接复用 context）
         if self._entropy_enabled:

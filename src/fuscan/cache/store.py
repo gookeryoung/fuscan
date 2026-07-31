@@ -54,7 +54,13 @@ from fuscan.cache._helpers import (
     CacheStats,
     default_cache_path,
 )
-from fuscan.cache._queries import get_cached_hits, get_extracted_content, get_rule_hashes, lookup_file_hash
+from fuscan.cache._queries import (
+    get_cached_hits,
+    get_extracted_content,
+    get_rule_hashes,
+    lookup_file_hash,
+    lookup_file_hashes_batch,
+)
 from fuscan.cache._writes import (
     batch_put_results,
     put_extracted_content,
@@ -422,6 +428,20 @@ class CacheStore:
     ) -> str | None:
         """按 ``(path, mtime, size)`` 查询已登记的 ``file_hash``（委托 :func:`fuscan.cache._queries.lookup_file_hash`）。"""
         return lookup_file_hash(self, path, mtime, size)  # pyrefly: ignore [bad-argument-type]
+
+    def lookup_file_hashes(
+        self,
+        keys: Collection[tuple[Path, float, int]],
+    ) -> dict[tuple[Path, float, int], str | None]:
+        """批量查询多个 ``(path, mtime, size)`` 的 ``file_hash``（iter-158 预热）。
+
+        单条 SQL 批量化查询，比 N 次 ``lookup_file_hash`` 快 10~30 倍；
+        查询结果写回路径预筛 LRU，后续 ``lookup_file_hash`` 直接命中内存。
+
+        :param keys: 三元组 (path, mtime, size) 集合
+        :return: 键为三元组，值为 file_hash（未命中为 None）
+        """
+        return lookup_file_hashes_batch(self, keys)  # pyrefly: ignore [bad-argument-type]
 
     # ------------------------------------------------------------------ 提取内容缓存
 

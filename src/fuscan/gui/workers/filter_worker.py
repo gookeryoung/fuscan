@@ -4,8 +4,12 @@ FilterWorker 在独立 QThread 中执行 filter_and_sort 纯函数，通过信�
 过滤后的元组传回主线程。10 万结果过滤+排序约 50-100ms，移至后台后
 UI 不阻塞。
 
+iter-165：同时在后台构建倒排索引（严重度 / 规则名），通过 ``done``
+信号一并传回，避免主线程在 ``set_results`` 阶段同步构建索引阻塞 UI。
+
 信号：
-- ``done``：(tuple[ScanResult, ...]) 过滤+排序后的结果元组
+- ``done``：(tuple[ScanResult, ...], dict[Severity, list[int]], dict[str, list[int]])
+  过滤+排序后的结果元组 + 严重度倒排索引 + 规则名倒排索引
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import QThread, Signal  # pyrefly: ignore [missing-import]
 
-from fuscan.gui.models.result_model import filter_and_sort
+from fuscan.gui.models.result_model import build_indices, filter_and_sort
 from fuscan.rules.model import Severity
 
 if TYPE_CHECKING:
@@ -32,6 +36,10 @@ logger = logging.getLogger(__name__)
 class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
     """后台过滤+排序工作线程。
 
+    iter-165：同时在后台线程构建倒排索引（严重度/规则名），避免主线程
+    在大结果集（>= ``_ASYNC_THRESHOLD``）场景下同步构建索引阻塞 UI。
+    索引仅在结果数 >= ``_INDEX_THRESHOLD`` 时构建；小结果集返回空字典。
+
     :param results: 原始结果元组
     :param filter_text: 文件路径模糊匹配文本（空串表示不过滤）
     :param filter_rules: 规则名过滤集合（空集合表示不过滤）
@@ -40,7 +48,8 @@ class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
     :param sort_ascending: True 升序，False 降序
     """
 
-    done = Signal(tuple)
+    # iter-165：扩展信号签名，同时回传过滤结果 + 严重度/规则名倒排索引
+    done = Signal(tuple, dict, dict)
 
     def __init__(
         self,
@@ -50,8 +59,16 @@ class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         filter_severities: frozenset[Severity],
         sort_field: str,
         sort_ascending: bool,
+        *,
+        build_index: bool = True,
+        index_threshold: int = 2000,
     ) -> None:
-        """初始化过滤线程。"""
+        """初始化过滤线程。
+
+        :param build_index: 是否在后台同时构建倒排索引（默认 True）
+        :param index_threshold: 结果数达到该阈值才构建索引（默认 2000，与
+            ``result_model._INDEX_THRESHOLD`` 保持一致）
+        """
         super().__init__()
 
         self._results = results
@@ -60,9 +77,11 @@ class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         self._filter_severities = filter_severities
         self._sort_field = sort_field
         self._sort_ascending = sort_ascending
+        self._build_index = build_index
+        self._index_threshold = index_threshold
 
     def run(self) -> None:
-        """线程入口：执行过滤+排序，通过 ``done`` 信号回传结果。"""
+        """线程入口：执行过滤+排序，同时可选构建倒排索引。"""
         filtered = filter_and_sort(
             self._results,
             self._filter_text,
@@ -71,4 +90,10 @@ class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
             self._sort_field,
             self._sort_ascending,
         )
-        self.done.emit(filtered)  # pyrefly: ignore [missing-attribute]
+        # iter-165：后台构建倒排索引（仅对原始结果 >= 阈值时）
+        if self._build_index and len(self._results) >= self._index_threshold:
+            severity_index, rule_index = build_indices(self._results)
+        else:
+            severity_index: dict[Severity, list[int]] = {}
+            rule_index: dict[str, list[int]] = {}
+        self.done.emit(filtered, severity_index, rule_index)  # pyrefly: ignore [missing-attribute]

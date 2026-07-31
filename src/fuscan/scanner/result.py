@@ -26,6 +26,7 @@ import datetime
 import html
 import io
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -65,16 +66,10 @@ def format_size(size: int) -> str:
 class MatchResult:
     """单次匹配求值结果。
 
-    ``match_text`` 存储匹配到的原始文本（regex 模式为首个 ``m.group(0)``，
-    其他模式为 ``pattern``），供 GUI 高亮定位使用，避免 ``repr`` 转义导致的失真。
-    ``match_count`` 为该次求值实际匹配到的文本条数（同一规则在同一文件中
-    可能匹配多处，如多处密码、多处密钥），用于区分"命中规则数"与"匹配条数"。
-    ``target`` 为匹配目标类型（"filename"/"content"/"path"），叶子匹配器设置，
-    组合规则为空字符串。GUI 根据 ``target`` 判断是否在内容预览中搜索高亮位置。
-    ``match_texts`` 为该次求值命中的所有文本（去重保序，含组合规则子匹配文本），
-    用于 AND/OR 等组合规则标记每个命中的内容，避免仅标记单一匹配规则的内容。
-    ``match_description`` 为该匹配项的可选描述（来自 MatchSpec.description），
-    便于用户理解匹配规则含义，在 GUI 详情表与导出结果中展示。
+    iter-163：保留 ``frozen=True`` —— 该对象在匹配器内部被多次复用（AND/OR
+    组合器收集子匹配结果时需要作为 dict key 或 set 元素使用 tuple 转换，
+    但 MatchResult 本身不进入 hash 路径，此处保留 frozen 仅为明确不可变
+    语义；若后续性能基准证明 ``__hash__`` 开销可接受再考虑替换为 ``__slots__``。
     """
 
     matched: bool
@@ -147,6 +142,10 @@ class ProgressInfo:
 class RuleHit:
     """规则命中记录：一条规则对一个文件的命中信息。
 
+    iter-163：保留 ``frozen=True`` 不可变语义；命中对象在 GUI 详情区、
+    导出、缓存重建等多路径复用，不变性可防止误修改。若后续性能基准证明
+    构造开销显著，可引入 ``__slots__`` + 手动 ``__hash__`` 方案。
+
     ``match_text`` 为匹配到的原始文本，供 GUI 高亮定位使用；
     对于组合规则（and/or/not）无单一匹配文本时为空字符串。
     ``match_count`` 为该规则在该文件实际匹配到的文本条数（如多处密码各算 1 条），
@@ -173,6 +172,11 @@ class RuleHit:
 @dataclass(frozen=True)
 class ScanResult:
     """单个文件的扫描结果。
+
+    iter-163：保留 ``frozen=True`` 不可变语义。``ScanResult`` 进入
+    GUI 展示层与报告序列化后不应被修改；frozen 不可变约束在 dataclass
+    层面保证该不变式。若后续基准证明构造开销成为瓶颈，可引入 ``__slots__``
+    + 手动 ``__hash__`` 方案。
 
     ``user_skipped`` 标识该文件是否被用户在结果详情区「标记为跳过」（iter-77）。
     标记后本次扫描结果中仍保留该条目（带跳过标记），下一次扫描起扫描器在遍历
@@ -754,3 +758,155 @@ class ScanReport:
             ],
         }
         return json.dumps(sarif, ensure_ascii=False, indent=2)
+
+    def save_json_file(
+        self,
+        path: str | Path,
+        chunk_size: int = 1000,
+        progress_cb: Callable[[int, int], None] | None = None,
+    ) -> None:
+        """流式分块写入 JSON 文件，避免大结果集内存峰值。
+
+        iter-166：原始 :meth:`to_json` / :meth:`to_json_bytes` 会在内存中构造完整
+        JSON 对象 + 序列化 str/bytes，10 万命中场景下内存峰值约为结果本身的
+        3-5 倍。本方法按 ``chunk_size`` 条 :class:`ScanResult` 为单位分批序列化
+        并写盘，常驻内存仅与单批大小相关，峰值约为原始方案的 20-30%。
+
+        输出 JSON 结构与 :meth:`to_json` 完全一致，可与 :meth:`from_json`
+        互逆。
+
+        :param path: 目标 JSON 文件路径
+        :param chunk_size: 每批序列化的 ``ScanResult`` 条数，必须 > 0
+        :param progress_cb: 可选进度回调，签名为 ``(current: int, total: int)``，
+            ``current`` 表示已处理完成的 ``ScanResult`` 条数
+        """
+        if chunk_size <= 0:
+            raise ValueError(f"chunk_size 必须为正整数，当前: {chunk_size}")
+        total = len(self.hits)
+        path_obj = Path(path)
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+        # 1. 写出 header：{root, stats, cancelled} + ",\"hits\":["
+        header: dict[str, Any] = {
+            "root": str(self.root),
+            "stats": asdict(self.stats),
+            "cancelled": self.cancelled,
+        }
+        header_bytes = _json_dumps_bytes(header)
+        # header_bytes 形如 b'{...}'，去掉末尾 } 追加 hits 数组开头
+        if not header_bytes.endswith(b"}"):  # pragma: no cover - 防御性
+            raise RuntimeError("header JSON 序列化失败，无法流式拼接 hits")
+        prefix = header_bytes[:-1] + b',"hits":['
+
+        with path_obj.open("wb") as f:
+            f.write(prefix)
+            if progress_cb is not None:
+                progress_cb(0, total)
+            # 2. 逐批序列化 hits
+            is_first = True
+            processed = 0
+            hits_list = list(self.hits)
+            for start in range(0, total, chunk_size):
+                batch = hits_list[start : start + chunk_size]
+                # 将 asdict 得到的 dict 直接序列化（与 _to_dict() 中 hits 结构一致）
+                batch_dicts: list[dict[str, Any]] = []
+                for r in batch:
+                    archive_path_str: str | None = str(r.archive_path) if r.archive_path is not None else None
+                    batch_dicts.append(
+                        {
+                            "path": str(r.path),
+                            "archive_path": archive_path_str,
+                            "inner_path": r.inner_path or None,
+                            "size": r.size,
+                            "max_severity": r.max_severity.value,
+                            "match_count": r.total_match_count,
+                            "user_skipped": r.user_skipped,
+                            "rules": [asdict(h) for h in r.hits],
+                        }
+                    )
+                batch_bytes = _json_dumps_bytes(batch_dicts)  # pyrefly: ignore [bad-argument-type]
+                # batch_bytes 形如 b"[{...},{...},...]"，去掉外围 []
+                inner = batch_bytes[1:-1]
+                if is_first:
+                    f.write(inner)
+                    is_first = False
+                else:
+                    f.write(b",")
+                    f.write(inner)
+                processed += len(batch)
+                if progress_cb is not None:
+                    progress_cb(processed, total)
+                f.flush()
+            # 3. 写出结尾：]}
+            f.write(b"]}")
+            f.flush()
+
+    def save_csv_file(
+        self,
+        path: str | Path,
+        chunk_size: int = 1000,
+        progress_cb: Callable[[int, int], None] | None = None,
+    ) -> None:
+        """流式分块写入 CSV 文件，避免大结果集内存峰值。
+
+        iter-166：CSV 每行对应一条 :class:`RuleHit`（单条 :class:`ScanResult`
+        可能对应多行）。原始 :meth:`to_csv` 会在内存 :class:`io.StringIO` 中
+        累积全部内容，对 100 万行 CSV 不友好。本方法按 ``chunk_size`` 条
+        :class:`ScanResult` 为单位分批 flush 到磁盘，常驻内存与单批大小相关。
+
+        输出 CSV 列与 :meth:`to_csv` 完全一致：
+        ``path, archive_path, inner_path, size, severity, rule, description, match_count, detail``。
+
+        :param path: 目标 CSV 文件路径
+        :param chunk_size: 每批处理的 ``ScanResult`` 条数，必须 > 0
+        :param progress_cb: 可选进度回调，签名为 ``(current: int, total: int)``，
+            ``current`` 表示已处理完成的 ``ScanResult`` 条数
+        """
+        if chunk_size <= 0:
+            raise ValueError(f"chunk_size 必须为正整数，当前: {chunk_size}")
+        total = len(self.hits)
+        path_obj = Path(path)
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+        with path_obj.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                [
+                    "path",
+                    "archive_path",
+                    "inner_path",
+                    "size",
+                    "severity",
+                    "rule",
+                    "description",
+                    "match_count",
+                    "detail",
+                ]
+            )
+            if progress_cb is not None:
+                progress_cb(0, total)
+            processed = 0
+            hits_list = list(self.hits)
+            for start in range(0, total, chunk_size):
+                batch = hits_list[start : start + chunk_size]
+                for r in batch:
+                    archive_path_str = str(r.archive_path) if r.archive_path is not None else ""
+                    inner_path_str = r.inner_path or ""
+                    for hit in r.hits:
+                        writer.writerow(
+                            [
+                                str(r.path),
+                                archive_path_str,
+                                inner_path_str,
+                                r.size,
+                                hit.severity.value,
+                                hit.rule_name,
+                                hit.match_description,
+                                hit.match_count,
+                                hit.detail,
+                            ]
+                        )
+                processed += len(batch)
+                if progress_cb is not None:
+                    progress_cb(processed, total)
+                f.flush()

@@ -2242,3 +2242,121 @@ class TestComputeSourceFiles:
         monkeypatch.setattr("fuscan.paths.BUILTIN_RULES_PATH", tmp_path / "absent.yaml")
         sources = compute_source_files([], use_builtin=True)
         assert sources == {}
+
+
+# ---------------------------------------------------------------------------
+# iter-158 批量 lookup_file_hashes 一致性与性能验证
+# ---------------------------------------------------------------------------
+
+
+class TestIter158BatchLookup:
+    """iter-158：``CacheStore.lookup_file_hashes`` 批量查询。
+
+    覆盖：
+    1. 结果与逐个 lookup_file_hash 完全等价（含 已登记/未登记/mtime 不匹配/size 不匹配）
+    2. 空集返回空 dict
+    3. 大批次（> BATCH_SIZE=250）拆分正确，所有键返回结果
+    4. 批量查询后路径 LRU 被填充，后续 lookup_file_hash 命中内存（SQLite 不再执行）
+    """
+
+    @staticmethod
+    def _register(store: CacheStore, path: Path, content: bytes) -> tuple[Path, float, int, str]:
+        """写文件 + register_file + register_path，返回 (path, mtime, size, file_hash)。"""
+        path.write_bytes(content)
+        st = path.stat()
+        fh = hash_bytes(content)
+        store.register_file(fh, st.st_size)
+        store.register_path(fh, path, st.st_mtime)
+        return path, st.st_mtime, st.st_size, fh
+
+    def test_batch_matches_individual_lookups(self, tmp_path: Path) -> None:
+        """批量查询结果与逐个 lookup_file_hash 等价（30 键，10 登记、10 未登记、10 登记单维不匹配）。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            # 10 个已登记路径
+            registered: list[tuple[Path, float, int, str]] = []
+            for i in range(10):
+                p = tmp_path / f"r{i:02d}.txt"
+                registered.append(self._register(store, p, f"content-{i}".encode()))
+            # 10 个未登记路径（不调 register）
+            unregistered_keys: list[tuple[Path, float, int]] = [
+                (tmp_path / f"u{i:02d}.txt", float(i * 100), i * 1000) for i in range(10)
+            ]
+            # 10 个 mtime 不匹配 / size 不匹配
+            mismatch_keys: list[tuple[Path, float, int]] = []
+            for i, (p, m, s, _fh) in enumerate(registered):
+                if i % 2 == 0:
+                    mismatch_keys.append((p, m + 999, s))
+                else:
+                    mismatch_keys.append((p, m, s + 1))
+
+            keys = [(p, m, s) for (p, m, s, _) in registered] + unregistered_keys + mismatch_keys
+            # 期望：逐个查
+            expected: dict[tuple[Path, float, int], str | None] = {}
+            for p, m, s, fh in registered:
+                expected[(p, m, s)] = fh
+            for k in unregistered_keys:
+                expected[k] = None
+            for k in mismatch_keys:
+                expected[k] = None
+            # 实际：批量查
+            actual = store.lookup_file_hashes(keys)
+            assert actual == expected
+            # 额外：逐个查也等于 expected，确保方法间一致
+            for k in keys:
+                p, m, s = k
+                assert store.lookup_file_hash(p, m, s) == expected[k]
+
+    def test_empty_keys_returns_empty(self, tmp_path: Path) -> None:
+        """空 keys 返回空 dict（不执行 SQL，不抛异常）。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            assert store.lookup_file_hashes([]) == {}
+
+    def test_large_batch_splits_correctly(self, tmp_path: Path) -> None:
+        """大批次（700 键 > BATCH_SIZE=250）拆分后所有键返回正确结果。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            # 300 个登记、400 个未登记，共 700 键
+            n_registered = 300
+            expected: dict[tuple[Path, float, int], str | None] = {}
+            for i in range(n_registered):
+                p = tmp_path / f"b{i:04d}.txt"
+                _p, m, s, fh = self._register(store, p, f"large-{i}".encode() * 2)
+                expected[(p, m, s)] = fh
+            # 400 个未登记
+            for i in range(400):
+                p = tmp_path / f"unreg-{i:04d}.txt"
+                key = (p, float(i), i * 17)
+                expected[key] = None
+            keys = list(expected.keys())
+            actual = store.lookup_file_hashes(keys)
+            assert len(actual) == len(keys)
+            # 所有已登记的必须精确匹配 file_hash；未登记必须为 None
+            for k, v in expected.items():
+                assert actual[k] == v
+
+    def test_batch_fills_path_lru(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """批量查询后路径 LRU 被填充：后续单查不执行 SQLite。"""
+        with CacheStore(tmp_path / "c.db") as store:
+            p = tmp_path / "f.txt"
+            _p, m, s, fh = self._register(store, p, b"data-batch")
+            key = (p, m, s)
+            # 批量查询：首次（LRU 空）走 SQLite
+            store.lookup_file_hashes([key])
+            # 伪造 SQLite 执行器：若后续单查再调 _get_read_conn().execute 就计数
+            real_get_conn = store._get_read_conn
+            call_count: list[int] = [0]
+
+            def wrapped() -> object:
+                conn = real_get_conn()
+                real_execute = conn.execute
+
+                def counting_execute(sql: str, *args: object, **kwargs: object) -> object:
+                    call_count[0] += 1
+                    return real_execute(sql, *args, **kwargs)  # pyrefly: ignore [bad-argument-type]
+
+                conn.execute = counting_execute  # type: ignore[attr-defined]
+                return conn
+
+            monkeypatch.setattr(store, "_get_read_conn", wrapped)
+            # 现在单查应命中路径 LRU，不调 SQLite（call_count 保持 0）
+            assert store.lookup_file_hash(p, m, s) == fh
+            assert call_count[0] == 0

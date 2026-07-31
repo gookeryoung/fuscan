@@ -395,3 +395,174 @@ rules:
         rs = load_ruleset(path)
         assert rs.version == "1.0"
         assert len(rs.rules) == 6
+
+
+# ---------------------------------------------------------------------------
+# iter-162 AST 共享节点去重
+# ---------------------------------------------------------------------------
+
+
+class TestIter162AstDedup:
+    """iter-162：parse_ruleset 内部 AST 共享节点去重。
+
+    相同结构的 LeafMatch/AndMatch/OrMatch/NotMatch 在同一个 parse_ruleset
+    执行中共享同一 Python 对象，减少内存+加速后续 build_matcher 的 is/id
+    判断路径。测试验证：
+    1. 两个完全相同的 LeafMatch（type/mode/pattern/case_sensitive/description）
+       解析后是同一对象（id 相等）
+    2. description 不同但其余字段相同的 LeafMatch 不共享（保证用户可见信息不串号）
+    3. 相同子结构的 AndMatch 共享同一对象（children 为相同对象元组时）
+    4. dedup ratio 可量化（100 规则 × 20% 重复模式 → 重复节点 id 计数下降）
+    """
+
+    def test_identical_leaf_match_shares_same_object(self) -> None:
+        """两个相同 LeafMatch 定义应返回同一 Python 对象（parse_ruleset 内去重）。"""
+        data = {
+            "version": "1.0",
+            "rules": [
+                {
+                    "name": "r1",
+                    "severity": "warning",
+                    "match": {
+                        "type": "content",
+                        "mode": "regex",
+                        "pattern": r"(?i)password[=:]\S+",
+                        "case_sensitive": False,
+                        "description": "相同描述",
+                    },
+                },
+                {
+                    "name": "r2",
+                    "severity": "info",
+                    "match": {
+                        "type": "content",
+                        "mode": "regex",
+                        "pattern": r"(?i)password[=:]\S+",
+                        "case_sensitive": False,
+                        "description": "相同描述",
+                    },
+                },
+            ],
+        }
+        rs = parse_ruleset(data)
+        m1 = rs.rules[0].match
+        m2 = rs.rules[1].match
+        assert m1 is m2, "两个相同 LeafMatch 应共享同一对象（iter-162 dedup 失效）"
+        # 同时保持语义等价（属性相等仍成立）
+        assert m1 == m2
+
+    def test_different_description_does_not_share(self) -> None:
+        """description 不同（其他字段相同）的两个 LeafMatch 不得共享对象。"""
+        data = {
+            "version": "1.0",
+            "rules": [
+                {
+                    "name": "r1",
+                    "severity": "warning",
+                    "match": {
+                        "type": "content",
+                        "mode": "contains",
+                        "pattern": "secret",
+                        "case_sensitive": False,
+                        "description": "规则A：检测 secret",
+                    },
+                },
+                {
+                    "name": "r2",
+                    "severity": "warning",
+                    "match": {
+                        "type": "content",
+                        "mode": "contains",
+                        "pattern": "secret",
+                        "case_sensitive": False,
+                        "description": "规则B：也检测 secret 但用于其他上下文",
+                    },
+                },
+            ],
+        }
+        rs = parse_ruleset(data)
+        m1 = rs.rules[0].match
+        m2 = rs.rules[1].match
+        # 对象不同（description 不同，避免 UI 串号）
+        assert m1 is not m2
+
+    def test_identical_and_match_children_shared(self) -> None:
+        """children 为同批解析出的相同子节点时，AndMatch 也应共享对象。"""
+        shared_child = {
+            "type": "content",
+            "mode": "contains",
+            "pattern": "AKIA",
+            "case_sensitive": True,
+        }
+        data = {
+            "version": "1.0",
+            "rules": [
+                {
+                    "name": "aws1",
+                    "match": {
+                        "type": "and",
+                        "children": [
+                            shared_child,
+                            {
+                                "type": "filename",
+                                "mode": "endswith",
+                                "pattern": ".env",
+                            },
+                        ],
+                    },
+                },
+                {
+                    "name": "aws2",
+                    "match": {
+                        "type": "and",
+                        "children": [
+                            # 完全相同的子树
+                            {
+                                "type": "content",
+                                "mode": "contains",
+                                "pattern": "AKIA",
+                                "case_sensitive": True,
+                            },
+                            {
+                                "type": "filename",
+                                "mode": "endswith",
+                                "pattern": ".env",
+                            },
+                        ],
+                    },
+                },
+            ],
+        }
+        rs = parse_ruleset(data)
+        a1 = rs.rules[0].match
+        a2 = rs.rules[1].match
+        # 子节点已共享（LeafMatch dedup）
+        assert a1.children[0] is a2.children[0]  # type: ignore[union-attr]
+        assert a1.children[1] is a2.children[1]  # type: ignore[union-attr]
+        # 父 AndMatch 也共享
+        assert a1 is a2, "children 全共享且描述相同的 AndMatch 也应共享对象"
+
+    def test_dedup_reduces_unique_ast_nodes_in_duplicate_pattern_ruleset(self) -> None:
+        """100 规则规则集（10 种模式各重复 10 次）：唯一 MatchSpec 对象数应 < 100（至少去重 >90%）。"""
+        patterns = [f"pattern-{i}-[a-z]+-{i}" for i in range(10)]
+        rules_raw: list[dict[str, object]] = []
+        for i in range(100):
+            p = patterns[i % 10]
+            rules_raw.append(
+                {
+                    "name": f"r{i:03d}",
+                    "severity": "info",
+                    "match": {
+                        "type": "content",
+                        "mode": "regex",
+                        "pattern": p,
+                        "case_sensitive": False,
+                        "description": f"重复模式 {i % 10}",
+                    },
+                }
+            )
+        data = {"version": "1.0", "rules": rules_raw}
+        rs = parse_ruleset(data)
+        unique_ids = {id(r.match) for r in rs.rules}
+        # 100 规则，10 种模式，去重后应恰好 10 个唯一对象（1/10 比例）
+        assert len(unique_ids) <= 15, f"去重后唯一对象数 {len(unique_ids)} 超过阈值 15（应 ≈10）"

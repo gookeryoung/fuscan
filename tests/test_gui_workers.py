@@ -970,7 +970,10 @@ class TestFilterWorker:
     """``FilterWorker`` 测试：过滤+排序后 emit done 携带结果元组。"""
 
     def test_run_emits_filtered_sorted_results(self, tmp_path: Path) -> None:
-        """run() 调用 filter_and_sort 并通过 done 信号回传结果。"""
+        """run() 调用 filter_and_sort 并通过 done 信号回传结果。
+
+        iter-165：done 信号现回传三元组 (filtered, severity_index, rule_index)。
+        """
         h_critical = RuleHit(rule_name="敏感内容", severity=Severity.CRITICAL, detail="d1")
         h_warning = RuleHit(rule_name="API 密钥", severity=Severity.WARNING, detail="d2")
         results = (
@@ -986,13 +989,17 @@ class TestFilterWorker:
             sort_ascending=True,
         )
 
-        done_payloads: list[tuple[ScanResult, ...]] = []
-        worker.done.connect(done_payloads.append)  # pyrefly: ignore [missing-attribute]
+        done_payloads: list[tuple[object, ...]] = []
+        worker.done.connect(lambda *args: done_payloads.append(args))  # pyrefly: ignore [missing-attribute]
 
         worker.run()
 
         assert len(done_payloads) == 1
-        filtered = done_payloads[0]
+        payload = done_payloads[0]
+        # iter-165：信号现回传 (filtered, severity_index, rule_index) 三元组
+        assert len(payload) == 3
+        filtered = payload[0]
+        assert isinstance(filtered, tuple)
         assert len(filtered) == 2
         # 按文件路径升序：a.txt 在前
         assert filtered[0].path == tmp_path / "a.txt"
@@ -1015,12 +1022,14 @@ class TestFilterWorker:
             sort_ascending=False,
         )
 
-        done_payloads: list[tuple[ScanResult, ...]] = []
-        worker.done.connect(done_payloads.append)  # pyrefly: ignore [missing-attribute]
+        done_payloads: list[tuple[object, ...]] = []
+        worker.done.connect(lambda *args: done_payloads.append(args))  # pyrefly: ignore [missing-attribute]
 
         worker.run()
 
         assert len(done_payloads) == 1
-        filtered = done_payloads[0]
+        payload = done_payloads[0]
+        filtered = payload[0]
+        assert isinstance(filtered, tuple)
         assert len(filtered) == 1
         assert filtered[0].path == tmp_path / "a.txt"

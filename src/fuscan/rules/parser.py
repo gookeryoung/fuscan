@@ -40,10 +40,14 @@ _COMPOSITE_TYPES = {"and", "or", "not"}
 SUPPORTED_VERSIONS: frozenset[str] = frozenset({"1.0"})
 
 
-def parse_match(data: Any) -> MatchSpec:
+def parse_match(data: Any, dedup: dict[int, MatchSpec] | None = None) -> MatchSpec:
     """从字典构造匹配条件。
 
     :param data: 匹配条件字典，必须包含 ``type`` 字段
+    :param dedup: iter-162 AST 共享节点去重。相同 (hashable_key) 结构的
+        ``MatchSpec`` 在同一个 ``parse_ruleset`` 执行中共享同一对象，减少
+        内存占用 + 加速 ``build_matcher`` 中 `is`/`id` 快速路径判断。为
+        ``None`` 时不启用去重（等价于旧行为）。
     :return: 对应的 MatchSpec 实例
     :raises RuleParseError: 数据结构不合法或缺少必填字段
     """
@@ -55,14 +59,19 @@ def parse_match(data: Any) -> MatchSpec:
         raise RuleParseError("匹配条件缺少 type 字段")
 
     if match_type in _LEAF_TYPES:
-        return _parse_leaf(match_type, data)
+        return _parse_leaf(match_type, data, dedup=dedup)
     if match_type in _COMPOSITE_TYPES:
-        return _parse_composite(match_type, data)
+        return _parse_composite(match_type, data, dedup=dedup)
     raise RuleParseError(f"未知匹配类型: {match_type!r}")
 
 
-def _parse_leaf(match_type: str, data: Mapping[str, Any]) -> LeafMatch:
-    """解析叶子匹配条件（filename/content/path）。"""
+def _parse_leaf(
+    match_type: str,
+    data: Mapping[str, Any],
+    *,
+    dedup: dict[int, MatchSpec] | None,
+) -> LeafMatch:
+    """解析叶子匹配条件（filename/content/path）。iter-162：启用 dedup 时，同键 LeafMatch 共享对象。"""
     target = MatchTarget(match_type)
     mode_raw = data.get("mode")
     if not mode_raw:
@@ -79,40 +88,86 @@ def _parse_leaf(match_type: str, data: Mapping[str, Any]) -> LeafMatch:
 
     case_sensitive = bool(data.get("case_sensitive", False))
     description = str(data.get("description", ""))
-    return LeafMatch(
+    spec = LeafMatch(
         target=target,
         mode=mode,
         pattern=str(pattern),
         case_sensitive=case_sensitive,
         description=description,
     )
+    if dedup is None:
+        return spec
+    # hashable_key: LeafMatch 作为 MatchSpec 是 frozen dataclass，可直接 id()/hash()
+    # 为了避免"不同 description 但其他字段相同"被错误合并（description 可能在 UI
+    # 展示时会被用户看到），用完整 dataclass 的 hash 做 key 更安全。
+    key = hash(
+        (
+            0,  # 0 = LeafMatch 类型哨兵，避免与组合器 key 碰撞
+            target.value,
+            mode.value,
+            spec.pattern,
+            case_sensitive,
+            description,
+        )
+    )
+    cached = dedup.get(key)
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+    dedup[key] = spec
+    return spec
 
 
-def _parse_composite(match_type: str, data: Mapping[str, Any]) -> MatchSpec:
-    """解析逻辑组合匹配条件（and/or/not）。"""
+def _parse_composite(
+    match_type: str,
+    data: Mapping[str, Any],
+    *,
+    dedup: dict[int, MatchSpec] | None,
+) -> MatchSpec:
+    """解析逻辑组合匹配条件（and/or/not）。iter-162：同结构组合器共享对象。"""
     description = str(data.get("description", ""))
     if match_type in ("and", "or"):
         children_raw = data.get("children")
         if not isinstance(children_raw, Sequence) or isinstance(children_raw, (str, bytes)):
             raise RuleParseError(f"{match_type} 匹配缺少 children 列表")
-        children = tuple(parse_match(child) for child in children_raw)
+        children = tuple(parse_match(child, dedup=dedup) for child in children_raw)
         if not children:
             raise RuleParseError(f"{match_type} 匹配的 children 不能为空")
+        type_tag = 1 if match_type == "and" else 2
         if match_type == "and":
-            return AndMatch(children=children, description=description)
-        return OrMatch(children=children, description=description)
+            spec: MatchSpec = AndMatch(children=children, description=description)
+        else:
+            spec = OrMatch(children=children, description=description)
+        if dedup is None:
+            return spec
+        # key: (type_tag, tuple[id(child) for child in children], description)
+        key = hash((type_tag, tuple(id(c) for c in children), description))
+        cached = dedup.get(key)
+        if cached is not None:
+            return cached
+        dedup[key] = spec
+        return spec
 
     # not
     child_raw = data.get("child")
     if child_raw is None:
         raise RuleParseError("not 匹配缺少 child 字段")
-    return NotMatch(child=parse_match(child_raw), description=description)
+    child = parse_match(child_raw, dedup=dedup)
+    spec = NotMatch(child=child, description=description)
+    if dedup is None:
+        return spec
+    key = hash((3, id(child), description))
+    cached = dedup.get(key)
+    if cached is not None:
+        return cached
+    dedup[key] = spec
+    return spec
 
 
-def parse_rule(data: Any) -> Rule:
+def parse_rule(data: Any, *, dedup: dict[int, MatchSpec] | None = None) -> Rule:
     """从字典构造单条规则。
 
     :param data: 规则字典，必须包含 ``name`` 和 ``match``
+    :param dedup: iter-162 AST 共享节点去重。为 ``None`` 时不启用。
     :return: Rule 实例
     :raises RuleParseError: 数据结构不合法
     """
@@ -126,7 +181,7 @@ def parse_rule(data: Any) -> Rule:
     match_data = data.get("match")
     if match_data is None:
         raise RuleParseError(f"规则 {name!r} 缺少 match 字段")
-    match = parse_match(match_data)
+    match = parse_match(match_data, dedup=dedup)
 
     description = str(data.get("description", ""))
     severity_raw = data.get("severity", "info")
@@ -183,7 +238,9 @@ def parse_ruleset(data: Any) -> RuleSet:
     rules_raw = data.get("rules", [])
     if not isinstance(rules_raw, Sequence) or isinstance(rules_raw, (str, bytes)):
         raise RuleParseError("rules 必须是列表")
-    rules = tuple(parse_rule(item) for item in rules_raw)
+    # iter-162：AST 共享节点去重（仅单次 parse_ruleset 生命周期，避免长期内存占用）
+    dedup: dict[int, MatchSpec] = {}
+    rules = tuple(parse_rule(item, dedup=dedup) for item in rules_raw)
 
     return RuleSet(
         version=version,

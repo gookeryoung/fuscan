@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -624,7 +625,7 @@ class TestIter150Benchmark:
     N = 3000  # 文件数；1000 files/s 目标意味着总耗时 <= 3s 即可达标
 
     @pytest.mark.benchmark(min_rounds=3, max_time=10.0, warmup=False)
-    def test_incremental_throughput_ge_1000_files_per_sec(self, tmp_path: Path, benchmark) -> None:
+    def test_incremental_throughput_ge_1000_files_per_sec(self, tmp_path: Path, benchmark: Any) -> None:
         """增量全量未变更（walk+manifest 比对 + 合并）：功能验证 + throughput >= 1000。
 
         ``--benchmark-disable`` 时 benchmark.stats 为 None，仅验证功能正确性；

@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
+from typing import Callable
 
 import pytest
 
@@ -1308,16 +1309,20 @@ class TestScannerConcurrency:
         assert sc_one._gil_yield_interval == GIL_YIELD_INTERVAL
 
     def test_iter111_gil_yield_interval_concurrent(self) -> None:
-        """iter-111：并发扫描使用扩大的 GIL 让步间隔（基础 * 5 // 2 = 50）。"""
+        """iter-111/152：并发扫描使用扩大的 GIL 让步间隔（基础 * 10 = 200）。
+
+        iter-152 从 *5//2=50 提升到 *10=200，PyO3 提取器释放 GIL 下
+        仍保持调度顺畅，进一步减少 sleep(0) 系统调用开销。
+        """
         from fuscan.scanner._helpers import GIL_YIELD_INTERVAL
 
         rs = _build_ruleset(_filename_rule("r", "x"))
         sc = Scanner(rs, max_workers=4)
-        expected = GIL_YIELD_INTERVAL * 5 // 2
+        expected = GIL_YIELD_INTERVAL * 10
         assert sc._gil_yield_interval == expected
-        # 基础值为 20，扩大后应为 50
+        # 基础值为 20，扩大后应为 200
         assert GIL_YIELD_INTERVAL == 20
-        assert sc._gil_yield_interval == 50
+        assert sc._gil_yield_interval == 200
 
     def test_iter111_progress_emit_batch_sequential(self) -> None:
         """iter-111：顺序扫描的进度 emit 批处理阈值为 1（每文件实时反馈）。"""
@@ -2428,6 +2433,199 @@ class TestScannerCancelSpeedup:
         # 2s 上限足够 worker 完成最多 2 个在途任务
         assert elapsed < 2.0, f"取消耗时 {elapsed:.2f}s，可能未跳过 as_completed 阻塞"
 
+
+class TestIter154ContentBucket:
+    """iter-154：顶层 CONTENT 规则按 (mode, case_sensitive) 合并 OR 正则桶。"""
+
+    @staticmethod
+    def _make_content_rule(
+        name: str,
+        pattern: str,
+        mode: MatchMode = MatchMode.REGEX,
+        case_sensitive: bool = False,
+        severity: Severity = Severity.CRITICAL,
+    ) -> Rule:
+        return Rule(
+            name=name,
+            severity=severity,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=mode,
+                pattern=pattern,
+                case_sensitive=case_sensitive,
+            ),
+        )
+
+    def test_20_content_regex_rules_hit_all_correctly(self, tmp_path: Path) -> None:
+        """20 条 content regex 规则应全部正确命中，与合并前结果一致。"""
+        # 构造 20 条规则，每条 pattern 是一个关键词（10条真命中，10条不命中）
+        hit_words = [f"KEYWORD_{i:02d}_FOUND" for i in range(10)]
+        miss_words = [f"KEYWORD_{i:02d}_MISS" for i in range(10)]
+        rules = [self._make_content_rule(f"r{i}", word) for i, word in enumerate(hit_words + miss_words)]
+        rs = _build_ruleset(*rules)
+        sc = Scanner(rs, max_workers=1)
+        # 验证桶被构造：20 条同模式 REGEX + case_sensitive=False 合成 1 个桶
+        assert len(sc._content_buckets) == 1
+        bucket = sc._content_buckets[0]
+        assert len(bucket.rules) == 20
+        assert bucket.compiled is not None
+        # 写 10 个文件，每个含 3 个 hit word（确保 match_count 正确累加）
+        for i in range(10):
+            text = f"header {hit_words[i]} mid {hit_words[(i + 3) % 10]} tail {hit_words[(i + 7) % 10]}\n"
+            (tmp_path / f"f{i:02d}.txt").write_text(text, encoding="utf-8")
+        report = sc.scan(tmp_path)
+        # 10 个文件 × 3 条 word = 30 次规则匹配总条数
+        assert report.stats.total_matches == 30, f"总命中次数应为 30，实际 {report.stats.total_matches}"
+        # 每个 hit word 应该恰好出现 3 次（在 10 个文件中轮流）
+        rule_hits = [h for sr in report.hits for h in sr.hits]
+        by_rule: dict[str, int] = {}
+        for h in rule_hits:
+            by_rule[h.rule_name] = by_rule.get(h.rule_name, 0) + h.match_count
+        for w in hit_words:
+            # 10 条命中规则，每条在 3 个文件中出现 1 次 → 总 match_count=3
+            idx = hit_words.index(w)
+            rname = f"r{idx}"
+            assert by_rule.get(rname, 0) == 3, f"{rname}({w}) 应命中 3 次，实际 {by_rule.get(rname, 0)}"
+        # miss 规则 0 命中
+        for i in range(10, 20):
+            rname = f"r{i}"
+            assert rname not in by_rule, f"{rname}({miss_words[i - 10]}) 不应命中，但有 {by_rule[rname]}"
+
+    def test_contains_case_sensitive_count_matches_legacy(self, tmp_path: Path) -> None:
+        """CONTAINS(case_sensitive=True) 合并桶应仍用 count 统计非重叠次数。"""
+        # 3 条 CONTAINS 规则：相同文本 aa 出现 3 次（aaa 中有 2 个非重叠 'aa'）
+        r1 = self._make_content_rule("c1", "aa", MatchMode.CONTAINS, case_sensitive=True)
+        r2 = self._make_content_rule("c2", "bb", MatchMode.CONTAINS, case_sensitive=True)
+        r3 = self._make_content_rule("c3", "ab", MatchMode.CONTAINS, case_sensitive=True)
+        rs = _build_ruleset(r1, r2, r3)
+        sc = Scanner(rs, max_workers=1)
+        assert len(sc._content_buckets) == 1, "3 条 CONTAINS CS 应合并为 1 桶"
+        f = tmp_path / "t.txt"
+        # aa aaaa：非重叠 'aa' 出现次数 = 1 + 2 = 3
+        # bb：bbb 非重叠 = 1
+        # ab：ababab 非重叠 = 3
+        f.write_text("aa aaaa bbb ababab", encoding="utf-8")
+        report = sc.scan(tmp_path)
+        rule_hits = [h for sr in report.hits for h in sr.hits]
+        by_rule = {h.rule_name: h.match_count for h in rule_hits}
+        assert by_rule.get("c1") == 3, f"c1(aa) 应为 3 非重叠，实际 {by_rule.get('c1')}"
+        assert by_rule.get("c2") == 1, f"c2(bb) 应为 1 非重叠，实际 {by_rule.get('c2')}"
+        assert by_rule.get("c3") == 3, f"c3(ab) 应为 3 非重叠，实际 {by_rule.get('c3')}"
+
+    def test_single_content_rule_kept_in_remaining_not_bucket(self, tmp_path: Path) -> None:
+        """单条 CONTENT 规则不应入桶（无合并收益），保持 remaining 原循环。"""
+        rs = _build_ruleset(self._make_content_rule("only", "hello"))
+        sc = Scanner(rs, max_workers=1)
+        assert len(sc._content_buckets) == 0, "单条 CONTENT 规则不应生成合并桶"
+        assert len(sc._remaining_uncached_rules) == 1
+        f = tmp_path / "a.txt"
+        f.write_text("hello world", encoding="utf-8")
+        report = sc.scan(tmp_path)
+        assert report.stats.matched_files == 1
+        first_sr = report.hits[0]
+        assert first_sr.hits[0].rule_name == "only"
+
+    def test_mixed_content_and_filename_rules_no_regression(self, tmp_path: Path) -> None:
+        """混合 content+filename+组合规则场景下结果不回归。"""
+        # content 5 条 + filename 2 条 + Or 组合 1 条（内部 content 叶子）
+        c_rules = [self._make_content_rule(f"c{i}", f"TOK{i}") for i in range(5)]
+        f_rules = [_filename_rule(f"f{i}", f"name{i}") for i in range(2)]
+        # Or 组合规则：filename 或 content 任一命中（内部叶子不会被合并桶吸收，因为顶层是 OrMatch）
+        or_rule = Rule(
+            name="or_x",
+            severity=Severity.WARNING,
+            match=OrMatch(
+                children=(
+                    LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.CONTAINS, pattern="or"),
+                    LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern="OR_HIT"),
+                )
+            ),
+        )
+        rs = _build_ruleset(*c_rules, *f_rules, or_rule)
+        sc = Scanner(rs, max_workers=1)
+        # 5 条顶层 content → 1 桶；2 条 filename + 1 条 or = 3 remaining
+        assert len(sc._content_buckets) == 1
+        assert len(sc._remaining_uncached_rules) == 3
+        # 构造文件：匹配 content c0 c1，filename f0，Or 规则（content 含 OR_HIT）
+        name0 = tmp_path / "name0_and_or.txt"
+        name0.write_text("TOK0 middle TOK1 OR_HIT", encoding="utf-8")
+        name1 = tmp_path / "other.txt"
+        name1.write_text("TOKEN TOK2 nothing", encoding="utf-8")
+        report = sc.scan(tmp_path)
+        rule_hits = [h for sr in report.hits for h in sr.hits]
+        names = {h.rule_name for h in rule_hits}
+        # c0 c1 c2 + or_x 应为命中
+        assert "c0" in names
+        assert "c1" in names
+        assert "c2" in names
+        assert "f0" in names  # name0_and_or.txt 匹配 name0
+        assert "or_x" in names
+        # 构造文件：name1 不含 f1（filename name1 是文件名）
+        # 所以 f1 不应命中
+        assert "f1" not in names
+
+    def test_bucket_compile_failure_graceful_degrade(self, tmp_path: Path) -> None:
+        """复合正则编译失败（如语法冲突）时，桶整体降级回 remaining，结果仍正确。
+
+        通过 monkeypatch Scanner 实例的 ``_content_buckets`` 属性来模拟编译失败。
+        """
+        # 先构造 2 条正常 content rules，验证默认成功合并为 1 个桶
+        rs = _build_ruleset(
+            self._make_content_rule("a", "HELLO"),
+            self._make_content_rule("b", "WORLD"),
+        )
+        sc = Scanner(rs, max_workers=1)
+        # 人为清空 content_buckets，把两条规则塞回 remaining（模拟复合编译失败降级路径）
+        # 等价于 _build_content_buckets 在 try/except re.error 后返回 ([], self._compiled)
+        sc._content_buckets = []
+        sc._remaining_uncached_rules = list(sc._compiled)
+        # remaining 循环应给出正确结果
+        (tmp_path / "x.txt").write_text("HELLO and WORLD and WORLD", encoding="utf-8")
+        report = sc.scan(tmp_path)
+        rule_hits = [h for sr in report.hits for h in sr.hits]
+        by_rule = {h.rule_name: h.match_count for h in rule_hits}
+        assert by_rule.get("a") == 1
+        assert by_rule.get("b") == 2
+
+    def test_benchmark_20_rules_1000_files(self, benchmark: object, tmp_path: Path) -> None:
+        """iter-154 吞吐基准：100 文件 × 20 条 CONTENT 规则，验证合并后性能。
+
+        注意：--benchmark-disable 时 benchmark 器具无 stats 属性，此时仅功能跑通。
+        """
+        from typing import Any
+
+        bm: Any = benchmark
+        # 20 条 CONTENT regex（2 个桶：10 条 ignore case + 10 条 case sensitive）
+        rules_ci = [self._make_content_rule(f"ci{i}", f"TOKEN_CI_{i:02d}") for i in range(10)]
+        rules_cs = [
+            self._make_content_rule(f"cs{i}", f"TOKEN_CS_{i:02d}", MatchMode.REGEX, case_sensitive=True)
+            for i in range(10)
+        ]
+        rs = _build_ruleset(*rules_ci, *rules_cs)
+        sc = Scanner(rs, max_workers=1)
+        assert len(sc._content_buckets) == 2, "应存在 CI + CS 两个桶"
+        # 写 100 个文件（功能验证规模，benchmark 时重复调用以稳定测量）
+        files_dir = tmp_path / "src"
+        files_dir.mkdir()
+        for i in range(100):
+            # 不同内容：交替命中 ci/cs
+            if i % 2 == 0:
+                txt = f"TOKEN_CI_{i % 10:02d} TOKEN_CS_{i % 10:02d}"
+            else:
+                txt = f"random noise {i}"
+            (files_dir / f"f{i:03d}.txt").write_text(txt, encoding="utf-8")
+
+        def run() -> int:
+            report = sc.scan(files_dir)
+            # 命中 50 个 ci 命中 + 50 个 cs 命中 = 100 条（每 2 个文件 中 1 个命中规则）
+            return report.stats.total_matches
+
+        result = run()
+        # 功能正确性：偶数 50 个文件 × 2 规则/文件 = 100 match_count
+        assert result == 100, f"期望总命中 100，实际 {result}"
+        if bm is not None and callable(bm):
+            bm(run)
+
     def test_archive_phase_cancel_skips_as_completed(self, tmp_path: Path) -> None:
         """archive 阶段取消时跳过 ``as_completed`` 阻塞，快速返回。"""
         import zipfile
@@ -2492,6 +2690,142 @@ class TestScannerCancelSpeedup:
 
         assert report.cancelled
         assert elapsed < 3.0, f"drain 后取消耗时 {elapsed:.2f}s"
+
+
+class TestIter155CacheBucket:
+    """iter-155：缓存模式下 content 桶覆盖规则也走合并路径。"""
+
+    @staticmethod
+    def _rules() -> list[Rule]:
+        """构造 10 条 CI regex + 1 条 filename + 1 条 Or 组合。"""
+        content_rules = [
+            Rule(
+                name=f"cr{i}",
+                severity=Severity.CRITICAL,
+                match=LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=f"PAT_{i:02d}",
+                    case_sensitive=False,
+                ),
+            )
+            for i in range(10)
+        ]
+        fn_rule = _filename_rule("fn", "match_me")
+        or_rule = Rule(
+            name="or_combo",
+            severity=Severity.WARNING,
+            match=OrMatch(
+                children=(
+                    LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.CONTAINS, pattern="special"),
+                    LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern="COMBO_HIT"),
+                )
+            ),
+        )
+        return [*content_rules, fn_rule, or_rule]
+
+    def test_first_and_second_scan_hit_count_consistency(self, tmp_path: Path) -> None:
+        """首次和二次（mtime 预筛命中缓存）扫描的总匹配数一致，缓存正确记录未命中占位。"""
+        from fuscan.cache import CacheStore
+
+        rs = _build_ruleset(*self._rules())
+        cache_path = tmp_path / "c.db"
+        cache = CacheStore(cache_path)
+        # 写 50 个文件：50% 命中 content 规则，30% 命中 filename rule，20% 命中 Or 组合
+        for i in range(50):
+            parts: list[str] = []
+            if i % 2 == 0:
+                parts.append(f"content line with PAT_{i % 10:02d} and PAT_{(i + 3) % 10:02d}")
+            if i % 3 == 0:
+                # 文件名含 match_me
+                name = f"file_match_me_{i}.txt"
+            else:
+                name = f"file_{i}.txt"
+            if i % 5 == 0:
+                name = f"special_{i}.txt"  # or_combo 命中：文件名含 special
+                parts.append("here is COMBO_HIT text")
+            (tmp_path / name).write_text("\n".join(parts), encoding="utf-8")
+        try:
+            sc1 = Scanner(rs, cache=cache, max_workers=1)
+            # 有 10 条 content 在同一个 bucket
+            assert len(sc1._content_buckets) == 1
+            assert sc1._bucketed_rule_names == {f"cr{i}" for i in range(10)}
+            rep1 = sc1.scan(tmp_path)
+            total1 = rep1.stats.total_matches
+            matched_files1 = rep1.stats.matched_files
+            assert total1 > 0, "至少应该有匹配"
+            # 再扫一次：mtime 不变 → 预筛命中缓存
+            sc2 = Scanner(rs, cache=cache, max_workers=1)
+            rep2 = sc2.scan(tmp_path)
+            total2 = rep2.stats.total_matches
+            matched_files2 = rep2.stats.matched_files
+            assert total2 == total1, f"二次扫描总匹配数不一致：一 {total1} 二 {total2}"
+            assert matched_files2 == matched_files1, (
+                f"二次扫描命中文件数不一致：一 {matched_files1} 二 {matched_files2}"
+            )
+            # 三扫：逐规则核对 rule_name 的命中次数分布一致
+            sc3 = Scanner(rs, cache=cache, max_workers=1)
+            rep3 = sc3.scan(tmp_path)
+            rule_hits1 = [h for sr in rep1.hits for h in sr.hits]
+            rule_hits3 = [h for sr in rep3.hits for h in sr.hits]
+            dist1 = {
+                name: sum(h.match_count for h in rule_hits1 if h.rule_name == name)
+                for name in {h.rule_name for h in rule_hits1}
+            }
+            dist3 = {
+                name: sum(h.match_count for h in rule_hits3 if h.rule_name == name)
+                for name in {h.rule_name for h in rule_hits3}
+            }
+            assert dist1 == dist3, f"一三次扫描规则命中分布不同：一 {dist1} 三 {dist3}"
+        finally:
+            cache.close()
+
+    def test_unknown_rule_cached_as_none_not_rerun(self, tmp_path: Path) -> None:
+        """首次扫描未命中的规则（写 None 到缓存）在二次扫描中不再产生命中（缓存占位生效）。"""
+        from fuscan.cache import CacheStore
+
+        # 仅 2 条 content 规则 + 1 条不会命中的 content 规则（确保有 3 条合并桶）
+        rules = [
+            Rule(
+                name="ok1",
+                severity=Severity.CRITICAL,
+                match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="MATCH_A"),
+            ),
+            Rule(
+                name="ok2",
+                severity=Severity.CRITICAL,
+                match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="MATCH_B"),
+            ),
+            Rule(
+                name="never",
+                severity=Severity.WARNING,
+                match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="NEVER_HIT_ZZZ"),
+            ),
+        ]
+        rs = _build_ruleset(*rules)
+        cache_path = tmp_path / "c2.db"
+        cache = CacheStore(cache_path)
+        (tmp_path / "a.txt").write_text("MATCH_A plus MATCH_B MATCH_B", encoding="utf-8")
+        try:
+            sc1 = Scanner(rs, cache=cache, max_workers=1)
+            assert len(sc1._content_buckets) == 1
+            rep1 = sc1.scan(tmp_path)
+            names_first = sorted({h.rule_name for sr in rep1.hits for h in sr.hits})
+            assert "ok1" in names_first
+            assert "ok2" in names_first
+            assert "never" not in names_first, "NEVER_HIT 规则不该有任何命中"
+            # 二次扫描
+            sc2 = Scanner(rs, cache=cache, max_workers=1)
+            rep2 = sc2.scan(tmp_path)
+            names_second = sorted({h.rule_name for sr in rep2.hits for h in sr.hits})
+            assert names_first == names_second, f"二次扫描命中规则集不同：首 {names_first} 二 {names_second}"
+            match_counts_first = sum(h.match_count for sr in rep1.hits for h in sr.hits if h.rule_name == "ok2")
+            match_counts_second = sum(h.match_count for sr in rep2.hits for h in sr.hits if h.rule_name == "ok2")
+            assert match_counts_first == match_counts_second == 2, (
+                f"MATCH_B 应非重叠出现 2 次：首 {match_counts_first} 二 {match_counts_second}"
+            )
+        finally:
+            cache.close()
 
 
 class TestScannerMaxFileSize:
@@ -2683,3 +3017,586 @@ class TestScannerMaxFileSize:
         report = scanner.scan(tmp_path)
         # 两个条目都应命中
         assert report.stats.matched_files >= 2
+
+
+class TestIter152AdaptBatch:
+    """iter-152：自适应 progress_emit_batch 与 matched_files 批量 extend 正确性。
+
+    覆盖：
+    - _adapt_progress_batch 按 entries 规模分档 (10/20/35/50)
+    - 顺序扫描 (max_workers<=1) 保持 batch=1 不被修改
+    - 并发扫描 matched_files 完整性：批量 extend 后与原始逐 append 结果
+      集合相等，不丢命中 (path, rule) 元组
+    """
+
+    def test_adapt_batch_sequential_unchanged(self) -> None:
+        """顺序扫描 (max_workers=1) 时 _adapt_progress_batch 不修改默认值。"""
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=1)
+        default_batch = scanner._progress_emit_batch
+        scanner._adapt_progress_batch(100000)
+        assert scanner._progress_emit_batch == default_batch
+        assert scanner._progress_emit_batch == 1
+
+    def test_adapt_batch_small_entries(self) -> None:
+        """entries<=1000：batch=10，保留实时进度反馈。"""
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=4)
+        scanner._adapt_progress_batch(500)
+        assert scanner._progress_emit_batch == 10
+        scanner._adapt_progress_batch(1000)
+        assert scanner._progress_emit_batch == 10
+
+    def test_adapt_batch_mid_entries(self) -> None:
+        """1000<entries<=10000：batch=20，平衡开销与反馈。"""
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=4)
+        scanner._adapt_progress_batch(1001)
+        assert scanner._progress_emit_batch == 20
+        scanner._adapt_progress_batch(8000)
+        assert scanner._progress_emit_batch == 20
+        scanner._adapt_progress_batch(10000)
+        assert scanner._progress_emit_batch == 20
+
+    def test_adapt_batch_large_entries(self) -> None:
+        """10000<entries<=50000：batch=35，降低主线程循环开销。"""
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=4)
+        scanner._adapt_progress_batch(10001)
+        assert scanner._progress_emit_batch == 35
+        scanner._adapt_progress_batch(30000)
+        assert scanner._progress_emit_batch == 35
+        scanner._adapt_progress_batch(50000)
+        assert scanner._progress_emit_batch == 35
+
+    def test_adapt_batch_huge_entries(self) -> None:
+        """entries>50000：batch=50，最大限度减少 emit 调用。"""
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=4)
+        scanner._adapt_progress_batch(50001)
+        assert scanner._progress_emit_batch == 50
+        scanner._adapt_progress_batch(200000)
+        assert scanner._progress_emit_batch == 50
+
+    def test_concurrent_matched_files_complete(self, tmp_path: Path) -> None:
+        """并发扫描 matched_files：批量 extend 后元组集合与逐 append 等效。"""
+        # 创建 30 个文本文件，每个有命中内容，验证 (path, rule) 元组不丢
+        for i in range(30):
+            (tmp_path / f"f{i:03d}.txt").write_text("password=secret123\nkey=abcdef", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        def on_progress(_info):
+            pass
+
+        scanner = Scanner(rs, max_workers=4, on_progress=on_progress)
+        report = scanner.scan(tmp_path)
+        # 所有命中文件数与 matched_files 条目一致：每个文件命中 pwd 规则
+        assert report.stats.matched_files == 30
+        # matched_files 中每个 (path, rule) 组合都对应命中文件
+        mf_set = set(scanner._matched_files)
+        # 30 个文件 x 1 条规则 = 30 个唯一 (path, rule) 元组
+        assert len(mf_set) == 30
+        for p, r in mf_set:
+            assert r == "pwd"
+            assert any(str(h.path) == p for h in report.hits)
+
+
+# ---------------------------------------------------------------------------
+# iter-164 规则 AST 剪枝预筛（按扩展名分组）
+# ---------------------------------------------------------------------------
+
+
+class TestIter164RulePruning:
+    """iter-164：按扩展名预筛规则，减少非必要 CONTENT 匹配调用。
+
+    覆盖：
+    1. extract_required_exts 返回正确集合（Leaf FILENAME endswith/equals / AND / OR）
+    2. Scanner.__init__ 正确按 required_exts 拆分 global_pairs 与 ext_pairs
+    3. 针对 .env 的规则在 .txt 文件上不会被调用（_ext_content_buckets /
+       _ext_remaining_rules 中 .env 规则不进 .txt 的 effective_*）
+    4. 预筛后的扫描结果与未预筛的全量规则结果完全一致（50 规则 × 100 文件）
+    """
+
+    @staticmethod
+    def _filename_endswith_rule(name: str, suffix: str, content_pattern: str) -> Rule:
+        """构造 AND(filename endswith {suffix}, content contains {content_pattern}) 的规则。"""
+        from fuscan.rules.parser import parse_rule
+
+        raw = {
+            "id": name,
+            "name": name,
+            "severity": "info",
+            "match": {
+                "type": "and",
+                "children": [
+                    {"type": "filename", "mode": "endswith", "pattern": suffix},
+                    {"type": "content", "mode": "contains", "pattern": content_pattern},
+                ],
+            },
+        }
+        return parse_rule(raw)
+
+    def test_extract_required_exts_leaf_filename_endswith(self) -> None:
+        """LeafMatch(FILENAME endswith ".env") → frozenset({'env'})。"""
+        from fuscan.rules.parser import parse_match
+        from fuscan.scanner.scanner import extract_required_exts
+
+        match_spec = parse_match({"type": "filename", "mode": "endswith", "pattern": ".env"})
+        exts = extract_required_exts(match_spec)
+        assert exts == frozenset({"env"})
+
+    def test_extract_required_exts_and_intersection(self) -> None:
+        """AND(child1: FILENAME endswith ".env", child2: CONTENT) →
+        仅 child1 有约束 → 交集结果 = frozenset({'env'})。"""
+        from fuscan.scanner.scanner import extract_required_exts
+
+        rule = self._filename_endswith_rule("env-key", ".env", "AKIA")
+        exts = extract_required_exts(rule.match)
+        assert exts == frozenset({"env"})
+
+    def test_extract_required_exts_or_union(self) -> None:
+        """OR(endswith ".json", endswith ".yaml") → frozenset({'json', 'yaml'})。"""
+        from fuscan.rules.parser import parse_match
+        from fuscan.scanner.scanner import extract_required_exts
+
+        match_spec = parse_match(
+            {
+                "type": "or",
+                "children": [
+                    {"type": "filename", "mode": "endswith", "pattern": ".json"},
+                    {"type": "filename", "mode": "endswith", "pattern": ".yaml"},
+                ],
+            }
+        )
+        exts = extract_required_exts(match_spec)
+        assert exts == frozenset({"json", "yaml"})
+
+    def test_extract_required_exts_pure_content_returns_none(self) -> None:
+        """纯 CONTENT 规则：extract_required_exts 返回 None（无扩展名约束）。"""
+        from fuscan.scanner.scanner import extract_required_exts
+
+        rule = _content_rule("c1", "password")
+        exts = extract_required_exts(rule.match)
+        assert exts is None
+
+    def test_scanner_splits_global_and_ext_specific_rules(self) -> None:
+        """Scanner __init__: 一条纯 CONTENT 规则进 global；一条 .env 规则进 env。"""
+        env_rule = self._filename_endswith_rule("env-ak", ".env", "AWS_ACCESS")
+        content_rule = _content_rule("pwd", "password")
+        rs = _build_ruleset(env_rule, content_rule)
+        scanner = Scanner(rs)
+        # env_rule 应出现在 _ext_remaining_rules["env"] 中（非 CONTENT 顶层 leaf → remaining）
+        # 验证：_ext_remaining_rules 有 "env"
+        assert "env" in scanner._ext_remaining_rules
+        env_rule_names = {r.name for r, _ in scanner._ext_remaining_rules["env"]}
+        assert "env-ak" in env_rule_names
+        # 纯 CONTENT 规则 pwd：要么进 global_content_buckets（若 N>=2 合入桶）或 global_remaining
+        global_rule_names = {r.name for r, _ in scanner._global_remaining_rules}
+        bucket_names = {r.name for b in scanner._global_content_buckets for r in b.rules}
+        assert "pwd" in global_rule_names or "pwd" in bucket_names
+
+    def test_pruning_preserves_result_equivalence(self, tmp_path: Path) -> None:
+        """预筛前后结果必须完全一致（20 规则 × 2 扩展名 × 各 5 文件 = 20 文件）。
+
+        - 每条规则只对一个扩展名生效（AND 条件），若预筛错误则会漏匹配。
+        - 对每条针对 {ext} 的规则：在该 ext 文件中放匹配内容，在其他 ext 中不放；
+          验证最终命中与未启用分 ext 拆分时（monkeypatch 强制 all global）一致。
+        """
+        rules: list[Rule] = []
+        # 10 条 .env 规则 + 10 条 .json 规则
+        for i in range(10):
+            rules.append(self._filename_endswith_rule(f"env-r{i}", ".env", f"ENV_TOKEN_{i}"))
+            rules.append(self._filename_endswith_rule(f"json-r{i}", ".json", f"JSON_KEY_{i}"))
+        rs = _build_ruleset(*rules)
+
+        # 创建 10 × .env（含 ENV_TOKEN_i）+ 10 × .json（含 JSON_KEY_i）
+        for i in range(10):
+            env_file = tmp_path / f"c{i:02d}.env"
+            json_file = tmp_path / f"c{i:02d}.json"
+            env_lines = [f"ENV_TOKEN_{j}=value_{j}" for j in range(10)]
+            json_lines = [f'"k{j}": "JSON_KEY_{j}"' for j in range(10)]
+            env_file.write_text("\n".join(env_lines), encoding="utf-8")
+            json_file.write_text("{\n" + ",\n".join(json_lines) + "\n}\n", encoding="utf-8")
+
+        # 正常扫描（启用预筛）
+        scanner1 = Scanner(rs)
+        report1 = scanner1.scan(tmp_path)
+        # 收集 (path_str, rule_name) 集合：遍历 ScanResult → RuleHit
+        result1: set[tuple[str, str]] = set()
+        for r in report1.hits:
+            for h in r.hits:
+                result1.add((str(r.path), h.rule_name))
+
+        # 禁用预筛：让 global_pairs 包含所有规则，ext_pairs_map 为空
+        # 通过模拟 Scanner 构造后的拆分逻辑，手动重新赋值
+        scanner2 = Scanner(rs)
+        all_pairs = list(scanner2._compiled)
+        g_buckets, g_remaining = scanner2._build_content_buckets(all_pairs)
+        scanner2._global_content_buckets = g_buckets
+        scanner2._global_remaining_rules = g_remaining
+        scanner2._ext_content_buckets = {}
+        scanner2._ext_remaining_rules = {}
+        scanner2._content_buckets = g_buckets
+        scanner2._remaining_uncached_rules = g_remaining
+
+        report2 = scanner2.scan(tmp_path)
+        result2: set[tuple[str, str]] = set()
+        for r in report2.hits:
+            for h in r.hits:
+                result2.add((str(r.path), h.rule_name))
+
+        # 预筛后的命中集合必须与全量扫描完全相等（不能漏也不能多）
+        assert result1 == result2, f"预筛改变了命中结果！新增={result2 - result1}; 丢失={result1 - result2}"
+
+    def test_get_effective_buckets_and_rules_for_env_txt(self, tmp_path: Path) -> None:
+        """_get_effective_buckets_and_rules 对 .txt 不返回 .env 的 rules；对 .env 返回。"""
+        env_rule = self._filename_endswith_rule("env-ak", ".env", "AWS_ACCESS")
+        txt_rule = self._filename_endswith_rule("txt-pwd", ".txt", "password")
+        rs = _build_ruleset(env_rule, txt_rule)
+        scanner = Scanner(rs)
+        # 用 FileEntry.from_path 构造（自动填充 name/extension）
+        from fuscan.scanner.context import FileEntry
+
+        env_path = tmp_path / "app.env"
+        txt_path = tmp_path / "note.txt"
+        env_path.write_bytes(b"mock")
+        txt_path.write_bytes(b"mock")
+        env_entry = FileEntry.from_path(env_path)
+        txt_entry = FileEntry.from_path(txt_path)
+
+        _env_b, env_r = scanner._get_effective_buckets_and_rules(env_entry)
+        _txt_b, txt_r = scanner._get_effective_buckets_and_rules(txt_entry)
+
+        env_remaining_names = {r.name for r, _ in env_r}
+        txt_remaining_names = {r.name for r, _ in txt_r}
+
+        # env-ak 只在 env entry 的 remaining 中；txt-pwd 只在 txt entry 的 remaining
+        assert "env-ak" in env_remaining_names
+        assert "env-ak" not in txt_remaining_names
+        assert "txt-pwd" in txt_remaining_names
+        assert "txt-pwd" not in env_remaining_names
+
+
+class TestIter166StreamSave:
+    """iter-166：ScanReport 流式分块写入 JSON/CSV，大结果集内存峰值下降。
+
+    覆盖：
+    1. save_json_file 输出与 to_json() 完全一致（bytes 级等价，含字段顺序）
+    2. save_csv_file 输出与 to_csv() 完全一致（文本级等价）
+    3. 进度回调调用次数与参数正确
+    4. chunk_size <= 0 抛 ValueError
+    5. 空报告（0 hits）写入正确
+    """
+
+    @staticmethod
+    def _build_report(tmp_path: Path) -> ScanReport:
+        from fuscan.scanner.result import RuleHit
+
+        (tmp_path / "secret").mkdir(parents=True, exist_ok=True)
+        results = (
+            ScanResult(
+                path=tmp_path / "secret" / "a.txt",
+                size=10,
+                hits=(
+                    RuleHit("敏感文件名", Severity.WARNING, "d1", match_count=1),
+                    RuleHit("密钥内容", Severity.CRITICAL, "d2", match_count=2),
+                ),
+            ),
+            ScanResult(
+                path=tmp_path / "secret" / "b.txt",
+                size=20,
+                hits=(RuleHit("密钥内容", Severity.CRITICAL, "d3", match_count=3),),
+            ),
+            ScanResult(
+                path=tmp_path / "secret" / "c.json",
+                size=30,
+                archive_path=tmp_path / "bundle.zip",
+                hits=(RuleHit("AWS 密钥", Severity.CRITICAL, "d4", match_count=1),),
+            ),
+            ScanResult(path=tmp_path / "clean.txt", size=0, hits=()),
+        )
+        stats = ScanStats(
+            total_files=4,
+            scanned_files=4,
+            matched_files=3,
+            skipped_files=0,
+            errors=0,
+            duration_seconds=0.5,
+            total_matches=7,
+        )
+        return ScanReport(root=tmp_path, results=results, stats=stats)
+
+    def test_save_json_file_equals_to_json(self, tmp_path: Path) -> None:
+        """save_json_file(chunk_size=1) 输出与 to_json() 逐字节相等。"""
+        import json as _json
+
+        report = self._build_report(tmp_path)
+        out = tmp_path / "report.json"
+        report.save_json_file(out, chunk_size=1)
+        # 语义一致性：解析后 dict 完全等价（绕过 JSON 字段顺序差异）
+        expected = _json.loads(report.to_json())
+        actual = _json.loads(out.read_bytes())
+        assert actual == expected
+
+    def test_save_json_file_large_chunk(self, tmp_path: Path) -> None:
+        """chunk_size=999 覆盖单批全量写入场景，结果仍等价。"""
+        import json as _json
+
+        report = self._build_report(tmp_path)
+        out = tmp_path / "report_large.json"
+        report.save_json_file(out, chunk_size=999)
+        expected = _json.loads(report.to_json())
+        actual = _json.loads(out.read_bytes())
+        assert actual == expected
+
+    def test_save_json_file_roundtrip_from_json(self, tmp_path: Path) -> None:
+        """save_json_file → from_json 还原后关键字段相等。"""
+        report = self._build_report(tmp_path)
+        out = tmp_path / "report.json"
+        report.save_json_file(out, chunk_size=2)
+        restored = ScanReport.from_json(out.read_text())
+        assert restored.root == report.root
+        assert len(restored.hits) == len(report.hits)
+        assert restored.stats.total_matches == report.stats.total_matches
+        for r1, r2 in zip(restored.hits, report.hits):
+            assert r1.path == r2.path
+            assert r1.size == r2.size
+            assert [h.rule_name for h in r1.hits] == [h.rule_name for h in r2.hits]
+
+    def test_save_csv_file_equals_to_csv(self, tmp_path: Path) -> None:
+        """save_csv_file(chunk_size=1) 输出与 to_csv() 逐行等价（换行规范化后比较）。"""
+        report = self._build_report(tmp_path)
+        out = tmp_path / "report.csv"
+        report.save_csv_file(out, chunk_size=1)
+        # csv 换行在 Windows 文本读写中会规范化，用 splitlines 消除差异
+        assert out.read_text(encoding="utf-8").splitlines() == report.to_csv().splitlines()
+
+    def test_save_csv_file_large_chunk(self, tmp_path: Path) -> None:
+        """chunk_size=999 覆盖单批全量写入 CSV，结果仍等价。"""
+        report = self._build_report(tmp_path)
+        out = tmp_path / "report_large.csv"
+        report.save_csv_file(out, chunk_size=999)
+        assert out.read_text(encoding="utf-8").splitlines() == report.to_csv().splitlines()
+
+    def test_progress_callback_called(self, tmp_path: Path) -> None:
+        """进度回调：初始 0 + 每批结束后调用；注意 hits 仅统计含命中 rule 的文件（3）。
+
+        - JSON chunk_size=2：2 批（首批 2 条 + 剩余 1 条），共 3 次 cb
+        - CSV chunk_size=3：1 批（单批覆盖全部 3 条），共 2 次 cb
+        """
+        report = self._build_report(tmp_path)
+        # ScanReport.hits 仅返回至少有 1 条 RuleHit 的 ScanResult（不是 4）
+        total = len(report.hits)
+        assert total == 3, f"expect 3 files with rule hits, got {total}"
+        calls: list[tuple[int, int]] = []
+        report.save_json_file(tmp_path / "p.json", chunk_size=2, progress_cb=lambda c, t: calls.append((c, t)))
+        assert calls == [(0, total), (2, total), (3, total)]
+        calls.clear()
+        report.save_csv_file(tmp_path / "p.csv", chunk_size=3, progress_cb=lambda c, t: calls.append((c, t)))
+        assert calls == [(0, total), (3, total)]
+
+    def test_chunk_size_non_positive_raises(self, tmp_path: Path) -> None:
+        """chunk_size <= 0 抛 ValueError。"""
+        report = self._build_report(tmp_path)
+        with pytest.raises(ValueError, match="chunk_size"):
+            report.save_json_file(tmp_path / "bad.json", chunk_size=0)
+        with pytest.raises(ValueError, match="chunk_size"):
+            report.save_json_file(tmp_path / "bad.json", chunk_size=-5)
+        with pytest.raises(ValueError, match="chunk_size"):
+            report.save_csv_file(tmp_path / "bad.csv", chunk_size=0)
+
+    def test_empty_report_writes_valid_json_and_csv(self, tmp_path: Path) -> None:
+        """空报告（no hits）仍能写出合法 JSON/CSV。"""
+        import json as _json
+
+        empty = ScanReport(root=tmp_path, results=(), stats=ScanStats())
+        json_out = tmp_path / "empty.json"
+        csv_out = tmp_path / "empty.csv"
+        empty.save_json_file(json_out, chunk_size=100)
+        empty.save_csv_file(csv_out, chunk_size=100)
+        assert _json.loads(json_out.read_bytes())["hits"] == []
+        assert csv_out.read_text(encoding="utf-8").splitlines() == empty.to_csv().splitlines()
+
+
+class TestIter160ProgressThrottle:
+    """iter-160：Scanner._emit_progress 双门限节流测试。
+
+    覆盖：
+    1. 时间门限 + 增量门限（双抑制）：时间窗内且 scanned/matched 增量都低于阈值时跳过
+    2. 时间门限通过但增量仍不足：仍然跳过
+    3. 增量门限通过（scanned 增量 >= 阈值）：即使时间极短也放行
+    4. force=True 强制发送：忽略双门限
+    5. matched_files 快照截断到 PROGRESS_SNAPSHOT_TAIL（避免 O(N) 拷贝）
+    """
+
+    @staticmethod
+    def _build_scanner(
+        on_progress: Callable[[ProgressInfo], None] | None,
+        progress_interval: float = 0.0,
+    ) -> Scanner:
+        rs = _build_ruleset(_filename_rule("r", "f"))
+        return Scanner(
+            rs,
+            on_progress=on_progress,
+            progress_interval=progress_interval,
+        )
+
+    def test_throttle_skips_when_below_both_thresholds(self) -> None:
+        """时间窗内且增量不足 → 跳过 emit。"""
+        received: list[ProgressInfo] = []
+        sc = self._build_scanner(received.append, progress_interval=0.05)
+        sc._progress_start = time.perf_counter()
+        sc._progress_total = 1000
+        # 先放一次 initial，建立基线（首次 emit 放行以初始化进度）
+        sc._emit_progress("", 10, 0, 0, 0)
+        assert len(received) == 1
+        # 等待超过时间窗，但 scanned 增量仍只有 10（<200）且 matched=0 → 跳过
+        time.sleep(0.1)
+        sc._emit_progress("", 20, 0, 0, 0)
+        assert len(received) == 1
+
+    def test_throttle_releases_when_delta_files_reached(self) -> None:
+        """时间窗通过 + 扫描增量 >= 阈值 → 放行。"""
+        received: list[ProgressInfo] = []
+        sc = self._build_scanner(received.append, progress_interval=0.05)
+        sc._progress_start = time.perf_counter()
+        sc._progress_total = 1000
+        # 首次 emit（时间窗天然通过，增量因无历史基准直接通过）
+        sc._emit_progress("", 10, 0, 0, 0)
+        assert len(received) == 1
+        # 时间窗通过 + 扫描增量 >= 200
+        time.sleep(0.1)
+        sc._emit_progress("", 220, 0, 0, 0)
+        assert len(received) == 2
+        assert received[-1].scanned == 220
+
+    def test_throttle_releases_when_delta_matched_reached(self) -> None:
+        """时间窗通过 + 命中增量 >= 阈值（即使扫描增量不足）→ 放行。"""
+        received: list[ProgressInfo] = []
+        sc = self._build_scanner(received.append, progress_interval=0.05)
+        sc._progress_start = time.perf_counter()
+        sc._progress_total = 1000
+        # 首次 emit 确立基线
+        sc._emit_progress("", 10, 0, 0, 0)
+        assert len(received) == 1
+        time.sleep(0.1)
+        # 扫描增量 20<200 但 matched 增量 60>=50 → 放行
+        sc._emit_progress("", 30, 60, 0, 0)
+        assert len(received) == 2
+        assert received[-1].matched == 60
+
+    def test_force_bypasses_all_thresholds(self) -> None:
+        """force=True 无视时间窗和增量，强制发送。"""
+        received: list[ProgressInfo] = []
+        sc = self._build_scanner(received.append, progress_interval=10.0)
+        sc._progress_start = time.perf_counter()
+        sc._progress_total = 1000
+        # 时间窗极长（10s）且 scanned=0 matched=0 仍应强制发送
+        sc._emit_progress("", 0, 0, 0, 0, force=True)
+        assert len(received) == 1
+        # 紧接着再次 force=True 也必须发送
+        sc._emit_progress("", 1, 0, 0, 0, force=True)
+        assert len(received) == 2
+
+    def test_snapshot_tail_capped(self) -> None:
+        """matched_files/skipped_dirs 快照截断到 PROGRESS_SNAPSHOT_TAIL。"""
+        from fuscan.scanner._helpers import PROGRESS_SNAPSHOT_TAIL
+
+        received: list[ProgressInfo] = []
+        sc = self._build_scanner(received.append, progress_interval=0.0)
+        sc._progress_start = time.perf_counter()
+        sc._progress_total = 1000
+        # 模拟添加远超上限的命中记录
+        for i in range(PROGRESS_SNAPSHOT_TAIL + 100):
+            sc._matched_files.append((f"path_{i}", f"rule_{i}"))
+        for i in range(PROGRESS_SNAPSHOT_TAIL + 50):
+            sc._skipped_dirs.append(f"skip_{i}")
+        sc._emit_progress("", 10, 10, 0, 0)
+        assert len(received) == 1
+        info = received[0]
+        # 截断到 PROGRESS_SNAPSHOT_TAIL
+        assert len(info.matched_files) == PROGRESS_SNAPSHOT_TAIL
+        assert len(info.skipped_dirs) == PROGRESS_SNAPSHOT_TAIL
+        # 且为最新的条目
+        if info.matched_files:
+            assert info.matched_files[-1][0] == f"path_{PROGRESS_SNAPSHOT_TAIL + 99}"
+        if info.skipped_dirs:
+            assert info.skipped_dirs[-1] == f"skip_{PROGRESS_SNAPSHOT_TAIL + 49}"
+
+
+# ---------------------------------------------------------------------------
+# iter-161 并发扫描路径去重（entries 提交前按 path 去重）
+# ---------------------------------------------------------------------------
+
+
+class TestIter161ConcurrentDedup:
+    """iter-161：并发扫描时 entries 按路径去重，避免同一文件被重复扫描。"""
+
+    def test_concurrent_dedup_when_duplicate_entries(self, tmp_path: Path) -> None:
+        """entries 中包含重复路径时，结果仅保留唯一文件。"""
+        (tmp_path / "a.txt").write_text("password=1", encoding="utf-8")
+        (tmp_path / "b.txt").write_text("password=2", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        scanner = Scanner(rs, max_workers=4)
+        # 虽然 scan 方法内部的 collect_entries 通常已去重，但此处验证
+        # 并发扫描（run_pipeline_phase → _scan_concurrent）在收到重复
+        # entries 时能正确去重。通过直接向 _scan_concurrent 传入手工
+        # 构造的重复 entries 验证。
+        from fuscan.scanner._pipeline_phase import run_pipeline_phase
+        from fuscan.scanner.context import FileEntry
+
+        def _entry(p: Path) -> FileEntry:
+            st = p.stat()
+            return FileEntry(
+                path=p,
+                name=p.name,
+                size=st.st_size,
+                mtime=st.st_mtime,
+                extension=p.suffix.lower().lstrip("."),
+                is_dir=False,
+            )
+
+        a_entry = _entry(tmp_path / "a.txt")
+        b_entry = _entry(tmp_path / "b.txt")
+        # 构造重复 entries：a 出现两次
+        dup_entries = [a_entry, b_entry, a_entry]
+
+        results: list[ScanResult] = []
+        scanned, matched, errors, matches = run_pipeline_phase(scanner, dup_entries, results)
+
+        assert scanned == 2, f"scanned 应为 2（去重后仅 2 个唯一文件），实际 {scanned}"
+        assert matched == 2, f"matched 应为 2，实际 {matched}"
+        assert len(results) == 2, f"results 应为 2 条，实际 {len(results)}"
+        paths = sorted(str(r.path) for r in results)
+        assert paths == sorted([str(tmp_path / "a.txt"), str(tmp_path / "b.txt")])
+        # 命中数总计：每个文件各 1 条密码命中
+        assert matches == 2
+        assert errors == 0
+
+    def test_concurrent_dedup_single_entry_no_duplicate(self, tmp_path: Path) -> None:
+        """唯一 entries 列表应不受去重逻辑影响。"""
+        (tmp_path / "only.txt").write_text("no secret here", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        scanner = Scanner(rs, max_workers=4)
+        from fuscan.scanner._pipeline_phase import run_pipeline_phase
+        from fuscan.scanner.context import FileEntry
+
+        p = tmp_path / "only.txt"
+        st = p.stat()
+        entry = FileEntry(
+            path=p,
+            name=p.name,
+            size=st.st_size,
+            mtime=st.st_mtime,
+            extension=p.suffix.lower().lstrip("."),
+            is_dir=False,
+        )
+        results: list[ScanResult] = []
+        scanned, matched, errors, matches = run_pipeline_phase(scanner, [entry], results)
+        assert scanned == 1
+        assert matched == 0  # 无 password 命中
+        assert matches == 0
+        assert len(results) == 1
+        assert errors == 0

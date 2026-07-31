@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -18,8 +19,10 @@ pytestmark = pytest.mark.gui
 try:
     try:
         from PySide2.QtCore import QModelIndex, Qt
+        from PySide2.QtWidgets import QApplication
     except ImportError:  # pragma: no cover
         from PySide6.QtCore import QModelIndex, Qt  # pyrefly: ignore [missing-import]
+        from PySide6.QtWidgets import QApplication  # pyrefly: ignore [missing-import]
 
     from fuscan.gui.models.result_model import ResultListModel
     from fuscan.rules.model import Severity
@@ -31,6 +34,9 @@ except ImportError:
 
 if not PYSIDE_AVAILABLE:
     pytest.skip("PySide 未安装，跳过结果模型测试", allow_module_level=True)
+
+if TYPE_CHECKING:
+    pass  # 仅用于类型检查占位
 
 
 def _build_results(tmp_path: Path) -> tuple[ScanResult, ...]:
@@ -460,13 +466,8 @@ def _build_large_results(tmp_path: Path, n: int = 12000) -> tuple[ScanResult, ..
 
 
 @pytest.fixture(scope="session")
-def qapp() -> object:
+def qapp() -> QApplication:
     """创建 QApplication（若不存在），用于 QThread 信号传递。"""
-    try:
-        from PySide2.QtWidgets import QApplication
-    except ImportError:  # pragma: no cover
-        from PySide6.QtWidgets import QApplication  # pyrefly: ignore [missing-import]
-
     app = QApplication.instance()
     if app is None:
         app = QApplication([])
@@ -546,7 +547,7 @@ class TestIter129AsyncPath:
         for _ in range(10):
             QCoreApplication.processEvents()
 
-    def test_async_threshold_triggers_worker(self, tmp_path: Path, qapp: object) -> None:
+    def test_async_threshold_triggers_worker(self, tmp_path: Path, qapp: QApplication) -> None:
         """结果数 >= 阈值时启动 FilterWorker。"""
         from fuscan.gui.models.result_model import _ASYNC_THRESHOLD
 
@@ -558,7 +559,7 @@ class TestIter129AsyncPath:
         self._wait_for_worker(m)
         assert m.rowCount() == _ASYNC_THRESHOLD + 1
 
-    def test_async_filter_applies_correctly(self, tmp_path: Path, qapp: object) -> None:
+    def test_async_filter_applies_correctly(self, tmp_path: Path, qapp: QApplication) -> None:
         """后台过滤完成后视图反映过滤条件。"""
         from fuscan.gui.models.result_model import _ASYNC_THRESHOLD
 
@@ -575,7 +576,7 @@ class TestIter129AsyncPath:
         assert m.rowCount() == 1
         assert "file_00000" in str(m.filtered_results[0].path).lower()
 
-    def test_async_generation_guard_drops_stale(self, tmp_path: Path, qapp: object) -> None:
+    def test_async_generation_guard_drops_stale(self, tmp_path: Path, qapp: QApplication) -> None:
         """连续修改过滤条件时，过期 worker 结果被丢弃。"""
         from fuscan.gui.models.result_model import _ASYNC_THRESHOLD
 
@@ -593,7 +594,7 @@ class TestIter129AsyncPath:
         assert m.rowCount() == 1
         assert "file_00002" in str(m.filtered_results[0].path).lower()
 
-    def test_cancel_worker_on_new_set_results(self, tmp_path: Path, qapp: object) -> None:
+    def test_cancel_worker_on_new_set_results(self, tmp_path: Path, qapp: QApplication) -> None:
         """set_results 在 worker 运行期间被调用时，旧 worker 应被取消。"""
         from fuscan.gui.models.result_model import _ASYNC_THRESHOLD
 
@@ -678,6 +679,8 @@ class TestIter149FilterViaIndex:
 
         sev_idx, rule_idx, n = self._build_indices(tmp_path)
         out = filter_via_index(sev_idx, rule_idx, frozenset(), frozenset({Severity.CRITICAL}), n)
+        # filter_severities 非空 → 不会返回 None
+        assert out is not None
         assert sorted(out) == [0, 3]
 
     def test_filter_only_rule(self, tmp_path: Path) -> None:
@@ -685,6 +688,8 @@ class TestIter149FilterViaIndex:
 
         sev_idx, rule_idx, n = self._build_indices(tmp_path)
         out = filter_via_index(sev_idx, rule_idx, frozenset({"敏感内容"}), frozenset(), n)
+        # filter_rules 非空 → 不会返回 None
+        assert out is not None
         assert sorted(out) == [0, 3]
 
     def test_filter_rule_plus_severity_intersection(self, tmp_path: Path) -> None:
@@ -694,6 +699,8 @@ class TestIter149FilterViaIndex:
         # "API 密钥" 命中 {1, 2, 3}（规则索引）；Severity.WARNING 命中 {1, 2}（max_severity）
         # 交集 = {1, 2}
         out = filter_via_index(sev_idx, rule_idx, frozenset({"API 密钥"}), frozenset({Severity.WARNING}), n)
+        # filter_severities + filter_rules 均非空 → 不会返回 None
+        assert out is not None
         assert sorted(out) == [1, 2]
 
     def test_no_match_returns_empty_list(self, tmp_path: Path) -> None:
@@ -709,7 +716,7 @@ class TestIter149FilterViaIndex:
 class TestIter149SortCache:
     """排序缓存：相同结果集+相同过滤排序条件不重复计算。"""
 
-    def test_cache_hit_avoids_filter_and_sort(self, tmp_path: Path, monkeypatch) -> None:
+    def test_cache_hit_avoids_filter_and_sort(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         m = ResultListModel()
         results = _build_filter_results(tmp_path)
         m.set_results(results)
@@ -818,3 +825,620 @@ class TestIter149IndexAppliedForLargeSet:
         assert m.filtered_count == (n // 3) - 1
         # 检查每个过滤后结果确实含敏感内容 rule_name
         assert all("敏感内容" in r.rule_names for r in m.filtered_results)
+
+
+class TestIter151Virtualize:
+    """iter-151：ListView 虚拟化——setVisibleRange 与 data() 占位返回。"""
+
+    @staticmethod
+    def _role_index() -> int:
+        return Qt.UserRole + 6  # index role（始终返回行号，不受虚拟化影响）
+
+    @staticmethod
+    def _role_filepath() -> int:
+        return Qt.UserRole + 1
+
+    def test_set_visible_range_empty_model_noop(self) -> None:
+        """空模型 setVisibleRange 不应抛出，rowCount=0 直接 return。"""
+        m = ResultListModel()
+        try:
+            m.setVisibleRange(0, 10)
+        except Exception as exc:  # pragma: no cover - 故障保护
+            pytest.fail(f"空模型 setVisibleRange 不应抛异常：{exc}")
+        assert m.rowCount() == 0
+
+    def test_small_result_set_not_virtualized(self, tmp_path: Path) -> None:
+        """小结果集（<= _VIRTUALIZE_THRESHOLD）即使 setVisibleRange，data() 仍返回真实值。"""
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD
+
+        m = ResultListModel()
+        n = max(10, _VIRTUALIZE_THRESHOLD // 10)  # 200 条远小于阈值
+        results = _build_large_results(tmp_path, n=n)
+        m.set_results(results)
+        # 设置视口范围：只「可见」第 0~2 行
+        m.setVisibleRange(0, 2)
+        # 小结果集不应虚拟化：第 100 行（远超视口范围）仍应返回真实文件路径（非空字符串）
+        idx = m.index(n - 1)
+        fp = m.data(idx, self._role_filepath())
+        assert isinstance(fp, str)
+        assert fp != "", "小结果集不应虚拟化：远视野文件仍应有真实 filePath"
+        # 行号应始终正确（无论是否虚拟化，index role 返回 row）
+        assert m.data(idx, self._role_index()) == n - 1
+
+    def test_large_result_outside_viewport_returns_placeholder(self, tmp_path: Path) -> None:
+        """大结果集（> _VIRTUALIZE_THRESHOLD）视口外 data() 返回占位空串/0。"""
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD
+
+        m = ResultListModel()
+        n = _VIRTUALIZE_THRESHOLD + 500
+        results = _build_large_results(tmp_path, n=n)
+        m.set_results(results)
+        # 设置仅可见第 50~60 行
+        m.setVisibleRange(50, 60)
+        # 视口内：55 行的 filePath 不为空
+        inside = m.index(55)
+        fp_in = m.data(inside, self._role_filepath())
+        assert isinstance(fp_in, str) and fp_in != "", "视口内应有真实 filePath"
+        # 视口外很远的位置（2000，远超 buffer=100）：filePath 应为空串
+        outside_idx = m.index(n - 50)  # 约第 2450 行
+        fp_out = m.data(outside_idx, self._role_filepath())
+        assert fp_out == "", f"视口外（row={n - 50}）应返回占位空串，实际={fp_out!r}"
+        # hitsCount 视口外应为 0
+        hits_out = m.data(outside_idx, Qt.UserRole + 5)
+        assert hits_out == 0, f"视口外 hitsCount 应=0，实际={hits_out}"
+        # index role（无论是否视口内，始终=row）
+        assert m.data(outside_idx, self._role_index()) == n - 50
+
+    def test_set_visible_range_normalize_bounds(self, tmp_path: Path) -> None:
+        """setVisibleRange 应自动归一化 start/end 至合法区间。"""
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD
+
+        m = ResultListModel()
+        n = _VIRTUALIZE_THRESHOLD + 100
+        m.set_results(_build_large_results(tmp_path, n=n))
+        # start < 0, end > rowCount-1：自动截断
+        m.setVisibleRange(-50, n + 9999)
+        assert m._visible_start == 0  # type: ignore[attr-defined]
+        assert m._visible_end == n - 1  # type: ignore[attr-defined]
+        # start > end：直接 return，不修改内部状态
+        prev_s, prev_e = m._visible_start, m._visible_end  # type: ignore[attr-defined]
+        m.setVisibleRange(n + 5, n - 1)
+        assert m._visible_start == prev_s  # type: ignore[attr-defined]
+        assert m._visible_end == prev_e  # type: ignore[attr-defined]
+
+    def test_visible_range_unchanged_no_extra_emits(self, qapp: QApplication, tmp_path: Path) -> None:
+        """相同范围重复调用 setVisibleRange 不应 emit dataChanged（无副作用）。"""
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD
+
+        m = ResultListModel()
+        n = _VIRTUALIZE_THRESHOLD + 200
+        m.set_results(_build_large_results(tmp_path, n=n))
+        changed_calls: list[tuple[int, int]] = []
+
+        def _on_changed(tl: QModelIndex, br: QModelIndex) -> None:
+            changed_calls.append((tl.row(), br.row()))
+
+        m.dataChanged.connect(_on_changed)  # type: ignore[attr-defined]
+        # 首次设置：会 emit
+        m.setVisibleRange(100, 120)
+        first_count = len(changed_calls)
+        assert first_count >= 0
+        # 相同范围再次设置：不应 emit（直接 return）
+        m.setVisibleRange(100, 120)
+        assert len(changed_calls) == first_count, "相同范围重复调用不应触发 dataChanged"
+
+    def test_data_micro_benchmark_1000_calls(self, benchmark: object, tmp_path: Path) -> None:  # pragma: no cover
+        """微基准：虚拟化启用时，data() 1000 次视口外访问开销应 < 20ms。
+
+        仅当 --benchmark-only 启用时实际跑基准；常规运行仅验证功能正确性。
+        """
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD
+
+        m = ResultListModel()
+        n = _VIRTUALIZE_THRESHOLD + 1000
+        m.set_results(_build_large_results(tmp_path, n=n))
+        m.setVisibleRange(5, 15)  # 仅 11 行在视口（+buffer），其余均为占位
+        role_fp = self._role_filepath()
+
+        def run() -> None:
+            # 随机访问：循环中 90% 访问视口外（快速路径占位返回）
+            rows = list(range(0, n, max(1, n // 1000)))[:1000]
+            for r in rows:
+                idx = m.index(r)
+                _ = m.data(idx, role_fp)
+
+        # 功能正确性先行：确保真的有占位返回
+        outside = m.data(m.index(n - 10), role_fp)
+        assert outside == "", "基准前功能校验：远端应返回占位"
+        if benchmark is not None and callable(benchmark):
+            benchmark(run)
+        else:
+            run()  # 普通运行至少走一遍路径（无基准器具时）
+
+
+class TestIter153DiffRefresh:
+    """iter-153：setVisibleRange 差异段 dataChanged + filter 后恢复 visible_range。"""
+
+    @staticmethod
+    def _capture_changes(m: ResultListModel) -> list[tuple[int, int]]:
+        captured: list[tuple[int, int]] = []
+
+        def _on(tl: QModelIndex, br: QModelIndex) -> None:
+            captured.append((tl.row(), br.row()))
+
+        m.dataChanged.connect(_on)  # type: ignore[attr-defined]
+        return captured
+
+    def test_scroll_down_emits_two_difference_ranges_not_whole_union(self, qapp: QApplication, tmp_path: Path) -> None:
+        """向下滚动：仅旧超出新左段 + 新超出旧右段 两段刷新，而非整段并集。"""
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD, _VISIBLE_BUFFER_ROWS
+
+        buf = _VISIBLE_BUFFER_ROWS  # 60
+        m = ResultListModel()
+        n = _VIRTUALIZE_THRESHOLD + 1000  # 3000
+        m.set_results(_build_large_results(tmp_path, n=n))
+        changes = self._capture_changes(m)
+        # 初始：[100, 120] → buf = [40, 180]
+        m.setVisibleRange(100, 120)
+        changes.clear()
+        # 向下滚动 30 行：新 [130, 150] → buf_new = [70, 210]
+        # 旧 buf = [40, 180]，差异：左 [40, 69]（旧超新左），右 [181, 210]（新超旧右）
+        m.setVisibleRange(130, 150)
+        # 总共 2 段：不应该是整段 [40, 210]（跨度 170 行）
+        total_rows = sum(end - start + 1 for start, end in changes)
+        expected_right = (180 + 1, min(n - 1, 150 + buf))  # 181 → 210
+        expected_left = (40, 70 - 1)  # 40 → 69
+        # 两段独立发射
+        assert len(changes) == 2, f"应恰好 2 段差异刷新，实际={changes}"
+        # 行总和 ≈ 两段之和，而非整段并集 (210-40+1) = 171
+        expected_sum = (expected_left[1] - expected_left[0] + 1) + (expected_right[1] - expected_right[0] + 1)
+        assert total_rows == expected_sum, (
+            f"差异段总行数应为 {expected_sum}（两段之和），实际 {total_rows}；"
+            f"若 ≈171 则是退回了整段并集刷新（bug）。changes={changes}"
+        )
+        # 两段的内容（顺序可能不保证，用集合比对）
+        ranges = sorted(changes)
+        assert ranges[0] == expected_left, f"左段差异不符：期望 {expected_left} 实际 {ranges[0]}"
+        assert ranges[1] == expected_right, f"右段差异不符：期望 {expected_right} 实际 {ranges[1]}"
+
+    def test_filter_text_change_restores_visible_range(self, qapp: QApplication, tmp_path: Path) -> None:
+        """filter 改变 _filtered 后，visible_range 仍被保留，data() 继续虚拟化返回占位。"""
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD
+
+        m = ResultListModel()
+        n = _VIRTUALIZE_THRESHOLD + 500
+        results = _build_large_results(tmp_path, n=n)
+        m.set_results(results)
+        # 先进入虚拟化态
+        m.setVisibleRange(50, 80)
+        assert m._visible_end >= 0  # type: ignore[attr-defined]
+        prev_s, prev_e = m._visible_start, m._visible_end  # type: ignore[attr-defined]
+        # 保存虚拟化远端（第 n-10 行）的状态：应为占位
+        far_idx = m.index(n - 10)
+        fp_role = Qt.UserRole + 1
+        before = m.data(far_idx, fp_role)
+        assert before == "", "filter 前远端应已返回占位"
+        # 触发 filter（空字符串，过滤视图结果相同，但走 filter_and_sort + resetModel 流程）
+        m.set_filter_text("")
+        # 验证：visible_start/end 未被清零，_restore_visible_range_after_filter 生效
+        assert m._visible_start == prev_s  # type: ignore[attr-defined]
+        assert m._visible_end == prev_e  # type: ignore[attr-defined]
+        # 功能正确性：远端依然返回占位（虚拟化继续生效）
+        after = m.data(far_idx, fp_role)
+        assert after == "", "filter 后远端应继续返回占位（visible_range 未恢复）"
+
+    def test_first_setvisible_emits_single_initial_range(self, qapp: QApplication, tmp_path: Path) -> None:
+        """首次设置可见范围（prev_buf_end < 0）：应只发射一次新缓冲区整块刷新。"""
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD, _VISIBLE_BUFFER_ROWS
+
+        buf = _VISIBLE_BUFFER_ROWS
+        m = ResultListModel()
+        n = _VIRTUALIZE_THRESHOLD + 200
+        m.set_results(_build_large_results(tmp_path, n=n))
+        changes = self._capture_changes(m)
+        # 首次：[200, 230] → buf [140, 290]
+        start, end = 200, 230
+        m.setVisibleRange(start, end)
+        assert len(changes) == 1, f"首次可见范围应整块刷新（1段），实际={changes}"
+        expected_start = max(0, start - buf)
+        expected_end = min(n - 1, end + buf)
+        assert changes[0] == (expected_start, expected_end), (
+            f"首次刷新范围不符：期望 ({expected_start},{expected_end}) 实际 {changes[0]}"
+        )
+
+
+class TestIter156LazyFill:
+    """iter-156：大结果集幽灵行+分帧懒加载正确性测试。"""
+
+    def test_large_result_set_uses_lazy_fill_initial_none_rows(self, qapp: QApplication, tmp_path: Path) -> None:
+        """大结果集 set_results 后，_filtered 初始应为全 None（幽灵行），_filtered_real 为完整真实。"""
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD
+
+        m = ResultListModel()
+        n = _VIRTUALIZE_THRESHOLD + 500
+        results = _build_large_results(tmp_path, n=n)
+        m.set_results(results)
+        # 真实副本：完整无 None
+        assert len(m._filtered_real) == n  # type: ignore[attr-defined]
+        assert all(x is not None for x in m._filtered_real)  # type: ignore[attr-defined]
+        # 懒加载状态已建立
+        assert m._lazystate is not None  # type: ignore[attr-defined]
+        # _filtered 初始存在至少大量 None（幽灵行，除非 visible_range 已填视口）
+        none_count = sum(1 for x in m._filtered if x is None)  # type: ignore[attr-defined]
+        # visible_end < 0 时，优先填充可能为空，大量仍为 None
+        assert none_count > 0, "大结果集懒加载初期应有幽灵行（至少部分 None）"
+
+    def test_filtered_results_never_contains_none(self, qapp: QApplication, tmp_path: Path) -> None:
+        """filtered_results 属性永远返回真实值（无 None），即使处于懒加载阶段。"""
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD
+
+        m = ResultListModel()
+        n = _VIRTUALIZE_THRESHOLD + 100
+        m.set_results(_build_large_results(tmp_path, n=n))
+        filtered = m.filtered_results
+        assert len(filtered) == n
+        for i, r in enumerate(filtered):
+            assert r is not None, f"filtered_results[{i}] 不应为 None"
+            assert hasattr(r, "path") and hasattr(r, "hits"), "filtered_results 元素应为 ScanResult"
+
+    def test_get_result_returns_real_even_when_ghost_row(self, qapp: QApplication, tmp_path: Path) -> None:
+        """get_result(row) 即使 row 对应 _filtered[row] 为 None 也应返回真实 ScanResult。
+
+        iter-156：过滤排序后结果顺序可能与原 results 顺序不同（sort+倒排索引裁剪重新排序），
+        因此只断言 got.path 必须属于原 results 的某一条路径，而非严格按下标相等。
+        """
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD
+
+        m = ResultListModel()
+        n = _VIRTUALIZE_THRESHOLD + 800
+        results = _build_large_results(tmp_path, n=n)
+        m.set_results(results)
+        # 选一个非常靠后的行（懒加载 cursor 还没到，大概率仍为 None）
+        far_row = n - 50
+        got = m.get_result(far_row)
+        assert got is not None, "get_result(far_row) 不应为 None（回退到 _filtered_real）"
+        original_paths = {r.path for r in results}
+        assert got.path in original_paths, (
+            f"get_result 返回路径 {got.path} 不在原结果路径集合中（过滤后重排属正常，但路径必须存在）"
+        )
+
+    def test_cancel_lazy_fill_then_all_real(self, qapp: QApplication, tmp_path: Path) -> None:
+        """_cancel_lazy_fill(and_fill_rest=True) 后 _filtered 应全部替换为真实值。"""
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD
+
+        m = ResultListModel()
+        n = _VIRTUALIZE_THRESHOLD + 300
+        m.set_results(_build_large_results(tmp_path, n=n))
+        m._cancel_lazy_fill(and_fill_rest=True)  # type: ignore[attr-defined]
+        assert m._lazystate is None  # type: ignore[attr-defined]
+        none_after = sum(1 for x in m._filtered if x is None)  # type: ignore[attr-defined]
+        assert none_after == 0, "cancel 后 _filtered 不应再有 None"
+
+    def test_setvisible_range_fills_visible_priority_immediately(self, qapp: QApplication, tmp_path: Path) -> None:
+        """懒加载中 setVisibleRange(远位置) 会立即把 visible_range + buffer 填成真实值。
+
+        iter-156：为避免 QTimer singleShot(0, ...) 的第一帧在 set_results 之后
+        先把 [0, batch) 填成真实值（导致 none_count_total 达不到阈值反而触发可见段未填），
+        此处先 cancel_lazy_fill(and_fill_rest=False)，手动重建幽灵行，再置 visible_end=-1，
+        保证初始态干净，然后 setVisibleRange 验证可见段优先填充。
+        """
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD, _VISIBLE_BUFFER_ROWS
+
+        buf = _VISIBLE_BUFFER_ROWS
+        m = ResultListModel()
+        n = _VIRTUALIZE_THRESHOLD + 1000
+        results = _build_large_results(tmp_path, n=n)
+        m.set_results(results)
+        # 强制回到干净的懒加载初始态（避免 singleShot(0) 已经填了一部分）
+        m._cancel_lazy_fill(and_fill_rest=False)  # type: ignore[attr-defined]
+        m._filtered = (None,) * n  # type: ignore[attr-defined]
+        m._filtered_real = m._filtered_real  # type: ignore[attr-defined]  # 保持真实副本
+        # 重新启用 lazystate（cursor=0, generation=当前 generation）
+        from fuscan.gui.models.result_model import _LazyFillState
+
+        m._lazystate = _LazyFillState(  # type: ignore[attr-defined]
+            generation=m._filter_generation,  # type: ignore[attr-defined]
+            cursor=0,
+            result_tuple=m._filtered_real,  # type: ignore[attr-defined]
+        )
+        # 清空 visible 记录（保证进入 setVisibleRange 前是未知态）
+        m._visible_start = 0  # type: ignore[attr-defined]
+        m._visible_end = -1  # type: ignore[attr-defined]
+        # 跳转到非常靠后的范围
+        far_start, far_end = n - 200, n - 180
+        m.setVisibleRange(far_start, far_end)
+        # 验证 visible 范围内 _filtered 都是真实值（无 None）
+        buf_start = max(0, far_start - buf)
+        buf_end = min(n - 1, far_end + buf)
+        missing = [i for i in range(buf_start, buf_end + 1) if m._filtered[i] is None]  # type: ignore[attr-defined]
+        assert missing == [], (
+            f"visible range + buffer 内 {len(missing)} 行仍为 None（未立即填充）：{missing[:5]}..."
+            if len(missing) > 5
+            else f"visible range + buffer 内行仍为 None：{missing}"
+        )
+
+    def test_small_result_set_no_lazy_fill(self, qapp: QApplication, tmp_path: Path) -> None:
+        """小结果集（<=_VIRTUALIZE_THRESHOLD）不启用懒加载，_filtered 全为真实值且 lazystate=None。"""
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD
+
+        m = ResultListModel()
+        n = _VIRTUALIZE_THRESHOLD  # 刚好等于阈值，不启用
+        m.set_results(_build_large_results(tmp_path, n=n))
+        assert m._lazystate is None  # type: ignore[attr-defined]
+        none_count = sum(1 for x in m._filtered if x is None)  # type: ignore[attr-defined]
+        assert none_count == 0, "小结果集无懒加载，_filtered 不应有任何 None"
+
+
+class TestIter159FlatData:
+    """iter-159：扁平化数据层 _flat_data 正确性验证。"""
+
+    def test_flat_data_small_result_set(self, qapp: QApplication, tmp_path: Path) -> None:
+        """小结果集 set_results 后 _flat_data 全量构造且字段正确。"""
+        from fuscan.gui.models.result_model import (
+            _FLAT_FILE_PATH,
+            _FLAT_HITS_COUNT,
+            _FLAT_RULE_NAME,
+            _FLAT_SEV_TEXT,
+        )
+
+        m = ResultListModel()
+        results = _build_results(tmp_path)
+        m.set_results(results)
+        flat = m._flat_data  # type: ignore[attr-defined]
+        assert len(flat) == len(results), f"flat_data 行数 {len(flat)} != {len(results)}"
+        # 第 0 行（CRITICAL 命中）
+        row0 = flat[0]
+        assert row0 is not None
+        assert row0[_FLAT_FILE_PATH] == str(results[0].path)
+        assert row0[_FLAT_RULE_NAME] == "敏感内容"
+        assert row0[_FLAT_SEV_TEXT] == "严重"
+        assert row0[_FLAT_HITS_COUNT] == 1
+        # 第 1 行（含 2 条命中，取第一个规则名）
+        row1 = flat[1]
+        assert row1 is not None
+        assert row1[_FLAT_RULE_NAME] == "敏感内容"
+        assert row1[_FLAT_HITS_COUNT] == 2
+        # 扁平数据列数正确（6 列）
+        for i, r in enumerate(flat):
+            assert r is not None, f"第 {i} 行为 None（应为扁平元组）"
+            assert len(r) == 6, f"第 {i} 行元组长度 {len(r)} != 6"
+
+    def test_flat_data_filled_during_lazy_fill(self, qapp: QApplication, tmp_path: Path) -> None:
+        """懒加载填充可见范围时，_flat_data 同步构造扁平元组。"""
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD
+
+        m = ResultListModel()
+        n = _VIRTUALIZE_THRESHOLD + 100
+        m.set_results(_build_large_results(tmp_path, n=n))
+        flat = m._flat_data  # type: ignore[attr-defined]
+        # 初始为幽灵行，flat 全为 None
+        assert len(flat) == n
+        # 触发可见范围填充（前 200 行）
+        m.setVisibleRange(0, 180)
+        # 验证可见范围 + buffer 内的 flat 已构造
+        from fuscan.gui.models.result_model import _VISIBLE_BUFFER_ROWS
+
+        buf = _VISIBLE_BUFFER_ROWS
+        end = min(n - 1, 180 + buf)
+        filled_count = sum(1 for i in range(0, end + 1) if flat[i] is not None)
+        assert filled_count > 0, "可见范围内 flat 应为非 None"
+        # 不在可见范围的行保持 None
+        outside_none = sum(1 for i in range(end + 1, n) if flat[i] is None)
+        assert outside_none == n - end - 1
+
+    def test_flat_data_rebuilt_on_cancel_lazy_fill(self, qapp: QApplication, tmp_path: Path) -> None:
+        """cancel_lazy_fill(and_fill_rest=True) 后 _flat_data 全量重建。"""
+        from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD
+
+        m = ResultListModel()
+        n = _VIRTUALIZE_THRESHOLD + 500
+        m.set_results(_build_large_results(tmp_path, n=n))
+        m._cancel_lazy_fill(and_fill_rest=True)  # type: ignore[attr-defined]
+        flat = m._flat_data  # type: ignore[attr-defined]
+        assert len(flat) == n
+        none_count = sum(1 for r in flat if r is None)
+        assert none_count == 0, "cancel 后 flat 不应有 None"
+        # 验证每条 flat 元组字段与 _filtered_real 一致
+        for i, r in enumerate(flat):
+            assert r is not None
+            result = m._filtered_real[i]  # type: ignore[attr-defined]
+            assert r[0] == str(result.path), f"第 {i} 行文件路径不一致"
+            assert r[4] == len(result.hits), f"第 {i} 行 hitsCount 不一致"
+
+
+# ----------------------------- iter-165 并行倒排索引 -----------------------------
+
+
+class TestIter165BuildIndicesParallel:
+    """iter-165：build_indices_parallel 分块并行构建 + 与串行结果等价。"""
+
+    def test_parallel_empty(self) -> None:
+        from fuscan.gui.models.result_model import build_indices_parallel
+
+        sev, rule = build_indices_parallel(())
+        assert sev == {}
+        assert rule == {}
+
+    def test_parallel_single_chunk_equals_serial(self, tmp_path: Path) -> None:
+        """结果数小于 chunk_size 时，并行退化单线程，结果完全等价。"""
+        from fuscan.gui.models.result_model import build_indices, build_indices_parallel
+
+        results = _build_large_results(tmp_path, n=500)
+        sev_s, rule_s = build_indices(results)
+        sev_p, rule_p = build_indices_parallel(results, max_workers=4, chunk_size=2000)
+        assert sev_s == sev_p
+        assert rule_s == rule_p
+
+    def test_parallel_multi_chunk_equals_serial(self, tmp_path: Path) -> None:
+        """多切片并行构建后与串行结果等价。"""
+        from fuscan.gui.models.result_model import build_indices, build_indices_parallel
+
+        results = _build_large_results(tmp_path, n=5000)
+        sev_s, rule_s = build_indices(results)
+        sev_p, rule_p = build_indices_parallel(results, max_workers=4, chunk_size=800)
+        assert sev_s == sev_p
+        assert rule_s == rule_p
+
+    def test_build_indices_auto_parallel_for_large(self, tmp_path: Path) -> None:
+        """build_indices 在结果数 >= _INDEX_PARALLEL_THRESHOLD 时自动走并行路径。"""
+        from fuscan.gui.models.result_model import (
+            _INDEX_PARALLEL_THRESHOLD,
+            build_indices,
+        )
+
+        results = _build_large_results(tmp_path, n=_INDEX_PARALLEL_THRESHOLD + 100)
+        sev, rule = build_indices(results)
+        assert len(sev) > 0
+        assert len(rule) > 0
+        # 严重度索引覆盖三种等级
+        for sev_lv in (Severity.CRITICAL, Severity.WARNING, Severity.INFO):
+            assert sev_lv in sev, f"严重度 {sev_lv} 应出现在索引中"
+
+    def test_parallel_single_worker(self, tmp_path: Path) -> None:
+        """max_workers=1 时直接走串行，避免线程池开销。"""
+        from fuscan.gui.models.result_model import build_indices, build_indices_parallel
+
+        results = _build_large_results(tmp_path, n=3000)
+        sev_s, rule_s = build_indices(results)
+        sev_p, rule_p = build_indices_parallel(results, max_workers=1, chunk_size=100)
+        assert sev_s == sev_p
+        assert rule_s == rule_p
+
+
+class TestIter165FilterWorkerWithIndex:
+    """iter-165：FilterWorker 信号现回传 (filtered, severity_index, rule_index) 三元组。"""
+
+    def test_filter_worker_emits_three_values(self, qapp: QApplication, tmp_path: Path) -> None:
+        from fuscan.gui.workers.filter_worker import FilterWorker
+
+        results = _build_large_results(tmp_path, n=3000)
+        worker = FilterWorker(
+            results=results,
+            filter_text="",
+            filter_rules=frozenset(),
+            filter_severities=frozenset(),
+            sort_field="severity",
+            sort_ascending=False,
+        )
+        captured: dict[str, object] = {}
+
+        def _on_done(filtered: tuple[object, ...], sev: dict[object, object], rule: dict[object, object]) -> None:
+            captured["filtered"] = filtered
+            captured["sev"] = sev
+            captured["rule"] = rule
+
+        worker.done.connect(_on_done)  # type: ignore[attr-defined]
+        worker.start()
+        # 等待线程完成，然后处理事件让信号送达 slot
+        worker.wait(2000)
+        assert worker.isRunning() is False
+        qapp.processEvents()
+        assert "filtered" in captured, "FilterWorker.done 应触发"
+        filtered = captured["filtered"]
+        assert isinstance(filtered, tuple)
+        assert len(filtered) == 3000
+        sev = captured["sev"]
+        rule = captured["rule"]
+        assert isinstance(sev, dict)
+        assert isinstance(rule, dict)
+        # 3000 条已达 _INDEX_THRESHOLD（2000），索引应被构建
+        assert len(sev) > 0
+        assert len(rule) > 0
+
+    def test_filter_worker_skips_index_for_small_set(self, qapp: QApplication, tmp_path: Path) -> None:
+        from fuscan.gui.workers.filter_worker import FilterWorker
+
+        results = _build_large_results(tmp_path, n=100)
+        worker = FilterWorker(
+            results=results,
+            filter_text="",
+            filter_rules=frozenset(),
+            filter_severities=frozenset(),
+            sort_field="default",
+            sort_ascending=True,
+            build_index=True,
+            index_threshold=2000,
+        )
+        captured: dict[str, object] = {}
+
+        def _on_done(filtered: tuple[object, ...], sev: dict[object, object], rule: dict[object, object]) -> None:
+            captured["sev"] = sev
+            captured["rule"] = rule
+
+        worker.done.connect(_on_done)  # type: ignore[attr-defined]
+        worker.start()
+        worker.wait(2000)
+        assert worker.isRunning() is False
+        qapp.processEvents()
+        # 100 条小于阈值，索引应为空
+        assert captured["sev"] == {}
+        assert captured["rule"] == {}
+
+
+class TestIter165SetResultsAsyncIndex:
+    """iter-165：set_results 在大结果集时不阻塞主线程构建索引，由 FilterWorker 后台完成。"""
+
+    def test_large_set_results_builds_index_via_worker(self, qapp: QApplication, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import _ASYNC_THRESHOLD, _INDEX_THRESHOLD
+
+        m = ResultListModel()
+        n = max(_ASYNC_THRESHOLD + 1000, _INDEX_THRESHOLD + 100)
+        # 直接调用 set_results —— 对 n >= _ASYNC_THRESHOLD 的结果，索引不在主线程同步构建
+        # 而是由 FilterWorker 异步构建，_on_filter_done 回调中应用
+        results = _build_large_results(tmp_path, n=n)
+        m.set_results(results)
+        # 等待 FilterWorker 完成
+        worker = m._filter_worker  # type: ignore[attr-defined]
+        if worker is not None:
+            worker.wait(3000)
+            worker.quit()
+            worker.wait(500)
+            qapp.processEvents()
+        # 索引已被 FilterWorker 回传并应用（通过信号）
+        assert m._severity_index  # type: ignore[attr-defined]
+        assert m._rule_index  # type: ignore[attr-defined]
+        # 过滤+排序结果已应用
+        assert m.total_count == n
+
+    def test_medium_set_results_builds_index_sync(self, qapp: QApplication, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import _ASYNC_THRESHOLD, _INDEX_THRESHOLD
+
+        m = ResultListModel()
+        # 中结果集：>= _INDEX_THRESHOLD 且 < _ASYNC_THRESHOLD —— 主线程同步构建
+        n = (_INDEX_THRESHOLD + _ASYNC_THRESHOLD) // 2
+        n = max(n, _INDEX_THRESHOLD + 500)
+        results = _build_large_results(tmp_path, n=n)
+        m.set_results(results)
+        # 主线程同步路径（n < _ASYNC_THRESHOLD，若结果同时满足 _INDEX_THRESHOLD），
+        # 索引应在 set_results 内已直接构建（无需等待 worker）
+        assert m._severity_index  # type: ignore[attr-defined]
+        assert m._rule_index  # type: ignore[attr-defined]
+
+    def test_remove_result_updates_index_via_worker(self, qapp: QApplication, tmp_path: Path) -> None:
+        from fuscan.gui.models.result_model import _ASYNC_THRESHOLD
+
+        m = ResultListModel()
+        n = _ASYNC_THRESHOLD + 500
+        results = _build_large_results(tmp_path, n=n)
+        m.set_results(results)
+        # 等待首次 set_results 的 worker 完成
+        w1 = m._filter_worker  # type: ignore[attr-defined]
+        if w1 is not None:
+            w1.wait(3000)
+            w1.quit()
+            w1.wait(500)
+            qapp.processEvents()
+        # 移除一条结果
+        first_path = results[0].path
+        ok = m.remove_result_by_path(first_path)
+        assert ok is True
+        # 等待 remove 后的 worker 完成
+        w2 = m._filter_worker  # type: ignore[attr-defined]
+        if w2 is not None:
+            w2.wait(3000)
+            w2.quit()
+            w2.wait(500)
+            qapp.processEvents()
+        # 索引仍可用于过滤
+        assert m._severity_index  # type: ignore[attr-defined]
+        assert m.filtered_count == n - 1

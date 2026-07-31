@@ -41,6 +41,9 @@ __all__ = [
     "DEFAULT_MAX_FILE_SIZE",
     "GIL_YIELD_INTERVAL",
     "PROGRESS_LIST_MAX",
+    "PROGRESS_MIN_DELTA_FILES",
+    "PROGRESS_MIN_DELTA_MATCHES",
+    "PROGRESS_SNAPSHOT_TAIL",
     "build_hit_from_match",
     "cancel_all_futures",
     "default_extract_content",
@@ -68,6 +71,18 @@ BATCH_THRESHOLD: int = 50
 # 50 项已足够用户感知"近期"上下文，更大的值会导致高频进度回调时
 # tuple 拷贝与信号槽分发占用主线程时间片引起 UI 卡滞。
 PROGRESS_LIST_MAX: int = 50
+
+# iter-160：进度双门限节流的增量阈值（时间窗 + 增量门）。
+# 即便达到时间窗 elapsed >= _progress_interval，若自上次 emit 以来 scanned/matched
+# 的增量都低于以下阈值，跳过本次 emit，避免 50k+ 小文件扫描时 UI 仍被高频刷新。
+# - PROGRESS_MIN_DELTA_FILES：scanned 至少增加 200 个
+# - PROGRESS_MIN_DELTA_MATCHES：matched 至少增加 50 个（命中率较高时的兜底）
+PROGRESS_MIN_DELTA_FILES: int = 200
+PROGRESS_MIN_DELTA_MATCHES: int = 50
+
+# iter-160：进度快照保留的最近 N 条目（配合 _emit_progress 的 tuple 截断）。
+# 避免大规模扫描时 matched_files/skipped_dirs 的 deque 元组转换 O(N) 拷贝开销。
+PROGRESS_SNAPSHOT_TAIL: int = 50
 
 # GIL 让步间隔：_scan_concurrent 每处理 N 个文件 sleep(0) 一次，
 # 让 UI 线程有机会处理 Qt 事件队列。20 个文件约对应 1-5ms 扫描时间，

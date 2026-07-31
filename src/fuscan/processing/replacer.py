@@ -505,35 +505,31 @@ def _apply_replace_text(
 ) -> tuple[str, int]:
     """对文本内容按规则逐条替换 ``match_texts → replace_with``。
 
-    同一条规则命中的多个文本依次替换；不同规则按 ``specs`` 顺序应用。
-    已替换的区间不会再次匹配后续规则（避免链式替换导致内容损坏）。
+    所有 (关键词, 替换文本) 对按关键词长度降序排列后统一应用，
+    确保长关键词优先替换，避免短关键词先替换破坏长关键词匹配。
 
     :param content: 原始文本
     :param specs: ``(Rule, RuleHit)`` 列表，按规则集顺序
     :return: ``(新内容, 实际替换的规则条数)``
     """
-    # 收集所有 (关键词, 替换文本) 对，按关键词长度降序避免短词先替换破坏长词
-    replacements: list[tuple[str, str]] = []
-    for rule, hit in specs:
+    # 收集所有 (关键词, 替换文本, 规则索引) 三元组
+    indexed: list[tuple[str, str, int]] = []
+    for rule_idx, (rule, hit) in enumerate(specs):
         for kw in hit.match_texts:
-            if kw:  # 跳过空字符串
-                replacements.append((kw, rule.replace_with))
-    if not replacements:
+            if kw:
+                indexed.append((kw, rule.replace_with, rule_idx))
+    if not indexed:
         return content, 0
     # 按关键词长度降序：长关键词优先，避免短关键词破坏长关键词匹配
-    replacements.sort(key=lambda x: len(x[0]), reverse=True)
+    indexed.sort(key=lambda x: len(x[0]), reverse=True)
 
     new_content = content
-    replaced_rule_count = 0
-    for rule, hit in specs:
-        rule_replaced = False
-        for kw in hit.match_texts:
-            if kw and kw in new_content:
-                new_content = new_content.replace(kw, rule.replace_with)
-                rule_replaced = True
-        if rule_replaced:
-            replaced_rule_count += 1
-    return new_content, replaced_rule_count
+    replaced_rule_indices: set[int] = set()
+    for kw, replace_with, rule_idx in indexed:
+        if kw in new_content:
+            new_content = new_content.replace(kw, replace_with)
+            replaced_rule_indices.add(rule_idx)
+    return new_content, len(replaced_rule_indices)
 
 
 def _apply_replace_bytes(
@@ -542,42 +538,33 @@ def _apply_replace_bytes(
 ) -> tuple[bytes, int]:
     """对二进制内容按规则逐条替换（UTF-8 编码关键词）。
 
-    与 :func:`_apply_replace_text` 类似，但操作 bytes。关键词与替换文本
-    统一编码为 UTF-8 bytes 进行 ``bytes.replace``。
+    与 :func:`_apply_replace_text` 逻辑一致：所有 (关键词, 替换文本) 对
+    按长度降序排列后统一应用，确保长关键词优先替换。
 
     :param raw: 原始字节
     :param specs: ``(Rule, RuleHit)`` 列表
     :return: ``(新字节, 实际替换的规则条数)``
     """
-    replacements: list[tuple[bytes, bytes]] = []
-    for rule, hit in specs:
+    indexed: list[tuple[bytes, bytes, int]] = []
+    for rule_idx, (rule, hit) in enumerate(specs):
         for kw in hit.match_texts:
-            if kw:
-                try:
-                    replacements.append((kw.encode("utf-8"), rule.replace_with.encode("utf-8")))
-                except UnicodeEncodeError:  # pragma: no cover - Python 字符串均可 UTF-8 编码
-                    continue
-    if not replacements:
-        return raw, 0
-    replacements.sort(key=lambda x: len(x[0]), reverse=True)
-
-    new_raw = raw
-    replaced_rule_count = 0
-    for rule, hit in specs:
-        rule_replaced = False
-        for kw in hit.match_texts:
-            if not kw:  # pragma: no cover - 外层 replacements 收集已过滤空 kw
+            if not kw:
                 continue
             try:
-                kw_bytes = kw.encode("utf-8")
+                indexed.append((kw.encode("utf-8"), rule.replace_with.encode("utf-8"), rule_idx))
             except UnicodeEncodeError:  # pragma: no cover - Python 字符串均可 UTF-8 编码
                 continue
-            if kw_bytes in new_raw:
-                new_raw = new_raw.replace(kw_bytes, rule.replace_with.encode("utf-8"))
-                rule_replaced = True
-        if rule_replaced:
-            replaced_rule_count += 1
-    return new_raw, replaced_rule_count
+    if not indexed:
+        return raw, 0
+    indexed.sort(key=lambda x: len(x[0]), reverse=True)
+
+    new_raw = raw
+    replaced_rule_indices: set[int] = set()
+    for kw_bytes, replace_bytes, rule_idx in indexed:
+        if kw_bytes in new_raw:
+            new_raw = new_raw.replace(kw_bytes, replace_bytes)
+            replaced_rule_indices.add(rule_idx)
+    return new_raw, len(replaced_rule_indices)
 
 
 def _atomic_write_text(path: Path, content: str) -> None:

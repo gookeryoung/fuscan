@@ -220,6 +220,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._error_count: int = 0
         # iter-137：压缩包内条目数（含在 scanned 中，单独暴露供 UI 注明）
         self._archive_entry_count: int = 0
+        # iter-151：增量扫描统计——未变更文件复用数与实际变更扫描数
+        self._reused_files: int = 0
         # 阶段独立进度（iter-105 双进度条）：
         # walk 阶段：discovered 持续增长，skipped/user_skipped 反映白名单与用户标记跳过
         # scan 阶段：scanned/total 反映解析进度，与上方 progressScanned/progressTotal 同步
@@ -376,6 +378,23 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         避免 ``scanned > total_files`` 时产生误解。
         """
         return self._archive_entry_count
+
+    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def reusedFiles(self) -> int:
+        """增量扫描：未变更直接复用上次结果的文件数（iter-151）。
+
+        全量扫描时为 0；增量扫描越大，此值越接近 ``progressTotal``。
+        """
+        return self._reused_files
+
+    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def changedFiles(self) -> int:
+        """增量扫描：实际发生内容变更、重新做了 I/O 与规则匹配的文件数（iter-151）。
+
+        等于 ``progressScanned``（不含复用未变更文件）与压缩包内条目
+        之差的下限为 0（archive_entries 含在 scanned 中）。
+        """
+        return max(0, self._progress_scanned - self._archive_entry_count)
 
     # ----------------------------- 阶段与收集进度（iter-105 双进度条） -----------------------------
 
@@ -1025,6 +1044,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._skipped_count = 0
         self._error_count = 0
         self._archive_entry_count = 0
+        # iter-151：增量扫描统计重置
+        self._reused_files = 0
         self._current_file = "准备统计..."
         self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -1111,6 +1132,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._skipped_count = 0
         self._error_count = 0
         self._archive_entry_count = 0
+        # iter-151：增量扫描统计重置
+        self._reused_files = 0
         self._current_file = "准备统计..."
         self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -1267,9 +1290,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         total_discovered = sum(wr.total for wr in results)
         total_skipped = sum(wr.skipped for wr in results)
         total_user_skipped = sum(wr.user_skipped for wr in results)
+        # iter-151：增量扫描——未变更文件复用数从 WalkResult.unchanged_count 累加
+        total_reused = sum(wr.unchanged_count for wr in results)
         self._walk_discovered = total_discovered
         self._walk_skipped = total_skipped
         self._walk_user_skipped = total_user_skipped
+        self._reused_files = total_reused
         self._walk_done = True
         self._walk_indeterminate = False
         # scan 阶段总文件数 = walk 收集的 entries 总数（不含跳过项）
@@ -1406,6 +1432,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._error_count = stats.errors
         self._passed_count = max(stats.scanned_files - stats.matched_files - stats.errors, 0)
         self._archive_entry_count = stats.archive_entries
+        # iter-151：最终未变更文件复用数以 ScanReport.stats.unchanged_files 为准
+        self._reused_files = stats.unchanged_files
 
     def _can_build_roots(self) -> bool:
         """判断当前是否可构建扫描根路径列表。"""

@@ -189,6 +189,26 @@ Item {
                                : resultListView.count > 10000 ? 1000
                                : 2000
                     currentIndex: workspaceController.currentScanController.selectedResultIndex
+                    // iter-151：滚动停止时上报当前可视范围给 Model，启用虚拟化（大结果集才生效）
+                    property int delegateHeight: 56
+                    onMovementEnded: {
+                        if (count <= 0 || !visibleArea) return
+                        var vp = visibleArea.yPosition
+                        var start = Math.max(0, Math.floor(vp * count))
+                        var visibleRows = visibleArea.height > 0 ? Math.ceil(visibleArea.height / delegateHeight) : 10
+                        var end = Math.min(count - 1, start + visibleRows + 4)
+                        workspaceController.currentScanController.resultModel.setVisibleRange(start, end)
+                    }
+                    onCountChanged: {
+                        // 首次加载或过滤后重置：上报当前顶部可视范围，确保 Model 立即进入虚拟化态
+                        if (count > 0 && visibleArea) {
+                            var vp0 = visibleArea.yPosition
+                            var s0 = Math.max(0, Math.floor(vp0 * count))
+                            var vr0 = visibleArea.height > 0 ? Math.ceil(visibleArea.height / delegateHeight) : 10
+                            var e0 = Math.min(count - 1, s0 + vr0 + 4)
+                            workspaceController.currentScanController.resultModel.setVisibleRange(s0, e0)
+                        }
+                    }
 
                     // 恢复中占位态（iter-128：后台异步加载缓存结果）
                     ColumnLayout {
@@ -224,11 +244,6 @@ Item {
                         width: resultListView.width
                         height: 56
 
-                        // iter-131：缓存 model.* 到本地 property，避免 RowLayout 中重复求值
-                        // severityColor 在色条与标签背景两处使用，缓存减少一次 model 访问
-                        property string sevColor: model.severityColor
-                        property string sevText: model.severityText
-
                         background: Rectangle {
                             color: ListView.isCurrentItem
                                   ? (theme.isDark ? theme.colorBgSelectedDark : theme.colorBgSelected)
@@ -247,7 +262,7 @@ Item {
                             workspaceController.currentScanController.setSelectedResultIndex(model.index)
                         }
 
-                        RowLayout {
+                        Row {
                             anchors.fill: parent
                             anchors.leftMargin: 12
                             anchors.rightMargin: 12
@@ -257,17 +272,34 @@ Item {
                             Rectangle {
                                 width: 3
                                 height: parent.height * 0.6
-                                color: sevColor
+                                color: model.severityColor
                                 radius: 2
                             }
 
-                            ColumnLayout {
-                                Layout.fillWidth: true
+                            // 严重度标签（必须在内容前定义，供 Column 宽度绑定引用）
+                            Rectangle {
+                                id: severityTag
+                                radius: 8
+                                height: 20
+                                width: Math.max(implicitWidth, tagLabel.implicitWidth + 12)
+                                color: model.severityColor
+                                readonly property Label tagLabel: severityLabel
+                                Label {
+                                    id: severityLabel
+                                    anchors.centerIn: parent
+                                    text: model.severityText
+                                    font.pixelSize: 10
+                                    color: theme.colorTextOnPrimary
+                                }
+                            }
+
+                            Column {
+                                width: parent.width - 3 - parent.spacing - severityTag.tagLabel.implicitWidth
                                 spacing: 2
 
                                 // 文件路径
                                 Label {
-                                    Layout.fillWidth: true
+                                    width: parent.width
                                     text: model.filePath
                                     font.pixelSize: 12
                                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
@@ -278,21 +310,6 @@ Item {
                                     text: model.ruleName + " · 命中 " + model.hitsCount + " 处"
                                     font.pixelSize: 11
                                     color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                }
-                            }
-
-                            // 严重度标签
-                            Rectangle {
-                                radius: 8
-                                height: 20
-                                width: severityLabel.width + 12
-                                color: sevColor
-                                Label {
-                                    id: severityLabel
-                                    anchors.centerIn: parent
-                                    text: sevText
-                                    font.pixelSize: 10
-                                    color: theme.colorTextOnPrimary
                                 }
                             }
                         }

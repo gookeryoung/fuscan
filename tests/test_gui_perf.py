@@ -254,3 +254,112 @@ def test_perf_stats_save_to_json_writes_file(tmp_path) -> None:  # type: ignore[
     assert "stages" in payload
     assert "read" in payload["stages"]
     assert payload["meta"]["files"] == 100
+
+
+def _collect_info_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    """过滤 fuscan.perf logger 的 INFO 记录（timed 默认级别）。"""
+    return [r for r in caplog.records if r.name == "fuscan.perf" and r.levelno == logging.INFO]
+
+
+def test_timed_disabled_context_no_logging(caplog: pytest.LogCaptureFixture) -> None:
+    """未启用时 timed 作上下文管理器不应记录任何日志（零开销）。"""
+    caplog.set_level(logging.INFO, logger="fuscan.perf")
+    perf_mod.set_perf_enabled(False)
+    with perf_mod.timed("阶段"):
+        pass
+    assert _collect_info_records(caplog) == []
+
+
+def test_timed_context_records_begin_and_end(caplog: pytest.LogCaptureFixture) -> None:
+    """启用后 timed 作上下文应记录进入与耗时两条 INFO 日志。"""
+    caplog.set_level(logging.INFO, logger="fuscan.perf")
+    perf_mod.set_perf_enabled(True)
+    with perf_mod.timed("构造主控制器"):
+        pass
+    records = _collect_info_records(caplog)
+    assert len(records) == 2
+    assert records[0].getMessage() == "构造主控制器…"
+    assert "构造主控制器 完成，用时" in records[1].getMessage()
+    assert "ms" in records[1].getMessage()
+
+
+def test_timed_decorator_uses_explicit_name(caplog: pytest.LogCaptureFixture) -> None:
+    """timed 作装饰器（显式命名）应在每次调用时计时并记录。"""
+    caplog.set_level(logging.INFO, logger="fuscan.perf")
+    perf_mod.set_perf_enabled(True)
+
+    @perf_mod.timed("加载配置")
+    def load() -> int:
+        return 42
+
+    assert load() == 42
+    records = _collect_info_records(caplog)
+    assert len(records) == 2
+    assert records[0].getMessage() == "加载配置…"
+    assert "加载配置 完成，用时" in records[1].getMessage()
+
+
+def test_timed_decorator_auto_name_from_function(caplog: pytest.LogCaptureFixture) -> None:
+    """timed 作装饰器未命名时应自动取被装饰函数的限定名。"""
+    caplog.set_level(logging.INFO, logger="fuscan.perf")
+    perf_mod.set_perf_enabled(True)
+
+    @perf_mod.timed()
+    def build_widget() -> None:
+        return None
+
+    build_widget()
+    records = _collect_info_records(caplog)
+    assert len(records) == 2
+    # __qualname__ 含外层测试函数前缀，故用子串断言
+    assert "build_widget" in records[0].getMessage()
+
+
+def test_timed_decorator_disabled_zero_overhead(caplog: pytest.LogCaptureFixture) -> None:
+    """未启用时 timed 装饰的函数应正常执行但不记录日志。"""
+    caplog.set_level(logging.INFO, logger="fuscan.perf")
+    perf_mod.set_perf_enabled(False)
+
+    @perf_mod.timed("noop")
+    def compute() -> int:
+        return 7
+
+    assert compute() == 7
+    assert _collect_info_records(caplog) == []
+
+
+def test_timed_threshold_filters_short_durations(caplog: pytest.LogCaptureFixture) -> None:
+    """threshold_ms 大于实际耗时应跳过耗时行（仍记录进入行）。"""
+    caplog.set_level(logging.INFO, logger="fuscan.perf")
+    perf_mod.set_perf_enabled(True)
+    with perf_mod.timed("fast", threshold_ms=10000.0):
+        pass
+    records = _collect_info_records(caplog)
+    # 进入行始终记录，耗时行因 < threshold_ms 被过滤
+    assert len(records) == 1
+    assert records[0].getMessage() == "fast…"
+
+
+def test_timed_custom_level(caplog: pytest.LogCaptureFixture) -> None:
+    """level 参数应改变日志记录级别。"""
+    caplog.set_level(logging.DEBUG, logger="fuscan.perf")
+    perf_mod.set_perf_enabled(True)
+    with perf_mod.timed("debug_stage", level=logging.DEBUG):
+        pass
+    debug_records = [r for r in caplog.records if r.name == "fuscan.perf" and r.levelno == logging.DEBUG]
+    assert len(debug_records) == 2
+    assert debug_records[0].getMessage() == "debug_stage…"
+    # 未产生 INFO 级记录
+    assert _collect_info_records(caplog) == []
+
+
+def test_timed_propagates_exception(caplog: pytest.LogCaptureFixture) -> None:
+    """timed 不应吞掉代码块异常，且仍记录耗时行。"""
+    caplog.set_level(logging.INFO, logger="fuscan.perf")
+    perf_mod.set_perf_enabled(True)
+    with pytest.raises(ValueError, match="boom"), perf_mod.timed("会失败的阶段"):
+        raise ValueError("boom")
+    records = _collect_info_records(caplog)
+    # 进入行 + 耗时行均记录（__exit__ 在异常时仍执行）
+    assert len(records) == 2
+    assert "会失败的阶段 完成，用时" in records[1].getMessage()

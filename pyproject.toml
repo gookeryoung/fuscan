@@ -20,21 +20,14 @@ dependencies = [
     "lxml>=4.9.0",
     "pypdf>=4.0.0",
     "pdf_oxide>=0.3",
-    # iter-167：pypdfium2（pdfium C++）作为 pdf_oxide 不可用时的中间层回退
-    # 性能接近 pdf_oxide 且兼容 Win7（无 Rust 依赖）
     "pypdfium2>=4.0",
     "rarfile>=4.1",
     "charset-normalizer>=3.3.0",
     "striprtf>=0.0.26",
     "olefile>=0.46",
     "extract-msg>=0.48.0,<0.56",
-    # py7zr 1.x 移除了 readall()/read() API（改用 extract 写入磁盘），
-    # 与 SevenZReader 的 read(targets) 惰性读取方案冲突；
-    # iter-126 已将 readall() 预读改为 read(targets) 按需读取，但 1.x 完全移除 read，
-    # 故仍锁定 0.x 直到迁移到 extract+临时目录方案。
     "py7zr>=0.20.0,<1.0.0",
     "reportlab>=4.0.0",
-    # iter-126：迁移 Python 3.10 后统一使用 python-calamine 0.8.2（更高性能）
     "python-calamine==0.8.2",
     "orjson>=3.9.0",
     "kreuzberg>=4.10.0",
@@ -67,7 +60,7 @@ test = [
 
 [project.scripts]
 fuscanc = "fuscan.cli:main"
-fuscan = "fuscan.gui.app:launch"
+fuscan = "fuscan.app:main"
 
 [build-system]
 build-backend = "hatchling.build"
@@ -94,7 +87,7 @@ pyc_strip = true
 no_site = true
 
 [tool.fspack.entries]
-fuscan = "src/fuscan/gui/__main__.py"
+fuscan = "src/fuscan/app.py"
 
 [dependency-groups]
 dev = ["fuscan[dev]"]

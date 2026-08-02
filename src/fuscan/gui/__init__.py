@@ -9,7 +9,6 @@
 
 公共 API（惰性导出，避免无 GUI 环境下 import 整个包失败）：
 
-- :func:`launch`：启动 QML GUI 应用
 - :class:`AppController`：主控制器工厂，构造并注册所有 controller 到 QML context
 - :class:`ScanController`：扫描工作流控制器（状态机 + 进度 + 结果模型）
 - :class:`ConfigController`：配置持久化 + 盘符/路径历史/提取器勾选
@@ -18,17 +17,17 @@
 - :class:`RuleListModel`：规则列表 QAbstractListModel
 - :class:`ExtractorListModel`：提取器勾选 QAbstractListModel
 - :class:`AboutController`：关于页信息
+
+.. note::
+    GUI 应用入口 :func:`fuscan.app.main` 已迁出本子包（原 ``fuscan.gui.app.launch``），
+    请从 :mod:`fuscan.app` 导入。
 """
 
 from __future__ import annotations
 
 
 def __getattr__(name: str):  # type: ignore[no-untyped-def]
-    """惰性导入 launch 与 controller/model 类，避免无 GUI 环境下 import 整个包失败。"""
-    if name == "launch":
-        from fuscan.gui.app import launch
-
-        return launch
+    """惰性导入 controller/model 类，避免无 GUI 环境下 import 整个包失败。"""
     if name == "AppController":
         from fuscan.gui.controllers import AppController
 

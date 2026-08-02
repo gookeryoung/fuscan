@@ -1,16 +1,19 @@
 """性能测量基础设施（GUI 与扫描器共用）。
 
-提供两类工具：
+提供三类工具：
 
 - :class:`PerfTimer`：单阶段上下文计时器，用于 GUI 卡滞定位
 - :class:`PerfStats`：线程安全的聚合统计，用于扫描器分阶段瓶颈分析
+- :class:`timed`：装饰器 + 上下文两用计时器，用于入口流程（如 GUI 启动）
+  分阶段展示各部分用时（INFO 级）
 
 启用方式：
 - :class:`PerfStats` **始终启用**（iter-66 起）：仅做聚合统计（无日志输出），
   开销约 1-2μs/次，对扫描性能影响 < 0.3%。扫描结果通过 :meth:`PerfStats.to_dict`
   导出，填入 :attr:`ScanStats.perf_summary` 供 GUI/CLI 展示与持久化。
-- :class:`PerfTimer` / :func:`record_event` 需 ``FUSCAN_PERF=1`` 或 CLI ``--perf``
-  启用：输出详细 DEBUG 日志，适合定向卡滞定位，不适合日常使用。
+- :class:`PerfTimer` / :class:`timed` / :func:`record_event` 需 ``FUSCAN_PERF=1``
+  或 CLI ``--perf`` 启用（发布版默认关闭，零开销），适合定向卡滞定位与启动耗时
+  分析，不适合日常使用。
 
 设计要点：
 - :class:`PerfStats` 始终记录：``measure`` 仅 ``perf_counter`` + Lock，无 enabled 检查
@@ -25,8 +28,9 @@
 - :data:`PERF_ENABLED`：PerfTimer 详细日志开关（模块加载时快照，运行时切换用 :func:`set_perf_enabled`）
 - :class:`PerfTimer`：上下文管理器计时器（单阶段，需启用）
 - :class:`PerfStats`：聚合统计计时器（多阶段累计，始终启用）
+- :class:`timed`：装饰器 + 上下文两用计时器（入口流程分阶段用时，需启用）
 - :func:`record_event`：记录离散事件（需启用）
-- :func:`set_perf_enabled`：运行时切换 PerfTimer 开关
+- :func:`set_perf_enabled`：运行时切换 PerfTimer/timed/record_event 开关
 """
 
 from __future__ import annotations
@@ -36,12 +40,20 @@ import logging
 import os
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import ContextDecorator, contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Generator
+from types import TracebackType
+from typing import Callable, Generator
 
-__all__ = ["PERF_ENABLED", "PerfStats", "PerfTimer", "record_event", "set_perf_enabled"]
+__all__ = [
+    "PERF_ENABLED",
+    "PerfStats",
+    "PerfTimer",
+    "record_event",
+    "set_perf_enabled",
+    "timed",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +99,7 @@ def PerfTimer(name: str, *, threshold_ms: float = 0.0) -> Generator[None, None, 
     if not _PerfState.enabled:
         yield
         return
+
     start = time.perf_counter()
     _PerfState.depth += 1
     indent = "  " * (_PerfState.depth - 1)
@@ -111,8 +124,84 @@ def record_event(name: str, **fields: object) -> None:
     """
     if not _PerfState.enabled:
         return
+
     pairs = " ".join(f"{k}={v}" for k, v in fields.items())
     logger.debug("[perf] event %s %s", name, pairs)
+
+
+class timed(ContextDecorator):
+    """两用计时工具：既是装饰器又是上下文管理器，测量并记录代码段耗时。
+
+    继承 :class:`contextlib.ContextDecorator`，因此同一实例可两种方式使用：
+
+    装饰器（自动用函数名，也可显式命名）::
+
+        @timed("加载配置")
+        def load() -> Config: ...
+
+        @timed()  # 未命名时用被装饰函数的限定名
+        def build() -> None: ...
+
+    上下文管理器::
+
+        with timed("构造主控制器"):
+            controller = AppController()
+
+    **发布后零开销**：受 :data:`_PerfState.enabled` 控制（由 ``FUSCAN_PERF=1``
+    环境变量、CLI ``--perf`` 或 :func:`set_perf_enabled` 开启）。未启用时
+    ``__enter__`` 仅一次 bool 检查即返回，``__exit__`` 直接返回，不调用
+    ``perf_counter``、不记日志，装饰函数调用开销可忽略。因此发布版默认关闭，
+    无需担心性能损失。
+
+    与 :class:`PerfTimer` 的区别：``PerfTimer`` 仅上下文管理器且固定 DEBUG 级、
+    带嵌套缩进；``timed`` 额外支持装饰器语法与自定义日志级别，适合入口流程
+    （如 GUI 启动各阶段）用 INFO 级直接展示各部分用时。
+
+    :param name: 阶段名称；``None`` 时装饰器模式自动取函数限定名，
+        上下文模式取 ``"<anonymous>"``
+    :param level: 日志级别（如 :data:`logging.INFO`），默认 :data:`logging.INFO`
+    :param threshold_ms: 仅当耗时超过该阈值（毫秒）才记录耗时行，默认 0 总是记录
+    """
+
+    __slots__ = ("_level", "_name", "_start", "_threshold_ms")
+
+    def __init__(
+        self,
+        name: str | None = None,
+        *,
+        level: int = logging.INFO,
+        threshold_ms: float = 0.0,
+    ) -> None:
+        self._name = name
+        self._level = level
+        self._threshold_ms = threshold_ms
+        self._start: float = 0.0
+
+    def __call__(self, func: Callable[..., object]) -> Callable[..., object]:
+        """装饰器入口：未显式命名时用被装饰函数的限定名。"""
+        if self._name is None:
+            self._name = getattr(func, "__qualname__", None) or getattr(func, "__name__", "func")
+        return super().__call__(func)
+
+    def __enter__(self) -> timed:
+        if not _PerfState.enabled:
+            return self
+        self._start = time.perf_counter()
+        logger.log(self._level, "%s…", self._name or "<anonymous>")
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool:
+        if not _PerfState.enabled:
+            return False
+        elapsed_ms = (time.perf_counter() - self._start) * 1000.0
+        if elapsed_ms >= self._threshold_ms:
+            logger.log(self._level, "%s 完成，用时 %.1fms", self._name or "<anonymous>", elapsed_ms)
+        return False
 
 
 class _StageStats:
@@ -131,11 +220,6 @@ class PerfStats:
 
     累计各阶段总耗时、调用次数与最大单次耗时，扫描结束时通过
     :meth:`report` 输出汇总，便于一眼定位瓶颈阶段。
-
-    iter-66 起始终启用（仅聚合统计，无日志输出），开销约 1-2μs/次
-    （``perf_counter`` + Lock），对 171 files/s 的扫描影响 < 0.3%。
-    :class:`PerfTimer` 的详细日志仍需 ``FUSCAN_PERF=1`` 启用。
-
     用法：
 
     >>> stats = PerfStats()

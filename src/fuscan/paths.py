@@ -25,3 +25,7 @@ BUILTIN_RULES_PATH: Path = ASSETS_DIR / "rules" / "builtin.yaml"
 
 # 用户手册 PDF：``assets/docs/fuscan-用户手册.pdf``，GUI 关于页打开
 MANUAL_PDF_PATH: Path = ASSETS_DIR / "docs" / "fuscan-用户手册.pdf"
+
+# QML
+QML_IMPORT_PATH = "qrc:/qml"
+MAIN_QML_URL = "qrc:/qml/Main.qml"

@@ -1,6 +1,6 @@
 """GUI 启动 smoke 测试。
 
-验证 :func:`fuscan.gui.app.launch` 能成功加载 ``Main.qml`` 并构造
+验证 :func:`fuscan.app.main` 能成功加载 ``Main.qml`` 并构造
 所有 controller。本次测试直接覆盖 iter-95 QML 迁移后未被发现的两类
 加载错误（``ContentArea`` 缺少 ``import "pages"``、``NavItem`` 重复
 声明 ``clicked()`` 信号、未安装的 ``QtQuick.Dialogs 1.3``）。
@@ -8,10 +8,10 @@
 策略：
 
 1. 设置 ``QT_QPA_PLATFORM=offscreen`` 支持无显示器环境
-2. 在调用 :func:`launch` 前用 ``QTimer.singleShot`` 注册延迟 ``quit``，
+2. 在调用 :func:`main` 前用 ``QTimer.singleShot`` 注册延迟 ``quit``，
    确保 ``app.exec_()`` 不阻塞测试进程
-3. 断言 ``launch`` 返回 ``0``（QML 加载成功 + 正常退出）；
-   若 QML 加载失败，``launch`` 内部检测到 ``rootObjects()`` 为空会
+3. 断言 ``main`` 返回 ``0``（QML 加载成功 + 正常退出）；
+   若 QML 加载失败，``main`` 内部检测到 ``rootObjects()`` 为空会
    立即返回 ``-1``，测试即可捕获 regression
 """
 
@@ -37,7 +37,7 @@ except ImportError:
     from PySide6.QtGui import QGuiApplication  # type: ignore[no-redef]
 
 try:
-    from fuscan.gui.app import launch
+    from fuscan.app import main as launch
 
     PYSIDE_AVAILABLE = True
 except ImportError:

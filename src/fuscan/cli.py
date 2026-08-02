@@ -288,11 +288,11 @@ def _cmd_gui(_args: argparse.Namespace) -> int:
     """执行 gui 子命令：启动图形界面。"""
     try:
         # 仅在 gui 子命令时加载 PySide
-        from fuscan.gui import launch
+        from fuscan.app import main as gui_main
     except ImportError as exc:
         print(f"GUI 启动失败（PySide 未安装）: {exc}", file=sys.stderr)
         return 3
-    return launch()
+    return gui_main()
 
 
 def _merge_ignore_dirs(base_dirs: list[str], extra_dirs: list[str]) -> tuple[str, ...]:

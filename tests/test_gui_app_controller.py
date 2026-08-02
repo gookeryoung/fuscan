@@ -5,7 +5,7 @@
 - ``AppController`` 构造时聚合 5 个 controller（theme/config/rules/workspace/about）
 - ``register_to`` 将 controller 注册到 QQmlContext
 - ``cleanup`` 调用 WorkspaceController.cleanup（资源释放）
-- ``fuscan.gui.__init__`` 的 ``__getattr__`` 惰性导入 launch / AppController
+- ``fuscan.gui.__init__`` 的 ``__getattr__`` 惰性导入 AppController 等类
 - 错误属性名抛 ``AttributeError``
 """
 
@@ -28,9 +28,9 @@ except ImportError:
     from PySide6.QtGui import QGuiApplication  # type: ignore[no-redef]
 
 try:
+    from fuscan.app import _apply_global_font
     from fuscan.config import Config
     from fuscan.gui import AppController
-    from fuscan.gui.app import _apply_global_font
     from fuscan.gui.controllers.about_controller import AboutController
     from fuscan.gui.controllers.config_controller import ConfigController
     from fuscan.gui.controllers.rules_controller import RulesController
@@ -141,15 +141,6 @@ class TestCleanup:
 class TestGuiPackageGetattr:
     """``fuscan.gui`` 包入口的 ``__getattr__`` 惰性导入。"""
 
-    def test_getattr_launch(self) -> None:
-        """``from fuscan.gui import launch`` 应惰性导入 launch 函数。"""
-        # 强制重新导入以触发 __getattr__
-        import fuscan.gui as gui_pkg
-
-        launch = gui_pkg.launch
-        assert callable(launch)
-        assert launch.__name__ == "launch"
-
     def test_getattr_app_controller(self) -> None:
         """``from fuscan.gui import AppController`` 应惰性导入类。"""
         import fuscan.gui as gui_pkg
@@ -225,39 +216,12 @@ class TestGuiPackageGetattr:
             _ = gui_pkg.nonexistent_attribute  # type: ignore[attr-defined]
 
 
-class TestGuiMainModule:
-    """``fuscan.gui.__main__`` 模块入口测试。
-
-    覆盖 ``python -m fuscan.gui`` 入口的 import 段（PySide2/PySide6 探测）
-    与 ``launch`` 引用，不实际启动 GUI（避免阻塞测试进程）。
-    """
-
-    def test_main_module_imports_launch(self) -> None:
-        """``fuscan.gui.__main__`` 模块应能成功导入并暴露 ``launch`` 引用。"""
-        import fuscan.gui.__main__ as main_mod
-
-        # launch 应为模块级可调用对象
-        assert callable(main_mod.launch)
-        assert main_mod.launch.__name__ == "launch"
-
-    def test_main_module_pyside_detection(self) -> None:
-        """模块加载时应成功探测到 PySide2 或 PySide6 之一。"""
-        # 间接验证：若 PySide 探测失败，模块 import 时即抛 ImportError，
-        # test_main_module_imports_launch 无法通过。这里再断言 PySide 可用。
-        try:
-            import PySide2 as pyside
-        except ImportError:
-            import PySide6 as pyside  # type: ignore[no-redef]
-
-        assert pyside is not None
-
-
 class TestApplyGlobalFont:
     """``_apply_global_font`` 测试：用户配置覆盖与平台默认回退。
 
-    覆盖 :func:`fuscan.gui.app._apply_global_font` 的两个分支：
+    覆盖 :func:`fuscan.app._apply_global_font` 的两个分支：
     ``font_family`` 非空时用指定字体，为空时回退到平台默认字体族列表。
-    本测试不标记 ``gui_qml``，CI 上仍会运行（不同于 ``launch`` smoke 测试）。
+    本测试不标记 ``gui_qml``，CI 上仍会运行（不同于 ``main`` smoke 测试）。
     """
 
     def test_user_font_family_applied(self) -> None:
@@ -280,7 +244,7 @@ class TestApplyGlobalFont:
         app = QGuiApplication.instance() or QGuiApplication(["fuscan"])
         cfg = Config(font_family=None, font_size=14, font_bold=False)
         with patch("fuscan.config.load_config", return_value=cfg), patch(
-            "fuscan.gui.theme.detect_font_families", return_value=("DefaultFont",)
+            "fuscan.app.detect_font_families", return_value=("DefaultFont",)
         ):
             _apply_global_font(app)
         font = app.font()

@@ -434,24 +434,24 @@ class TestBuiltinRules:
 
 class TestGuiCommand:
     def test_gui_launches_when_pyside_available(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """PySide 可用时调用 launch 启动 GUI。"""
-        called = {"launch": False}
+        """PySide 可用时调用 fuscan.app.main 启动 GUI。"""
+        called = {"launched": False}
 
-        def fake_launch() -> int:
-            called["launch"] = True
+        def fake_main() -> int:
+            called["launched"] = True
             return 0
 
-        # 注入 fake launch 到 fuscan.gui 命名空间
+        # 注入 fake main 到 fuscan.app 命名空间
         import sys
         import types
 
-        fake_gui = types.ModuleType("fuscan.gui")
-        fake_gui.launch = fake_launch  # type: ignore[attr-defined]
-        monkeypatch.setitem(sys.modules, "fuscan.gui", fake_gui)
+        fake_app = types.ModuleType("fuscan.app")
+        fake_app.main = fake_main  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "fuscan.app", fake_app)
 
         rc = main(["gui"])
         assert rc == 0
-        assert called["launch"] is True
+        assert called["launched"] is True
 
     def test_gui_returns_error_when_pyside_missing(
         self,
@@ -464,7 +464,7 @@ class TestGuiCommand:
         original_import = builtins.__import__
 
         def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
-            if name == "fuscan.gui":
+            if name == "fuscan.app":
                 raise ImportError("No module named 'PySide2'")
             return original_import(name, *args, **kwargs)
 
@@ -484,14 +484,6 @@ class TestMainErrorHandling:
     def test_invalid_command_exits(self) -> None:
         with pytest.raises(SystemExit):
             main(["invalid-command"])
-
-
-class TestMainModuleImport:
-    def test_main_module_importable(self) -> None:
-        """``python -m fuscan`` 入口模块可被导入。"""
-        import fuscan.__main__ as main_mod
-
-        assert hasattr(main_mod, "main")
 
 
 class TestCliErrorPaths:

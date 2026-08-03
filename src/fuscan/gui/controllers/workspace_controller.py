@@ -108,17 +108,17 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         super().__init__(parent)
         self._config_controller = config_controller
         self._rules_controller = rules_controller
-        # iter-133：误报白名单控制器——共享实例注入到所有 ScanController，
+        # 误报白名单控制器——共享实例注入到所有 ScanController，
         # 使白名单变更对所有工作区生效；为 None 时（独立测试）ScanController
         # 内部回退到自建 WhitelistStore，保持向后兼容。
         self._whitelist_controller: WhitelistController | None = whitelist_controller
-        # iter-137：规则配置全局化——RulesController 不再绑定工作区，
+        # 规则配置全局化——RulesController 不再绑定工作区，
         # 全局 rulesetChanged 时清除所有工作区 manifest，使下次增量扫描回退全量，
         # 确保新规则被实际执行（manifest 指纹只记录 mtime+size，不感知规则变化）
         self._rules_controller.rulesetChanged.connect(self._invalidate_all_manifests)  # pyrefly: ignore [missing-attribute]
-        # iter-139：全局规则变化时同步刷新所有工作区的 rules_paths/use_builtin，
+        # 全局规则变化时同步刷新所有工作区的 rules_paths/use_builtin，
         # 使 WorkspaceCard 的 rules_tags 标签反映当前全局规则配置。
-        # iter-137 规则全局化后，WorkspaceItem.rules_paths/use_builtin 字段不再
+        # 规则全局化后，WorkspaceItem.rules_paths/use_builtin 字段不再
         # 决定扫描时使用的规则（ScanController 直接读全局 RulesController），
         # 但 rules_tags 派生属性仍依赖这些字段，需同步以保持 UI 一致。
         self._rules_controller.rulesetChanged.connect(self._sync_all_workspaces_rules)  # pyrefly: ignore [missing-attribute]
@@ -127,21 +127,21 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._model = WorkspaceListModel(self)
         self._scan_controllers: dict[str, ScanController] = {}
         self._current_workspace_id: str = ""
-        # iter-128：延迟加载——已恢复结果的工作区集合 + 正在恢复中的工作区集合
+        # 延迟加载——已恢复结果的工作区集合 + 正在恢复中的工作区集合
         self._restored_workspaces: set[str] = set()
         self._restoring_workspaces: set[str] = set()
         self._restore_workers: dict[str, object] = {}  # ws_id → ResultRestoreWorker
         # 当前扫描中（含暂停态）工作区 ID；空串表示无扫描任务进行
         self._active_scan_workspace_id: str = ""
-        # iter-133：全局共享 SkipStore——所有 ScanController 复用同一实例，
+        # 全局共享 SkipStore——所有 ScanController 复用同一实例，
         # 避免每个工作区独立读 ~/.fuscan/skips.json 造成的 N 次重复 I/O。
         from fuscan.processing.skip_store import SkipStore
 
         self._shared_skip_store: SkipStore = SkipStore()
-        # iter-133：HistoryStore 延迟初始化——首次访问时构造，
+        # HistoryStore 延迟初始化——首次访问时构造，
         # 避免启动时读 ~/.fuscan/history.json 阻塞主线程。
         self._history_store_instance: HistoryStore | None = None
-        # iter-133：cleanup 标志——cleanup() 后置 True，hasCurrentWorkspace
+        # cleanup 标志——cleanup() 后置 True，hasCurrentWorkspace
         # 据此返回 False（进程退出阶段 QML 不应再访问 currentScanController）
         self._cleaned_up: bool = False
         # 恢复持久化的工作区
@@ -190,7 +190,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def setCurrentWorkspaceId(self, ws_id: str) -> None:
         """切换当前工作区 ID。
 
-        iter-128：切换时触发延迟加载——若该工作区有缓存结果且尚未恢复，
+        切换时触发延迟加载——若该工作区有缓存结果且尚未恢复，
         在后台启动 ResultRestoreWorker 异步加载，避免启动时全量阻塞。
         """
         if ws_id != self._current_workspace_id:
@@ -205,7 +205,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         未选中工作区时返回一个默认实例（避免 QML 绑定 null 报错）。
 
-        iter-133：ScanController 延迟创建——首次访问时通过
+        ScanController 延迟创建——首次访问时通过
         :meth:`_ensure_scan_controller` 构造，避免启动时为所有工作区预创建。
         """
         if self._current_workspace_id:
@@ -213,7 +213,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             if controller is not None:
                 return controller
         # 兜底：返回一个临时实例（仅当未选中工作区或工作区不存在时）
-        # iter-137：fallback 实例直接复用全局 RulesController.ruleset（启动时占位），
+        # fallback 实例直接复用全局 RulesController.ruleset（启动时占位），
         # 该实例不会启动扫描（hasCurrentWorkspace=False 时 QML 不显示扫描入口）
         if not hasattr(self, "_fallback_controller"):
             self._fallback_controller = ScanController(
@@ -229,7 +229,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def hasCurrentWorkspace(self) -> bool:
         """是否有当前选中工作区。
 
-        iter-133：基于 :class:`WorkspaceListModel` 判断工作区是否存在，
+        基于 :class:`WorkspaceListModel` 判断工作区是否存在，
         不依赖 ScanController 是否已创建（延迟创建场景下未访问过的工作区
         也应视为「存在」，QML 据此显示工作区详情）。
         cleanup 后返回 False（进程退出阶段 QML 不应再访问工作区）。
@@ -298,26 +298,26 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         :param name: 工作区名称（空串时自动生成）
         :param mode_str: 扫描模式字符串（``"full"``/``"drive"``/``"folder"``）
         :param target: 扫描目标（盘符或文件夹路径，全盘模式忽略）
-        :param rules_paths_json: 已废弃（iter-137 规则全局化），保留向后兼容
-        :param use_builtin: 已废弃（iter-137 规则全局化），保留向后兼容
+        :param rules_paths_json: 已废弃（规则全局化），保留向后兼容
+        :param use_builtin: 已废弃（规则全局化），保留向后兼容
         :return: 新工作区 ID（``"ws-<8位hex>"`` 格式）
 
-        iter-137：规则配置全局化——所有工作区共享同一规则集，扫描时直接读
-        全局 :class:`RulesController`。iter-139：新工作区的 ``rules_paths``/
+        规则配置全局化——所有工作区共享同一规则集，扫描时直接读
+        全局 :class:`RulesController`。新工作区的 ``rules_paths``/
         ``use_builtin`` 字段从全局 :class:`RulesController` 同步，使
         :attr:`WorkspaceItem.rules_tags` 标签反映实际扫描时使用的规则。
         ``rules_paths_json`` 与 ``use_builtin`` 参数保留仅为向后兼容，
         实际值从全局读取。
         """
         ws_id = f"ws-{secrets.token_hex(4)}"
-        # iter-139：从全局 RulesController 读取规则配置快照
+        # 从全局 RulesController 读取规则配置快照
         global_paths, global_use_builtin = self._read_global_rules_snapshot()
 
         if not name:
             name = f"任务 {self._model.rowCount() + 1}"
 
         self._create_workspace(ws_id, name, mode_str, target, global_paths, global_use_builtin)
-        # iter-133：用户新建工作区后立即创建 ScanController（用户马上要操作），
+        # 用户新建工作区后立即创建 ScanController（用户马上要操作），
         # 与 _load_persisted（启动恢复）的延迟创建策略区分
         self._ensure_scan_controller(ws_id)
         self._persist()
@@ -347,7 +347,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         供 :meth:`addWorkspace`（新建）与 :meth:`_load_persisted`（恢复）共用。
         持久化恢复时传入 ``status_text``/计数字段，使重启后仍能展示上次扫描状态。
 
-        iter-133：ScanController 改为延迟创建——本方法仅创建 WorkspaceItem
+        ScanController 改为延迟创建——本方法仅创建 WorkspaceItem
         并加入 model，ScanController 在首次访问（:meth:`_ensure_scan_controller`）
         时才构造。避免启动时为 N 个工作区各创建一个 ScanController + 加载规则集
         造成的主线程阻塞。
@@ -378,7 +378,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def _ensure_scan_controller(self, ws_id: str) -> ScanController | None:
         """延迟创建并返回指定工作区的 :class:`ScanController` 实例。
 
-        iter-133：ScanController 延迟创建——首次访问时才构造 ScanController，
+        ScanController 延迟创建——首次访问时才构造 ScanController，
         注入工作区参数（扫描模式/目标/任务覆盖/规则集）并连接状态信号。
         后续访问直接返回缓存的实例。
 
@@ -394,8 +394,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if item is None:
             return None
         # 首次访问：构造 ScanController + 注入参数 + 连接信号
-        # iter-133：注入共享 SkipStore，避免每个工作区独立读 skips.json
-        # iter-133：注入共享 WhitelistController，使误报白名单对所有工作区生效
+        # 注入共享 SkipStore，避免每个工作区独立读 skips.json
+        # 注入共享 WhitelistController，使误报白名单对所有工作区生效
         scan_controller = ScanController(
             self._config_controller,
             self._rules_controller,
@@ -410,10 +410,10 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 scan_controller.setSelectedDrive(item.target)
             elif item.mode_str == "folder" and item.target:
                 scan_controller.setFolderRoot(item.target)
-            # 同步任务级配置覆盖到 ScanController（iter-104）
+            # 同步任务级配置覆盖到 ScanController
             for key, value in item.task_overrides.items():
                 scan_controller.setTaskOverride(key, value)
-            # iter-137：规则配置全局化——ScanController 启动时从全局 RulesController
+            # 规则配置全局化——ScanController 启动时从全局 RulesController
             # 取 ruleset 占位，startScan 时再次取最新（保证规则变更立即生效），
             # 不再注入工作区专属 ruleset
             # 连接状态变化信号以回写工作区
@@ -450,9 +450,9 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if self._active_scan_workspace_id == ws_id:
             self._active_scan_workspace_id = ""
             self.activeScanChanged.emit()  # pyrefly: ignore [missing-attribute]
-        # iter-115：清理该工作区的扫描历史
+        # 清理该工作区的扫描历史
         self._history_store.clear_workspace(ws_id)
-        # iter-123：清理该工作区的缓存扫描结果
+        # 清理该工作区的缓存扫描结果
         self._delete_cached_results(ws_id)
         self._persist()
         self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -461,8 +461,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def startScan(self, ws_id: str) -> None:
         """启动指定工作区的扫描。
 
-        iter-132：启动扫描时将工作区移到列表顶部（最近活动在最上方）。
-        iter-134：显式设置 ``ScanController._pending_ws_id``，即使是「启动扫描」
+        启动扫描时将工作区移到列表顶部（最近活动在最上方）。
+        显式设置 ``ScanController._pending_ws_id``，即使是「启动扫描」
             （全量）也持久化 manifest，使重启后下一次增量扫描可直接生效。
         """
         controller = self._ensure_scan_controller(ws_id)
@@ -471,17 +471,17 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return
         self._model.move_to_top(ws_id)
         self._persist()
-        # iter-134：全量扫描同样持久化 manifest，保证下次增量扫描有基线可比对
+        # 全量扫描同样持久化 manifest，保证下次增量扫描有基线可比对
         controller._pending_ws_id = ws_id  # 同包私有访问
         controller.startScan()
 
     @Slot(str)  # pyrefly: ignore [not-callable]
     def startIncrementalScan(self, ws_id: str) -> None:
-        """启动指定工作区的增量扫描（iter-124）。
+        """启动指定工作区的增量扫描。
 
         委托给对应工作区的 :class:`ScanController`，加载上次 manifest 与
         ScanReport 后启用增量模式。无上次结果时回退到全量扫描。
-        iter-132：增量扫描同样将工作区移到列表顶部。
+        增量扫描同样将工作区移到列表顶部。
         """
         controller = self._ensure_scan_controller(ws_id)
         if controller is None:
@@ -522,7 +522,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str, str, str)  # pyrefly: ignore [not-callable]
     def updateWorkspaceTarget(self, ws_id: str, mode_str: str, target: str) -> None:
-        """更新工作区扫描目标（iter-104 任务切换扫描目标）。
+        """更新工作区扫描目标（任务切换扫描目标）。
 
         :param ws_id: 工作区 ID
         :param mode_str: 新的扫描模式（``"full"``/``"drive"``/``"folder"``）
@@ -571,7 +571,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str, result=str)  # pyrefly: ignore [not-callable]
     def taskOverridesJson(self, ws_id: str) -> str:
-        """返回指定工作区的任务级配置覆盖 JSON 字符串（iter-104）。
+        """返回指定工作区的任务级配置覆盖 JSON 字符串。
 
         :param ws_id: 工作区 ID
         :return: JSON 字符串（如 ``{"scan_archives": false, "max_workers": 8}``）；
@@ -583,13 +583,13 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         try:
             return json.dumps(item.task_overrides, ensure_ascii=False)
         except (TypeError, ValueError):
-            # iter-105：容错防御，避免非 JSON 可序列化对象冒泡到 QML
+            # 容错防御，避免非 JSON 可序列化对象冒泡到 QML
             logger.warning("工作区 %s 的 task_overrides 序列化失败", ws_id, exc_info=True)
             return "{}"
 
     @Slot(str, str, str)  # pyrefly: ignore [not-callable]
     def setTaskOverride(self, ws_id: str, key: str, value_json: str) -> None:
-        """设置任务级配置覆盖（iter-104）。
+        """设置任务级配置覆盖。
 
         :param ws_id: 工作区 ID
         :param key: Config 字段名（如 ``"scan_archives"``/``"max_workers"``）
@@ -604,7 +604,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if item is None:
             logger.warning("工作区 %s 不存在，无法设置任务级配置", ws_id)
             return
-        # 白名单校验（iter-105：统一用 TASK_OVERRIDE_KEYS，避免重复定义）
+        # 白名单校验（统一用 TASK_OVERRIDE_KEYS，避免重复定义）
         if key not in TASK_OVERRIDE_KEYS:
             logger.warning("不允许覆盖字段: %s", key)
             return
@@ -624,7 +624,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         elif not isinstance(value, expected_type):
             logger.warning("%s 应为 %s，得到 %s", key, expected_type.__name__, type(value).__name__)
             return
-        # iter-105：int 字段范围钳制（max_workers 1-16，max_file_size 1-500MB）
+        # int 字段范围钳制（max_workers 1-16，max_file_size 1-500MB）
         if isinstance(value, int) and not isinstance(value, bool):
             clamped = clamp_task_override_int(key, value)
             if clamped is None:
@@ -643,7 +643,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str, str)  # pyrefly: ignore [not-callable]
     def clearTaskOverride(self, ws_id: str, key: str) -> None:
-        """清除任务级配置覆盖的指定字段（iter-127）。
+        """清除任务级配置覆盖的指定字段。
 
         用于"留空使用全局"语义：当任务级配置值与全局值相同时，
         删除该字段的覆盖，使后续全局配置变更能自动生效。
@@ -678,7 +678,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(result=bool)  # pyrefly: ignore [not-callable]
     def clearAllWorkspaces(self) -> bool:
-        """清空所有工作区（iter-108 快速移除全部任务）。
+        """清空所有工作区（快速移除全部任务）。
 
         :return: 是否成功清空。扫描中/暂停中拒绝清空返回 False，
             避免破坏运行时 worker 状态；空列表视为已成功无需操作返回 True。
@@ -704,7 +704,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             controller.cleanup()
             controller.deleteLater()
         self._scan_controllers.clear()
-        # iter-123：清理所有工作区的缓存扫描结果
+        # 清理所有工作区的缓存扫描结果
         for ws_item in list(self._model.all_workspaces()):
             self._delete_cached_results(ws_item.workspace_id)
         self._model.clear()
@@ -716,7 +716,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if self._active_scan_workspace_id:  # pragma: no cover - 入口已拒绝，防御性兜底
             self._active_scan_workspace_id = ""
             self.activeScanChanged.emit()  # pyrefly: ignore [missing-attribute]
-        # iter-137：规则配置全局化——不再有工作区绑定，无需解绑
+        # 规则配置全局化——不再有工作区绑定，无需解绑
         # 持久化空列表
         self._persist()
         self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -769,37 +769,37 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self.activeScanChanged.emit()  # pyrefly: ignore [missing-attribute]
             # 扫描结束（scanning → 非 scanning）：持久化状态，重启后仍能展示
             self._persist()
-            # iter-115：扫描结束自动归档到历史存储
+            # 扫描结束自动归档到历史存储
             self._archive_scan_history(ws_id, controller)
-            # iter-123：扫描结果持久化到 ~/.fuscan/results/<ws_id>.json，
+            # 扫描结果持久化到 ~/.fuscan/results/<ws_id>.json，
             # 重启后通过 restoreFromReport 恢复，避免用户被迫重新扫描
             self._save_cached_results(ws_id, controller)
 
     def cleanup(self) -> None:
         """窗口关闭时快速取消所有 ScanController 的 worker。
 
-        iter-127：改用 ``quick_cancel()`` 替代 ``cleanup()``——仅设置 cancel 标志，
+        改用 ``quick_cancel()`` 替代 ``cleanup()``——仅设置 cancel 标志，
         不 ``wait()`` / ``cache.close()`` / ``deleteLater()``，进程退出时由 OS
         回收线程与文件句柄。10 万结果场景下避免主线程阻塞（原 ``cleanup()``
         每 controller 最多 5s 累计等待 + SQLite 刷盘）。
 
-        iter-124：关闭时不再 emit ``currentWorkspaceChanged``/``activeScanChanged``
+        关闭时不再 emit ``currentWorkspaceChanged``/``activeScanChanged``
         信号，避免 QML 在组件销毁过程中重新求值 ``currentScanController`` binding
         访问到已被 ``deleteLater`` 的对象（Terminal#4-17 null 错误根因）。
 
-        iter-132：``quick_cancel`` 内部已改为 cancel + wait(500) + terminate，
+        ``quick_cancel`` 内部已改为 cancel + wait(500) + terminate，
         确保 QThread 退出，避免进程退出后后台残留。同时取消 ResultRestoreWorker
         和 ResultListModel 的 FilterWorker。
         """
         for controller in self._scan_controllers.values():
             controller.quick_cancel()
         self._scan_controllers.clear()
-        # iter-133：标记已清理，hasCurrentWorkspace 据此返回 False
+        # 标记已清理，hasCurrentWorkspace 据此返回 False
         self._cleaned_up = True
         # fallback 仅快速取消
         if hasattr(self, "_fallback_controller"):
             self._fallback_controller.quick_cancel()
-        # iter-132：取消未完成的 ResultRestoreWorker
+        # 取消未完成的 ResultRestoreWorker
         from typing import cast
 
         try:
@@ -841,16 +841,16 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """从 ``~/.fuscan/workspaces.json`` 恢复工作区列表。
 
         文件不存在/解析失败时静默跳过（首次启动或文件损坏）。
-        iter-132：按 ``last_activity_time`` 倒序加载，使最近活动的工作区排在顶部。
+        按 ``last_activity_time`` 倒序加载，使最近活动的工作区排在顶部。
         """
         workspaces = load_persisted_workspaces(self._persist_file)
-        # iter-132：按 last_activity_time 倒序排列，最新活动的排在最上方
+        # 按 last_activity_time 倒序排列，最新活动的排在最上方
         workspaces.sort(
             key=lambda ws: float(ws.get("last_activity_time", 0.0)),
             reverse=True,
         )
         for ws in workspaces:
-            # iter-113：dict 反序列化返回 object，通过 coerce_* 辅助函数做类型守卫
+            # dict 反序列化返回 object，通过 coerce_* 辅助函数做类型守卫
             ws_id = coerce_str(ws.get("id", ""))
             if not ws_id or self._model.get_workspace(ws_id) is not None:
                 continue
@@ -862,21 +862,21 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     target=coerce_str(ws.get("target", "")),
                     rules_paths=coerce_str_tuple(ws.get("rules_paths", [])),
                     use_builtin=bool(ws.get("use_builtin", True)),
-                    # 恢复上次扫描状态（iter-102 起持久化）
+                    # 恢复上次扫描状态（持久化）
                     status_text=coerce_str(ws.get("status_text", STR_STATUS_READY)),
                     matched_count=coerce_int(ws.get("matched_count", 0)),
                     passed_count=coerce_int(ws.get("passed_count", 0)),
                     skipped_count=coerce_int(ws.get("skipped_count", 0)),
                     error_count=coerce_int(ws.get("error_count", 0)),
                     last_summary=coerce_str(ws.get("last_summary", "")),
-                    # 恢复收集到的符合文件类型文件数（iter-105 起持久化）
+                    # 恢复收集到的符合文件类型文件数（持久化）
                     collected_count=coerce_int(ws.get("collected_count", 0)),
-                    # 恢复任务级配置覆盖（iter-104 起持久化）
+                    # 恢复任务级配置覆盖（持久化）
                     task_overrides=deserialize_task_overrides(ws.get("task_overrides", {})),
-                    # 恢复最近活动时间（iter-132 起持久化，用于列表排序）
+                    # 恢复最近活动时间（持久化，用于列表排序）
                     last_activity_time=coerce_float(ws.get("last_activity_time", 0.0)),
                 )
-                # iter-128：不再在启动时同步加载所有工作区的缓存结果，
+                # 不再在启动时同步加载所有工作区的缓存结果，
                 # 改为延迟加载——setCurrentWorkspaceId 时按需后台异步恢复。
                 # 工作区列表的 status_text/matched_count 等已从 workspaces.json 恢复，
                 # 用户看到正确的状态摘要，完整结果在切换到该工作区时才加载。
@@ -884,21 +884,21 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 logger.warning("工作区 %s 恢复失败: %s", ws_id, exc)
         if self._model.rowCount() > 0:
             self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
-            # iter-128：启动时仅后台加载第一个工作区的结果（QML 默认选中第一个）
+            # 启动时仅后台加载第一个工作区的结果（QML 默认选中第一个）
             first_ws_id = self._model.all_workspaces()[0].workspace_id
             self._try_load_cached_results(first_ws_id)
-        # iter-137：将旧版本工作区级 rules_paths 迁移到全局规则配置
+        # 将旧版本工作区级 rules_paths 迁移到全局规则配置
         self._migrate_workspace_rules_to_global(workspaces)
-        # iter-139：迁移完成后同步刷新所有工作区的 rules_paths/use_builtin
+        # 迁移完成后同步刷新所有工作区的 rules_paths/use_builtin
         # 为全局值，使 WorkspaceCard 标签反映当前全局规则（而非持久化旧值）
         self._sync_all_workspaces_rules()
 
-    # ----------------------------- iter-137 规则全局化迁移 -----------------------------
+    # ----------------------------- 规则全局化迁移 -----------------------------
 
     def _migrate_workspace_rules_to_global(self, workspaces: list[dict[str, object]]) -> None:
         """将旧版本工作区级 ``rules_paths``/``use_builtin`` 合并到全局 :class:`Config`。
 
-        iter-137 之前每个工作区有独立的 ``rules_paths``，重构后所有工作区共享
+        之前每个工作区有独立的 ``rules_paths``，重构后所有工作区共享
         全局规则集。启动恢复时遍历所有工作区，将不重复的规则文件路径合并到
         ``Config.rules_paths``；``use_builtin`` 取 OR（任一工作区启用则全局启用）。
         合并后调用 :meth:`ConfigController.save` 持久化。
@@ -932,7 +932,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             )
 
     def _invalidate_all_manifests(self) -> None:
-        """全局规则变更时清除所有已创建 ScanController 的 manifest（iter-137）。
+        """全局规则变更时清除所有已创建 ScanController 的 manifest。
 
         全局 :class:`RulesController` 的 ``rulesetChanged`` 信号触发本方法，
         遍历所有已创建的 :class:`ScanController` 调用 ``invalidate_manifest``，
@@ -955,7 +955,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def _sync_all_workspaces_rules(self) -> None:
         """全局规则变化时同步刷新所有工作区的 ``rules_paths``/``use_builtin`` 字段。
 
-        iter-139：iter-137 规则全局化后，:attr:`WorkspaceItem.rules_paths`/
+        规则全局化后，:attr:`WorkspaceItem.rules_paths`/
         ``use_builtin`` 字段不再决定扫描时使用的规则（ScanController 直接读
         全局 :class:`RulesController`），但 :attr:`WorkspaceItem.rules_tags`
         派生属性仍依赖这些字段。本方法在全局规则变化时将所有工作区的
@@ -975,7 +975,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if changed:
             self._persist()
 
-    # ----------------------------- 扫描结果缓存（iter-123） -----------------------------
+    # ----------------------------- 扫描结果缓存 -----------------------------
 
     @property
     def _cached_results_dir(self) -> Path:
@@ -992,7 +992,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         扫描结束（含取消）后调用，重启后通过 :meth:`_load_cached_results` 恢复。
         持久化失败仅记录日志，不影响主流程。委托 :func:`._restore.save_cached_results`。
 
-        iter-135：本次结果无命中但缓存文件中已有非空结果时不覆盖，避免增量扫描
+        本次结果无命中但缓存文件中已有非空结果时不覆盖，避免增量扫描
         回退全量后空结果覆盖之前的完整结果，导致重启后无法恢复且后续增量扫描
         因 ``prev_report.hits`` 为空而无法合并旧命中（恶性循环）。
         """
@@ -1003,7 +1003,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         )
 
     def _try_load_cached_results(self, ws_id: str) -> None:
-        """后台异步加载工作区缓存结果（iter-128）。
+        """后台异步加载工作区缓存结果。
 
         若该工作区已恢复或正在恢复中则跳过（幂等）。否则启动
         :class:`ResultRestoreWorker` 在后台线程读取 + 反序列化，
@@ -1061,7 +1061,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """删除指定工作区的缓存扫描结果文件。委托 :func:`._restore.delete_cached_results`。"""
         _delete_cached_results_fn(self._cached_results_path(ws_id))
 
-    # ----------------------------- 扫描历史（iter-115） -----------------------------
+    # ----------------------------- 扫描历史 -----------------------------
 
     def _archive_scan_history(self, ws_id: str, controller: ScanController) -> None:
         """扫描结束时从 ScanController 提取报告并归档到 :class:`HistoryStore`。

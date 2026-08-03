@@ -14,7 +14,7 @@ openpyxl）集中在本模块，职责单一。
 文本格式（csv/json/sarif/text）由 :meth:`ScanReport.to_format` 处理，
 本模块负责二进制格式与文件分发。
 
-iter-121 新增 SARIF 格式支持（GitHub Code Scanning 集成），
+新增 SARIF 格式支持（GitHub Code Scanning 集成），
 ``.sarif`` 扩展名导出 SARIF v2.1.0 JSON。
 """
 
@@ -233,7 +233,7 @@ def export_excel(report: ScanReport) -> bytes:
 
 
 def export_report(report: ScanReport, path: Path, fmt: str | None = None) -> None:
-    """将扫描报告导出到文件，统一入口（iter-121）。
+    """将扫描报告导出到文件，统一入口。
 
     根据扩展名或 ``fmt`` 参数自动选择格式：
 
@@ -271,7 +271,7 @@ def export_report(report: ScanReport, path: Path, fmt: str | None = None) -> Non
 def save_report(report: ScanReport, path: Path) -> None:
     """将扫描报告保存到文件（``export_report`` 的向后兼容别名）。
 
-    .. deprecated:: iter-121
+    .. deprecated:: 0.2.9
         请使用 :func:`export_report` 替代。
     """
     export_report(report, path)

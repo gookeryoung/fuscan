@@ -48,7 +48,7 @@ rules:
           pattern: '(价格|内部|商业|薪酬)'
 
   # ---------- 凭证与密钥（CREDENTIALS） ----------
-  # iter-134：扩展内置凭证模式覆盖 10+ 类常见密钥格式
+  # 扩展内置凭证模式覆盖 10+ 类常见密钥格式
   # AWS Access Key ID（20 位字母数字，以 AKIA/ASIA/AGPA/AIDA/AROA/AIPA/ANPA/ANVA 开头）
   - name: P0201-AWS-Access-Key-ID
     description: 检测 AWS Access Key ID（AKIA/ASIA 等前缀 + 17 位字母数字）

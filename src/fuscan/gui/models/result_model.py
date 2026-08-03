@@ -913,7 +913,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         """过滤后结果数。"""
         return len(self._filtered_real)
 
-    # ----------------------------- 过滤+排序 API（iter-112） -----------------------------
+    # ----------------------------- 过滤+排序 API -----------------------------
 
     def set_filter_text(self, text: str) -> None:
         """设置文件路径模糊匹配条件（不区分大小写）。
@@ -1160,10 +1160,10 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         # --- 小结果集：原流程直接替换 ---
         self.beginResetModel()
         self._filtered = filtered
-        # iter-159：扁平化预构造，小结果集直接全量构造
+        # 扁平化预构造，小结果集直接全量构造
         self._flat_data = [_build_flat_row(result, idx) for idx, result in enumerate(filtered)]
         self.endResetModel()
-        # iter-153：filter 视图变化后立刻恢复虚拟化可见范围
+        # filter 视图变化后立刻恢复虚拟化可见范围
         self._restore_visible_range_after_filter()
 
     def _on_filter_done(
@@ -1176,7 +1176,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
     ) -> None:
         """``FilterWorker.done`` 信号回调：校验 generation → 回写索引/缓存 → 应用结果。
 
-        iter-165：FilterWorker 现在同时回传后台构建的倒排索引（severity_index /
+        FilterWorker 现在同时回传后台构建的倒排索引（severity_index /
         rule_index），回调时直接应用到 Model，避免主线程在 ``set_results``
         阶段同步构建索引阻塞 UI。
         """
@@ -1186,7 +1186,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         if generation != self._filter_generation:
             # 过期结果，丢弃
             return
-        # iter-165：应用后台构建的倒排索引（仅当非空时覆盖；空表示未构建或结果集过小）
+        # 应用后台构建的倒排索引（仅当非空时覆盖；空表示未构建或结果集过小）
         if severity_index or rule_index:
             self._severity_index = severity_index
             self._rule_index = rule_index

@@ -114,7 +114,7 @@ PHASE_SCAN: str = "scan"
 PHASE_ARCHIVE: str = "archive"
 PHASE_DONE: str = "done"
 
-# iter-124：增量扫描清单持久化目录（与 results 目录并行，存放 <ws_id>.json）
+# 增量扫描清单持久化目录（与 results 目录并行，存放 <ws_id>.json）
 _MANIFESTS_DIR: Path = CONFIG_DIR / "manifests"
 
 
@@ -143,9 +143,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     # canStartScan 的独立 NOTIFY 信号：仅触发 canStartScan 重算，
     # 不触发 QML 侧 Connections.onScanStateChanged（避免 StackView 误重建）
     canStartScanChanged = Signal()
-    # iter-128：后台恢复扫描结果时的加载态信号
+    # 后台恢复扫描结果时的加载态信号
     restoringChanged = Signal()
-    # iter-139：任务级 effective 配置变更信号——max_workers/max_file_size/max_depth
+    # 任务级 effective 配置变更信号——max_workers/max_file_size/max_depth
     # 等任务级覆盖或全局 Config 变更时 emit，供 QML 重算 effective* 属性绑定。
     # 同时连接到 configController.configChanged 以反映全局配置变更。
     effectiveConfigChanged = Signal()
@@ -167,35 +167,35 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._worker: ScanWorker | None = None
         self._stats_worker: FileStatsWorker | None = None
         self._cache: CacheStore | None = None
-        # iter-133：SkipStore 共享实例——由 WorkspaceController 注入全局共享
+        # SkipStore 共享实例——由 WorkspaceController 注入全局共享
         # SkipStore，避免 N 个工作区各自读 ~/.fuscan/skips.json 造成的重复 I/O。
         # 独立构造（无 skip_store 参数）时回退到自建实例，保持向后兼容。
         self._skip_store: SkipStore = skip_store if skip_store is not None else SkipStore()
-        # iter-133：WhitelistController 共享实例——由 WorkspaceController 注入。
+        # WhitelistController 共享实例——由 WorkspaceController 注入。
         # 为 None 时（独立测试）回退到自建实例，保持向后兼容。
         self._whitelist_controller: WhitelistController = (
             whitelist_controller if whitelist_controller is not None else _new_whitelist_controller()
         )
         self._result_model: ResultListModel = ResultListModel(self)
-        # 任务级配置覆盖（iter-104）：键为 Config 字段名，值为该任务专属覆盖值
+        # 任务级配置覆盖：键为 Config 字段名，值为该任务专属覆盖值
         # 通过 _effective_<field>() 方法优先读取覆盖值，回退到全局 Config
         self._task_overrides: dict[str, object] = {}
-        # iter-137：规则配置全局化——本控制器不再持有工作区专属 ruleset 副本，
+        # 规则配置全局化——本控制器不再持有工作区专属 ruleset 副本，
         # 启动时从全局 RulesController.ruleset 取占位，startScan 时再取最新
         # （保证规则变更立即生效）。缓存上下文构建时直接读取全局 rules_paths/use_builtin
-        # iter-113：最近一次批量替换的 (源文件路径, 备份文件路径) 配对元组，供 undoLastBatchReplace 撤销。
+        # 最近一次批量替换的 (源文件路径, 备份文件路径) 配对元组，供 undoLastBatchReplace 撤销。
         # 初始为空元组表示无可撤销记录；每次批量替换后由 replaceAllFilteredResults 更新。
         # 存储 (src, backup) 配对而非仅 backup_path，因为 backup_path 与 src 不在同一目录，
         # 直接 with_suffix('') 会得到备份区下的路径而非源文件路径。
         self._last_batch_backup_paths: tuple[tuple[Path, Path], ...] = ()
-        # iter-124：增量扫描上下文（由 startIncrementalScan 设置，_on_stats_finished/
+        # 增量扫描上下文（由 startIncrementalScan 设置，_on_stats_finished/
         # _on_scan_finished 读取）。_pending_manifest 由 stats worker 完成后填入，
         # _pending_prev_report 传给 ScanWorker 供 Scanner 合并未变更文件命中结果，
         # _pending_ws_id 标识当前工作区用于 manifest 持久化（空串表示全量扫描不持久化）。
         self._pending_manifest: IncrementalManifest | None = None
         self._pending_prev_report: ScanReport | None = None
         self._pending_ws_id: str = ""
-        # iter-135：标记增量扫描回退为全量扫描，_on_scan_finished 据此在本次
+        # 标记增量扫描回退为全量扫描，_on_scan_finished 据此在本次
         # 无命中时合并 _pending_prev_report 中的旧 hits，避免回退全量 0 命中
         # 导致用户丢失之前的结果。
         self._fallback_from_incremental: bool = False
@@ -204,7 +204,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._scan_state: str = STATE_SETUP  # setup / scanning / results
         self._cancelling: bool = False
         self._is_paused: bool = False
-        # iter-128：后台恢复扫描结果的加载态
+        # 后台恢复扫描结果的加载态
         self._restoring: bool = False
 
         # 进度信息
@@ -218,11 +218,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._matched_count: int = 0
         self._skipped_count: int = 0
         self._error_count: int = 0
-        # iter-137：压缩包内条目数（含在 scanned 中，单独暴露供 UI 注明）
+        # 压缩包内条目数（含在 scanned 中，单独暴露供 UI 注明）
         self._archive_entry_count: int = 0
-        # iter-151：增量扫描统计——未变更文件复用数与实际变更扫描数
+        # 增量扫描统计——未变更文件复用数与实际变更扫描数
         self._reused_files: int = 0
-        # 阶段独立进度（iter-105 双进度条）：
+        # 阶段独立进度（双进度条）：
         # walk 阶段：discovered 持续增长，skipped/user_skipped 反映白名单与用户标记跳过
         # scan 阶段：scanned/total 反映解析进度，与上方 progressScanned/progressTotal 同步
         self._scan_phase: str = PHASE_SETUP  # setup / walk / scan / archive / done
@@ -243,16 +243,16 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 选中结果
         self._selected_result_index: int = -1
 
-        # iter-137：规则配置全局化——启动时一次性快照全局 RulesController.ruleset
+        # 规则配置全局化——启动时一次性快照全局 RulesController.ruleset
         # 作为占位（避免 None 状态），startScan 时再次取最新（保证规则变更立即生效）
         self._ruleset = self._rules_controller.ruleset
-        # iter-139：全局 Config 变更时同步 emit effectiveConfigChanged，
+        # 全局 Config 变更时同步 emit effectiveConfigChanged，
         # 让 QML effective* 绑定（如 effectiveMaxWorkers）跟随全局配置更新。
         # 任务级 override 变更由 setTaskOverride 内部 emit，不在此处处理。
         self._config_controller.configChanged.connect(  # pyrefly: ignore [missing-attribute]
             self._emit_effective_config_changed
         )
-        # iter-139：规则集变更时同步 emit canStartScanChanged/rulesCountChanged，
+        # 规则集变更时同步 emit canStartScanChanged/rulesCountChanged，
         # 避免 canStartScan/rulesCount 读到陈旧缓存值导致规则加载后仍无法启动扫描。
         self._rules_controller.rulesetChanged.connect(  # pyrefly: ignore [missing-attribute]
             self._on_ruleset_changed
@@ -267,7 +267,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(bool, notify=restoringChanged)  # pyrefly: ignore [not-callable]
     def restoring(self) -> bool:
-        """是否正在后台恢复扫描结果（iter-128）。
+        """是否正在后台恢复扫描结果。
 
         QML 据此显示「正在恢复扫描结果...」占位态，加载完成后无缝切换到结果列表。
         """
@@ -292,7 +292,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def canStartScan(self) -> bool:
         """是否可开始扫描（规则集已加载 + 目标已选）。
 
-        iter-139：直接读 ``self._rules_controller.ruleset`` 而非缓存值，
+        直接读 ``self._rules_controller.ruleset`` 而非缓存值，
         确保规则加载/移除后立即反映到 canStartScan（用户反馈：加载规则后
         仍无法启动扫描，因为读的是 ``__init__`` 时的快照）。
         """
@@ -326,7 +326,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         ``progressTotal <= 0`` 时返回 0（避免除零导致 NaN）。
         扫描进行中按 ``progressScanned / progressTotal * 100`` 计算；
         扫描完成后（``scanDone=True``）固定返回 100，确保进度条与
-        「已完成」状态文字对应（iter-125 修复：scan 阶段完成后 ``progressScanned``
+        「已完成」状态文字对应（修复：scan 阶段完成后 ``progressScanned``
         可能因错误文件未计入而小于 ``progressTotal``，导致进度条未满）。
         """
         if self._scan_done:
@@ -372,7 +372,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
     def archiveEntryCount(self) -> int:
-        """压缩包内条目数（含在 scanned 中，iter-137）。
+        """压缩包内条目数（含在 scanned 中）。
 
         用于 UI 注明"扫描 N"中包含的压缩包内条目数，
         避免 ``scanned > total_files`` 时产生误解。
@@ -381,7 +381,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
     def reusedFiles(self) -> int:
-        """增量扫描：未变更直接复用上次结果的文件数（iter-151）。
+        """增量扫描：未变更直接复用上次结果的文件数。
 
         全量扫描时为 0；增量扫描越大，此值越接近 ``progressTotal``。
         """
@@ -389,14 +389,14 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
     def changedFiles(self) -> int:
-        """增量扫描：实际发生内容变更、重新做了 I/O 与规则匹配的文件数（iter-151）。
+        """增量扫描：实际发生内容变更、重新做了 I/O 与规则匹配的文件数。
 
         等于 ``progressScanned``（不含复用未变更文件）与压缩包内条目
         之差的下限为 0（archive_entries 含在 scanned 中）。
         """
         return max(0, self._progress_scanned - self._archive_entry_count)
 
-    # ----------------------------- 阶段与收集进度（iter-105 双进度条） -----------------------------
+    # ----------------------------- 阶段与收集进度（双进度条） -----------------------------
 
     @Property(str, notify=progressChanged)  # pyrefly: ignore [not-callable]
     def scanPhase(self) -> str:
@@ -459,7 +459,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         ``discovered == 0`` 时返回 0（避免除零）。
 
         walk 完成后（``walkDone=True``）固定返回 100，确保进度条与「已完成」
-        状态文字对应（iter-125 修复：walk 完成后若有白名单跳过文件，
+        状态文字对应（修复：walk 完成后若有白名单跳过文件，
         ``classified < discovered`` 导致进度条未满）。
         """
         if self._walk_done:
@@ -517,11 +517,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self.folderRootChanged.emit()  # pyrefly: ignore [missing-attribute]
             self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
 
-    # ----------------------------- 任务级配置覆盖（iter-104） -----------------------------
+    # ----------------------------- 任务级配置覆盖 -----------------------------
 
     @Slot(str, object)  # pyrefly: ignore [not-callable]
     def setTaskOverride(self, key: str, value: object) -> None:
-        """设置任务级配置覆盖（iter-104）。
+        """设置任务级配置覆盖。
 
         :param key: Config 字段名（``scan_archives``/``max_workers``/
             ``max_file_size``/``max_depth``/``ignore_dirs``）
@@ -530,7 +530,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         覆盖值在 :meth:`_effective_scan_archives`/`_effective_max_workers` 等
         方法中优先读取，未设置时回退到全局 :attr:`_config`。
 
-        iter-139：影响 QML effective* 绑定的字段（``max_workers``/``max_file_size``/
+        影响 QML effective* 绑定的字段（``max_workers``/``max_file_size``/
         ``max_depth``）变更时 emit :attr:`effectiveConfigChanged`，让
         ``effectiveMaxWorkers``/``effectiveMaxFileSizeMB``/``effectiveMaxDepth``
         绑定重算。
@@ -550,7 +550,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def _on_ruleset_changed(self) -> None:
         """rulesController.rulesetChanged → 同步缓存与 QML 绑定信号。
 
-        iter-139：规则集变更时同步 ``self._ruleset`` 缓存（供 startScan
+        规则集变更时同步 ``self._ruleset`` 缓存（供 startScan
         快速访问、避免每次读取属性的开销），并 emit canStartScanChanged
         与 rulesCountChanged 让 QML 侧绑定重算。修复用户反馈：加载规则后
         canStartScan 仍为 False 因读的是 ``__init__`` 时的快照。
@@ -586,7 +586,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(int, notify=effectiveConfigChanged)  # pyrefly: ignore [not-callable]
     def effectiveMaxWorkers(self) -> int:
-        """任务级覆盖优先的最大工作线程数（iter-139）。
+        """任务级覆盖优先的最大工作线程数。
 
         供 QML ScanProgressCard 显示实际生效的线程数（任务级 override 优先，
         回退到全局 Config）。变更通知走 :attr:`effectiveConfigChanged`：
@@ -596,7 +596,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(int, notify=effectiveConfigChanged)  # pyrefly: ignore [not-callable]
     def effectiveMaxFileSizeMB(self) -> int:
-        """任务级覆盖优先的最大文件大小（MB，iter-139）。
+        """任务级覆盖优先的最大文件大小（MB）。
 
         与 :attr:`effectiveMaxWorkers` 同模式：任务级 override 优先，回退全局。
         """
@@ -604,7 +604,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(int, notify=effectiveConfigChanged)  # pyrefly: ignore [not-callable]
     def effectiveMaxDepth(self) -> int:
-        """任务级覆盖优先的最大扫描深度（0=无限，iter-139）。
+        """任务级覆盖优先的最大扫描深度（0=无限）。
 
         与 :attr:`effectiveMaxWorkers` 同模式：任务级 override 优先，回退全局。
         ``None`` 归一化为 ``0`` 与 :meth:`ConfigController.maxDepth` 一致。
@@ -616,7 +616,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def rulesCount(self) -> int:
         """当前规则集规则数。
 
-        iter-139：直接读 ``self._rules_controller.ruleset`` 而非缓存值，
+        直接读 ``self._rules_controller.ruleset`` 而非缓存值，
         与 :attr:`canStartScan` 同步确保规则变更后 UI 立即更新。
         """
         ruleset = self._rules_controller.ruleset
@@ -712,7 +712,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if self._selected_result_index > 0:
             self.setSelectedResultIndex(self._selected_result_index - 1)
 
-    # ----------------------------- iter-112 过滤+排序 -----------------------------
+    # ----------------------------- 过滤+排序 -----------------------------
 
     @Slot(str)  # pyrefly: ignore [not-callable]
     def setResultFilterText(self, text: str) -> None:
@@ -797,7 +797,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def replaceSelectedResult(self, replace_with: str = "") -> str:
         """替换当前选中结果的命中内容。
 
-        iter-124：接受用户自定义替换文本 ``replace_with``（QML 输入框提供，
+        接受用户自定义替换文本 ``replace_with``（QML 输入框提供，
         默认 ``...``）。非空时覆盖所有规则的 ``replace_with``，且不要求规则
         ``replace=True``，实现「默认用 ... 替换被命中内容，支持设置自定义」。
 
@@ -817,7 +817,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             override_replace_with=replace_with if replace_with else None,
         )
 
-    # ----------------------------- iter-113 批量替换与撤销 -----------------------------
+    # ----------------------------- 批量替换与撤销 -----------------------------
 
     def _resolve_backup_dir(self) -> Path:
         """解析当前生效的备份目录 Path。"""
@@ -837,7 +837,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def replaceAllFilteredResults(self, replace_with: str = "") -> str:
         """对当前过滤后的所有结果执行批量替换。
 
-        iter-124：接受用户自定义替换文本 ``replace_with``（QML 输入框提供，
+        接受用户自定义替换文本 ``replace_with``（QML 输入框提供，
         默认 ``...``）。非空时覆盖所有规则的 ``replace_with``，且不要求规则
         ``replace=True``。
 
@@ -896,7 +896,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def canReplaceAllFiltered(self) -> bool:
         """是否可对过滤后结果执行批量替换。
 
-        iter-124：放宽条件——过滤后结果非空且至少一个结果可替换即可
+        放宽条件——过滤后结果非空且至少一个结果可替换即可
         （不要求规则 ``replace=True``，用户自定义替换文本模式）。
         """
         filtered = self._result_model.filtered_results
@@ -922,7 +922,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         4. 调用 :class:`SkipStore.add` 标记为跳过，后续扫描自动跳过
         5. 返回操作消息供 QML 显示
 
-        iter-139：移至暂存成功后从 :class:`ResultListModel` 与
+        移至暂存成功后从 :class:`ResultListModel` 与
         ``_last_report.hits`` 中移除该条目，避免用户仍能在结果列表中
         看到已隔离的文件。选中索引重置为 -1，emit ``selectedResultChanged``
         让 QML 详情面板清空。
@@ -940,7 +940,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             last_report_root=last_root,
             skip_store=self._skip_store,
         )
-        # iter-139：成功后从结果列表与 last_report 中移除该条目
+        # 成功后从结果列表与 last_report 中移除该条目
         if msg.startswith("已移至暂存") and selected is not None:
             removed = self._result_model.remove_result_by_path(selected.path)
             if removed and self._last_report is not None:
@@ -995,14 +995,14 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     @Slot()  # pyrefly: ignore [not-callable]
     def startScan(self) -> None:
         """开始扫描（启动 stats worker → scan worker 串行）。"""
-        # iter-135：提前读取并重置回退标志，确保所有提前返回路径都不会
+        # 提前读取并重置回退标志，确保所有提前返回路径都不会
         # 遗留 _fallback_from_incremental=True 导致下次全量扫描误合并旧 hits
         fallback = self._fallback_from_incremental
         self._fallback_from_incremental = False
 
         if self._scan_state == STATE_SCANNING:
             return
-        # iter-137：每次扫描前重新取最新全局 ruleset，保证规则变更立即生效
+        # 每次扫描前重新取最新全局 ruleset，保证规则变更立即生效
         self._ruleset = self._rules_controller.ruleset
         if self._ruleset is None:
             logger.warning("未加载规则集，无法开始扫描")
@@ -1013,10 +1013,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             logger.warning("未选择有效扫描目标")
             return
 
-        # iter-124：全量扫描不合并 prev_report（_pending_prev_report=None）。
+        # 全量扫描不合并 prev_report（_pending_prev_report=None）。
         # 注意：不重置 _pending_ws_id——若由 startIncrementalScan 回退调用，
         # _pending_ws_id 已设置为工作区 ID，仍需持久化 manifest 以便下次增量扫描。
-        # iter-135：若由 startIncrementalScan 回退调用（fallback=True），保留
+        # 若由 startIncrementalScan 回退调用（fallback=True），保留
         # _pending_prev_report 供 _on_scan_finished 在本次无命中时合并旧 hits。
         if not fallback:
             self._pending_prev_report = None
@@ -1027,7 +1027,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._is_paused = False
         self._set_scan_state(STATE_SCANNING)
         self._set_status("扫描中...", "准备统计...")
-        # 阶段重置：进入 walk 阶段（iter-105 双进度条）
+        # 阶段重置：进入 walk 阶段（双进度条）
         self._scan_phase = PHASE_WALK
         self._walk_indeterminate = True
         self._walk_done = False
@@ -1044,7 +1044,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._skipped_count = 0
         self._error_count = 0
         self._archive_entry_count = 0
-        # iter-151：增量扫描统计重置
+        # 增量扫描统计重置
         self._reused_files = 0
         self._current_file = "准备统计..."
         self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -1067,7 +1067,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str)  # pyrefly: ignore [not-callable]
     def startIncrementalScan(self, ws_id: str) -> None:
-        """启动增量扫描（iter-124）。
+        """启动增量扫描。
 
         加载上次 ScanReport（``_last_report``）与 manifest（``~/.fuscan/manifests/<ws_id>.json``），
         传入 FileStatsWorker 启用增量模式：walk 阶段对比指纹跳过未变更文件，
@@ -1086,7 +1086,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if prev_report is None or manifest is None:
             # 回退到全量扫描（_pending_ws_id 已设置，仍会持久化 manifest）
             logger.info("工作区 %s 无上次扫描结果或清单，回退到全量扫描", ws_id)
-            # iter-135：标记回退，startScan 据此保留 _pending_prev_report，
+            # 标记回退，startScan 据此保留 _pending_prev_report，
             # _on_scan_finished 在本次无命中时合并旧 hits
             self._fallback_from_incremental = True
             self._pending_prev_report = prev_report  # 可能为 None，但保留供 _on_scan_finished 检查
@@ -1095,7 +1095,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         if self._scan_state == STATE_SCANNING:
             return
-        # iter-137：每次扫描前重新取最新全局 ruleset，保证规则变更立即生效
+        # 每次扫描前重新取最新全局 ruleset，保证规则变更立即生效
         self._ruleset = self._rules_controller.ruleset
         if self._ruleset is None:
             logger.warning("未加载规则集，无法开始增量扫描")
@@ -1115,7 +1115,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._is_paused = False
         self._set_scan_state(STATE_SCANNING)
         self._set_status("增量扫描中...", "准备统计...")
-        # 阶段重置：进入 walk 阶段（iter-105 双进度条）
+        # 阶段重置：进入 walk 阶段（双进度条）
         self._scan_phase = PHASE_WALK
         self._walk_indeterminate = True
         self._walk_done = False
@@ -1132,7 +1132,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._skipped_count = 0
         self._error_count = 0
         self._archive_entry_count = 0
-        # iter-151：增量扫描统计重置
+        # 增量扫描统计重置
         self._reused_files = 0
         self._current_file = "准备统计..."
         self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -1209,7 +1209,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def openLocation(self) -> None:
         """在文件管理器中打开选中结果文件位置。
 
-        iter-133：压缩包内部条目（``archive_path`` 非 None）时定位到压缩包
+        压缩包内部条目（``archive_path`` 非 None）时定位到压缩包
         文件本身——内部条目路径形如 ``archive.zip!inner/file.txt`` 无法直接
         被 explorer 识别，定位到压缩包根让用户在文件管理器中查看压缩包。
         """
@@ -1282,15 +1282,15 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     @Slot(object)  # pyrefly: ignore [not-callable]
     def _on_stats_finished(self, results: list[WalkResult]) -> None:
         """stats worker 完成：标记 walk 阶段完成，构造带 precollected 的 ScanWorker 启动 scan 阶段。"""
-        # iter-124：在 cleanup 前读取本次构建的 manifest（_cleanup_stats_worker 置空 _stats_worker）
+        # 在 cleanup 前读取本次构建的 manifest（_cleanup_stats_worker 置空 _stats_worker）
         if self._stats_worker is not None:
             self._pending_manifest = self._stats_worker.manifest
         self._cleanup_stats_worker()
-        # walk 阶段完成：从最终 WalkResult 同步收集统计（iter-105 双进度条）
+        # walk 阶段完成：从最终 WalkResult 同步收集统计（双进度条）
         total_discovered = sum(wr.total for wr in results)
         total_skipped = sum(wr.skipped for wr in results)
         total_user_skipped = sum(wr.user_skipped for wr in results)
-        # iter-151：增量扫描——未变更文件复用数从 WalkResult.unchanged_count 累加
+        # 增量扫描——未变更文件复用数从 WalkResult.unchanged_count 累加
         total_reused = sum(wr.unchanged_count for wr in results)
         self._walk_discovered = total_discovered
         self._walk_skipped = total_skipped
@@ -1318,12 +1318,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             scan_extensions=self._config_controller.enabled_extensions(),
             skip_paths=self._skip_store.paths(),
             precollected=results,
-            # iter-124：传入上次报告供 Scanner 合并未变更文件命中结果
+            # 传入上次报告供 Scanner 合并未变更文件命中结果
             # （_pending_prev_report 由 startScan 置 None 或 startIncrementalScan 设置）
             prev_report=self._pending_prev_report,
-            # iter-133：传入白名单快照，Scanner 在命中聚合阶段过滤误报
+            # 传入白名单快照，Scanner 在命中聚合阶段过滤误报
             whitelist=self._whitelist_controller.snapshot(),
-            # iter-134：高熵字符串检测配置（从全局 Config 读取，实时生效）
+            # 高熵字符串检测配置（从全局 Config 读取，实时生效）
             entropy_enabled=self._config.entropy_enabled,
             entropy_threshold=self._config.entropy_threshold,
         )
@@ -1351,18 +1351,18 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def _on_scan_finished(self, report: ScanReport) -> None:
         """扫描完成：填充结果模型并切到 results 态。
 
-        iter-135：增量扫描回退全量时，若本次无命中但 ``_pending_prev_report``
+        增量扫描回退全量时，若本次无命中但 ``_pending_prev_report``
         有 hits，将旧 hits 合并到 results 中。回退全量因 ``_unchanged_count=0``
         导致 Scanner 层合并条件不满足，此处做 controller 层补救，避免用户
         在运行时丢失之前扫描的结果。
 
-        iter-139：先切换扫描状态到 results/setup 与「已完成」状态文本，让 UI
+        先切换扫描状态到 results/setup 与「已完成」状态文本，让 UI
         状态机立即跳出"扫描中"；再执行 ``set_results``/``_sync_stats_from_report``
         /``_save_manifest`` 等耗时操作。状态切换在前确保 Qt 信号 emit 后 QML
         绑定可立即重算（虽然实际重绘需等事件循环），避免 set_results 大结果集
         阻塞时 UI 状态机仍停在 STATE_SCANNING。
         """
-        # iter-135：增量回退全量无命中时合并上次 hits
+        # 增量回退全量无命中时合并上次 hits
         if not report.hits and self._pending_prev_report is not None and self._pending_prev_report.hits:
             old_hits = self._pending_prev_report.hits
             report = ScanReport(
@@ -1373,7 +1373,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             )
             logger.info("本次扫描无命中，合并上次扫描的 %d 条命中结果", len(old_hits))
         self._last_report = report
-        # 标记 scan 阶段完成（iter-105 双进度条）+ 切换 phase，让进度条满格
+        # 标记 scan 阶段完成（双进度条）+ 切换 phase，让进度条满格
         self._scan_done = True
         self._scan_phase = PHASE_DONE
         # 先清理 worker 引用并复位 cancelling/paused 标志
@@ -1390,7 +1390,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 耗时收尾：结果模型填充 + 统计同步 + manifest 持久化
         self._result_model.set_results(report.hits)
         self._sync_stats_from_report(report)
-        # iter-124：持久化本次构建的 manifest（仅 startIncrementalScan 设置了 _pending_ws_id）
+        # 持久化本次构建的 manifest（仅 startIncrementalScan 设置了 _pending_ws_id）
         if self._pending_ws_id and self._pending_manifest is not None:
             self._save_manifest(self._pending_ws_id, self._pending_manifest)
         # 重新 emit progressChanged 让统计页/进度条读取最新数值
@@ -1432,7 +1432,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._error_count = stats.errors
         self._passed_count = max(stats.scanned_files - stats.matched_files - stats.errors, 0)
         self._archive_entry_count = stats.archive_entries
-        # iter-151：最终未变更文件复用数以 ScanReport.stats.unchanged_files 为准
+        # 最终未变更文件复用数以 ScanReport.stats.unchanged_files 为准
         self._reused_files = stats.unchanged_files
 
     def _can_build_roots(self) -> bool:
@@ -1449,7 +1449,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         )
 
     def _build_cache_context(self) -> tuple[CacheStore | None, dict[Path, str] | None]:
-        """构造扫描缓存上下文（iter-137：使用全局规则路径与内置开关）。"""
+        """构造扫描缓存上下文（使用全局规则路径与内置开关）。"""
         if not self._config.cache_enabled:
             return None, None
         if self._cache is None:
@@ -1459,7 +1459,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._cache = CacheStore(cache_path)
         from fuscan.cache import compute_source_files
 
-        # iter-137：直接读取全局 RulesController 的 rules_paths/use_builtin
+        # 直接读取全局 RulesController 的 rules_paths/use_builtin
         global_paths = self._rules_controller.rules_paths
         source_files = compute_source_files(
             global_paths,
@@ -1467,7 +1467,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         )
         return self._cache, source_files
 
-    # ----------------------------- iter-124 增量扫描清单持久化 -----------------------------
+    # ----------------------------- 增量扫描清单持久化 -----------------------------
 
     def _load_manifest(self, ws_id: str) -> IncrementalManifest | None:
         """从 ``~/.fuscan/manifests/<ws_id>.json`` 加载增量扫描清单。
@@ -1490,7 +1490,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         _save_manifest_fn(ws_id, manifest, _MANIFESTS_DIR)
 
     def invalidate_manifest(self, ws_id: str) -> None:
-        """删除工作区的增量扫描清单（iter-136）。
+        """删除工作区的增量扫描清单。
 
         委托 :func:`fuscan.gui.controllers._manifest.invalidate_manifest`。规则变更
         （新增/修改/删除/导入规则）时由 :meth:`WorkspaceController.updateWorkspaceRules`
@@ -1503,7 +1503,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         return self._result_model.get_result(self._selected_result_index)
 
     def build_history_entry(self, workspace_id: str, workspace_name: str) -> ScanHistoryEntry | None:
-        """从最近一次 :class:`ScanReport` 构建扫描历史条目（iter-115）。
+        """从最近一次 :class:`ScanReport` 构建扫描历史条目。
 
         委托 :func:`fuscan.gui.controllers._history.build_history_entry`。在扫描
         完成/取消后由 :class:`WorkspaceController` 调用，将本次扫描关键指标归档到
@@ -1527,7 +1527,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self.restoringChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def restoreFromReport(self, report: ScanReport) -> None:
-        """从持久化的 :class:`ScanReport` 恢复扫描结果（iter-123）。
+        """从持久化的 :class:`ScanReport` 恢复扫描结果。
 
         重启后由 :class:`WorkspaceController` 调用，从 ``~/.fuscan/results/<ws_id>.json``
         加载上次扫描结果并恢复到 ``_result_model`` 与 ``_last_report``，
@@ -1607,7 +1607,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def cleanup(self) -> None:
         """窗口关闭时清理资源（worker + cache）。
 
-        iter-124：worker wait 超时从 3000ms 降至 500ms，避免多工作区关闭时
+        worker wait 超时从 3000ms 降至 500ms，避免多工作区关闭时
         累计等待过久（10 个工作区 6s → 1s）。超时后 worker 线程随进程退出
         自然终止，不阻塞用户。
         """
@@ -1628,15 +1628,15 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def quick_cancel(self) -> None:
         """退出时快速取消所有 worker。
 
-        iter-132：cancel + 短暂 wait(500ms) + terminate 后备。
-        原 iter-127 实现仅设 cancel 标志不 wait，导致 QThread 在后台继续运行，
+        cancel + 短暂 wait(500ms) + terminate 后备。
+        原实现仅设 cancel 标志不 wait，导致 QThread 在后台继续运行，
         阻止进程退出（用户看到"界面退出后后台一直还在"）。
         现改为：cancel 后 wait 最多 500ms（大部分 worker < 100ms 退出），
         超时则 terminate 强制终止。
 
-        iter-147 修复：原实现不 close SQLite（注释说"进程退出由 OS 回收"），
+        修复：原实现不 close SQLite（注释说"进程退出由 OS 回收"），
         但 workspace_controller.cleanup 用 quick_cancel 而非 cleanup，导致
-        cache.close() 永不被调用，WAL 文件无限膨胀（iter-145 cache.db
+        cache.close() 永不被调用，WAL 文件无限膨胀（cache.db
         15.7GB 根因）。现改为：cancel + wait + terminate + deleteLater 统一模式，
         末尾启动 daemon thread 异步关闭 cache，避免主线程阻塞（SQLite WAL
         checkpoint 可能慢），同时消除 quick_cancel/cleanup 路径不一致。
@@ -1657,16 +1657,16 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 self._stats_worker.wait(100)
             self._stats_worker.deleteLater()
             self._stats_worker = None
-        # iter-132：取消未完成的 FilterWorker
+        # 取消未完成的 FilterWorker
         self._result_model.cleanup()
-        # iter-147：异步关闭 cache，避免 WAL 文件膨胀
+        # 异步关闭 cache，避免 WAL 文件膨胀
         # 用 daemon thread 避免 cache.close() 阻塞主线程（SQLite WAL checkpoint
         # 可能慢）；cache 实例设为 None 避免重复关闭，daemon thread 进程退出时
         # 由 OS 回收（若 close 未完成）
         self._close_cache_async()
 
     def _close_cache_async(self) -> None:
-        """启动 daemon thread 异步关闭 cache（iter-147）。
+        """启动 daemon thread 异步关闭 cache。
 
          避免在主线程（特别是退出路径）阻塞于 SQLite WAL checkpoint。
          cache.close() 内部有 RLock 保护，与已终止 worker 的残留访问竞争安全

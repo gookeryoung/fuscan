@@ -48,7 +48,7 @@ class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
     :param sort_ascending: True 升序，False 降序
     """
 
-    # iter-165：扩展信号签名，同时回传过滤结果 + 严重度/规则名倒排索引
+    # 扩展信号签名，同时回传过滤结果 + 严重度/规则名倒排索引
     done = Signal(tuple, dict, dict)
 
     def __init__(

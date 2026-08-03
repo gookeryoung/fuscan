@@ -95,9 +95,9 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         # ScanWorker 用 precollected 模式调 scan_entries，Scanner 在 __init__ 时
         # 根据 prev_report 预索引未变更命中结果（_unchanged_hits），scan_entries 合并。
         self._prev_report: ScanReport | None = prev_report
-        # iter-133：误报白名单快照，传给 Scanner 在命中聚合阶段过滤
+        # 误报白名单快照，传给 Scanner 在命中聚合阶段过滤
         self._whitelist: Whitelist | None = whitelist
-        # iter-134：高熵字符串检测配置，透传给 Scanner
+        # 高熵字符串检测配置，透传给 Scanner
         self._entropy_enabled: bool = entropy_enabled
         self._entropy_threshold: float | None = entropy_threshold
         self._scanner: Scanner | None = None
@@ -203,7 +203,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
             else:
                 reports = (self._scanner.scan(root) for root in self._roots)
 
-            # iter-139：手动迭代 reports 生成器，每根之前检查 _cancel_requested。
+            # 手动迭代 reports 生成器，每根之前检查 _cancel_requested。
             # 原因：scan()/scan_entries() 在 finally 中清除 _cancel_event，
             # 若用 `for report in reports:` 隐式 next()，下一根 scan 时 _cancel_event
             # 已清空会正常执行，导致取消后仍扫描后续根路径。

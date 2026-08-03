@@ -6,7 +6,7 @@ import logging
 import os
 import sys
 import warnings
-from typing import Sequence
+from collections.abc import Sequence
 
 from fuscan.paths import MAIN_QML_URL, QML_IMPORT_PATH
 from fuscan.perf import PerfReport, render_startup_summary, timed

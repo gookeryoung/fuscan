@@ -11,7 +11,7 @@ from __future__ import annotations
 import builtins
 import logging
 import threading
-from typing import Iterator
+from collections.abc import Iterator
 
 import pytest
 

@@ -24,9 +24,11 @@ import re
 import threading
 import time
 from collections import deque
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Mapping, Pattern
+from re import Pattern
+from typing import TYPE_CHECKING
 
 from fuscan.cache.store import BatchWriteItem
 from fuscan.perf import PerfStats

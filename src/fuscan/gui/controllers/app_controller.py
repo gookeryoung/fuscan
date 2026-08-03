@@ -22,7 +22,7 @@
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
+from functools import cache
 
 try:
     from PySide2.QtCore import QObject
@@ -48,7 +48,7 @@ __all__ = ["AppController", "register_qml_types"]
 logger = logging.getLogger(__name__)
 
 
-@lru_cache(maxsize=None)
+@cache
 def register_qml_types() -> None:
     """将所有 controller 与 model 类型注册到 QML 引擎。
 

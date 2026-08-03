@@ -22,8 +22,9 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any
 
 from fuscan.cache._helpers import BatchWriteItem, now_iso
 from fuscan.cache.hashes import compute_rule_hash, hash_bytes, serialize_rule

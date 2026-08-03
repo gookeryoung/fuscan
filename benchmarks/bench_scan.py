@@ -18,9 +18,9 @@ import shutil
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 # 确保项目根目录在 sys.path 中，使 benchmarks 包可导入
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent

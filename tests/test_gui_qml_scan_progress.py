@@ -20,9 +20,8 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
-from typing import Callable
 
 import pytest
 

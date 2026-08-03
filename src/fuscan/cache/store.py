@@ -43,8 +43,9 @@ import sqlite3
 import threading
 import weakref
 from collections import OrderedDict
+from collections.abc import Collection, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Collection, Mapping
+from typing import TYPE_CHECKING
 
 from fuscan.cache._cleanup import prune_orphan_rules, prune_stale_files, stats
 from fuscan.cache._helpers import (

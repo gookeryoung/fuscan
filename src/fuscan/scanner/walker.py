@@ -8,8 +8,8 @@ import logging
 import os
 import string
 import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Callable, Iterator
 
 from fuscan.scanner.context import FileEntry
 

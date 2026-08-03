@@ -8,8 +8,9 @@ YAML 结构示例见 ``rules/example.yaml``。
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 import yaml
 

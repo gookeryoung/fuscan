@@ -14,9 +14,9 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Callable
 
 __all__ = [
     "BINARY_GENERATORS",

@@ -20,9 +20,9 @@ import enum
 import logging
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 __all__ = [
     "Extractor",

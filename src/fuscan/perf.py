@@ -48,12 +48,12 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable, Generator
 from contextlib import ContextDecorator, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Callable, Generator
 
 __all__ = [
     "PERF_ENABLED",

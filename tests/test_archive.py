@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import io
 import zipfile
+from collections.abc import Callable
 from concurrent.futures import Future
 from pathlib import Path
-from typing import Callable
 
 import pytest
 from typing_extensions import override

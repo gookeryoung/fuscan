@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Collection
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Collection
+from typing import TYPE_CHECKING, Any
 
 from fuscan.rules.model import Severity
 

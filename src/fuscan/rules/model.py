@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Union
 
 __all__ = [
     "AndMatch",
@@ -112,7 +111,7 @@ class NotMatch:
     description: str = ""
 
 
-MatchSpec = Union[LeafMatch, AndMatch, OrMatch, NotMatch]
+MatchSpec = LeafMatch | AndMatch | OrMatch | NotMatch
 
 
 @dataclass(frozen=True)

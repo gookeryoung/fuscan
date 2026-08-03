@@ -13,9 +13,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
-from typing import Sequence
 
 from fuscan.paths import BUILTIN_RULES_PATH
 from fuscan.rules.merge import merge_multiple_rulesets

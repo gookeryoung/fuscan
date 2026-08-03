@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pytest
 
@@ -3358,7 +3358,7 @@ class TestIter166StreamSave:
         assert restored.root == report.root
         assert len(restored.hits) == len(report.hits)
         assert restored.stats.total_matches == report.stats.total_matches
-        for r1, r2 in zip(restored.hits, report.hits):
+        for r1, r2 in zip(restored.hits, report.hits, strict=True):
             assert r1.path == r2.path
             assert r1.size == r2.size
             assert [h.rule_name for h in r1.hits] == [h.rule_name for h in r2.hits]

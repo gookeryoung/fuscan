@@ -16,7 +16,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Collection
+from collections.abc import Collection
+from typing import TYPE_CHECKING
 
 from fuscan.cache._helpers import CacheStats, iso_days_ago
 from fuscan.cache.schema import CURRENT_VERSION

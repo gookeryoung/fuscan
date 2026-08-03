@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import os
 import zipfile
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 

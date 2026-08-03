@@ -243,8 +243,9 @@ class TestApplyGlobalFont:
 
         app = QGuiApplication.instance() or QGuiApplication(["fuscan"])
         cfg = Config(font_family=None, font_size=14, font_bold=False)
-        with patch("fuscan.config.load_config", return_value=cfg), patch(
-            "fuscan.app.detect_font_families", return_value=("DefaultFont",)
+        with (
+            patch("fuscan.config.load_config", return_value=cfg),
+            patch("fuscan.app.detect_font_families", return_value=("DefaultFont",)),
         ):
             _apply_global_font(app)
         font = app.font()

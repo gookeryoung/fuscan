@@ -243,9 +243,9 @@ class TestScanReportJsonRoundtrip:
         report = _build_report(tmp_path)
         restored = ScanReport.from_json(report.to_json())
         assert len(report.hits) == len(restored.hits)
-        for orig, restored_hit in zip(report.hits, restored.hits):
+        for orig, restored_hit in zip(report.hits, restored.hits, strict=True):
             assert len(orig.hits) == len(restored_hit.hits)
-            for orig_rule, restored_rule in zip(orig.hits, restored_hit.hits):
+            for orig_rule, restored_rule in zip(orig.hits, restored_hit.hits, strict=True):
                 assert restored_rule.match_count == orig_rule.match_count
 
     def test_from_json_roundtrip_preserves_match_texts_tuple(self, tmp_path: Path) -> None:

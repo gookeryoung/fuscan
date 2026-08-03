@@ -21,8 +21,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from concurrent.futures import Future
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Any
 
 from fuscan.cache.hashes import hash_bytes
 from fuscan.config import DEFAULT_MAX_FILE_SIZE

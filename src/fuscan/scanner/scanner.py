@@ -41,7 +41,6 @@ from fuscan.rules.model import (
     OrMatch,
     Rule,
     RuleSet,
-    Severity,
 )
 from fuscan.scanner._archive_phase import run_archive_phase
 from fuscan.scanner._cache_phase import (
@@ -65,11 +64,6 @@ from fuscan.scanner._helpers import (
 )
 from fuscan.scanner._pipeline_phase import run_pipeline_phase
 from fuscan.scanner.context import ContentProvider, FileEntry, MatchContext
-from fuscan.scanner.entropy import (
-    DEFAULT_ENTROPY_THRESHOLD,
-    ENTROPY_RULE_NAME,
-    find_high_entropy_strings,
-)
 from fuscan.scanner.manifest import FileFingerprint, IncrementalManifest
 from fuscan.scanner.matchers import Matcher, build_matcher
 from fuscan.scanner.result import (
@@ -262,8 +256,6 @@ class Scanner:
         incremental_manifest: IncrementalManifest | None = None,
         prev_report: ScanReport | None = None,
         whitelist: Whitelist | None = None,
-        entropy_enabled: bool = False,
-        entropy_threshold: float | None = None,
     ) -> None:
         self.ruleset = ruleset
         self._content_provider: ContentProvider = content_provider or default_extract_content
@@ -436,14 +428,6 @@ class Scanner:
         # 误报白名单快照——扫描期间持有不可变快照，UI 增删不影响本次扫描。
         # 在 scan_entries 命中聚合阶段过滤命中白名单的结果（不计入 ScanReport.hits）。
         self._whitelist: Whitelist | None = whitelist
-        # 高熵字符串检测——作为正则规则的兜底，识别未在规则集中显式定义
-        # 的密钥格式（如自定义生成的 Base64/Hex 串）。启用后在 _scan_entry_uncached/
-        # _scan_entry_cached 的规则匹配后对 content 执行熵检测，命中构造 RuleHit
-        # （rule_name=E001-高熵字符串，severity=WARNING）。
-        self._entropy_enabled: bool = entropy_enabled
-        self._entropy_threshold: float = (
-            entropy_threshold if entropy_threshold is not None else DEFAULT_ENTROPY_THRESHOLD
-        )
         # collect_entries 阶段 1 walk 结束后批量预热的 file_hash 结果。
         # 键为 str(Path)，值为 file_hash（64 hex，None 表示未登记/不适用）。
         # _scan_entry_cached 优先查本 dict，省掉 SQLite/路径 LRU 查询。
@@ -1270,14 +1254,11 @@ class Scanner:
         - 规则集不含任何 CONTENT 规则（``_content_rule_names`` 为空）——所有文件均跳过 I/O
         - 文件超过 ``max_file_size`` ——大文件跳过避免一次性读入内存导致卡死
 
-        启用 ``entropy_enabled`` 时，对内容执行高熵字符串检测，
-        命中构造 ``E001-高熵字符串`` RuleHit（severity=WARNING）。
-
         通过 ``_get_effective_buckets_and_rules`` 仅取当前 entry.extension
         真正需要的 CONTENT 桶 + remaining 规则，减少 60%+ 非必要 CONTENT re 调用。
         """
-        # 是否需要读取内容：含 CONTENT 规则或启用熵检测时均需读取
-        need_content = bool(self._content_rule_names) or self._entropy_enabled
+        # 是否需要读取内容：含 CONTENT 规则时才读取
+        need_content = bool(self._content_rule_names)
         skip_content = (not need_content) or (self._max_file_size > 0 and entry.size > self._max_file_size)
         if skip_content:
             context = MatchContext(entry, content_provider=empty_content_provider)
@@ -1316,55 +1297,7 @@ class Scanner:
             if result.matched:
                 hits.append(build_hit_from_match(rule, result))
 
-        # 高熵字符串兜底检测（仅在启用且未跳过内容时执行）
-        if self._entropy_enabled and not skip_content:
-            entropy_hits = self._detect_entropy(entry, context)
-            hits.extend(entropy_hits)
-
         return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)
-
-    def _detect_entropy(self, entry: FileEntry, context: MatchContext) -> list[RuleHit]:
-        """对文件内容执行高熵字符串检测，返回命中列表。
-
-        候选 token 经 :func:`find_high_entropy_strings` 提取并按熵阈值过滤，
-        每个高熵子串构造一个 :class:`RuleHit`（severity=WARNING），便于 GUI
-        在详情区分别高亮各处疑似密钥。检测在 ``self._perf.measure("entropy")``
-        计时下进行，便于性能剖析。
-
-        :param entry: 文件条目（仅用于日志，不读取）
-        :param context: 匹配上下文（懒加载内容）
-        :return: 命中列表；空列表表示无高熵子串或读取失败
-        """
-        try:
-            content = context.content
-        except Exception:
-            logger.debug("熵检测读取内容失败 %s", entry.path, exc_info=True)
-            return []
-        if not content:
-            return []
-        try:
-            with self._perf.measure("entropy"):
-                high_entropy = find_high_entropy_strings(content, threshold=self._entropy_threshold)
-        except Exception:
-            logger.warning("熵检测失败 %s", entry.path, exc_info=True)
-            return []
-        hits: list[RuleHit] = []
-        for token, entropy in high_entropy:
-            # 截断过长的 token 避免 GUI 详情展示过长（保留前后 32 字符 + 中间省略）
-            display_token = token if len(token) <= 80 else f"{token[:32]}...{token[-32:]}"
-            hits.append(
-                RuleHit(
-                    rule_name=ENTROPY_RULE_NAME,
-                    severity=Severity.WARNING,
-                    detail=f"高熵字符串（熵={entropy:.2f}）: {display_token}",
-                    match_text=token,
-                    match_count=1,
-                    target="content",
-                    match_texts=(token,),
-                    match_description="疑似密钥/令牌的高熵随机串",
-                )
-            )
-        return hits
 
     def _extract_with_cache(self, entry: FileEntry) -> tuple[str, str]:
         """缓存模式的提取+哈希（委托 :func:`extract_with_cache`）。
@@ -1382,16 +1315,8 @@ class Scanner:
         cached: dict[str, RuleHit | None],
         cached_file_hash: str,
     ) -> ScanResult:
-        """全部规则已缓存命中时，从缓存重建 ScanResult。
-
-        熵检测启用时，即便全部正则规则命中缓存也需读取内容执行熵检测，
-        因为熵检测结果未纳入缓存（每次扫描均重新计算）。该路径相对全量重扫仍快
-        （跳过正则匹配与哈希计算），仅多一次文件 I/O，可接受。
-        """
+        """全部规则已缓存命中时，从缓存重建 ScanResult。"""
         hits, rule_errors = build_hits_from_cache(applicable, cached)
-        if self._entropy_enabled:
-            context = MatchContext(entry, content_provider=self._content_provider)
-            hits.extend(self._detect_entropy(entry, context))
         # 累积元数据刷新到批量缓冲（无新 scan_results 需写入，hits=()）
         self._add_to_batch(
             BatchWriteItem(
@@ -1537,10 +1462,6 @@ class Scanner:
                     hits=tuple(batch_hits),
                 )
             )
-
-        # 高熵字符串兜底检测（内容已读取，直接复用 context）
-        if self._entropy_enabled:
-            hits.extend(self._detect_entropy(entry, context))
 
         return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)
 

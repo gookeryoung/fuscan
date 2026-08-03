@@ -1,8 +1,7 @@
 """扫描性能基准测量（CLI ``benchmark`` 子命令后端）。
 
 对指定路径执行多轮扫描，复用 :class:`~fuscan.scanner.Scanner` 全链路埋点的
-:class:`~fuscan.perf.PerfStats` 各阶段计时（walk/read_bytes/hash/extract/match/
-entropy/cache_* 等），聚合出每阶段的均值/最小/最大/标准差，便于一眼识别瓶颈。
+:class:`~fuscan.perf.PerfStats` 各阶段计时（walk/read_bytes/hash/extract/match/cache_* 等），聚合出每阶段的均值/最小/最大/标准差，便于一眼识别瓶颈。
 
 支持将结果导出为**基准线**（JSON），并在后续运行时加载历史基准线与本次结果
 逐阶段对比，输出变化百分比与回归提示。

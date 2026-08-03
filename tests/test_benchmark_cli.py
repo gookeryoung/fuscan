@@ -235,13 +235,13 @@ class TestCompareToBaseline:
 
     def test_new_stage_no_ratio(self) -> None:
         """本次新增而基准线无的阶段，change_ratio 为 None 且不判回归。"""
-        result = _result_with({"match": 50.0, "entropy": 30.0})
+        result = _result_with({"match": 50.0, "extra": 30.0})
         baseline = _baseline_with({"match": 50.0})
         cmp = compare_to_baseline(result, baseline)
-        entropy_delta = next(d for d in cmp.deltas if d.name == "entropy")
-        assert entropy_delta.baseline_ms is None
-        assert entropy_delta.change_ratio is None
-        assert entropy_delta.regressed is False
+        extra_delta = next(d for d in cmp.deltas if d.name == "extra")
+        assert extra_delta.baseline_ms is None
+        assert extra_delta.change_ratio is None
+        assert extra_delta.regressed is False
 
     def test_missing_stage_no_ratio(self) -> None:
         """基准线有而本次无的阶段，current_ms 为 None 并排在末尾。"""

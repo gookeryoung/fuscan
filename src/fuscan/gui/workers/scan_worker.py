@@ -66,8 +66,6 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         precollected: list[WalkResult] | None = None,
         prev_report: ScanReport | None = None,
         whitelist: Whitelist | None = None,
-        entropy_enabled: bool = False,
-        entropy_threshold: float | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -97,9 +95,6 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         self._prev_report: ScanReport | None = prev_report
         # 误报白名单快照，传给 Scanner 在命中聚合阶段过滤
         self._whitelist: Whitelist | None = whitelist
-        # 高熵字符串检测配置，透传给 Scanner
-        self._entropy_enabled: bool = entropy_enabled
-        self._entropy_threshold: float | None = entropy_threshold
         self._scanner: Scanner | None = None
         self._cancel_requested: bool = False
         # 多根路径累计性能统计：每次 scan() 后合并 perf_summary
@@ -195,8 +190,6 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
                 skip_paths=self._skip_paths,
                 prev_report=self._prev_report,
                 whitelist=self._whitelist,
-                entropy_enabled=self._entropy_enabled,
-                entropy_threshold=self._entropy_threshold,
             )
             if self._cancel_requested:
                 self._scanner.cancel()

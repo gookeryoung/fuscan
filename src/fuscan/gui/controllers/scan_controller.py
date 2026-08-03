@@ -1323,9 +1323,6 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             prev_report=self._pending_prev_report,
             # 传入白名单快照，Scanner 在命中聚合阶段过滤误报
             whitelist=self._whitelist_controller.snapshot(),
-            # 高熵字符串检测配置（从全局 Config 读取，实时生效）
-            entropy_enabled=self._config.entropy_enabled,
-            entropy_threshold=self._config.entropy_threshold,
         )
         self._worker.progress_info.connect(self._on_scan_progress)  # pyrefly: ignore [missing-attribute]
         self._worker.finished_report.connect(self._on_scan_finished)  # pyrefly: ignore [missing-attribute]

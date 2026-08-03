@@ -256,61 +256,6 @@ Item {
                         }
                     }
 
-                    // 凭证检测（高熵字符串）
-                    GroupBox {
-                        Layout.fillWidth: true
-                        title: "凭证检测"
-                        ColumnLayout {
-                            anchors.fill: parent
-                            spacing: 8
-                            RowLayout {
-                                Layout.fillWidth: true
-                                Label {
-                                    text: "启用高熵字符串检测"
-                                    Layout.fillWidth: true
-                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                }
-                                Switch {
-                                    checked: configController.entropyEnabled
-                                    onCheckedChanged: configController.setEntropyEnabled(checked)
-                                }
-                            }
-                            RowLayout {
-                                Layout.fillWidth: true
-                                Label {
-                                    text: "熵阈值"
-                                    Layout.fillWidth: true
-                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                }
-                                // 阈值滑块：3.0~5.0，步长 0.1，默认 4.5
-                                SpinBox {
-                                    id: entropyThresholdSpin
-                                    from: 30
-                                    to: 50
-                                    value: Math.round(configController.entropyThreshold * 10)
-                                    stepSize: 1
-                                    editable: false
-                                    onValueChanged: configController.setEntropyThreshold(value / 10.0)
-                                    // 显示一位小数
-                                    textFromValue: function(value) {
-                                        return (value / 10.0).toFixed(1)
-                                    }
-                                    // 用户输入解析为整数
-                                    valueFromText: function(text) {
-                                        return Math.round(parseFloat(text) * 10)
-                                    }
-                                }
-                                Label {
-                                    text: "（3.0=最敏感，5.0=最严格；默认 4.5 捕获 Base64/Hex 密钥）"
-                                    font.pixelSize: theme.fontSizeCaption
-                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                    Layout.fillWidth: true
-                                    wrapMode: Text.WordWrap
-                                }
-                            }
-                        }
-                    }
-
                     GroupBox {
                         Layout.fillWidth: true
                         title: "文件类型"

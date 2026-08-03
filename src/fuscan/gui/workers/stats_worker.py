@@ -99,6 +99,15 @@ class FileStatsWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         if self._scanner is not None:
             self._scanner.pause()
 
+    def start(self, priority: QThread.Priority = QThread.LowPriority) -> None:
+        """以低优先级启动线程，让 GUI 主线程优先获得调度。
+
+        walk 阶段以磁盘 I/O 为主（等待时释放 GIL），CPU 占用低于扫描 worker，
+        但与 ScanWorker 保持一致的 ``QThread.LowPriority`` 策略，确保统计阶段
+        目录遍历不与主线程渲染争抢调度，维持界面流畅。
+        """
+        super().start(priority)
+
     def resume(self) -> None:
         """恢复统计。"""
         if self._scanner is not None:

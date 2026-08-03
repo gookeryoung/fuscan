@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from collections import Counter
 
 __all__ = [
@@ -46,6 +47,12 @@ DEFAULT_ENTROPY_THRESHOLD: float = 4.5
 DEFAULT_MIN_ENTROPY_LENGTH: int = 32
 # 熵检测命中的规则名（独立命名空间，避免与 builtin.yaml 中 P0xxx 冲突）
 ENTROPY_RULE_NAME: str = "E001-高熵字符串"
+
+# GIL 让步间隔：熵检测扫描超长文本时，每处理这么多个候选 token 主动
+# ``time.sleep(0)`` 让出 GIL 一次，避免单次调用长时间独占导致 GUI 主线程卡滞。
+# 取 512 平衡让步开销与响应性：小文本通常不足 512 个 token 不触发，超长文本
+# （数万 token）每 512 个让步一次，把单次数百毫秒的独占拆成多次数毫秒。
+_ENTROPY_GIL_YIELD_INTERVAL: int = 512
 
 # 候选 token 提取正则：Base64/Base64URL 字符集（字母数字 + / + - + _）
 # 注意：不含 ``=``（Base64 padding），因为 ``=`` 也是赋值分隔符，包含会导致
@@ -220,7 +227,14 @@ def find_high_entropy_strings(
         return []
     seen: set[str] = set()
     results: list[tuple[str, float]] = []
+    # GIL 让步计数：每处理 _ENTROPY_GIL_YIELD_INTERVAL 个候选 token 让步一次，
+    # 避免超长文本的熵扫描在 worker 线程内长时间独占 GIL 导致 GUI 卡滞
+    yield_counter = 0
     for match in _TOKEN_PATTERN.finditer(text):
+        yield_counter += 1
+        if yield_counter >= _ENTROPY_GIL_YIELD_INTERVAL:
+            yield_counter = 0
+            time.sleep(0)
         token = match.group(0)
         if len(token) < min_length:
             continue

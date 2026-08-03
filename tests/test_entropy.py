@@ -446,3 +446,39 @@ class TestLongAndUnicodePaths:
         assert shannon_entropy(token) < 4.5
         # find 复算精确熵后剔除，结果为空
         assert find_high_entropy_strings(token, threshold=4.5, min_length=32) == []
+
+
+class TestEntropyGilYield:
+    """GIL 让步：超长文本熵扫描应周期性 ``time.sleep(0)`` 让出 GIL。"""
+
+    def test_yield_triggered_on_many_tokens(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """token 数超过让步间隔时应调用 time.sleep(0) 让步，且结果不受影响。"""
+        from fuscan.scanner import entropy as entropy_mod
+
+        calls: list[float] = []
+        original_sleep = entropy_mod.time.sleep
+
+        def _record_sleep(seconds: float) -> None:
+            calls.append(seconds)
+            original_sleep(seconds)
+
+        monkeypatch.setattr(entropy_mod.time, "sleep", _record_sleep)
+        # 让步间隔调小以便用例快速触发，构造略多于间隔数量的短 token
+        monkeypatch.setattr(entropy_mod, "_ENTROPY_GIL_YIELD_INTERVAL", 4)
+        # 10 个空格分隔的短 token（长度 < min_length，不产生结果但会被遍历计数）
+        text = " ".join(f"tok{i}" for i in range(10))
+        results = find_high_entropy_strings(text)
+        # 10 个 token / 间隔 4 -> 至少让步 2 次
+        assert calls.count(0) >= 2
+        # 短 token 不构成高熵结果
+        assert results == []
+
+    def test_no_yield_for_small_text(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """token 数不足让步间隔时不触发 sleep(0)（避免小文件无谓开销）。"""
+        from fuscan.scanner import entropy as entropy_mod
+
+        calls: list[float] = []
+        monkeypatch.setattr(entropy_mod.time, "sleep", calls.append)
+        # 少量 token，远低于默认间隔 512
+        find_high_entropy_strings("alpha beta gamma delta")
+        assert calls == []

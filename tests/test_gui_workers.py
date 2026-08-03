@@ -364,6 +364,24 @@ class TestScanWorkerControl:
         assert worker._cancel_requested is True
         assert scanner.cancel_called is True
 
+    def test_start_uses_low_priority(
+        self,
+        ruleset: RuleSet,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """start() 默认以 QThread.LowPriority 启动，缓解与主线程的 GIL 争抢。
+
+        不真实 spawn 线程（Windows 上会崩溃），仅拦截 QThread.start 捕获优先级。
+        """
+        from PySide2.QtCore import QThread
+
+        captured: list[object] = []
+        monkeypatch.setattr(QThread, "start", lambda self, priority: captured.append(priority))
+        worker = ScanWorker(ruleset=ruleset, roots=[tmp_path])
+        worker.start()
+        assert captured == [QThread.LowPriority]
+
 
 class TestScanWorkerRun:
     """``ScanWorker.run()`` 主流程：成功 / 取消 / 异常 / precollected / 多根路径。"""
@@ -702,6 +720,21 @@ class TestStatsWorkerControl:
         assert scanner.pause_called is True
         assert scanner.resume_called is True
         assert scanner.cancel_called is True
+
+    def test_start_uses_low_priority(
+        self,
+        ruleset: RuleSet,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """start() 默认以 QThread.LowPriority 启动，与 ScanWorker 保持一致。"""
+        from PySide2.QtCore import QThread
+
+        captured: list[object] = []
+        monkeypatch.setattr(QThread, "start", lambda self, priority: captured.append(priority))
+        worker = FileStatsWorker(ruleset=ruleset, roots=[tmp_path])
+        worker.start()
+        assert captured == [QThread.LowPriority]
 
 
 class TestStatsWorkerRun:

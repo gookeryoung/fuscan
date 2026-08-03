@@ -28,11 +28,13 @@ Button {
     property bool compact: false
     // 图标尺寸（像素），默认 14 与正文字号一致；compact 模式下默认 12
     property int iconSize: control.compact ? 12 : 14
+    // 非 compact 模式下所有 accent 统一使用 btnHeightSecondary（40px），
+    // 消除 primary(40)/secondary(40)/ghost(32) 的高度差，让主操作与辅助操作
+    // 在同一行内视觉对齐（用户反馈"主按钮和其他按钮尺寸差距太大"）。
+    // 视觉层级仍通过颜色区分：primary 主色填充 / secondary 描边 / ghost 透明 / danger 红描边。
+    // compact 模式（详情面板等中等密度场景）仍用 btnHeightGhost(32) 保持紧凑。
     property int btnSize: control.compact ? appTheme.btnHeightGhost
-        : accent === "primary" ? appTheme.btnHeightSecondary
-        : accent === "secondary" ? appTheme.btnHeightSecondary
-        : accent === "danger" ? appTheme.btnHeightSecondary
-        : appTheme.btnHeightGhost
+        : appTheme.btnHeightSecondary
     // dangerColor：accent="danger" 时使用，默认跟随主题危险色
     property color dangerColor: appTheme.colorDanger
 

@@ -274,54 +274,13 @@ Rectangle {
                 accent: "ghost"
                 onClicked: card.viewStatsRequested(card.workspaceId)
             }
-            // 展开按钮：more.svg icon + 「展开/收起」文字
-            Button {
-                id: expandBtn
-                Layout.preferredHeight: theme.btnHeightGhost
-                leftPadding: 10
-                rightPadding: 10
-                topPadding: 0
-                bottomPadding: 0
+            // 展开按钮：与同行其他 IconButton 高度一致（40px），ghost 风格
+            IconButton {
+                iconSource: theme.iconsPrefix + "more.svg"
+                text: card.expanded ? "收起" : "展开"
+                tooltip: card.expanded ? "收起更多操作" : "展开更多操作"
+                accent: "ghost"
                 onClicked: card.expanded = !card.expanded
-                ToolTip.visible: hovered
-                ToolTip.text: card.expanded ? "收起更多操作" : "展开更多操作"
-                ToolTip.delay: 400
-                background: Rectangle {
-                    color: expandBtn.down || expandBtn.hovered
-                        ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                        : "transparent"
-                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                    border.width: 1
-                    radius: theme.btnRadiusGhost
-                    Behavior on color { ColorAnimation { duration: 120 } }
-                }
-                contentItem: Row {
-                    spacing: 4
-                    // 展开图标：SVG more + ColorOverlay 染色
-                    Item {
-                        width: 14
-                        height: 14
-                        anchors.verticalCenter: parent.verticalCenter
-                        Image {
-                            id: moreIcon
-                            anchors.fill: parent
-                            source: theme.iconsPrefix + "more.svg"
-                            sourceSize: Qt.size(14, 14)
-                            visible: false
-                        }
-                        ColorOverlay {
-                            anchors.fill: moreIcon
-                            source: moreIcon
-                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                        }
-                    }
-                    Label {
-                        text: card.expanded ? "收起" : "展开"
-                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                        font.pixelSize: 12
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                }
             }
         }
 

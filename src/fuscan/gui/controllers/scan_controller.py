@@ -1586,17 +1586,47 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def _cleanup_stats_worker(self) -> None:
-        """清理 stats worker。"""
+        """清理 stats worker，非阻塞。
+
+        不 ``wait()`` 线程，避免主线程冻结。stats worker 在 emit
+        ``finished_stats``/``cancelled``/``failed`` 后 ``run()`` 即将退出，
+        ``deleteLater`` 由 Qt 在 ``finished`` 信号后处理，对象生命周期安全。
+        """
         if self._stats_worker is None:
             return
-        self._stats_worker.wait(2000)
+        try:
+            self._stats_worker.progress_info.disconnect(self._on_scan_progress)  # pyrefly: ignore [missing-attribute]
+            self._stats_worker.finished_stats.disconnect(self._on_stats_finished)  # pyrefly: ignore [missing-attribute]
+            self._stats_worker.failed.disconnect(self._on_stats_failed)  # pyrefly: ignore [missing-attribute]
+            self._stats_worker.cancelled.disconnect(self._on_stats_cancelled)  # pyrefly: ignore [missing-attribute]
+        except RuntimeError:
+            # 信号已断开或从未连接，忽略
+            pass
         self._stats_worker.deleteLater()
         self._stats_worker = None
 
     def _cleanup_workers(self) -> None:
-        """清理所有 worker（stats + scan）。"""
+        """清理所有 worker（stats + scan），非阻塞。
+
+        取消/完成/失败回调路径上调用，禁止 ``wait()`` 阻塞主线程——
+        worker 在 emit 终结信号后 ``run()`` 即将退出，主线程 ``wait(2000)``
+        会冻结 UI 2 秒（用户反馈"取消卡死"根因）。改为 disconnect 信号 +
+        ``deleteLater``，让 Qt 在 worker ``finished`` 信号后回收对象；
+        worker 仍持有 ``_scanner``/``_cache`` 引用由 GC 在 ``run()`` 退出后
+        自然释放，``_cache`` 内部 RLock 保护并发访问安全。
+
+        ``cleanup``/``quick_cancel``（窗口关闭/退出）路径仍走 ``wait`` + terminate
+        强制清理，本方法仅用于扫描终结回调路径。
+        """
         if self._worker is not None:
-            self._worker.wait(2000)
+            try:
+                self._worker.progress_info.disconnect(self._on_scan_progress)  # pyrefly: ignore [missing-attribute]
+                self._worker.finished_report.disconnect(self._on_scan_finished)  # pyrefly: ignore [missing-attribute]
+                self._worker.failed.disconnect(self._on_scan_failed)  # pyrefly: ignore [missing-attribute]
+                self._worker.cancelled.disconnect(self._on_scan_cancelled)  # pyrefly: ignore [missing-attribute]
+            except RuntimeError:
+                # 信号已断开或从未连接，忽略
+                pass
             self._worker.deleteLater()
             self._worker = None
         self._cleanup_stats_worker()

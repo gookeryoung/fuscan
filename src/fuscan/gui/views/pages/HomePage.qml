@@ -909,15 +909,13 @@ Item {
                 accent: "secondary"
                 onClicked: folderDialogForAdd.open()
             }
-            // 清空按钮：仅在有任务且无扫描进行时显示，避免误清空运行中任务
-            Button {
+            // 清空按钮：与同行 IconButton 高度一致，danger 风格提示破坏性
+            IconButton {
                 visible: !workspaceController.hasActiveScan && workspaceController.workspaceCount > 0
+                iconSource: "qrc:/icons/delete.svg"
                 text: "清空"
-                flat: true
-                // L3 辅助操作：32px 高度，扁平兜底
-                implicitHeight: 32
-                font.pixelSize: theme.fontSizeSmall
-                palette.buttonText: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                tooltip: "清空所有工作区"
+                accent: "ghost"
                 onClicked: clearConfirmDialog.open()
             }
             Label {

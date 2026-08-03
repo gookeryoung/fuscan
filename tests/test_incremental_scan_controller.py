@@ -57,6 +57,13 @@ class FakeSignal:
     def connect(self, cb: Any) -> None:
         self._callbacks.append(cb)
 
+    def disconnect(self, cb: Any) -> None:
+        """移除已注册回调；未注册时抛 RuntimeError（与 PySide2 一致）。"""
+        try:
+            self._callbacks.remove(cb)
+        except ValueError as exc:
+            raise RuntimeError from exc
+
     def emit(self, payload: Any = None) -> None:
         for cb in self._callbacks:
             cb(payload)

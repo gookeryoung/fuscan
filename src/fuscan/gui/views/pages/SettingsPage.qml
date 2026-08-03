@@ -14,6 +14,9 @@ Item {
     property WhitelistControllerType whitelistController: WhitelistController
     property RulesControllerType rulesController: RulesController
     property WorkspaceControllerType workspaceController: WorkspaceController
+    // 字体列表懒加载标记：首次切到「通用」Tab 时才调 Qt.fontFamilies()
+    // （Windows 数百字体，同步调用阻塞主线程），避免设置页构造期阻塞
+    property bool _fontListLoaded: false
 
     // 白名单导入/导出文件对话框
     Dialogs.FileDialog {
@@ -77,6 +80,17 @@ Item {
             Layout.topMargin: 8
             spacing: 0
             currentIndex: 0
+            // 切到「通用」Tab（索引 3）时懒加载字体列表，避免页面构造期同步阻塞
+            onCurrentIndexChanged: {
+                if (currentIndex === 3 && !settingsPage._fontListLoaded) {
+                    settingsPage._fontListLoaded = true
+                    fontFamilyCombo.model = Qt.fontFamilies()
+                    if (configController.fontFamily) {
+                        var idx = fontFamilyCombo.find(configController.fontFamily)
+                        if (idx >= 0) fontFamilyCombo.currentIndex = idx
+                    }
+                }
+            }
             background: Rectangle {
                 color: "transparent"
                 Rectangle {
@@ -87,7 +101,7 @@ Item {
                 }
             }
             Repeater {
-                model: ["扫描", "忽略目录", "通用", "规则"]
+                model: ["扫描", "忽略目录", "规则", "通用"]
                 TabButton {
                     id: tabBtn
                     text: modelData
@@ -303,7 +317,7 @@ Item {
                                 // 移除 model 条件绑定（null↔extractorModel 切换导致
                                 // contentHeight 变化触发 StackLayout 布局重算循环）。StackLayout
                                 // 已通过 visible 机制控制非当前 Tab 的渲染，无需再用 null 切换。
-                                cacheBuffer: 500
+                                cacheBuffer: 200
                                 model: configController.extractorModel
                                 // 按 category 角色分组，配合 section.delegate 渲染类别头部
                                 section.property: "category"
@@ -698,161 +712,7 @@ Item {
                 }
             }
 
-            // ===== Tab 3: 通用（字体设置） =====
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
-                contentWidth: availableWidth
-                ColumnLayout {
-                    width: settingsStack.width
-                    spacing: 16
-
-                    Label {
-                        text: "字体设置"
-                        font.pixelSize: theme.fontSizeHeading
-                        font.bold: true
-                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                    }
-
-                    // 字体族
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-                        Label {
-                            text: "字体"
-                            font.pixelSize: theme.fontSizeBody
-                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                            Layout.preferredWidth: 80
-                        }
-                        ComboBox {
-                            id: fontFamilyCombo
-                            Layout.fillWidth: true
-                            // 延迟到 Component.onCompleted 再加载字体列表，
-                            // 避免页面首帧构造时 Qt.fontFamilies()（Windows 数百字体）阻塞。
-                            // 默认 model 为空，onCompleted 中赋值后触发 ComboBox 刷新。
-                            // 显示当前配置字体（空串显示"平台默认"）
-                            displayText: configController.fontFamily
-                                ? configController.fontFamily
-                                : "平台默认"
-                            onActivated: {
-                                configController.setFontFamily(fontFamilyCombo.currentText)
-                            }
-                            // 预选当前字体：先加载字体列表再 find，避免空 model 时 find 返回 -1
-                            Component.onCompleted: {
-                                fontFamilyCombo.model = Qt.fontFamilies()
-                                if (configController.fontFamily) {
-                                    var idx = fontFamilyCombo.find(configController.fontFamily)
-                                    if (idx >= 0) fontFamilyCombo.currentIndex = idx
-                                }
-                            }
-                        }
-                        // 清除按钮：恢复平台默认
-                        IconButton {
-                            text: "默认"
-                            tooltip: "恢复平台默认字体"
-                            accent: "ghost"
-                            onClicked: configController.setFontFamily("")
-                        }
-                    }
-
-                    // 字号
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-                        Label {
-                            text: "字号"
-                            font.pixelSize: theme.fontSizeBody
-                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                            Layout.preferredWidth: 80
-                        }
-                        ComboBox {
-                            id: fontSizeCombo
-                            model: [10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24]
-                            displayText: configController.fontSize + " px"
-                            onActivated: {
-                                configController.setFontSize(fontSizeCombo.currentValue)
-                            }
-                            Component.onCompleted: {
-                                var idx = fontSizeCombo.find(configController.fontSize)
-                                if (idx >= 0) fontSizeCombo.currentIndex = idx
-                            }
-                        }
-                        Label {
-                            text: "（基准字号，其他字号基于此计算）"
-                            font.pixelSize: theme.fontSizeCaption
-                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                        }
-                    }
-
-                    // 最小字号
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-                        Label {
-                            text: "最小字号"
-                            font.pixelSize: theme.fontSizeBody
-                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                            Layout.preferredWidth: 80
-                        }
-                        ComboBox {
-                            id: minFontSizeCombo
-                            model: [8, 9, 10, 11, 12, 13, 14, 15, 16]
-                            displayText: configController.minFontSize + " px"
-                            onActivated: {
-                                configController.setMinFontSize(minFontSizeCombo.currentValue)
-                            }
-                            Component.onCompleted: {
-                                var idx = minFontSizeCombo.find(configController.minFontSize)
-                                if (idx >= 0) minFontSizeCombo.currentIndex = idx
-                            }
-                        }
-                        Label {
-                            text: "（小字号下限，避免高 DPI 屏幕显示过小）"
-                            font.pixelSize: theme.fontSizeCaption
-                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                        }
-                    }
-
-                    // 加粗
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-                        Label {
-                            text: "加粗"
-                            font.pixelSize: theme.fontSizeBody
-                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                            Layout.preferredWidth: 80
-                        }
-                        CheckBox {
-                            checked: configController.fontBold
-                            onCheckedChanged: configController.setFontBold(checked)
-                        }
-                    }
-
-                    // 预览
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 60
-                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
-                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                        border.width: 1
-                        radius: theme.radiusMd
-                        Label {
-                            anchors.centerIn: parent
-                            text: "字体预览 ABC 中文 123"
-                            font.family: configController.fontFamily || theme.fontFamily
-                            font.pixelSize: configController.fontSize
-                            font.bold: configController.fontBold
-                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                        }
-                    }
-
-                    Item { Layout.fillHeight: true }
-                }
-            }
-
-            // ===== Tab 4: 规则（含白名单误报抑制，二者均为匹配规则管理） =====
+            // ===== Tab 3: 规则（含白名单误报抑制，二者均为匹配规则管理） =====
             // 白名单与规则都是匹配规则管理，合并为一个 Tab
             ColumnLayout {
                 Layout.fillWidth: true
@@ -1046,7 +906,7 @@ Item {
                     Layout.preferredHeight: 360
                     clip: true
                     interactive: true
-                    cacheBuffer: 500
+                    cacheBuffer: 200
                     model: whitelistController.whitelistEntries
                     // 空状态提示
                     Label {
@@ -1128,6 +988,151 @@ Item {
                     collapsed: false
                 }
             }
+            // ===== Tab 4: 通用（字体设置） =====
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                contentWidth: availableWidth
+                ColumnLayout {
+                    width: settingsStack.width
+                    spacing: 16
+
+                    Label {
+                        text: "字体设置"
+                        font.pixelSize: theme.fontSizeHeading
+                        font.bold: true
+                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    }
+
+                    // 字体族
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Label {
+                            text: "字体"
+                            font.pixelSize: theme.fontSizeBody
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            Layout.preferredWidth: 80
+                        }
+                        ComboBox {
+                            id: fontFamilyCombo
+                            Layout.fillWidth: true
+                            // 字体列表懒加载：默认 model 为空，切到「通用」Tab 时
+                            // 由 settingsTabBar.onCurrentIndexChanged 加载，避免页面
+                            // 构造期同步调用 Qt.fontFamilies()（Windows 数百字体）阻塞主线程
+                            displayText: configController.fontFamily
+                                ? configController.fontFamily
+                                : "平台默认"
+                            onActivated: {
+                                configController.setFontFamily(fontFamilyCombo.currentText)
+                            }
+                        }
+                        // 清除按钮：恢复平台默认
+                        IconButton {
+                            text: "默认"
+                            tooltip: "恢复平台默认字体"
+                            accent: "ghost"
+                            onClicked: configController.setFontFamily("")
+                        }
+                    }
+
+                    // 字号
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Label {
+                            text: "字号"
+                            font.pixelSize: theme.fontSizeBody
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            Layout.preferredWidth: 80
+                        }
+                        ComboBox {
+                            id: fontSizeCombo
+                            model: [10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24]
+                            displayText: configController.fontSize + " px"
+                            onActivated: {
+                                configController.setFontSize(fontSizeCombo.currentValue)
+                            }
+                            Component.onCompleted: {
+                                var idx = fontSizeCombo.find(configController.fontSize)
+                                if (idx >= 0) fontSizeCombo.currentIndex = idx
+                            }
+                        }
+                        Label {
+                            text: "（基准字号，其他字号基于此计算）"
+                            font.pixelSize: theme.fontSizeCaption
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+                    }
+
+                    // 最小字号
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Label {
+                            text: "最小字号"
+                            font.pixelSize: theme.fontSizeBody
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            Layout.preferredWidth: 80
+                        }
+                        ComboBox {
+                            id: minFontSizeCombo
+                            model: [8, 9, 10, 11, 12, 13, 14, 15, 16]
+                            displayText: configController.minFontSize + " px"
+                            onActivated: {
+                                configController.setMinFontSize(minFontSizeCombo.currentValue)
+                            }
+                            Component.onCompleted: {
+                                var idx = minFontSizeCombo.find(configController.minFontSize)
+                                if (idx >= 0) minFontSizeCombo.currentIndex = idx
+                            }
+                        }
+                        Label {
+                            text: "（小字号下限，避免高 DPI 屏幕显示过小）"
+                            font.pixelSize: theme.fontSizeCaption
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+                    }
+
+                    // 加粗
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Label {
+                            text: "加粗"
+                            font.pixelSize: theme.fontSizeBody
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            Layout.preferredWidth: 80
+                        }
+                        CheckBox {
+                            checked: configController.fontBold
+                            onCheckedChanged: configController.setFontBold(checked)
+                        }
+                    }
+
+                    // 预览
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 60
+                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                        border.width: 1
+                        radius: theme.radiusMd
+                        Label {
+                            anchors.centerIn: parent
+                            text: "字体预览 ABC 中文 123"
+                            font.family: configController.fontFamily || theme.fontFamily
+                            font.pixelSize: configController.fontSize
+                            font.bold: configController.fontBold
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        }
+                    }
+
+                    Item { Layout.fillHeight: true }
+                }
+            }
+
         }
     }
 }

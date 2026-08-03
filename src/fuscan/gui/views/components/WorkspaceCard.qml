@@ -34,7 +34,7 @@ Rectangle {
     property bool expanded: false
 
     // 信号：通知 HomePage 切换到结果页 / 统计页
-    // iter-137：移除 defineRulesRequested（规则配置全局化，首页下方直接编辑）
+    // 移除 defineRulesRequested（规则配置全局化，首页下方直接编辑）
     signal viewResultsRequested(string workspaceId)
     signal viewStatsRequested(string workspaceId)
 
@@ -44,7 +44,7 @@ Rectangle {
     border.width: 1
     radius: theme.radiusLg
 
-    // 状态色：根据 statusText 决定（iter-127：与 StatsPage 统一判断逻辑与配色）
+    // 状态色：根据 statusText 决定（与 StatsPage 统一判断逻辑与配色）
     function statusColor() {
         var s = String(statusText || "")
         if (s === "扫描中") return theme.colorWarning
@@ -202,7 +202,7 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             spacing: 12
-            // 收集到的符合文件类型文件数（iter-105 新增）
+            // 收集到的符合文件类型文件数
             Label {
                 text: "<b style='color:#0366D6'>纳入扫描 " + collectedCount + "</b>"
                 textFormat: Text.RichText
@@ -233,7 +233,7 @@ Rectangle {
             spacing: 8
 
             // 左侧：切换目标 + 启动/暂停扫描 + 查看结果
-            // iter-137：原「定义规则」按钮改为「切换目标」（规则配置全局化）
+            // 原「定义规则」按钮改为「切换目标」（规则配置全局化）
             IconButton {
                 iconSource: "qrc:/icons/target.svg"
                 text: "切换目标"
@@ -365,7 +365,7 @@ Rectangle {
                 Layout.fillWidth: true
                 spacing: 8
 
-                // iter-137：展开区移除「切换目标」（已挪到第一行）
+                // 展开区移除「切换目标」（已挪到第一行）
                 IconButton {
                     iconSource: "qrc:/icons/rescan.svg"
                     text: "重新扫描"
@@ -375,7 +375,7 @@ Rectangle {
                     enabled: card.isCompletedState()
                     onClicked: workspaceController.startScan(card.workspaceId)
                 }
-                // iter-125：CSV/JSON/PDF 合并为「导出」按钮 + Menu 格式选择
+                // CSV/JSON/PDF 合并为「导出」按钮 + Menu 格式选择
                 IconButton {
                     iconSource: "qrc:/icons/export_csv.svg"
                     text: "导出"
@@ -451,7 +451,7 @@ Rectangle {
         }
     }
 
-    // ---------- 切换目标对话框（iter-104 任务切换扫描目标） ----------
+    // ---------- 切换目标对话框（任务切换扫描目标） ----------
     Dialog {
         id: editTargetDialog
         title: "切换扫描目标"
@@ -595,7 +595,7 @@ Rectangle {
     signal exportPdfRequested(string workspaceId)
     signal taskSettingsRequested(string workspaceId)
 
-    // ---------- 任务级设置对话框（iter-104 任务专属配置覆盖） ----------
+    // ---------- 任务级设置对话框（任务专属配置覆盖） ----------
     Dialog {
         id: taskSettingsDialog
         title: "任务级设置 — " + card.taskName
@@ -651,14 +651,14 @@ Rectangle {
                     font.pixelSize: theme.fontSizeCaption
                     color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                 }
-                // iter-125：上限改为 cpuCount（与提示一致）
+                // 上限改为 cpuCount（与提示一致）
                 SpinBox {
                     id: taskMaxWorkersSpin
                     from: 1
                     to: Math.max(configController.cpuCount, 1)
                     value: Math.min(taskSettingsDialog.editMaxWorkers, configController.cpuCount)
                     editable: true
-                    // iter-139：用 onValueModified 替代 onValueChanged，仅在用户交互时
+                    // 用 onValueModified 替代 onValueChanged，仅在用户交互时
                     // 写回属性，避免 value 绑定 ↔ onValueChanged 双向触发 binding loop
                     onValueModified: taskSettingsDialog.editMaxWorkers = value
                 }
@@ -673,7 +673,7 @@ Rectangle {
                     font.pixelSize: theme.fontSizeBody
                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                 }
-                // iter-125：动态步进 <50 步 10，50-100 步 25，>100 步 100
+                // 动态步进 <50 步 10，50-100 步 25，>100 步 100
                 SpinBox {
                     id: taskMaxFileSizeSpin
                     from: 1
@@ -686,7 +686,7 @@ Rectangle {
                         if (v < 100) return 25
                         return 100
                     }
-                    // iter-139：用 onValueModified 替代 onValueChanged，避免 binding loop
+                    // 用 onValueModified 替代 onValueChanged，避免 binding loop
                     onValueModified: taskSettingsDialog.editMaxFileSizeMB = value
                 }
             }
@@ -705,7 +705,7 @@ Rectangle {
                     to: 64
                     value: taskSettingsDialog.editMaxDepth
                     editable: true
-                    // iter-139：用 onValueModified 替代 onValueChanged，避免 binding loop
+                    // 用 onValueModified 替代 onValueChanged，避免 binding loop
                     onValueModified: taskSettingsDialog.editMaxDepth = value
                 }
             }
@@ -736,7 +736,7 @@ Rectangle {
         }
 
         onAccepted: {
-            // iter-127：与全局值相同的字段清除覆盖（留空使用全局承诺），
+            // 与全局值相同的字段清除覆盖（留空使用全局承诺），
             // 不同的字段才下发 setTaskOverride，避免任务级配置冗余持久化。
             var keys = ["scan_archives", "max_workers", "max_file_size", "max_depth", "ignore_dirs"]
             for (var i = 0; i < keys.length; i++) {
@@ -781,7 +781,7 @@ Rectangle {
         }
     }
 
-    // ---------- 扫描历史对话框（iter-115） ----------
+    // ---------- 扫描历史对话框 ----------
     Dialog {
         id: historyDialog
         title: "扫描历史 — " + card.taskName

@@ -17,7 +17,7 @@ ApplicationWindow {
     property ThemeController theme: Theme
     property WorkspaceControllerType workspaceController: WorkspaceController
 
-    // iter-124：拦截窗口关闭，先显示退出保存进度 Popup，再异步触发 Qt.quit()
+    // 拦截窗口关闭，先显示退出保存进度 Popup，再异步触发 Qt.quit()
     // 避免 cleanup 阻塞主线程时用户看到「无响应」假象
     onClosing: {
         close.accepted = false  // 阻止默认关闭

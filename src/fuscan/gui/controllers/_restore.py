@@ -1,7 +1,7 @@
 """扫描结果缓存持久化纯函数。
 
 将 :class:`WorkspaceController` 中 ``_save_cached_results`` /
-``_delete_cached_results`` 的纯 I/O 逻辑抽离到模块级（iter-142），便于独立
+``_delete_cached_results`` 的纯 I/O 逻辑抽离到模块级，便于独立
 测试。``WorkspaceController`` 对应方法改为薄包装：解析缓存路径后委托本模块。
 
 公共 API：
@@ -37,7 +37,7 @@ def save_cached_results(
     扫描结束（含取消）后调用，重启后通过 ``_try_load_cached_results`` 恢复。
     持久化失败仅记录日志，不影响主流程。
 
-    iter-135：本次结果无命中但缓存文件中已有非空结果时不覆盖，避免增量扫描
+    本次结果无命中但缓存文件中已有非空结果时不覆盖，避免增量扫描
     回退全量后空结果覆盖之前的完整结果，导致重启后无法恢复且后续增量扫描
     因 ``prev_report.hits`` 为空而无法合并旧命中（恶性循环）。
 

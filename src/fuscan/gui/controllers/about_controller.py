@@ -76,7 +76,7 @@ class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
     # 关于页内容为常量，运行时不变；QML 绑定要求 @Property 声明 NOTIFY，
     # 否则报 "depends on non-NOTIFYable properties" 警告。共用一个信号即可。
     infoChanged = Signal()
-    # iter-139：打开手册/配置目录失败时通知 QML 显示 toast（参数为提示消息）
+    # 打开手册/配置目录失败时通知 QML 显示 toast（参数为提示消息）
     openFailed = Signal(str)
 
     def __init__(self, parent: QObject | None = None) -> None:
@@ -111,7 +111,7 @@ class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def openManual(self) -> None:
         """打开用户手册 PDF（系统默认阅读器）。
 
-        iter-139：失败时通过 :attr:`openFailed` 信号通知 QML 显示 toast，
+        失败时通过 :attr:`openFailed` 信号通知 QML 显示 toast，
         避免用户点击后无任何反馈。Windows 上 ``QDesktopServices.openUrl``
         对含中文路径的本地 PDF 偶发失败，回退到 ``os.startfile``。
         """
@@ -128,7 +128,7 @@ class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """打开配置目录（系统文件管理器）。
 
         方便用户查看 ``config.yaml`` / 规则文件 / 缓存等。
-        iter-139：失败时通过 :attr:`openFailed` 信号通知 QML 显示 toast。
+        失败时通过 :attr:`openFailed` 信号通知 QML 显示 toast。
         """
         if not CONFIG_DIR.exists():
             logger.warning("配置目录不存在: %s", CONFIG_DIR)

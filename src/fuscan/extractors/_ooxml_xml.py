@@ -94,7 +94,7 @@ def _extract_docx_root_paragraphs(root: object) -> list[str]:
     子元素按文档顺序拼接为段落文本。
 
     .. note::
-       iter-111 尝试过两种优化方向均未达预期，已撤销：
+       曾尝试过两种优化方向均未达预期，已撤销：
 
        - ``etree.iterparse`` 流式解析：在 36KB-140KB document.xml 上反慢 0.5x
          （事件分发开销超过收益，DOCX 通常 < 1MB，无大文档内存优势）

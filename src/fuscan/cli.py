@@ -191,7 +191,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
     if ruleset is None:
         return 1
 
-    # --perf 启用 PerfTimer 详细日志（iter-66）
+    # --perf 启用 PerfTimer 详细日志
     if getattr(args, "perf", False):
         from fuscan.perf import set_perf_enabled
 
@@ -236,7 +236,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
     output_report(report, args.output_format, args.output_file)
     _print_summary(report)
 
-    # --perf-save 持久化性能统计到 JSON（iter-66）
+    # --perf-save 持久化性能统计到 JSON
     perf_save: Path | None = getattr(args, "perf_save", None)
     if perf_save and report.stats.perf_summary:
         from fuscan.perf import PerfStats
@@ -396,7 +396,7 @@ def _print_summary(report: ScanReport) -> None:
         report.stats.duration_seconds,
         speed,
     )
-    # 性能统计摘要（iter-66，PerfStats 始终启用）
+    # 性能统计摘要（PerfStats 始终启用）
     perf = report.stats.perf_summary
     if perf:
         total_ms = sum(s.get("total_ms", 0.0) for s in perf.values()) or 1.0

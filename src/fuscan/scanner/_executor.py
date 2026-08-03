@@ -5,7 +5,7 @@
 线程为 daemon=True 且不注册到 ``_threads_queues``，确保进程退出时
 ``_python_exit`` atexit 不会 join worker 导致阻塞。
 
-iter-139 修复进程退出问题：``ScanWorker.run`` 内 ``pool.shutdown(wait=True)``
+修复进程退出问题：``ScanWorker.run`` 内 ``pool.shutdown(wait=True)``
 在 worker 卡在慢 I/O（大文件 read_bytes、慢正则）时会无限阻塞，
 导致 ``finished_report`` 信号不 emit、``ScanController`` 卡在 STATE_SCANNING，
 ``quick_cancel`` 的 ``wait(500)`` 超时后 ``QThread.terminate()`` 也无法杀掉
@@ -83,7 +83,7 @@ class DaemonThreadPoolExecutor(ThreadPoolExecutor):
             t.daemon = True
             t.start()
             self._threads.add(t)  # pyrefly: ignore [missing-attribute]
-            # iter-139：不注册到 _threads_queues——避免 _python_exit atexit 对 worker
+            # 不注册到 _threads_queues——避免 _python_exit atexit 对 worker
             # t.join() 阻塞进程退出。worker 已为 daemon，进程退出时由 OS 回收。
             # 注：_python_exit 也不会对本 worker 的 work_queue put(None) 信号，
             # 但 pool.shutdown(wait=False) 已 put(None)，正常路径 worker 自然退出；

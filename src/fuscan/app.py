@@ -77,7 +77,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # 抑制 cryptography 对 Python 3.8 的弃用警告
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="cryptography")
 
-    # iter-132：抑制 Qt 在 Windows 上访问剪贴板时的 "Retrying to obtain clipboard"
+    # 抑制 Qt 在 Windows 上访问剪贴板时的 "Retrying to obtain clipboard"
     # 警告。该警告由其他应用锁住剪贴板时 Qt 内部重试产生，非代码 bug，仅日志噪音。
     os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.mime=false")
 

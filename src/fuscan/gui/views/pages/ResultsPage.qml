@@ -53,7 +53,7 @@ Item {
             }
         }
 
-        // ---------- iter-112 过滤+排序工具栏 ----------
+        // ---------- 过滤+排序工具栏 ----------
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
@@ -108,7 +108,7 @@ Item {
                 Layout.preferredHeight: 32
                 font.pixelSize: theme.fontSizeBody
                 model: ["默认顺序", "文件路径", "命中数", "严重度"]
-                // iter-137：默认按严重度排序（currentIndex=3）
+                // 默认按严重度排序（currentIndex=3）
                 currentIndex: 3
                 onCurrentIndexChanged: {
                     var field = "default"
@@ -126,7 +126,7 @@ Item {
                 Layout.preferredHeight: 32
                 font.pixelSize: theme.fontSizeBody
                 model: ["升序", "降序"]
-                // iter-137：默认降序（严重 → 轻微）
+                // 默认降序（严重 → 轻微）
                 currentIndex: 1
                 onCurrentIndexChanged: {
                     var field = "default"
@@ -182,14 +182,14 @@ Item {
                     anchors.margins: 8
                     model: workspaceController.currentScanController.resultModel
                     spacing: 4
-                    // iter-131：cacheBuffer 按结果量动态调整。
+                    // cacheBuffer 按结果量动态调整。
                     // 小结果集高 cacheBuffer 提升滚动流畅度；大结果集降低减少内存占用。
                     // 10w 结果 × 56px delegate ≈ 5.6MB 视觉区，cacheBuffer 500 限制预渲染约 9 个
                     cacheBuffer: resultListView.count > 50000 ? 500
                                : resultListView.count > 10000 ? 1000
                                : 2000
                     currentIndex: workspaceController.currentScanController.selectedResultIndex
-                    // iter-151：滚动停止时上报当前可视范围给 Model，启用虚拟化（大结果集才生效）
+                    // 滚动停止时上报当前可视范围给 Model，启用虚拟化（大结果集才生效）
                     property int delegateHeight: 56
                     onMovementEnded: {
                         if (count <= 0 || !visibleArea) return
@@ -210,7 +210,7 @@ Item {
                         }
                     }
 
-                    // 恢复中占位态（iter-128：后台异步加载缓存结果）
+                    // 恢复中占位态（后台异步加载缓存结果）
                     ColumnLayout {
                         anchors.centerIn: parent
                         visible: workspaceController.currentScanController.restoring

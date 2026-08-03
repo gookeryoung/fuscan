@@ -53,7 +53,7 @@ class WpsExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：委托到 DOCX/XLSX/PPTX 提取器。"""
+        """委托到 DOCX/XLSX/PPTX 提取器。"""
         return "委托 DOCX/XLSX/PPTX"
 
     @override
@@ -143,7 +143,7 @@ class WpsExtractor(Extractor):
     def _extract_as_xlsx(self, data: bytes) -> str:
         """以 XLSX 方式提取 WPS 表格文档。
 
-        iter-92 起复用 calamine (Rust + PyO3) 后端，与 XLSX/ODS/XLS 共用。
+        复用 calamine (Rust + PyO3) 后端，与 XLSX/ODS/XLS 共用。
         """
         from fuscan.extractors.spreadsheet import _extract_calamine_workbook
 

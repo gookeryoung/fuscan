@@ -134,7 +134,7 @@ Item {
                     onClicked: {
                         var modeStr = modeIndex === 0 ? "full" : (modeIndex === 1 ? "drive" : "folder")
                         var target = modeIndex === 0 ? "" : (modeIndex === 1 ? selectedDrive : folderRoot)
-                        // iter-138：规则配置已全局化（首页 RulesPanel），新建工作区不再单独配置规则，
+                        // 规则配置已全局化（首页 RulesPanel），新建工作区不再单独配置规则，
                         // 传空规则路径 + 启用内置规则，由全局规则统一管理
                         workspaceController.addWorkspace(taskName, modeStr, target, "[]", true)
                         addTaskPage.resetForm()

@@ -60,7 +60,7 @@ def _extract_context(path: Path, match_text: str) -> str:
     try:
         if not path.exists():
             return ""
-        # iter-127：先 stat 检查大小（O(1)），再 is_text_file（可能读内容），
+        # 先 stat 检查大小（O(1)），再 is_text_file（可能读内容），
         # 避免对超大文件先触发 is_text_file 的内容读取
         size = path.stat().st_size
         if size > _MAX_CONTEXT_FILE_SIZE:
@@ -93,7 +93,7 @@ def _extract_context(path: Path, match_text: str) -> str:
 def build_detail_hits_model(result: ScanResult | None) -> list[dict[str, object]]:
     """构造选中结果的命中详情列表（QML 直接 ListView 绑定）。
 
-    每条命中包含：规则名、严重度文本/色值、上下文（iter-124 起为文件内容
+    每条命中包含：规则名、严重度文本/色值、上下文（文件内容
     上下文，前后各 2 行，匹配行用 ``>>>`` 标记）、匹配文本、匹配条数、
     匹配目标（filename/content/path）、规则描述（供详情面板展示）。
 
@@ -107,7 +107,7 @@ def build_detail_hits_model(result: ScanResult | None) -> list[dict[str, object]
     file_path = result.path
     model: list[dict[str, object]] = []
     for hit in result.hits:
-        # iter-124：实时读取文件内容上下文（非压缩包条目）
+        # 实时读取文件内容上下文（非压缩包条目）
         if is_archive:
             context = hit.detail
         else:
@@ -130,17 +130,17 @@ def build_detail_hits_model(result: ScanResult | None) -> list[dict[str, object]
 def can_replace_result(result: ScanResult | None, ruleset: RuleSet | None) -> bool:  # noqa: ARG001
     """判断当前结果是否可执行替换。
 
-    iter-124：放宽条件——只要选中结果且非压缩包内部条目即可替换
+    放宽条件——只要选中结果且非压缩包内部条目即可替换
     （用户自定义替换文本 ``override_replace_with`` 模式不要求规则
     ``replace=True``）。``ruleset`` 参数保留向后兼容，实际不再要求规则集加载。
 
     :param result: 选中结果
-    :param ruleset: 当前规则集（iter-124 起可为 ``None``，不影响判断）
+    :param ruleset: 当前规则集（可为 ``None``，不影响判断）
     :return: 可替换返回 ``True``
     """
     if result is None or result.archive_path is not None:
         return False
-    # iter-124：用户自定义替换模式不要求规则 replace=True，
+    # 用户自定义替换模式不要求规则 replace=True，
     # 只要命中规则有 match_texts 即可替换（无匹配文本则无法替换）
     return any(hit.match_texts for hit in result.hits)
 
@@ -163,7 +163,7 @@ def replace_selected(
     :param backup_dir_str: 备份目录字符串（``None`` 或空字符串用默认目录）
     :param backup_preserve_relative: 是否保留相对路径备份
     :param last_report_root: 上次扫描报告根路径（用于相对路径计算）
-    :param override_replace_with: 用户自定义替换文本（iter-124）。非空时覆盖
+    :param override_replace_with: 用户自定义替换文本。非空时覆盖
         所有规则的 ``replace_with``，不要求规则 ``replace=True``。默认 ``None``
         走规则驱动模式（要求 ``replace=True`` + ``replace_with``）
     :return: 操作消息字符串
@@ -220,7 +220,7 @@ def move_to_staging(
     4. 调用 :meth:`SkipStore.add` 标记为跳过，后续扫描自动跳过
     5. 返回操作消息供 QML 显示
 
-    iter-133：压缩包内部条目（``archive_path`` 非 None）时，移至暂存的是
+    压缩包内部条目（``archive_path`` 非 None）时，移至暂存的是
     压缩包文件本身（``archive_path``），并标记 ``archive_path`` 为跳过——
     压缩包内含敏感文件时隔离整个压缩包是合理的，且内部条目无法直接复制。
 
@@ -239,7 +239,7 @@ def move_to_staging(
     if result is None:
         return "未选中结果"
 
-    # iter-133：压缩包内部条目时操作 archive_path（压缩包文件本身）
+    # 压缩包内部条目时操作 archive_path（压缩包文件本身）
     source_path = result.archive_path if result.archive_path is not None else result.path
 
     # 计算暂存区隔离目录

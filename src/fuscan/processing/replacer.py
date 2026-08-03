@@ -14,7 +14,7 @@
 仅支持纯文本文件。二进制格式（PDF/DOCX 等）在 :func:`replace_in_file` 入口
 通过扩展名白名单拒绝，避免破坏文件结构。
 
-iter-113 起支持批量替换与撤销：
+支持批量替换与撤销：
 
 - :func:`replace_batch`：对一组 :class:`ScanResult` 批量执行替换，聚合结果
 - :func:`restore_from_backup`：从 ``.bak`` 备份恢复源文件，支持撤销最近替换
@@ -23,10 +23,10 @@ iter-113 起支持批量替换与撤销：
 公共 API：
 
 - :class:`ReplaceResult`：单文件替换结果（成功/失败/提示三类状态）
-- :class:`BatchReplaceResult`：批量替换聚合结果（iter-113）
+- :class:`BatchReplaceResult`：批量替换聚合结果
 - :func:`replace_in_file`：单文件备份+替换的原子操作
-- :func:`replace_batch`：批量替换（iter-113）
-- :func:`restore_from_backup`：从备份撤销替换（iter-113）
+- :func:`replace_batch`：批量替换
+- :func:`restore_from_backup`：从备份撤销替换
 - :func:`is_text_file`：判断文件扩展名是否在可替换的纯文本白名单内
 """
 
@@ -180,7 +180,7 @@ def replace_in_file(  # noqa: PLR0912
     1. 扩展名白名单校验（二进制格式直接拒绝）
     2. 从 ``hits`` 与 ``ruleset`` 中筛选可替换规则：
 
-       - ``override_replace_with`` 非空（用户自定义替换文本，iter-124）：
+       - ``override_replace_with`` 非空（用户自定义替换文本）：
          不检查 ``replace`` 标志，对所有有 ``match_texts`` 的命中执行替换，
          统一使用 ``override_replace_with`` 作为替换文本
        - ``override_replace_with`` 为空（规则驱动模式）：仅替换 ``replace=True``
@@ -197,7 +197,7 @@ def replace_in_file(  # noqa: PLR0912
     :param scan_root: 扫描根目录（用于计算相对路径）
     :param preserve_relative: ``True`` 在备份区保留相对扫描根目录的目录结构；
         ``False`` 仅保留文件名，冲突时追加序号
-    :param override_replace_with: 用户自定义替换文本（iter-124）。非空时覆盖
+    :param override_replace_with: 用户自定义替换文本。非空时覆盖
         所有规则的 ``replace_with``，且不要求规则 ``replace=True``。默认 ``None``
         走规则驱动模式
     :return: :class:`ReplaceResult` 描述操作结果
@@ -209,7 +209,7 @@ def replace_in_file(  # noqa: PLR0912
         )
 
     if override_replace_with is not None and override_replace_with != "":
-        # 用户自定义替换模式（iter-124）：不检查 replace 标志，对所有命中执行替换
+        # 用户自定义替换模式：不检查 replace 标志，对所有命中执行替换
         # 规则集可为 None（仅用于规则名查找，此处构造占位 Rule 供 _apply_replace_text 使用）
         replace_specs: list[tuple[Rule, RuleHit]] = []
         for hit in hits:
@@ -322,7 +322,7 @@ def replace_in_file(  # noqa: PLR0912
     )
 
 
-# ----------------------------- iter-113 批量替换与撤销 -----------------------------
+# ----------------------------- 批量替换与撤销 -----------------------------
 
 
 @dataclass(frozen=True)
@@ -374,7 +374,7 @@ def replace_batch(
     :param backup_root: 备份区根目录
     :param scan_root: 扫描根目录（用于相对路径计算）
     :param preserve_relative: ``True`` 在备份区保留相对目录结构
-    :param override_replace_with: 用户自定义替换文本（iter-124）。非空时覆盖
+    :param override_replace_with: 用户自定义替换文本。非空时覆盖
         所有规则的 ``replace_with``，不要求规则 ``replace=True``。默认 ``None``
     :return: :class:`BatchReplaceResult` 含每个文件的详情
     """

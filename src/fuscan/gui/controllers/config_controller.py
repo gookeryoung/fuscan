@@ -59,7 +59,7 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         return self._config
 
     def get_config_value(self, key: str) -> object:
-        """按 task_override 字段名读取全局配置值（iter-127）。
+        """按 task_override 字段名读取全局配置值。
 
         供 :meth:`WorkspaceController.clearTaskOverride` 在清除任务级覆盖后
         回填全局值到 ScanController。``max_file_size`` 返回字节（与
@@ -164,7 +164,7 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
             set_perf_enabled(value)
             self.save()
 
-    # ----------------------------- 凭证检测（iter-134） -----------------------------
+    # ----------------------------- 凭证检测 -----------------------------
 
     @Property(bool, notify=configChanged)  # pyrefly: ignore [not-callable]
     def entropyEnabled(self) -> bool:
@@ -342,7 +342,7 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str, bool)  # pyrefly: ignore [not-callable]
     def setCategoryEnabled(self, category: str, enabled: bool) -> None:
-        """QML 类别父节点勾选回调：批量设置该类别下所有提取器勾选状态（iter-104）。"""
+        """QML 类别父节点勾选回调：批量设置该类别下所有提取器勾选状态。"""
         self._extractor_model.set_category_enabled(category, enabled)
         self._config.disabled_extractors = self._extractor_model.disabled_extractors()
         self.extractorCountChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -350,7 +350,7 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str, result=int)  # pyrefly: ignore [not-callable]
     def categoryEnabledState(self, category: str) -> int:
-        """返回类别勾选状态（iter-104 父节点三态显示）。
+        """返回类别勾选状态（父节点三态显示）。
 
         :return: 0=全不选, 1=全选, 2=部分选中
         """
@@ -496,7 +496,7 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._config.font_size = 14
         self._config.font_bold = False
         self._config.min_font_size = 12
-        # iter-134：凭证检测重置为默认（启用 + 阈值 4.5）
+        # 凭证检测重置为默认（启用 + 阈值 4.5）
         self._config.entropy_enabled = True
         self._config.entropy_threshold = 4.5
         set_perf_enabled(False)

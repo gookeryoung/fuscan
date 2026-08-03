@@ -5,14 +5,14 @@ import QtQuick.Dialogs 1.3 as Dialogs
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
 
-// 规则面板：全局规则配置区（iter-137）
+// 规则面板：全局规则配置区
 // 从 RulesPage.qml 提取，供 HomePage 内嵌与 RulesPage 独立页共用。
 // 包含：标题栏（标题 + 导入/导出 + 规则数）+ 左右分栏（规则文件列表 + 规则列表）
 Item {
     id: rulesPanel
     property ThemeController theme: Theme
     property RulesControllerType rulesController: RulesController
-    // iter-138：可折叠属性。collapsible=true 时显示展开/收起按钮，
+    // 可折叠属性。collapsible=true 时显示展开/收起按钮，
     // collapsed=true 时仅显示标题栏，主区域隐藏。
     // HomePage 内嵌时启用可折叠（默认收起），RulesPage 独立页保持展开。
     property bool collapsible: false
@@ -33,7 +33,7 @@ Item {
         }
     }
 
-    // iter-122：规则集导入对话框
+    // 规则集导入对话框
     Dialogs.FileDialog {
         id: importFileDialog
         title: "导入规则集"
@@ -47,7 +47,7 @@ Item {
         }
     }
 
-    // iter-122：规则集导出对话框
+    // 规则集导出对话框
     Dialogs.FileDialog {
         id: exportFileDialog
         title: "导出规则集"
@@ -63,7 +63,7 @@ Item {
         }
     }
 
-    // iter-122：导入/导出操作结果通知（Toast 风格）
+    // 导入/导出操作结果通知（Toast 风格）
     Rectangle {
         id: ioToast
         property bool success: false
@@ -98,7 +98,7 @@ Item {
 
         Connections {
             target: rulesController
-            // iter-138：使用 Qt 5.15+ 新语法 function onFoo()，消除
+            // 使用 Qt 5.15+ 新语法 function onFoo()，消除
             // "Implicitly defined onFoo properties in Connections are deprecated" 警告
             function onRulesIoCompleted(ok, msg) {
                 ioToast.success = ok
@@ -122,7 +122,7 @@ Item {
                 color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
             }
             Item { Layout.fillWidth: true }
-            // iter-138：收起态隐藏导入/导出按钮，标题栏更紧凑
+            // 收起态隐藏导入/导出按钮，标题栏更紧凑
             IconButton {
                 text: "导入"
                 tooltip: "从 YAML/JSON 文件导入规则集"
@@ -144,7 +144,7 @@ Item {
                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                 Layout.leftMargin: 8
             }
-            // iter-138：可折叠模式下显示展开/收起按钮
+            // 可折叠模式下显示展开/收起按钮
             IconButton {
                 visible: rulesPanel.collapsible
                 iconSource: rulesPanel.collapsed
@@ -202,7 +202,7 @@ Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
-                        // iter-106 P1：预渲染屏幕外 delegate，避免滚动时重建
+                        // 预渲染屏幕外 delegate，避免滚动时重建
                         cacheBuffer: 500
                         model: rulesController.rulesFileModel
                         currentIndex: rulesController.selectedFileIndex
@@ -213,18 +213,18 @@ Item {
                             // QVariantList of dict 通过 modelData 访问字段
                             text: modelData.fileName
                             font.pixelSize: 12
-                            // iter-138：选中态文字加粗（在 delegate 上设置，contentItem
+                            // 选中态文字加粗（在 delegate 上设置，contentItem
                             // 通过 parent.font 继承，避免在 Label 上同时设 font 与 font.bold
                             // 触发 "Property has already been assigned a value"）
                             font.bold: ListView.isCurrentItem
                             highlighted: ListView.isCurrentItem
-                            // iter-139：文件缺失时禁用选中（仍可点击但视觉提示不可用）
+                            // 文件缺失时禁用选中（仍可点击但视觉提示不可用）
                             enabled: modelData.exists
                             // ItemDelegate 在 Qt Quick Controls 2 不会自动设置
                             // ListView.currentIndex，需在 onClicked 显式同步选中
                             onClicked: rulesFileList.currentIndex = index
                             background: Rectangle {
-                                // iter-138：暗色下 colorBgSelectedDark == colorBgHoverDark 完全无区别，
+                                // 暗色下 colorBgSelectedDark == colorBgHoverDark 完全无区别，
                                 // 选中态改用主色 0.15 透明叠加 + 左侧 3px 色条 + 文字主色加粗，
                                 // 与 hover 态形成明显视觉差异。
                                 color: ListView.isCurrentItem
@@ -261,7 +261,7 @@ Item {
                                     Layout.fillWidth: true
                                     leftPadding: 12
                                 }
-                                // iter-139：缺失文件显示"缺失"标记
+                                // 缺失文件显示"缺失"标记
                                 Rectangle {
                                     visible: !modelData.exists
                                     radius: 4
@@ -348,7 +348,7 @@ Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
-                        // iter-106 P1：预渲染屏幕外 delegate，避免滚动时重建
+                        // 预渲染屏幕外 delegate，避免滚动时重建
                         cacheBuffer: 1000
                         model: rulesController.ruleModel
                         delegate: ItemDelegate {

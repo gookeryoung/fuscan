@@ -61,7 +61,7 @@ class DocxExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：lxml 可用时优先使用，回退 python-docx。"""
+        """lxml 可用时优先使用，回退 python-docx。"""
         return "lxml" if _lxml_available() else "python-docx"
 
     @override
@@ -149,7 +149,7 @@ class PptxExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：lxml 可用时优先使用，回退 python-pptx。"""
+        """lxml 可用时优先使用，回退 python-pptx。"""
         return "lxml" if _lxml_available() else "python-pptx"
 
     @override

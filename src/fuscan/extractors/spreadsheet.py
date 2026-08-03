@@ -3,7 +3,7 @@
 XLSX/XLSM 使用 calamine（Rust + PyO3）提取所有工作表单元格文本，相比
 openpyxl 的纯 Python 逐单元格遍历有 5-10 倍提速，且 Rust 侧执行期间释放
 GIL，避免阻塞 Qt 主线程。ODS 用 ``zipfile`` + ``lxml`` 解析
-``content.xml``（iter-109 移除 odfpy 依赖以兼容 fspack 打包；lxml 比
+``content.xml``（已移除 odfpy 依赖以兼容 fspack 打包；lxml 比
 ElementTree 快 3-5x，不可用时回退 ElementTree）。
 """
 
@@ -42,7 +42,7 @@ def _extract_calamine_workbook(
     """使用 calamine (Rust + PyO3) 提取工作簿所有工作表文本。
 
     支持 XLSX/XLSM/XLSB/XLS 等 Excel 格式。ODS 由 :class:`OdsExtractor`
-    用标准库 ``zipfile`` + ``xml.etree`` 独立解析（iter-109 移除 odfpy
+    用标准库 ``zipfile`` + ``xml.etree`` 独立解析（已移除 odfpy
     依赖）。calamine 在 Rust 侧完成全部解析与单元格遍历，PyO3 边界仅
     一次性返回二维列表，避免 Python 层逐单元格调用带来的 GIL 长期占用。
 
@@ -96,7 +96,7 @@ def _extract_calamine_workbook(
 class XlsxExtractor(Extractor):
     """XLSX 电子表格文本提取器。
 
-    iter-92 起切换到 calamine (Rust + PyO3) 后端，从 T4 慢速降至 T2 快速。
+    切换到 calamine (Rust + PyO3) 后端，从 T4 慢速降至 T2 快速。
     """
 
     def __init__(self, max_rows: int = _MAX_ROWS, max_cols: int = _MAX_COLS) -> None:
@@ -124,7 +124,7 @@ class XlsxExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：python-calamine (Rust + PyO3)。"""
+        """python-calamine (Rust + PyO3)。"""
         return "python-calamine"
 
     @override
@@ -150,7 +150,7 @@ class XlsxExtractor(Extractor):
 class OdsExtractor(Extractor):
     """ODS 电子表格文本提取器（OpenDocument Spreadsheet）。
 
-    iter-109 起改用 ``zipfile`` + ``lxml`` 直接解析 ODS 的 ``content.xml``，
+    改用 ``zipfile`` + ``lxml`` 直接解析 ODS 的 ``content.xml``，
     移除 odfpy 依赖（odfpy 在 PyPI 上仅有 sdist，无预编译 wheel，与 fspack
     的 ``--only-binary=:all:`` 打包策略冲突）。lxml 比 ElementTree 快 3-5x，
     不可用时回退 ElementTree。speed_tier 从 T4 慢速调整为 T2 快速（lxml）
@@ -180,7 +180,7 @@ class OdsExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：lxml 可用时优先使用，回退 ElementTree。"""
+        """lxml 可用时优先使用，回退 ElementTree。"""
         from fuscan.extractors._odf_xml import _LXML_AVAILABLE
 
         return "lxml" if _LXML_AVAILABLE else "ElementTree"

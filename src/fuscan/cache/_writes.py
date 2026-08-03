@@ -359,7 +359,7 @@ def batch_put_results(store: CacheStore, items: list[BatchWriteItem]) -> None:
         # 仅 COMMIT 成功后更新内存缓存
         with store._lru_lock:
             for item in items:
-                # 主动填充 _hit_cache（iter-73）：从 item.hits 构造 result dict，
+                # 主动填充 _hit_cache：从 item.hits 构造 result dict，
                 # 使下次 get_cached_hits 命中内存跳过 SQLite。item.hits 完整时
                 # （如冷缓存首次扫描所有规则）LRU 命中；不完整时（混合路径部分
                 # 规则已缓存）_hit_cache_get 检测 rule_hashes 集合不匹配，走
@@ -381,7 +381,7 @@ def put_extracted_content(store: CacheStore, file_hash: str, content: str, exten
     ``scanned_files`` 中须已存在该 ``file_hash``（外键约束），
     调用方通常先 :func:`register_file` 再调本方法。
 
-    写入后主动填充进程内 LRU（iter-118），使下次 ``get_extracted_content``
+    写入后主动填充进程内 LRU，使下次 ``get_extracted_content``
     命中内存跳过 SQLite 查询。
 
     :param store: 所属 CacheStore 实例
@@ -406,6 +406,6 @@ def put_extracted_content(store: CacheStore, file_hash: str, content: str, exten
             "  cached_at = excluded.cached_at",
             (file_hash, content, extension, now),
         )
-        # 主动填充 LRU（iter-118）：COMMIT 成功后使下次查询命中内存
+        # 主动填充 LRU：COMMIT 成功后使下次查询命中内存
         with store._lru_lock:
             store._extract_cache_put(file_hash, content)

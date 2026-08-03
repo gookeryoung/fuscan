@@ -60,7 +60,7 @@ def get_cached_hits(
     优先命中进程内 LRU 缓存；未命中走 SQLite 查询，结果写回 LRU。
 
     线程安全：LRU 访问经 ``_lru_lock`` 保护，SQLite 查询使用线程本地
-    只读连接并行执行（iter-68）。
+    只读连接并行执行。
 
     :param store: 所属 CacheStore 实例
     :param file_hash: 被扫描文件内容哈希
@@ -137,9 +137,9 @@ def lookup_file_hash(
     用于缓存模式预筛：文件 mtime 与 size 未变时，
     可直接复用已登记的 ``file_hash``，跳过 ``read_bytes`` 与哈希计算。
 
-    线程安全：使用线程本地只读连接，无锁并行（iter-68）。
-    查询优化：JOIN 替代 IN 子查询 + 复合索引（iter-70），消除全表扫描。
-    内存缓存（iter-73）：先查进程内 LRU，命中跳过 SQLite 查询；
+    线程安全：使用线程本地只读连接，无锁并行。
+    查询优化：JOIN 替代 IN 子查询 + 复合索引，消除全表扫描。
+    内存缓存：先查进程内 LRU，命中跳过 SQLite 查询；
     ``register_path`` / ``batch_put_results`` 写入后主动填充 LRU，
     使热缓存二次扫描完全命中内存。
 
@@ -153,7 +153,7 @@ def lookup_file_hash(
     :return: 命中时返回 ``file_hash``（64 字符 hex）；未命中返回 None
     """
     path_str = str(path)
-    # 先查进程内 LRU（iter-73）：热缓存二次扫描时 100% 命中，跳过 SQLite
+    # 先查进程内 LRU：热缓存二次扫描时 100% 命中，跳过 SQLite
     with store._lru_lock:
         cached = store._path_cache_get(path_str, mtime, size)
     if cached is not None:
@@ -186,7 +186,7 @@ def lookup_file_hashes_batch(
 ) -> dict[tuple[Path, float, int], str | None]:
     """批量查询多个 ``(path, mtime, size)`` 对应的 ``file_hash``。
 
-    iter-158：**路径预筛批量查询**。用单条 ``WITH targets(...) VALUES (...)``
+    **路径预筛批量查询**。用单条 ``WITH targets(...) VALUES (...)``
     CTE + JOIN 一次性从 SQLite 取回所有 keys 的 file_hash，取代 N 次
     :func:`lookup_file_hash` 单次查询，减少 90%+ 的 SQL 解析/执行器开销。
     查询结果（包括 None 未命中）同步写回路径预筛 LRU，使后续 worker 中
@@ -274,8 +274,8 @@ def get_extracted_content(store: CacheStore, file_hash: str) -> str | None:
     用于缓存模式：同内容不同路径（如 node_modules 重复依赖）的文件，
     通过 ``file_hash`` 复用提取结果，跳过 ``extract_content_from_bytes``。
 
-    线程安全：使用线程本地只读连接，无锁并行（iter-68）。
-    内存缓存（iter-118）：先查进程内 LRU，命中跳过 SQLite 查询；
+    线程安全：使用线程本地只读连接，无锁并行。
+    内存缓存：先查进程内 LRU，命中跳过 SQLite 查询；
     ``put_extracted_content`` 写入后主动填充 LRU，使重复内容查询
     完全命中内存。
 
@@ -283,7 +283,7 @@ def get_extracted_content(store: CacheStore, file_hash: str) -> str | None:
     :param file_hash: 文件内容哈希
     :return: 命中时返回提取后的纯文本；未命中返回 None
     """
-    # 先查进程内 LRU（iter-118）：node_modules 重复依赖场景下，
+    # 先查进程内 LRU：node_modules 重复依赖场景下，
     # 同一 file_hash 的内容会被查询多次，内存 LRU 跳过 SQLite 查询
     with store._lru_lock:
         cached = store._extract_cache_get(file_hash)

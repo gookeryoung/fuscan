@@ -1,4 +1,4 @@
-"""kreuzberg 加速后端适配层（iter-126）。
+"""kreuzberg 加速后端适配层。
 
 kreuzberg 是基于 Rust 的高性能文档提取库（MIT License），支持 91+ 格式，
 包括 DOC/PPT/RTF/MSG 等 fuscan 当前用纯 Python 解析的格式。
@@ -13,7 +13,7 @@ kreuzberg 是基于 Rust 的高性能文档提取库（MIT License），支持 9
 
 - 磁盘文件通过 :meth:`Extractor.extract` 调用 :func:`extract_text`
 - 压缩包内条目通过 :meth:`Extractor.extract_from_bytes` 调用
-  :func:`extract_text_from_bytes`（iter-127 起支持）
+  :func:`extract_text_from_bytes`
 
 SpeedTier 据 kreuzberg 可用性动态调整：可用时 T2 快速（Rust 核心），
 不可用时保持原档次。

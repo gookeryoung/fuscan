@@ -65,7 +65,7 @@ def _scan_sequential(
 ) -> tuple[int, int, int, int]:
     """单线程顺序扫描，返回 (scanned, matched, errors, matches)。
 
-    iter-160：与 ``_scan_concurrent`` 对齐，引入 ``_progress_emit_batch`` 批处理
+    与 ``_scan_concurrent`` 对齐，引入 ``_progress_emit_batch`` 批处理
     机制，每 N 个文件完成调用一次 ``_emit_progress``（内部仍有双门限节流），
     避免每文件都触发 ``time.perf_counter()`` 与 deque 转换开销。N 取 Scanner
     构造时的 ``_progress_emit_batch``（默认并发=10，顺序=1）。
@@ -83,7 +83,7 @@ def _scan_sequential(
     yield_counter = 0
     emit_counter = 0
     _last_entry_path: str = ""
-    # iter-152：命中结果批次缓冲，达 emit_batch 时一次性 extend 到共享列表
+    # 命中结果批次缓冲，达 emit_batch 时一次性 extend 到共享列表
     batch_match_list: list[tuple[str, str]] = []
     for entry in entries:
         if scanner._check_control():
@@ -104,7 +104,7 @@ def _scan_sequential(
             errors += 1
             scanned += 1
             logger.warning("扫描文件失败 %s", entry.path, exc_info=True)
-        # iter-160：批处理 emit，减少每文件调用 _emit_progress 的开销
+        # 批处理 emit，减少每文件调用 _emit_progress 的开销
         emit_counter += 1
         if emit_counter >= scanner._progress_emit_batch:
             if batch_match_list and scanner._on_progress is not None:
@@ -113,12 +113,12 @@ def _scan_sequential(
             scanner._emit_progress(_last_entry_path, scanned, matched, errors, matches)
             emit_counter = 0
         # GIL 让步：单线程扫描时也定期让出 GIL，避免长时间独占导致 UI 卡死
-        # iter-111：使用实例级 _gil_yield_interval（顺序扫描为 20）
+        # 使用实例级 _gil_yield_interval（顺序扫描为 20）
         yield_counter += 1
         if yield_counter >= scanner._gil_yield_interval:
             yield_counter = 0
             time.sleep(0)
-    # iter-160：尾部补发
+    # 尾部补发
     if batch_match_list and scanner._on_progress is not None:
         scanner._matched_files.extend(batch_match_list)
     if emit_counter > 0 and scanner._on_progress is not None:
@@ -133,7 +133,7 @@ def _scan_concurrent(
 ) -> tuple[int, int, int, int]:
     """并发扫描文件清单，返回 ``(scanned, matched, errors, matches)``。
 
-    iter-71 两阶段架构：阶段 1 已单线程收集 ``entries``，本方法将所有
+    两阶段架构：阶段 1 已单线程收集 ``entries``，本方法将所有
     entry 提交到 ``ThreadPoolExecutor`` 并用 :func:`as_completed` 收集结果。
     相比原流水线模式，先收集再扫描避免了 walk 线程与 worker 线程争抢
     磁盘 I/O，且可对完整清单做全局后缀过滤后再提交，减少无效 future。
@@ -146,7 +146,7 @@ def _scan_concurrent(
 
     命中结果同步收集到 ``scanner._matched_files`` 供进度回调上报。
 
-    iter-139：使用 :class:`DaemonThreadPoolExecutor` 并在 finally 中
+    使用 :class:`DaemonThreadPoolExecutor` 并在 finally 中
     ``shutdown(wait=False)`` 不阻塞主线程，依赖 daemon worker 在进程退出时
     由 OS 回收。原实现 ``shutdown(wait=True)`` 在取消路径下因
     ``_collect_concurrent_results`` 内已 ``shutdown(wait=False)`` 仍会重新
@@ -164,7 +164,7 @@ def _scan_concurrent(
     pool = DaemonThreadPoolExecutor(max_workers=scanner._max_workers)
     try:
         cancelled_in_submit = False
-        # iter-161：并发提交前按路径去重，避免同一文件被重复扫描
+        # 并发提交前按路径去重，避免同一文件被重复扫描
         seen_paths: set[str] = set()
         unique_entries: list[FileEntry] = []
         dup_skipped = 0
@@ -191,7 +191,7 @@ def _scan_concurrent(
             return scanned, matched, errors, matches
         scanned, matched, errors, matches = _collect_concurrent_results(scanner, future_to_entry, results, pool)
     finally:
-        # iter-139：wait=False 不阻塞主线程。DaemonThreadPoolExecutor 的 worker
+        # wait=False 不阻塞主线程。DaemonThreadPoolExecutor 的 worker
         # 为 daemon，进程退出时由 OS 回收；正常完成路径 as_completed 循环已退出，
         # 此时 worker 已空闲，shutdown 仅清理 pool 状态立即返回。
         pool.shutdown(wait=False)
@@ -206,7 +206,7 @@ def _collect_concurrent_results(
 ) -> tuple[int, int, int, int]:
     """阻塞收集 future 结果，返回 ``(scanned, matched, errors, matches)``。
 
-    iter-111 从 :func:`_scan_concurrent` 抽离的子流程，职责单一便于分支数控制。
+    从 :func:`_scan_concurrent` 抽离的子流程，职责单一便于分支数控制。
     内含 GIL 让步（``_gil_yield_interval``）与进度 emit 批处理
     （``_progress_emit_batch``）逻辑：
 
@@ -216,7 +216,7 @@ def _collect_concurrent_results(
       （内部仍有 150ms 节流），减少 ``time.perf_counter()`` 与 deque tuple
       拷贝开销；尾部不足一批的剩余进度补发一次。
 
-    iter-152：命中结果 (path, rule) 逐 tuple append → 批次内累积到
+    命中结果 (path, rule) 逐 tuple append → 批次内累积到
     ``_batch_match_list``，emit 时一次性 ``extend`` 到共享列表，减少
     list.append 的 C-level 调用次数与 Python 层循环（单文件多规则场景下
     可节省 30~50% 的命中聚合 overhead）。
@@ -232,7 +232,7 @@ def _collect_concurrent_results(
     matches = 0
     yield_counter = 0
     emit_counter = 0
-    # iter-152：命中结果批次缓冲，达 emit_batch 时一次性 extend 到共享列表
+    # 命中结果批次缓冲，达 emit_batch 时一次性 extend 到共享列表
     batch_match_list: list[tuple[str, str]] = []
     _last_entry_path: str = ""
     for future in as_completed(future_to_entry):
@@ -250,7 +250,7 @@ def _collect_concurrent_results(
                 matched += 1
                 matches += result.total_match_count
                 if scanner._on_progress is not None:
-                    # iter-152：先累积到批次列表，后续 emit 时一次性 extend
+                    # 先累积到批次列表，后续 emit 时一次性 extend
                     for hit in result.hits:
                         batch_match_list.append((entry_path, hit.rule_name))
             errors += result.errors
@@ -258,10 +258,10 @@ def _collect_concurrent_results(
         except Exception:
             errors += 1
             logger.warning("扫描文件失败 %s", entry_path, exc_info=True)
-        # iter-111：批处理 emit，减少并发高吞吐场景下的进度回调开销
+        # 批处理 emit，减少并发高吞吐场景下的进度回调开销
         emit_counter += 1
         if emit_counter >= scanner._progress_emit_batch:
-            # iter-152：flush 命中批次到共享列表（extend 比多次 append 快）
+            # flush 命中批次到共享列表（extend 比多次 append 快）
             if batch_match_list and scanner._on_progress is not None:
                 scanner._matched_files.extend(batch_match_list)
                 batch_match_list.clear()

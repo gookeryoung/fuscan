@@ -2,7 +2,7 @@
 
 使用 striprtf 库将 RTF 转换为纯文本，保留可见文字内容。
 
-iter-126：kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
+kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
 不可用时回退到 striprtf 纯 Python 实现（T3 中速）。
 """
 
@@ -49,7 +49,7 @@ class RtfExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：kreuzberg 可用时优先，回退 striprtf。"""
+        """kreuzberg 可用时优先，回退 striprtf。"""
         return "kreuzberg" if kreuzberg_available() else "striprtf"
 
     @override
@@ -74,7 +74,7 @@ class RtfExtractor(Extractor):
     def extract_from_bytes(self, data: bytes) -> str:
         """从内存字节提取 RTF 纯文本。
 
-        iter-127：kreuzberg 可用时通过临时文件走 Rust 核心加速（压缩包内条目同样加速），
+        kreuzberg 可用时通过临时文件走 Rust 核心加速（压缩包内条目同样加速），
         不可用时回退到 striprtf 纯 Python 实现。
         """
         if kreuzberg_available():

@@ -16,7 +16,7 @@ Base64/Hex 串）进行兜底识别。基于 Shannon 信息熵度量字符串随
 - :func:`is_high_entropy`：判断单字符串是否为高熵
 - :func:`find_high_entropy_strings`：从文本中提取所有高熵子串
 
-iter-157 性能优化：
+性能优化：
 - 字节频率数组（``array('I', [0]*256)``）替代 ``Counter(data)``，减少对象分配
 - ``math.log2`` 局部绑定，避免每次循环 LOAD_GLOBAL 查找
 - 新增 ``_shannon_entropy_ge(data, threshold)`` 快速路径：累积熵一旦 >= 阈值即
@@ -53,14 +53,14 @@ ENTROPY_RULE_NAME: str = "E001-高熵字符串"
 # 用 finditer 避免一次性 list 占内存
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9+/_-]+")
 
-# iter-157：log2 局部绑定（微基准下减少全局查找约 8~12% 熵计算开销）
+# log2 局部绑定（微基准下减少全局查找约 8~12% 熵计算开销）
 _LOG2 = math.log2
 
 
 def shannon_entropy(data: str) -> float:
     """计算字符串的 Shannon 信息熵（比特/字符）。
 
-    iter-157：对纯 ASCII 字符集（Base64/Hex 占绝大多数场景），使用长度 256
+    对纯 ASCII 字符集（Base64/Hex 占绝大多数场景），使用长度 256
     的字节频率数组替代 ``Counter(data)``，减少 dict/Counter 的分配与 hash 开销；
     同时 ``_LOG2`` 局部绑定避免全局查找。对长字符串（>1024 字符）仍退化为
     Counter，以兼顾 Unicode 文本的正确性。
@@ -71,7 +71,7 @@ def shannon_entropy(data: str) -> float:
     if not data:
         return 0.0
     length = len(data)
-    # iter-157 快速路径：字符均为 ASCII（ord(ch) < 256）且长度 <= 4096，用数组计频
+    # 快速路径：字符均为 ASCII（ord(ch) < 256）且长度 <= 4096，用数组计频
     if length <= 4096:
         # 先检测是否全 ASCII（ord < 256）。Base64/Hex 必然满足，自然语言大概率也满足
         ascii_ok = True
@@ -106,7 +106,7 @@ def shannon_entropy(data: str) -> float:
 def _shannon_entropy_ge(data: str, threshold: float) -> bool:  # noqa: PLR0912
     """快速判断 ``shannon_entropy(data) >= threshold``。
 
-    iter-157：**提前终止**与**小 token 快速路径**。
+    **提前终止**与**小 token 快速路径**。
     - 长度 < 256 字符的小 token（绝大多数 Base64/Hex 密钥）直接调
       :func:`shannon_entropy` 精确计算（数组路径开销极低，比分块多次重算更快）。
     - 长度 >= 256 字符的大 token，按 64 字节块累加计数+块级熵检查，高熵 token
@@ -182,7 +182,7 @@ def is_high_entropy(
 ) -> bool:
     """判断字符串是否为高熵（疑似密钥/令牌）。
 
-    iter-157：先走 ``_shannon_entropy_ge`` 快速路径，命中即返回 True，无需精确
+    先走 ``_shannon_entropy_ge`` 快速路径，命中即返回 True，无需精确
     熵值；仅在快速路径未命中时精确计算。对常见 Base64 高熵串节省 20~40% 开销。
 
     :param data: 待判断的字符串
@@ -206,7 +206,6 @@ def find_high_entropy_strings(
     对每个长度 >= ``min_length`` 的 token 计算熵，保留熵 >= ``threshold`` 的项。
     结果按出现顺序排列，每个 token 至多出现一次（同一 token 重复出现仅记录首次）。
 
-    iter-157：
     - 先用 ``_shannon_entropy_ge(token, threshold)`` 快速预筛，90% 的低熵 token
       在预筛阶段被淘汰（无需精确算熵）
     - 仅对预筛通过的 token，才调用 ``shannon_entropy`` 算精确熵用于返回结果
@@ -227,7 +226,7 @@ def find_high_entropy_strings(
             continue
         if token in seen:
             continue
-        # iter-157 快速预筛：大多数低熵 token 在此直接淘汰，无需精确算熵
+        # 快速预筛：大多数低熵 token 在此直接淘汰，无需精确算熵
         if not _shannon_entropy_ge(token, threshold):
             continue
         # 精确算熵（返回结果给调用方展示用）

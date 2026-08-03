@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 _LEAF_TYPES = {"filename", "content", "path"}
 _COMPOSITE_TYPES = {"and", "or", "not"}
 
-# iter-122：规则集版本兼容性检查
+# 规则集版本兼容性检查
 # 当前支持的规则集版本；导入时校验，不兼容版本抛出 RuleParseError
 SUPPORTED_VERSIONS: frozenset[str] = frozenset({"1.0"})
 
@@ -45,7 +45,7 @@ def parse_match(data: Any, dedup: dict[int, MatchSpec] | None = None) -> MatchSp
     """从字典构造匹配条件。
 
     :param data: 匹配条件字典，必须包含 ``type`` 字段
-    :param dedup: iter-162 AST 共享节点去重。相同 (hashable_key) 结构的
+    :param dedup: AST 共享节点去重。相同 (hashable_key) 结构的
         ``MatchSpec`` 在同一个 ``parse_ruleset`` 执行中共享同一对象，减少
         内存占用 + 加速 ``build_matcher`` 中 `is`/`id` 快速路径判断。为
         ``None`` 时不启用去重（等价于旧行为）。
@@ -72,7 +72,7 @@ def _parse_leaf(
     *,
     dedup: dict[int, MatchSpec] | None,
 ) -> LeafMatch:
-    """解析叶子匹配条件（filename/content/path）。iter-162：启用 dedup 时，同键 LeafMatch 共享对象。"""
+    """解析叶子匹配条件（filename/content/path）。启用 dedup 时，同键 LeafMatch 共享对象。"""
     target = MatchTarget(match_type)
     mode_raw = data.get("mode")
     if not mode_raw:
@@ -124,7 +124,7 @@ def _parse_composite(
     *,
     dedup: dict[int, MatchSpec] | None,
 ) -> MatchSpec:
-    """解析逻辑组合匹配条件（and/or/not）。iter-162：同结构组合器共享对象。"""
+    """解析逻辑组合匹配条件（and/or/not）。同结构组合器共享对象。"""
     description = str(data.get("description", ""))
     if match_type in ("and", "or"):
         children_raw = data.get("children")
@@ -168,7 +168,7 @@ def parse_rule(data: Any, *, dedup: dict[int, MatchSpec] | None = None) -> Rule:
     """从字典构造单条规则。
 
     :param data: 规则字典，必须包含 ``name`` 和 ``match``
-    :param dedup: iter-162 AST 共享节点去重。为 ``None`` 时不启用。
+    :param dedup: AST 共享节点去重。为 ``None`` 时不启用。
     :return: Rule 实例
     :raises RuleParseError: 数据结构不合法
     """
@@ -193,7 +193,7 @@ def parse_rule(data: Any, *, dedup: dict[int, MatchSpec] | None = None) -> Rule:
         raise RuleParseError(f"规则 {name!r} 未知严重等级 {severity_raw!r}，合法值: {valid}") from exc
 
     # file_extensions 已移除：旧规则文件中的该字段被静默忽略，文件后缀过滤由全局 Config 统一管理。
-    # replace/replace_with：可选字段，控制命中内容替换行为（iter-93）。
+    # replace/replace_with：可选字段，控制命中内容替换行为。
     # replace 为 True 时启用替换；replace_with 缺省为空字符串，触发替换时提示用户补充。
     replace = bool(data.get("replace", False))
     replace_with = str(data.get("replace_with", ""))
@@ -219,7 +219,7 @@ def parse_ruleset(data: Any) -> RuleSet:
 
     version = str(data.get("version", "1.0"))
 
-    # iter-122：版本兼容性检查
+    # 版本兼容性检查
     if version not in SUPPORTED_VERSIONS:
         supported = ", ".join(sorted(SUPPORTED_VERSIONS))
         raise RuleParseError(f"不支持的规则集版本 {version!r}，当前支持: {supported}。请升级 fuscan 或降级规则集格式。")
@@ -239,7 +239,7 @@ def parse_ruleset(data: Any) -> RuleSet:
     rules_raw = data.get("rules", [])
     if not isinstance(rules_raw, Sequence) or isinstance(rules_raw, (str, bytes)):
         raise RuleParseError("rules 必须是列表")
-    # iter-162：AST 共享节点去重（仅单次 parse_ruleset 生命周期，避免长期内存占用）
+    # AST 共享节点去重（仅单次 parse_ruleset 生命周期，避免长期内存占用）
     dedup: dict[int, MatchSpec] = {}
     rules = tuple(parse_rule(item, dedup=dedup) for item in rules_raw)
 

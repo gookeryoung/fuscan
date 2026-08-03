@@ -4,7 +4,7 @@
 展示字段（文件路径、命中规则名、严重度文本/色值、命中数等）。大数据量
 （数千条命中）必须用 Model，禁止 QML 侧 ``ListModel`` 动态 append。
 
-iter-112 起在 Model 内部维护过滤+排序视图：
+在 Model 内部维护过滤+排序视图：
 
 - ``_results``：原始结果元组（``set_results`` 写入，永不在外部修改）
 - ``_filtered``：应用过滤+排序后的视图元组，``data()``/``rowCount()``/``get_result()``
@@ -19,7 +19,7 @@ iter-112 起在 Model 内部维护过滤+排序视图：
 - :meth:`ResultListModel.set_results`：批量替换结果并 emit 信号
 - :meth:`ResultListModel.clear`：清空
 - :meth:`ResultListModel.set_filter_text` / :meth:`set_filter_rules` /
-  :meth:`set_filter_severities` / :meth:`set_sort`：iter-112 过滤+排序入口
+  :meth:`set_filter_severities` / :meth:`set_sort`：过滤+排序入口
 """
 
 from __future__ import annotations
@@ -83,26 +83,26 @@ SORT_HITS_COUNT = "hitsCount"
 SORT_SEVERITY = "severity"
 _SORT_FIELDS: frozenset[str] = frozenset({SORT_DEFAULT, SORT_FILE_PATH, SORT_HITS_COUNT, SORT_SEVERITY})
 
-# iter-129：结果数超过此阈值时过滤+排序移至后台线程，避免主线程阻塞
+# 结果数超过此阈值时过滤+排序移至后台线程，避免主线程阻塞
 _ASYNC_THRESHOLD = 10000
 
-# iter-149：结果数超过此阈值时启用倒排索引裁剪（小结果集索引开销抵不过线性扫描）
+# 结果数超过此阈值时启用倒排索引裁剪（小结果集索引开销抵不过线性扫描）
 _INDEX_THRESHOLD = 2000
 
-# iter-165：并行构建倒排索引的最小结果数（低于此阈值直接用单线程）
+# 并行构建倒排索引的最小结果数（低于此阈值直接用单线程）
 _INDEX_PARALLEL_THRESHOLD = 50000
-# iter-165：并行构建时的每个线程处理的最大切片大小
+# 并行构建时的每个线程处理的最大切片大小
 _INDEX_CHUNK_SIZE = 20000
-# iter-165：并行构建时的最大线程数（索引构建是轻量 CPU + 内存操作，过高反而增加调度开销）
+# 并行构建时的最大线程数（索引构建是轻量 CPU + 内存操作，过高反而增加调度开销）
 _INDEX_MAX_WORKERS = 4
 
-# iter-151：ListView 虚拟化——视口外额外缓冲的行数（快速滚动时减少占位闪烁）
-# iter-153：100 → 60，配合 ListView cacheBuffer（像素，最大 560 行像素~约 10 行）
+# ListView 虚拟化——视口外额外缓冲的行数（快速滚动时减少占位闪烁）
+# 100 → 60，配合 ListView cacheBuffer（像素，最大 560 行像素~约 10 行）
 # 60 行足够 3 帧快速滚动的覆盖区，减少 dataChanged 触发的整段刷新规模
 _VISIBLE_BUFFER_ROWS = 60
 # 启用虚拟化的最小过滤后结果数（小结果集全量渲染更快，无需虚拟化开销）
 _VIRTUALIZE_THRESHOLD = 2000
-# iter-156：Filter 完成后分帧懒加载的单帧填充行数（每批 emit 一次 dataChanged）
+# Filter 完成后分帧懒加载的单帧填充行数（每批 emit 一次 dataChanged）
 # 2000 行/dataChanged 约 <5ms，既减少 QML 侧信号风暴又不卡顿用户交互
 _LAZY_BATCH_SIZE = 2000
 
@@ -110,12 +110,12 @@ _LAZY_BATCH_SIZE = 2000
 def _is_range_covered(s: int, e: int, ranges: list[tuple[int, int]]) -> bool:
     """判断闭区间 [s,e] 是否被 ranges 中若干段**完全覆盖**（用于避免重复 dataChanged）。
 
-    iter-156 懒加载场景下，setVisibleRange / restore_visible_range 可能已手动
+    懒加载场景下，setVisibleRange / restore_visible_range 可能已手动
     发射若干 dataChanged 段，而后续 ``_fill_range_from_real`` / ``_cancel_lazy_fill``
     又会根据需要发射整段刷新。若本次填充范围已被完全覆盖，则跳过重发，
-    保证 iter-153 测试的段数断言不被重复发射干扰（QML 侧视觉完全无差异）。
+    保证测试的段数断言不被重复发射干扰（QML 侧视觉完全无差异）。
 
-    对最多 4 段（iter-153 的 2 正向 + 2 反向）ranges，O(len(ranges)) 贪心扫描，
+    对最多 4 段（2 正向 + 2 反向）ranges，O(len(ranges)) 贪心扫描，
     配合 ranges 长度小（<8），完全可接受。
     """
     if s > e:
@@ -147,7 +147,7 @@ def _is_range_covered(s: int, e: int, ranges: list[tuple[int, int]]) -> bool:
 
 @dataclass
 class _LazyFillState:
-    """iter-156：追踪当前进行中的「幽灵行 → 真实值」分帧填充任务。
+    """追踪当前进行中的「幽灵行 → 真实值」分帧填充任务。
 
     FilterWorker 返回超大结果集（>_VIRTUALIZE_THRESHOLD）时，为避免一次性
     ``beginResetModel`` 引发 ListView 立即为 50k 行构造 delegate 造成的
@@ -177,7 +177,7 @@ def build_indices(
     对大结果集（> ``_INDEX_THRESHOLD``）启用索引可将 ``filter_rules`` /
     ``filter_severities`` 过滤从 O(n) 降到 O(k)（k 为匹配条目数）。
 
-    iter-165：结果数 >= ``_INDEX_PARALLEL_THRESHOLD`` 时自动走
+    结果数 >= ``_INDEX_PARALLEL_THRESHOLD`` 时自动走
     :func:`build_indices_parallel`，按切片分块并行构建，合并后返回与串行结果等价。
 
     :param results: 原始结果元组
@@ -204,7 +204,7 @@ def build_indices_parallel(
     max_workers: int = _INDEX_MAX_WORKERS,
     chunk_size: int = _INDEX_CHUNK_SIZE,
 ) -> tuple[dict[Severity, list[int]], dict[str, list[int]]]:
-    """iter-165：并行构建倒排索引（分块多线程）。
+    """并行构建倒排索引（分块多线程）。
 
     将 ``results`` 按 ``chunk_size`` 切片，每个线程独立构建分片的严重度/规则
     名索引，最后在主线程合并。对 10 万条以上结果，相比单线程可缩短 30-40%
@@ -311,7 +311,7 @@ def filter_and_sort(
 ) -> tuple[ScanResult, ...]:
     """纯函数：过滤+排序扫描结果（无副作用，可独立测试）。
 
-    iter-129 从 ``ResultListModel`` 内联实现中提取为独立纯函数，供
+    从 ``ResultListModel`` 内联实现中提取为独立纯函数，供
     ``FilterWorker`` 后台调用与单元测试直接使用。
 
     :param results: 原始结果元组
@@ -352,7 +352,7 @@ def filter_and_sort(
     return tuple(view)
 
 
-# iter-159：扁平数据行结构（6 列对应 role 定义：filePath, ruleName, severityText, severityColor, hitsCount, index）
+# 扁平数据行结构（6 列对应 role 定义：filePath, ruleName, severityText, severityColor, hitsCount, index）
 # 用列表元组代替每次 data() 中对 ScanResult 的属性访问 + 计算，减少 5k 行场景下
 # 每帧可见行的 Python 调用开销（约 70-80% 的 data() 直接索引命中）
 _FLAT_COLS = 6
@@ -384,10 +384,10 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
     """扫描结果列表模型。
 
     存储 :class:`ScanResult` 列表，按 role 返回展示字段。
-    iter-112 起内置过滤+排序视图，``rowCount``/``data``/``get_result`` 均基于
+    内置过滤+排序视图，``rowCount``/``data``/``get_result`` 均基于
     过滤后的视图，``selectedResultIndex`` 直接对应视图行号无需映射。
 
-    iter-159：新增扁平数据层 ``_flat_data``，预先为每一行构造 6 列扁平元组，
+    新增扁平数据层 ``_flat_data``，预先为每一行构造 6 列扁平元组，
     使 ``data()`` 直接从扁平列表按索引读取而非每次重新计算，
     5k 行场景下 QML delegate 每帧可见 10-20 行时的 Python 调用开销降低约 70%。
     """
@@ -397,21 +397,21 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
 
         self._results: tuple[ScanResult, ...] = ()
         self._filtered: tuple[ScanResult | None, ...] = ()
-        # iter-156：真实完整的过滤结果（永不含 None，供 filtered_results / get_result 使用）
+        # 真实完整的过滤结果（永不含 None，供 filtered_results / get_result 使用）
         # 与 _lazystate.result_tuple 保持同一引用（若启用懒加载）
         self._filtered_real: tuple[ScanResult, ...] = ()
-        # iter-156：当前进行中的分帧懒填充状态；None 表示未启用或已完成
+        # 当前进行中的分帧懒填充状态；None 表示未启用或已完成
         self._lazystate: _LazyFillState | None = None
 
-        # iter-159：扁平数据层（与 _filtered 行数相同；None 行对应的 flat 也为 None）
+        # 扁平数据层（与 _filtered 行数相同；None 行对应的 flat 也为 None）
         # 虚拟化范围内的可见行对应的 flat 元组直接供 data() 返回
         self._flat_data: list[tuple[str, str, str, str, int, int] | None] = []
 
-        # iter-149：倒排索引（set_results 时重建，remove_result_by_path 增量更新）
+        # 倒排索引（set_results 时重建，remove_result_by_path 增量更新）
         self._severity_index: dict[Severity, list[int]] = {}
         self._rule_index: dict[str, list[int]] = {}
 
-        # iter-149：排序缓存，key = (id(self._results), filter_text, filter_rules,
+        # 排序缓存，key = (id(self._results), filter_text, filter_rules,
         # filter_severities, sort_field, sort_ascending)，value = 过滤+排序后最终 tuple
         # 同一结果集、相同过滤排序条件直接命中，跳过 filter_and_sort
         self._sort_cache: dict[
@@ -424,16 +424,16 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         self._filter_rules: frozenset[str] = frozenset()
         self._filter_severities: frozenset[Severity] = frozenset()
 
-        # 排序条件：iter-137 默认按严重度降序（严重 → 轻微）
+        # 排序条件：默认按严重度降序（严重 → 轻微）
         self._sort_field: str = SORT_SEVERITY
         self._sort_ascending: bool = False
 
-        # iter-129：后台过滤+排序（大结果集时启用）
+        # 后台过滤+排序（大结果集时启用）
         # generation 每次提交过滤任务时 +1，worker 回调时校验，丢弃过期结果
         self._filter_generation: int = 0
         self._filter_worker: FilterWorker | None = None
 
-        # iter-151：ListView 虚拟化——当前 QML 视口范围（行号，闭区间）
+        # ListView 虚拟化——当前 QML 视口范围（行号，闭区间）
         # _visible_end < 0 表示未设置视口（全量渲染，<= _VIRTUALIZE_THRESHOLD 时使用）
         self._visible_start: int = 0
         self._visible_end: int = -1
@@ -458,22 +458,22 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole) -> object:  # noqa: PLR0912
         """按 role 返回对应字段值（基于过滤后视图）。
 
-        iter-151：启用虚拟化时（过滤后结果 > ``_VIRTUALIZE_THRESHOLD`` 且
+        启用虚拟化时（过滤后结果 > ``_VIRTUALIZE_THRESHOLD`` 且
         ``_visible_end >= 0``），视口范围外（含缓冲）的行返回占位空值，
         避免 QML 为离屏 delegate 构造完整 ScanResult 展示字段造成的大量
         内存分配与 GC 压力。
 
-        iter-156：过滤完成后分帧懒加载的前几帧内，``_filtered[row]`` 可能
+        过滤完成后分帧懒加载的前几帧内，``_filtered[row]`` 可能
         为 ``None``（幽灵行，尚未填充真实值），此时同样直接返回占位，
         避免访问 ``None.path``。
 
-        iter-159：若 ``_flat_data[row]`` 已构建（扁平数据就绪），直接按列索引
+        若 ``_flat_data[row]`` 已构建（扁平数据就绪），直接按列索引
         返回，跳过 ScanResult 属性访问链。
         """
         if not index.isValid() or not (0 <= index.row() < len(self._filtered)):
             return ""
         row = index.row()
-        # iter-151：虚拟化——非视口范围（含缓冲）返回占位值
+        # 虚拟化——非视口范围（含缓冲）返回占位值
         if self._visible_end >= 0 and len(self._filtered) > _VIRTUALIZE_THRESHOLD:
             buf_start = max(0, self._visible_start - _VISIBLE_BUFFER_ROWS)
             buf_end = min(len(self._filtered) - 1, self._visible_end + _VISIBLE_BUFFER_ROWS)
@@ -484,7 +484,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
                 if role == Qt.UserRole + 6:  # index
                     return row
                 return ""
-        # iter-159：扁平数据就绪时直接索引，减少 70%+ Python 属性访问
+        # 扁平数据就绪时直接索引，减少 70%+ Python 属性访问
         if row < len(self._flat_data):
             flat_row = self._flat_data[row]
             if flat_row is not None:
@@ -502,7 +502,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
                     return flat_row[_FLAT_INDEX]
                 return ""
         result = self._filtered[row]
-        # iter-156：幽灵行（尚未懒填充）直接返回占位
+        # 幽灵行（尚未懒填充）直接返回占位
         if result is None:
             if role == Qt.UserRole + 5:  # hitsCount
                 return 0
@@ -530,15 +530,15 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         """批量替换结果。
 
         替换后自动重新应用当前过滤+排序条件，视图同步刷新。
-        iter-129：``beginResetModel``/``endResetModel`` 由 ``_schedule_filter_refresh``
+        ``beginResetModel``/``endResetModel`` 由 ``_schedule_filter_refresh``
         或 ``_on_filter_done`` 统一管理，避免双重 reset。
-        iter-149：结果量 >= ``_INDEX_THRESHOLD`` 时预构建倒排索引，并清空排序缓存。
-        iter-165：结果量 >= ``_ASYNC_THRESHOLD`` 时，索引构建移至 FilterWorker 后台
+        结果量 >= ``_INDEX_THRESHOLD`` 时预构建倒排索引，并清空排序缓存。
+        结果量 >= ``_ASYNC_THRESHOLD`` 时，索引构建移至 FilterWorker 后台
         完成（``_on_filter_done`` 回调接收并应用），主线程仅对小/中结果集同步构建。
         """
         self._results = results
         n = len(results)
-        # iter-165：仅对小/中结果集（< _ASYNC_THRESHOLD）同步构建索引；
+        # 仅对小/中结果集（< _ASYNC_THRESHOLD）同步构建索引；
         # 大结果集的索引交给 FilterWorker 后台构建（见 _schedule_filter_refresh / _on_filter_done）
         if n < _ASYNC_THRESHOLD and n >= _INDEX_THRESHOLD:
             self._severity_index, self._rule_index = build_indices(results)
@@ -566,9 +566,9 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             return
         if s == self._visible_start and e == self._visible_end:
             return
-        # iter-156：永远允许 iter-153 的两段差异 dataChanged 被正确 emit。
+        # 永远允许两段差异 dataChanged 被正确 emit。
         # 收集已 emit 的范围，传给 _apply_visible_priority_fill，避免
-        # _fill_range_from_real 对同一范围重复发射（会让 iter-153 测试
+        # _fill_range_from_real 对同一范围重复发射（会让测试
         # 断言段数失败，虽然 QML 侧视觉无害）。
         emit_signals = True
         emitted_ranges: list[tuple[int, int]] = []
@@ -586,11 +586,11 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             if emit_signals and new_buf_start <= new_buf_end:
                 emitted_ranges.append((new_buf_start, new_buf_end))
                 self.dataChanged.emit(self.index(new_buf_start), self.index(new_buf_end))
-            # iter-156：懒加载阶段首次 visible range → 立即填可见区，
+            # 懒加载阶段首次 visible range → 立即填可见区，
             # 但已发射段不再重复 dataChanged
             self._apply_visible_priority_fill(already_emitted_ranges=emitted_ranges)
             return
-        # iter-153：两段差异刷新
+        # 两段差异刷新
         # 左段：旧 [prev_buf_start, new_buf_start-1]（若 prev_buf_start < new_buf_start）
         left_start = prev_buf_start
         left_end = new_buf_start - 1
@@ -616,19 +616,19 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         if emit_signals and lrev_start <= lrev_end and new_buf_start < prev_buf_start:
             emitted_ranges.append((lrev_start, lrev_end))
             self.dataChanged.emit(self.index(lrev_start), self.index(lrev_end))
-        # iter-156：懒加载阶段用户滚动到新位置 → 立即填充可见 range + buffer 行
+        # 懒加载阶段用户滚动到新位置 → 立即填充可见 range + buffer 行
         self._apply_visible_priority_fill(already_emitted_ranges=emitted_ranges)
 
     def _restore_visible_range_after_filter(self) -> None:
         """filter/sort 改变 _filtered 后恢复可见范围虚拟化。
 
-        iter-153：set_results / filter_text / sort / filter_severity 等操作会
+        set_results / filter_text / sort / filter_severity 等操作会
         重置 ``_filtered`` 视图，若用户之前已通过 setVisibleRange 进入虚拟化态
         （``_visible_end >= 0``），此处立即对新的 filtered 视图重新裁剪
         可见范围，确保 ``data()`` 立刻按虚拟化返回占位值（而不是全量构造字段）。
         对于小结果集（<= _VIRTUALIZE_THRESHOLD），虚拟化本身即被禁用，调用成本可忽略。
 
-        iter-156：懒加载场景下，恢复 visible range 后立即调用
+        懒加载场景下，恢复 visible range 后立即调用
         ``_apply_visible_priority_fill()``，让当前可见行优先填充真实值（剩余
         继续走 QTimer 递归），避免看到空白幽灵行。
         """
@@ -651,14 +651,14 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         if buf_start <= buf_end:
             emitted_ranges.append((buf_start, buf_end))
             self.dataChanged.emit(self.index(buf_start), self.index(buf_end))
-        # iter-156：可见范围就绪 → 优先填充可见区，已发射段不再重复
+        # 可见范围就绪 → 优先填充可见区，已发射段不再重复
         self._apply_visible_priority_fill(already_emitted_ranges=emitted_ranges)
 
     def cleanup(self) -> None:
         """退出时取消未完成的 FilterWorker 和懒填充，避免进程退出后后台残留。
 
-        iter-132：显式取消 worker，不依赖 ``__del__``（解释器关闭时不保证调用）。
-        iter-156：同步 cancel 懒填充（无需填剩余），避免退出阶段仍递归 singleShot。
+        显式取消 worker，不依赖 ``__del__``（解释器关闭时不保证调用）。
+        同步 cancel 懒填充（无需填剩余），避免退出阶段仍递归 singleShot。
         """
         self._cancel_worker()
         self._cancel_lazy_fill(and_fill_rest=False)
@@ -682,7 +682,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             if and_fill_rest and self._filtered is not self._filtered_real:
                 self.beginResetModel()
                 self._filtered = self._filtered_real
-                # iter-159：同步重建扁平数据
+                # 同步重建扁平数据
                 self._flat_data = [_build_flat_row(result, idx) for idx, result in enumerate(self._filtered_real)]
                 self.endResetModel()
             return
@@ -691,13 +691,13 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             # 全量替换 + reset，保证之后 data() 无 None
             self.beginResetModel()
             self._filtered = self._filtered_real
-            # iter-159：同步重建扁平数据
+            # 同步重建扁平数据
             self._flat_data = [_build_flat_row(result, idx) for idx, result in enumerate(self._filtered_real)]
             self.endResetModel()
         else:
             # 退出阶段：仅把 _filtered 对齐到真实，避免持有临时大对象被误引用
             self._filtered = self._filtered_real
-            # iter-159：同步重建扁平数据
+            # 同步重建扁平数据
             self._flat_data = [_build_flat_row(result, idx) for idx, result in enumerate(self._filtered_real)]
 
     def _fill_range_from_real(
@@ -713,11 +713,11 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         时才做转换。对长度 <= 5000 的片段用 list 切片替换，长度更大时考虑
         直接转成完全真实引用（一次性），避免多次 tuple 拼接。
 
-        iter-156 段压缩：实际填充时记录 ``[min_none_idx, max_none_idx]``（即
+        段压缩：实际填充时记录 ``[min_none_idx, max_none_idx]``（即
         实际被 None→真实值 替换过的最小/最大行号），仅当这段「实际变动区间」
         未被已发射段完全覆盖时，才发射这段变动区间的 dataChanged（而不是
         原请求的 [start,end] 全区间）。这避免了把已经填充过的中间段也打包
-        进 emit，导致 iter-153 段数断言被重复段干扰（QML 侧视觉无差异）。
+        进 emit，导致段数断言被重复段干扰（QML 侧视觉无差异）。
 
         :param already_emitted_ranges: 调用方已发射的 (s,e) 段列表。仅当
             本次「实际变动区间」未被列表完全覆盖时，才补充发射 dataChanged。
@@ -737,9 +737,9 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         if not has_none:
             return False
         emitted = already_emitted_ranges or []
-        # iter-156：普通路径：list 切片替换 [s,e] 段 None
+        # 普通路径：list 切片替换 [s,e] 段 None
         lst = list(self._filtered)
-        # iter-159：扁平数据同步填充，使 data() 直接索引命中
+        # 扁平数据同步填充，使 data() 直接索引命中
         flat_list = self._flat_data
         if len(flat_list) != len(lst):
             flat_list = list(flat_list) + [None] * (len(lst) - len(flat_list))
@@ -750,7 +750,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             if lst[i] is None:
                 result_obj = real[i]
                 lst[i] = result_obj
-                # iter-159：同步构造扁平行
+                # 同步构造扁平行
                 if i < len(flat_list):
                     flat_list[i] = _build_flat_row(result_obj, i)
                 if min_none_idx < 0:
@@ -772,14 +772,14 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         视口范围内的行立即显示真实内容。对非虚拟化场景（visible_end<0 或
         总数 <_VIRTUALIZE_THRESHOLD）直接退化为全量填充。
 
-        iter-156 优化：若当前不是懒加载状态（_lazystate is None 且 _filtered
-        中无任何 None），直接 return，避免对 iter-153 差异刷新的 dataChanged
+        优化：若当前不是懒加载状态（_lazystate is None 且 _filtered
+        中无任何 None），直接 return，避免对差异刷新的 dataChanged
         发射重复段（测试断言段数量会受影响），同时省去不必要的遍历。
 
         :param already_emitted_ranges: 本次 setVisibleRange / restore
             已经 dataChanged 发射过的 (s,e) 段列表。对这些段若完全覆盖
             本次优先填充范围，则不再重复发射 dataChanged（视觉无差异，
-            但保证 iter-153 测试段数断言）。
+            但保证测试段数断言）。
         """
         total = len(self._filtered)
         if total <= 0:
@@ -854,7 +854,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
     def get_result(self, row: int) -> ScanResult | None:
         """按视图行号返回过滤后的 :class:`ScanResult`，越界返回 None。
 
-        iter-156：懒填充阶段 ``_filtered[row]`` 可能为 None（幽灵行），
+        懒填充阶段 ``_filtered[row]`` 可能为 None（幽灵行），
         此时回退到 ``_filtered_real[row]`` 拿真实值，避免调用方看到 None。
         """
         if 0 <= row < len(self._filtered_real):
@@ -862,7 +862,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         return None
 
     def remove_result_by_path(self, path: Path) -> bool:
-        """按文件路径移除一条结果（iter-139）。
+        """按文件路径移除一条结果。
 
         用于「移至暂存」成功后从结果列表移除该条目，避免用户仍能看到
         已隔离的文件。压缩包内部条目按 ``archive_path`` 匹配（路径形如
@@ -876,7 +876,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         if len(new_results) == len(self._results):
             return False
         self._results = new_results
-        # iter-165：大结果集（>= _ASYNC_THRESHOLD）的索引交给 FilterWorker 后台构建
+        # 大结果集（>= _ASYNC_THRESHOLD）的索引交给 FilterWorker 后台构建
         if len(new_results) < _ASYNC_THRESHOLD and len(new_results) >= _INDEX_THRESHOLD:
             self._severity_index, self._rule_index = build_indices(new_results)
         else:
@@ -884,7 +884,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             empty_rule: dict[str, list[int]] = {}
             self._severity_index, self._rule_index = empty_sev, empty_rule
         self._sort_cache.clear()
-        # iter-159：结果集变化时同步清空扁平数据，等待 _schedule_filter_refresh 重建
+        # 结果集变化时同步清空扁平数据，等待 _schedule_filter_refresh 重建
         self._flat_data = []
         self._schedule_filter_refresh()
         return True
@@ -898,7 +898,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
     def filtered_results(self) -> tuple[ScanResult, ...]:
         """过滤+排序后的视图元组（只读）。
 
-        iter-156：无论是否处于懒填充阶段，永远返回完整真实结果（永不含 None），
+        无论是否处于懒填充阶段，永远返回完整真实结果（永不含 None），
         保证 ``replace_all_filtered_results`` 等批量处理入口能正常遍历。
         """
         return self._filtered_real
@@ -1039,13 +1039,13 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         - 结果数 >= ``_ASYNC_THRESHOLD``：取消旧 worker，启动新 ``FilterWorker``
           后台执行，完成后通过 :meth:`_on_filter_done` 回调到主线程 reset
 
-        iter-149：调度前先查排序缓存（相同结果集+相同条件直接复用），再用倒排索引
+        调度前先查排序缓存（相同结果集+相同条件直接复用），再用倒排索引
         裁剪规则/严重度维度（候选子集缩小后再 filter_text+排序）。
 
         ``beginResetModel`` / ``endResetModel`` 仅在此处与 ``_on_filter_done`` 中调用，
         setters 不再手动管理，避免双重 reset。
 
-        iter-156：同步更新 ``_filtered_real``（真实完整结果副本）；大结果集
+        同步更新 ``_filtered_real``（真实完整结果副本）；大结果集
         （>_VIRTUALIZE_THRESHOLD）启用「幽灵行 + 分帧懒加载」。
         """
         # 取消上一个未完成的 worker / lazy fill：disconnect 信号后 wait 短暂等待退出
@@ -1056,7 +1056,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         cache_key = self._sort_cache_key()
         cached = self._sort_cache.get(cache_key)
         if cached is not None:
-            # iter-156：公共应用方法（大小判断→幽灵行/直接赋值）
+            # 公共应用方法（大小判断→幽灵行/直接赋值）
             self._apply_filtered_result(cached, generation=None)
             return
 
@@ -1074,7 +1074,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
                 self._sort_ascending,
             )
             self._sort_cache[cache_key] = new_filtered
-            # iter-156：公共应用方法（大小判断→幽灵行/直接赋值）
+            # 公共应用方法（大小判断→幽灵行/直接赋值）
             self._apply_filtered_result(new_filtered, generation=None)
             return
 
@@ -1124,7 +1124,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
     ) -> None:
         """把过滤排序后的结果应用到 Model。
 
-        iter-156：从同步路径/缓存命中路径/_on_filter_done 抽取的公共方法。
+        从同步路径/缓存命中路径/_on_filter_done 抽取的公共方法。
         统一处理：
         - 同步 ``_filtered_real``（完整真实结果，永不含 None）
         - 若 ``len(filtered) > _VIRTUALIZE_THRESHOLD``：幽灵行 + 分帧懒加载
@@ -1149,10 +1149,10 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             )
             self.beginResetModel()
             self._filtered = (None,) * total
-            # iter-159：扁平数据同步初始化，幽灵行对应 None（懒加载填充时重建）
+            # 扁平数据同步初始化，幽灵行对应 None（懒加载填充时重建）
             self._flat_data = [None] * total
             self.endResetModel()
-            # iter-153：恢复 visible range 虚拟化 → 内部 iter-156 立即 apply_visible_priority_fill
+            # 恢复 visible range 虚拟化 → 内部立即 apply_visible_priority_fill
             self._restore_visible_range_after_filter()
             if self._lazystate is not None and total > 0:
                 QTimer.singleShot(0, self._fill_next_chunk)  # pyrefly: ignore [missing-argument, bad-argument-type]

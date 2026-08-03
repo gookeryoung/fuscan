@@ -1,6 +1,6 @@
 """增量扫描清单：文件指纹与上次扫描状态持久化。
 
-从 :mod:`fuscan.scanner.result` 拆出（iter-142）：``FileFingerprint`` 与
+从 :mod:`fuscan.scanner.result` 拆出：``FileFingerprint`` 与
 :class:`IncrementalManifest` 是"增量扫描"概念的核心数据结构，与
 :class:`fuscan.scanner.result.ScanReport` 等"扫描结果"数据结构职责正交。
 拆分后 ``result`` 模块聚焦"扫描结果表示"，本模块聚焦"增量状态持久化"，

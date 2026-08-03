@@ -11,7 +11,7 @@
   便于一眼识别瓶颈（rich 惰性导入，缺失时回退纯文本 INFO 汇总）
 
 启用方式：
-- :class:`PerfStats` **始终启用**（iter-66 起）：仅做聚合统计（无日志输出），
+- :class:`PerfStats` **始终启用**：仅做聚合统计（无日志输出），
   开销约 1-2μs/次，对扫描性能影响 < 0.3%。扫描结果通过 :meth:`PerfStats.to_dict`
   导出，填入 :attr:`ScanStats.perf_summary` 供 GUI/CLI 展示与持久化。
 - :class:`PerfTimer` / :class:`timed` / :func:`record_event` /
@@ -76,7 +76,7 @@ class _PerfState:
     用类属性封装可变状态，避免 ``global`` 声明（PLW0603）。
     仅供模块内部使用，外部通过 :data:`PERF_ENABLED` 与 :func:`set_perf_enabled` 间接访问。
 
-    注意：iter-66 起 ``enabled`` 仅控制 :class:`PerfTimer` / :func:`record_event`
+    注意：``enabled`` 仅控制 :class:`PerfTimer` / :func:`record_event`
     的详细日志输出。:class:`PerfStats` 始终启用，不受此开关影响。
     """
 
@@ -361,7 +361,7 @@ class PerfStats:
 
     @contextmanager
     def measure(self, name: str) -> Generator[None, None, None]:
-        """计时上下文：累计阶段耗时。始终记录（iter-66 起）。
+        """计时上下文：累计阶段耗时。始终记录。
 
         :param name: 阶段名称（如 ``read_bytes`` / ``hash`` / ``match``）
         """
@@ -373,7 +373,7 @@ class PerfStats:
             self._record_locked(name, elapsed)
 
     def record(self, name: str, elapsed: float) -> None:
-        """直接记录一段耗时（非上下文模式）。始终记录（iter-66 起）。
+        """直接记录一段耗时（非上下文模式）。始终记录。
 
         适用于无法用 ``with`` 包裹的阶段（如回调内手动计时）。
 

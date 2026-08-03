@@ -1,4 +1,4 @@
-"""规则集序列化：将不可变数据结构转换为字典/YAML/JSON（iter-122）。
+"""规则集序列化：将不可变数据结构转换为字典/YAML/JSON。
 
 与 :mod:`fuscan.rules.parser` 互为逆操作：
 

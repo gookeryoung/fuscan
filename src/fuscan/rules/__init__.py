@@ -7,9 +7,9 @@
   :class:`MatchMode`, :class:`Severity`
 - 解析函数： :func:`load_ruleset`, :func:`parse_ruleset`, :func:`parse_rule`,
   :func:`parse_match`
-- 序列化函数（iter-122）： :func:`save_ruleset`, :func:`serialize_ruleset`,
+- 序列化函数： :func:`save_ruleset`, :func:`serialize_ruleset`,
   :func:`serialize_rule`, :func:`serialize_match`
-- 模板库（iter-122）： :func:`get_template_names`, :func:`get_template_descriptions`,
+- 模板库： :func:`get_template_names`, :func:`get_template_descriptions`,
   :func:`load_template`
 - 异常： :class:`RuleError`, :class:`RuleParseError`, :class:`RuleLoadError`
 """

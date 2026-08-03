@@ -1,7 +1,7 @@
 """扫描历史条目构建纯函数。
 
-将 :class:`ScanController.build_history_entry` 的纯逻辑抽离到模块级
-（iter-142），便于独立测试。``ScanController`` 对应方法改为薄包装：传入
+将 :class:`ScanController.build_history_entry` 的纯逻辑抽离到模块级，
+便于独立测试。``ScanController`` 对应方法改为薄包装：传入
 ``ScanReport`` 与工作区信息后委托本模块构造 :class:`ScanHistoryEntry`。
 
 公共 API：

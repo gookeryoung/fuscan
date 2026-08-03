@@ -13,7 +13,7 @@ Item {
     property ConfigControllerType configController: ConfigController
     property WhitelistControllerType whitelistController: WhitelistController
 
-    // iter-133：白名单导入/导出文件对话框
+    // 白名单导入/导出文件对话框
     Dialogs.FileDialog {
         id: whitelistImportDialog
         title: "导入误报白名单"
@@ -161,7 +161,7 @@ Item {
                                     font.pixelSize: theme.fontSizeCaption
                                     color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                 }
-                                // iter-125：上限改为 cpuCount（与提示一致），editable 支持手输入
+                                // 上限改为 cpuCount（与提示一致），editable 支持手输入
                                 SpinBox {
                                     id: maxWorkersSpin
                                     from: 1
@@ -178,7 +178,7 @@ Item {
                                     Layout.fillWidth: true
                                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                 }
-                                // iter-125：动态步进 <50 步 10，50-100 步 25，>100 步 100
+                                // 动态步进 <50 步 10，50-100 步 25，>100 步 100
                                 SpinBox {
                                     id: maxFileSizeSpin
                                     from: 1
@@ -201,8 +201,8 @@ Item {
                                     Layout.fillWidth: true
                                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                 }
-                                // iter-125：editable 支持手输入
-                                // iter-127：上限统一为 64（与 WorkspaceCard 任务级设置一致）
+                                // editable 支持手输入
+                                // 上限统一为 64（与 WorkspaceCard 任务级设置一致）
                                 SpinBox {
                                     from: 0
                                     to: 64
@@ -256,7 +256,7 @@ Item {
                         }
                     }
 
-                    // iter-134：凭证检测（高熵字符串）
+                    // 凭证检测（高熵字符串）
                     GroupBox {
                         Layout.fillWidth: true
                         title: "凭证检测"
@@ -345,15 +345,15 @@ Item {
                                 Layout.preferredHeight: 320
                                 clip: true
                                 interactive: true
-                                // iter-106 P1：预渲染屏幕外 delegate，避免滚动时重建
-                                // iter-135：仅扫描 Tab 激活时绑定 model + 启用 cacheBuffer，
+                                // 预渲染屏幕外 delegate，避免滚动时重建
+                                // 仅扫描 Tab 激活时绑定 model + 启用 cacheBuffer，
                                 // 避免页面首帧构造时 ListView 预渲染屏幕外 delegate 卡顿。
-                                // iter-136：扫描 Tab 已调到 index 0，SettingsPage 重建时
+                                // 扫描 Tab 已调到 index 0，SettingsPage 重建时
                                 // 默认即在此 Tab；切到其他 Tab 时 model 为 null 不构造 delegate。
-                                // iter-138：cacheBuffer 改为固定值，避免与 currentIndex 双向依赖
+                                // cacheBuffer 改为固定值，避免与 currentIndex 双向依赖
                                 // 触发 "model" binding loop（model=null 时 contentHeight=0 引起
                                 // StackLayout 尺寸重算循环）。
-                                // iter-139：移除 model 条件绑定（null↔extractorModel 切换导致
+                                // 移除 model 条件绑定（null↔extractorModel 切换导致
                                 // contentHeight 变化触发 StackLayout 布局重算循环）。StackLayout
                                 // 已通过 visible 机制控制非当前 Tab 的渲染，无需再用 null 切换。
                                 cacheBuffer: 500
@@ -372,12 +372,12 @@ Item {
                                         anchors.rightMargin: 8
                                         spacing: 8
 
-                                        // 类别父节点勾选框（iter-104 统一勾选）：
+                                        // 类别父节点勾选框（统一勾选）：
                                         // 三态显示：0=全不选, 1=全选, 2=部分选中
                                         // 点击切换为相反状态（全选↔全不选）
                                         CheckBox {
                                             id: categoryCheckbox
-                                            // iter-133：tristate=false 确保点击只在全选/全不选间
+                                            // tristate=false 确保点击只在全选/全不选间
                                             // 两态切换；PartiallyChecked 由 checkState binding 根据子项
                                             // 状态自动显示（子项部分选中时），用户点击不会停留在该态
                                             tristate: false
@@ -542,7 +542,7 @@ Item {
                         ComboBox {
                             id: fontFamilyCombo
                             Layout.fillWidth: true
-                            // iter-135：延迟到 Component.onCompleted 再加载字体列表，
+                            // 延迟到 Component.onCompleted 再加载字体列表，
                             // 避免页面首帧构造时 Qt.fontFamilies()（Windows 数百字体）阻塞。
                             // 默认 model 为空，onCompleted 中赋值后触发 ComboBox 刷新。
                             // 显示当前配置字体（空串显示"平台默认"）
@@ -739,7 +739,7 @@ Item {
                                     spacing: 8
 
                                     CheckBox {
-                                        // iter-133：tristate=false 确保点击只两态切换
+                                        // tristate=false 确保点击只两态切换
                                         // PartiallyChecked 由 binding 根据子项状态自动显示
                                         tristate: false
                                         checkState: categoryData.allEnabled ? Qt.Checked : Qt.Unchecked

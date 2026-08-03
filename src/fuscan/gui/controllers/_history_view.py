@@ -1,7 +1,7 @@
 """扫描历史 JSON 视图构建纯函数。
 
 将 :class:`WorkspaceController` 中 ``workspaceHistoryJson`` /
-``compareWithPreviousScan`` 的纯序列化逻辑抽离到模块级（iter-142），便于独立
+``compareWithPreviousScan`` 的纯序列化逻辑抽离到模块级，便于独立
 测试。``WorkspaceController`` 对应 ``@Slot`` 改为薄包装：从 :class:`HistoryStore`
 取出 ``workspace_history`` 后委托本模块构造 JSON 字符串。
 

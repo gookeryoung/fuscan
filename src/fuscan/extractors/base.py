@@ -7,9 +7,9 @@
 - :class:`ExtractorRegistry` 按扩展名分发，支持注册与查找
 - 依赖第三方库的提取器在 ``extract`` 方法内部懒加载 import，避免模块导入时强依赖
 - :func:`get_extractor` 提供默认注册表查询，未注册返回 ``None``（由调用方回退到纯文本）
-- :class:`SpeedTier` 枚举（iter-90）划分 5 档解析速度，GUI 勾选树展示档次
+- :class:`SpeedTier` 枚举划分 5 档解析速度，GUI 勾选树展示档次
   便于用户按需选择文件类型
-- iter-119：:class:`ExtractorRegistry` 新增 ``extract_from_bytes_with_retry`` /
+- :class:`ExtractorRegistry` 新增 ``extract_from_bytes_with_retry`` /
   ``extract_with_retry`` 方法，对瞬时 ``OSError``（Windows AV 文件锁、网络盘抖动）
   执行一次退避重试；:class:`ExtractorFailure` 聚合诊断信息供调用方统计
 """
@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 
 class SpeedTier(enum.Enum):
-    """提取器解析速度档次（iter-90，5 档）。
+    """提取器解析速度档次（5 档）。
 
     档次依据实现复杂度划分，与典型文件大小（1MB）下的解析耗时对应：
 
@@ -121,7 +121,7 @@ class ExtractorError(Exception):
 
 @dataclass(frozen=True)
 class ExtractorFailure:
-    """提取器失败诊断信息（iter-119）。
+    """提取器失败诊断信息。
 
     由 :meth:`ExtractorRegistry.extract_from_bytes_with_retry` /
     :meth:`ExtractorRegistry.extract_with_retry` 在每次失败（含重试）时
@@ -145,7 +145,7 @@ class ExtractorFailure:
 
 
 def is_retriable_error(exc: Exception) -> bool:
-    """判断异常是否值得重试（iter-119）。
+    """判断异常是否值得重试。
 
     仅 ``OSError`` 视为可重试瞬时错误：Windows 文件锁（AV 扫描、共享冲突）、
     网络盘抖动、磁盘瞬时 I/O 错误等。重试一次通常能成功。
@@ -166,7 +166,7 @@ class Extractor(ABC):
     （从内存字节提取）。后者用于缓存模式：调用方一次 ``read_bytes`` 既算哈希
     又提取内容，避免双重磁盘 I/O。
 
-    子类还须声明 :attr:`speed_tier` 标识解析速度档次（iter-90），
+    子类还须声明 :attr:`speed_tier` 标识解析速度档次，
     供 GUI 勾选树展示。档次依据实现复杂度划分，详见 :class:`SpeedTier`。
     """
 
@@ -178,7 +178,7 @@ class Extractor(ABC):
     @property
     @abstractmethod
     def speed_tier(self) -> SpeedTier:
-        """该提取器的解析速度档次（iter-90）。
+        """该提取器的解析速度档次。
 
         子类须按实现复杂度返回对应 :class:`SpeedTier`：
         纯文本解码 → ``VERY_FAST``，标准库解析 → ``FAST``，
@@ -193,7 +193,7 @@ class Extractor(ABC):
 
     @property
     def engine_info(self) -> str:
-        """提取器使用的解析引擎名称（iter-139，供 GUI tooltip 展示）。
+        """提取器使用的解析引擎名称（供 GUI tooltip 展示）。
 
         如 ``"pypdf"`` / ``"python-docx"`` / ``"python-calamine"`` /
         ``"olefile+ole"`` / ``"内置解码"`` 等。默认返回空字符串，子类应覆盖。
@@ -255,8 +255,8 @@ class ExtractorRegistry:
 
         :return: ``[(class_name, display_name, supported_extensions, speed_tier, engine_info), ...]``
                  列表，按 display_name 排序。同一提取器实例支持多个扩展名时合并为一项。
-                 ``speed_tier`` 为 :class:`SpeedTier` 枚举值（iter-90）。
-                 ``engine_info`` 为解析引擎名称字符串（iter-139，供 GUI tooltip 展示）。
+                 ``speed_tier`` 为 :class:`SpeedTier` 枚举值。
+                 ``engine_info`` 为解析引擎名称字符串（供 GUI tooltip 展示）。
         """
         seen: dict[int, tuple[str, str, tuple[str, ...], SpeedTier, str]] = {}
         for _ext, extractor in self._extractors.items():
@@ -311,7 +311,7 @@ class ExtractorRegistry:
         backoff_ms: float = 50.0,
         on_failure: Callable[[ExtractorFailure], None] | None = None,
     ) -> str:
-        """按扩展名从内存字节提取，对瞬时 ``OSError`` 执行退避重试（iter-119）。
+        """按扩展名从内存字节提取，对瞬时 ``OSError`` 执行退避重试。
 
         与 :meth:`extract_from_bytes` 的区别：
 
@@ -356,7 +356,7 @@ class ExtractorRegistry:
         backoff_ms: float = 50.0,
         on_failure: Callable[[ExtractorFailure], None] | None = None,
     ) -> str:
-        """按扩展名从磁盘路径提取，对瞬时 ``OSError`` 执行退避重试（iter-119）。
+        """按扩展名从磁盘路径提取，对瞬时 ``OSError`` 执行退避重试。
 
         与 :meth:`extract` 的区别：同 :meth:`extract_from_bytes_with_retry`，
         对 ``OSError`` 重试，其他异常直接抛出；通过 ``on_failure`` 回调上报诊断。
@@ -396,7 +396,7 @@ class ExtractorRegistry:
         backoff_ms: float,
         on_failure: Callable[[ExtractorFailure], None] | None,
     ) -> str:
-        """重试循环骨架（iter-119 内部复用）。
+        """重试循环骨架（内部复用）。
 
         :param action: 实际执行提取的可调用对象
         :param extractor_name: 提取器类名（诊断用）
@@ -506,7 +506,7 @@ def extract_content_from_bytes_with_retry(
     backoff_ms: float = 50.0,
     on_failure: Callable[[ExtractorFailure], None] | None = None,
 ) -> str:
-    """使用默认注册表从内存字节提取，对瞬时 ``OSError`` 执行退避重试（iter-119）。
+    """使用默认注册表从内存字节提取，对瞬时 ``OSError`` 执行退避重试。
 
     与 :func:`extract_content_from_bytes` 的区别：见
     :meth:`ExtractorRegistry.extract_from_bytes_with_retry`。
@@ -540,7 +540,7 @@ def extract_content_with_fallback_and_retry(
     backoff_ms: float = 50.0,
     on_failure: Callable[[ExtractorFailure], None] | None = None,
 ) -> str:
-    """带重试的提取+纯文本回退（iter-119）。
+    """带重试的提取+纯文本回退。
 
     与 :func:`extract_content_with_fallback` 的区别：先通过
     :meth:`ExtractorRegistry.extract_with_retry` 带重试地提取，重试后仍失败

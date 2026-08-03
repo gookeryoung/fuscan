@@ -15,7 +15,7 @@ Pane {
         color: "transparent"
     }
 
-    // iter-144：用 StackLayout 替代 StackView.replace，所有页面常驻不重建，
+    // 用 StackLayout 替代 StackView.replace，所有页面常驻不重建，
     // 切换仅改 currentIndex（O(1)），消除重页面（SettingsPage/HomePage）反复
     // 构造导致的卡滞。代价是失去淡入淡出动画与启动时多构造几个页面对象，
     // 但切换流畅性优先级更高；SettingsPage 的 Qt.fontFamilies() 已由
@@ -49,7 +49,7 @@ Pane {
         }
 
         RulesPage {
-            // iter-137：规则配置全局化——不再有工作区绑定，直接返回首页
+            // 规则配置全局化——不再有工作区绑定，直接返回首页
             onBackRequested: contentArea.sidebarRef.currentPage = "home"
         }
 

@@ -3,7 +3,7 @@
 将所有内置提取器注册到 default_registry。
 提取器实例化是轻量的（不 import 第三方库），可安全地在模块导入时执行。
 
-iter-102 起原 ``ConfigFileExtractor``/``MarkupDataExtractor``/``StylesheetExtractor``
+原 ``ConfigFileExtractor``/``MarkupDataExtractor``/``StylesheetExtractor``
 的扩展名合并到 :class:`SourceCodeExtractor`，文本类别仅注册「纯文本」「源代码」两项。
 ``TextExtractor`` 本身不再注册（保留为基类）。
 """
@@ -29,10 +29,10 @@ def register_all() -> None:
 
     幂等：重复调用安全，已注册的扩展名会被相同实例覆盖。
 
-    iter-102：文本类别仅注册「纯文本」「源代码」两项，原 ConfigFile/MarkupData/
+    文本类别仅注册「纯文本」「源代码」两项，原 ConfigFile/MarkupData/
     Stylesheet 三类子提取器的扩展名合并到 SourceCodeExtractor，避免 GUI 勾选树过度细分。
     """
-    # 文本子提取器（iter-102 合并后仅两项）
+    # 文本子提取器（合并后仅两项）
     default_registry.register(PlainTextExtractor())
     default_registry.register(SourceCodeExtractor())
     # 文档格式提取器

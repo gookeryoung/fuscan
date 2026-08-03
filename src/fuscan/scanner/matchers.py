@@ -8,7 +8,7 @@
 
 工厂函数 :func:`build_matcher` 根据 MatchSpec 实例类型构造对应匹配器。
 
-iter-134 性能优化：
+性能优化：
 
 - :func:`compile_regex_cached`：模块级 ``lru_cache`` 包装 ``re.compile``，
   跨 Scanner 实例共享编译结果（同一 pattern+flags 仅编译一次）
@@ -108,7 +108,7 @@ class LeafMatcher(Matcher):
         # 预编译不区分大小写的 CONTAINS 正则，避免每次匹配重复 re.escape + 编译
         self._compiled_contains_ci: Pattern[str] | None = None
         if spec.mode == MatchMode.REGEX:
-            # iter-134：经 compile_regex_cached 复用跨 Scanner 编译结果，
+            # 经 compile_regex_cached 复用跨 Scanner 编译结果，
             # 同一 pattern+flags 在进程内仅编译一次
             self._compiled = compile_regex_cached(spec.pattern, spec.case_sensitive)
         elif spec.mode == MatchMode.CONTAINS and not spec.case_sensitive and spec.pattern:

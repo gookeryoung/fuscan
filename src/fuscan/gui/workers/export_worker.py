@@ -2,7 +2,7 @@
 
 ``ExportWorker`` 在独立 QThread 中运行 :func:`fuscan.scanner.export.save_report`，
 通过信号通知 UI 完成或失败。PDF/Excel 渲染可能耗时数秒，主线程同步执行会
-导致界面完全无响应（菜单/按钮/进度条均无法刷新），iter-59 将其移至后台。
+导致界面完全无响应（菜单/按钮/进度条均无法刷新），故将其移至后台。
 
 设计要点：
 

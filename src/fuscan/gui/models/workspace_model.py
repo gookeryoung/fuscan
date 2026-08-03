@@ -93,7 +93,7 @@ _ROLES: dict[int, bytes] = {
 }
 
 # 字段名 → 关联 role 列表（含派生属性依赖）
-# iter-105：update_workspace 按字段对比仅 emit 实际变化的 role，
+# update_workspace 按字段对比仅 emit 实际变化的 role，
 # 避免扫描进度回调（0.3s 节流）时全量 14 个 role 刷新导致 QML 重新评估所有绑定
 _FIELD_TO_ROLES: dict[str, list[int]] = {
     "workspace_id": [Qt.UserRole + 1],
@@ -129,8 +129,8 @@ class WorkspaceItem:
     :param skipped_count: 跳过文件数
     :param error_count: 错误文件数
     :param last_summary: 最近一次扫描摘要（含速度等）
-    :param collected_count: walk 阶段收集到的符合文件类型的文件数（iter-105）
-    :param task_overrides: 任务级配置覆盖（iter-104）
+    :param collected_count: walk 阶段收集到的符合文件类型的文件数
+    :param task_overrides: 任务级配置覆盖
 
         ``dict[str, object]``，键为 :class:`fuscan.config.Config` 字段名，
         值为该任务专属的覆盖值。支持的字段：
@@ -253,7 +253,7 @@ class WorkspaceListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
     def add_workspace(self, item: WorkspaceItem) -> int:
         """插入工作区到列表顶部（最近活动在最上方），返回新行号。
 
-        iter-132：新工作区插入到列表顶部（row 0），符合「最新任务在上面」
+        新工作区插入到列表顶部（row 0），符合「最新任务在上面」
         的交互预期。``last_activity_time`` 默认为构造时的 ``time.time()``，
         新建工作区自然排在最上方。
 
@@ -282,7 +282,7 @@ class WorkspaceListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
     def move_to_top(self, workspace_id: str) -> bool:
         """将指定工作区移到列表顶部（row 0）。
 
-        iter-132：增量扫描或重新扫描时调用，使最近活动的工作区排在最上方。
+        增量扫描或重新扫描时调用，使最近活动的工作区排在最上方。
         更新 ``last_activity_time`` 为当前时间。
 
         :param workspace_id: 工作区 ID
@@ -314,7 +314,7 @@ class WorkspaceListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
         :param changes: 要更新的字段关键字参数
         :return: 是否成功更新
 
-        iter-105 优化：按字段对比新旧 item，仅 emit 实际变化字段对应的 role，
+        按字段对比新旧 item，仅 emit 实际变化字段对应的 role，
         避免扫描进度回调（0.3s 节流）时全量 14 个 role 刷新导致 QML 重新评估
         所有绑定（statusText/matchedCount/collectedCount 等）。
         ``task_overrides`` 不通过 role 暴露，变化时不 emit 信号。

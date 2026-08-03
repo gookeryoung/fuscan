@@ -43,7 +43,7 @@ def _list_windows_drives() -> list[Path]:
 
     - 避免对未就绪光驱/虚拟盘触发 ``OSError [WinError 1]`` 长时间阻塞
       （每次 OSError 探测可能耗时 100-500ms，未就绪光驱会让 GUI 启动卡顿）
-    - 性能从最坏 ~500ms 降至 <1ms，符合 iter-59 GUI 启动卡滞优化目标
+    - 性能从最坏 ~500ms 降至 <1ms，符合 GUI 启动卡滞优化目标
     - ``GetLogicalDrives`` 仅返回已挂载逻辑盘符，未格式化或未就绪的设备自动排除
     """
     windll = getattr(ctypes, "windll", None)
@@ -88,7 +88,7 @@ class FileWalker:
     - 默认不跟随符号链接，避免环
 
     .. note::
-       iter-87 起，扩展名过滤改由白名单制（``Scanner._should_scan`` 按
+       扩展名过滤改由白名单制（``Scanner._should_scan`` 按
        ``scan_extensions`` 判断）统一管理，``FileWalker`` 不再持有扩展名黑名单。
        待扫描文件由 walk 阶段收集后，Scanner 在 ``collect_entries`` 中按白名单过滤。
     """

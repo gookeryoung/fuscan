@@ -40,13 +40,13 @@ CURRENT_VERSION: int = 5
 
 # 缓存数据兼容版本号：仅在哈希算法/序列化格式等数据语义变更时递增。
 # v1：SHA-256 哈希
-# v2：BLAKE2b digest_size=32 哈希（iter-38）
-# v3：按数据大小分流算法（iter-39）——小文件 SHA-256、大文件 BLAKE2b，
-#     修复 iter-38 在小文件场景的性能回退
-# v4：scan_results 新增 match_texts/match_description 字段（iter-41）——
+# v2：BLAKE2b digest_size=32 哈希
+# v3：按数据大小分流算法——小文件 SHA-256、大文件 BLAKE2b，
+#     修复 v2 在小文件场景的性能回退
+# v4：scan_results 新增 match_texts/match_description 字段——
 #     AND/OR 组合规则需记录全部命中文本，原 match_text 仅含首条命中，
 #     语义不兼容，需清空旧缓存重新扫描以获取准确的多匹配文本
-# v5：serialize_match 补充 MatchSpec.description 字段（iter-47）——
+# v5：serialize_match 补充 MatchSpec.description 字段——
 #     原序列化遗漏 description，修改 MatchSpec.description 不触发 rule_hash
 #     变化，导致缓存的 match_description 过期。补字段后 rule_hash 语义变化，
 #     递增版本号清空旧缓存
@@ -101,12 +101,12 @@ CREATE TABLE IF NOT EXISTS file_paths (
     FOREIGN KEY (file_hash) REFERENCES scanned_files(file_hash) ON DELETE CASCADE
 );
 
--- iter-70：path 单列索引保留向后兼容；新增 (path, mtime) 复合索引
+-- path 单列索引保留向后兼容；新增 (path, mtime) 复合索引
 -- 让 lookup_file_hash 的 WHERE path=? AND mtime=? 只用索引即可完成过滤
 CREATE INDEX IF NOT EXISTS idx_paths_path ON file_paths(path);
 CREATE INDEX IF NOT EXISTS idx_paths_path_mtime ON file_paths(path, mtime);
 
--- iter-70：scanned_files 按 size 过滤的索引，消除 lookup_file_hash 子查询全表扫描
+-- scanned_files 按 size 过滤的索引，消除 lookup_file_hash 子查询全表扫描
 CREATE INDEX IF NOT EXISTS idx_scanned_size ON scanned_files(size);
 
 CREATE TABLE IF NOT EXISTS scan_results (
@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS scan_results (
 CREATE INDEX IF NOT EXISTS idx_results_file ON scan_results(file_hash);
 CREATE INDEX IF NOT EXISTS idx_results_rule ON scan_results(rule_hash);
 
--- 提取器结果缓存（iter-39）：按 file_hash 缓存提取后的纯文本，
+-- 提取器结果缓存：按 file_hash 缓存提取后的纯文本，
 -- 同内容不同路径（如 node_modules 重复依赖）可跳过 extract_content_from_bytes。
 -- 仅缓存高开销格式（docx/pptx/xlsx 等），纯文本不缓存。
 -- 通过外键级联删除：scanned_files 删除时自动清理对应提取内容。
@@ -243,12 +243,12 @@ def migrate(conn: sqlite3.Connection) -> int:
         logger.debug("schema 已是最新版本: %d", current)
     else:
         # v0 → v1：初始化全部表
-        # v1 → v2：新增 meta 表（iter-38），SCHEMA_SQL 中已含 IF NOT EXISTS，
+        # v1 → v2：新增 meta 表，SCHEMA_SQL 中已含 IF NOT EXISTS，
         #          旧库通过本路径安全创建 meta 表
-        # v2 → v3：兼容版本号升级触发 purge 后走此路径重建（iter-39）
-        # v3 → v4：新增 extracted_contents 表（iter-39），IF NOT EXISTS 安全升级
-        # v4 → v5：兼容版本号升级（iter-41，match_texts/match_description）触发 purge 后重建
-        # v5 → v6：新增 idx_scanned_size + idx_paths_path_mtime 索引（iter-70），
+        # v2 → v3：兼容版本号升级触发 purge 后走此路径重建
+        # v3 → v4：新增 extracted_contents 表，IF NOT EXISTS 安全升级
+        # v4 → v5：兼容版本号升级（match_texts/match_description）触发 purge 后重建
+        # v5 → v6：新增 idx_scanned_size + idx_paths_path_mtime 索引，
         #          IF NOT EXISTS 安全升级，不触发 purge
         conn.executescript(SCHEMA_SQL)
         current = CURRENT_VERSION

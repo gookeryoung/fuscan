@@ -126,8 +126,8 @@ def coerce_str_tuple(value: object) -> tuple[str, ...]:
 PERSIST_FILENAME = "workspaces.json"
 PERSIST_VERSION = 1
 
-# 允许任务级覆盖的 Config 字段及类型校验器（iter-104）
-# iter-105：补充范围钳制函数，与 ConfigController.setMax* 语义一致
+# 允许任务级覆盖的 Config 字段及类型校验器
+# 补充范围钳制函数，与 ConfigController.setMax* 语义一致
 TASK_OVERRIDE_KEYS: dict[str, type] = {
     "scan_archives": bool,
     "max_workers": int,
@@ -223,18 +223,18 @@ def serialize_workspace(item: WorkspaceItem) -> dict[str, object]:
         "target": item.target,
         "rules_paths": list(item.rules_paths),
         "use_builtin": item.use_builtin,
-        # iter-102 起持久化上次扫描状态，重启后仍能展示
+        # 持久化上次扫描状态，重启后仍能展示
         "status_text": item.status_text,
         "matched_count": item.matched_count,
         "passed_count": item.passed_count,
         "skipped_count": item.skipped_count,
         "error_count": item.error_count,
         "last_summary": item.last_summary,
-        # iter-105 起持久化收集到的符合文件类型文件数
+        # 持久化收集到的符合文件类型文件数
         "collected_count": item.collected_count,
-        # iter-104 起持久化任务级配置覆盖
+        # 持久化任务级配置覆盖
         "task_overrides": serialize_task_overrides(item.task_overrides),
-        # iter-132 起持久化最近活动时间，用于列表排序（最新活动在最上方）
+        # 持久化最近活动时间，用于列表排序（最新活动在最上方）
         "last_activity_time": item.last_activity_time,
     }
 

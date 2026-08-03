@@ -1,9 +1,9 @@
 """PDF 提取器。
 
-iter-91：优先使用 ``pdf_oxide``（Rust + PyO3，0.8ms/文档，释放 GIL），
+优先使用 ``pdf_oxide``（Rust + PyO3，0.8ms/文档，释放 GIL），
 import 失败时回退到 ``pypdf``（纯 Python，12.1ms/文档）。
 
-iter-167：新增 ``pypdfium2``（Google pdfium C++ 引擎，通过 cffi 绑定）
+新增 ``pypdfium2``（Google pdfium C++ 引擎，通过 cffi 绑定）
 作为中间层回退。pdf_oxide 在 Win7 等旧系统上可能因 Rust 运行时缺失而
 无法加载，pypdfium2 提供接近 pdf_oxide 的性能（C++ 原生），且兼容 Win7。
 
@@ -36,7 +36,7 @@ except ImportError:  # pragma: no cover - 环境依赖：仅 pdf_oxide 未安装
     _PDF_OXIDE_AVAILABLE = False
     _PdfOxideDocument = None  # type: ignore[assignment, unused-ignore]
 
-# 模块级检测 pypdfium2 是否可用（iter-167）
+# 模块级检测 pypdfium2 是否可用
 # pypdfium2 封装 Google pdfium C++ 引擎，性能接近 pdf_oxide 且兼容 Win7
 try:
     from pypdfium2 import PdfDocument as _PdfiumDocument
@@ -64,7 +64,7 @@ class PdfExtractor(Extractor):
     @property
     @override
     def speed_tier(self) -> SpeedTier:
-        """PDF 提取速度档次（iter-167）。
+        """PDF 提取速度档次。
 
         - pdf_oxide（Rust + PyO3）：0.8ms/文档 + 释放 GIL → T2 快速
         - pypdfium2（pdfium C++）：接近原生性能 + 释放 GIL → T3 中速
@@ -85,7 +85,7 @@ class PdfExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139/167：实际使用的 PDF 解析引擎。"""
+        """实际使用的 PDF 解析引擎。"""
         if _PDF_OXIDE_AVAILABLE:
             return "pdf_oxide"
         if _PDFIUM_AVAILABLE:
@@ -105,7 +105,7 @@ class PdfExtractor(Extractor):
     def extract_from_bytes(self, data: bytes) -> str:
         """从内存字节提取 PDF 文本，加密文档返回空字符串。
 
-        iter-167：三层降级链 pdf_oxide → pypdfium2 → pypdf。
+        三层降级链 pdf_oxide → pypdfium2 → pypdf。
         """
         if _PDF_OXIDE_AVAILABLE:
             return self._extract_with_pdf_oxide(data)
@@ -140,7 +140,7 @@ class PdfExtractor(Extractor):
             return ""
 
     def _extract_with_pdfium2(self, data: bytes) -> str:
-        """使用 pypdfium2（Google pdfium C++）提取 PDF 文本（iter-167）。
+        """使用 pypdfium2（Google pdfium C++）提取 PDF 文本。
 
         pypdfium2 基于 Google pdfium C++ 引擎，通过 cffi 绑定，
         性能接近 pdf_oxide 且兼容 Win7（无 Rust 依赖）。

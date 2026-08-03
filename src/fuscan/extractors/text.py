@@ -6,7 +6,7 @@
 大文件（>10MB）采用分块流式读取 + 增量解码，跳过 charset-normalizer
 全量分析以降低内存峰值。
 
-iter-102 起 GUI 文件类型树中文本类别仅展示「纯文本」与「源代码」两项，
+GUI 文件类型树中文本类别仅展示「纯文本」与「源代码」两项，
 原 ``ConfigFileExtractor``/``MarkupDataExtractor``/``StylesheetExtractor``
 的扩展名（配置文件/标记数据/样式表）合并到 :class:`SourceCodeExtractor`，
 避免文件类型树过度细分。``TextExtractor`` 保留为基类提供提取逻辑，不再直接注册。
@@ -40,7 +40,7 @@ PLAIN_TEXT_EXTENSIONS: tuple[str, ...] = (
 )
 
 # 源代码扩展名（编程语言 + 脚本 + 配置文件 + 标记数据 + 样式表）
-# iter-102 合并原 ConfigFile/MarkupData/Stylesheet 三类文本子提取器，
+# 合并原 ConfigFile/MarkupData/Stylesheet 三类文本子提取器，
 # GUI 文件类型树中文本类别仅保留「纯文本」「源代码」两项，简化勾选界面。
 SOURCE_CODE_EXTENSIONS: tuple[str, ...] = (
     # 编程语言 + 脚本
@@ -147,7 +147,7 @@ class TextExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：charset-normalizer + 内置解码。"""
+        """charset-normalizer + 内置解码。"""
         return "charset-normalizer"
 
     @override
@@ -247,7 +247,7 @@ class TextExtractor(Extractor):
 class PlainTextExtractor(TextExtractor):
     """纯文本子提取器：处理 txt/log 等基础文本文件。
 
-    iter-88 从 ``TextExtractor`` 拆分，提取逻辑继承基类，
+    从 ``TextExtractor`` 拆分，提取逻辑继承基类，
     仅限定支持的扩展名子集与显示名。
     display_name 包含全角括号后缀 ``（TXT）``，供 GUI 提取格式 TAG。
     """
@@ -265,14 +265,14 @@ class PlainTextExtractor(TextExtractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：charset-normalizer + 内置解码。"""
+        """charset-normalizer + 内置解码。"""
         return "charset-normalizer"
 
 
 class SourceCodeExtractor(TextExtractor):
     """源代码子提取器：处理编程语言、脚本、配置文件、标记数据与样式表。
 
-    iter-102 起合并原 ConfigFile/MarkupData/Stylesheet 三类子提取器，
+    合并原 ConfigFile/MarkupData/Stylesheet 三类子提取器，
     GUI 文件类型树中文本类别仅展示「纯文本」「源代码」两项，
     避免勾选界面过度细分。提取逻辑继承基类。
     display_name 包含全角括号后缀 ``（CODE）``，供 GUI 提取格式 TAG。
@@ -291,7 +291,7 @@ class SourceCodeExtractor(TextExtractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：charset-normalizer + 内置解码。"""
+        """charset-normalizer + 内置解码。"""
         return "charset-normalizer"
 
 

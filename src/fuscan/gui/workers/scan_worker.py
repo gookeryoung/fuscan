@@ -90,7 +90,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         # 直接调 Scanner.scan_entries。由 FileStatsWorker.finished_stats 提供，
         # 与 roots 一一对应（WalkResult.root == roots[i]）
         self._precollected: list[WalkResult] | None = precollected
-        # iter-124：上次扫描报告，提供未变更文件的命中结果供 Scanner 合并。
+        # 上次扫描报告，提供未变更文件的命中结果供 Scanner 合并。
         # 与 incremental_manifest 配合启用增量扫描（FileStatsWorker 侧传入 manifest）。
         # ScanWorker 用 precollected 模式调 scan_entries，Scanner 在 __init__ 时
         # 根据 prev_report 预索引未变更命中结果（_unchanged_hits），scan_entries 合并。
@@ -113,7 +113,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         self._cum_matches = 0
         # 多根路径累计用户跳过数
         self._cum_user_skipped = 0
-        # iter-137：多根路径累计压缩包内条目数
+        # 多根路径累计压缩包内条目数
         self._cum_archive_entries = 0
         self._start_time: float = 0.0
 
@@ -161,7 +161,7 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         :class:`WalkResult` 调 :meth:`Scanner.scan_entries`，与
         :class:`FileStatsWorker` 配合实现 stats/scan 职责拆分。
 
-        iter-139：取消保护——多根路径扫描时每个根之前检查 ``_cancel_requested``，
+        取消保护——多根路径扫描时每个根之前检查 ``_cancel_requested``，
         避免取消后仍启动下一个根的扫描。单根扫描的取消由 Scanner 内部
         ``_check_control``/``_cancel_event`` 保证（``_scan_entry`` 入口 +
         ``as_completed`` 循环顶部双重检查）。ThreadPool worker 由

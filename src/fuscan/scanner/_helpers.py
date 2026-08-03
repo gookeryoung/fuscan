@@ -73,7 +73,7 @@ BATCH_THRESHOLD: int = 50
 # tuple 拷贝与信号槽分发占用主线程时间片引起 UI 卡滞。
 PROGRESS_LIST_MAX: int = 50
 
-# iter-160：进度双门限节流的增量阈值（时间窗 + 增量门）。
+# 进度双门限节流的增量阈值（时间窗 + 增量门）。
 # 即便达到时间窗 elapsed >= _progress_interval，若自上次 emit 以来 scanned/matched
 # 的增量都低于以下阈值，跳过本次 emit，避免 50k+ 小文件扫描时 UI 仍被高频刷新。
 # - PROGRESS_MIN_DELTA_FILES：scanned 至少增加 200 个
@@ -81,7 +81,7 @@ PROGRESS_LIST_MAX: int = 50
 PROGRESS_MIN_DELTA_FILES: int = 200
 PROGRESS_MIN_DELTA_MATCHES: int = 50
 
-# iter-160：进度快照保留的最近 N 条目（配合 _emit_progress 的 tuple 截断）。
+# 进度快照保留的最近 N 条目（配合 _emit_progress 的 tuple 截断）。
 # 避免大规模扫描时 matched_files/skipped_dirs 的 deque 元组转换 O(N) 拷贝开销。
 PROGRESS_SNAPSHOT_TAIL: int = 50
 
@@ -95,7 +95,7 @@ def build_hit_from_match(rule: Rule, result: MatchResult) -> RuleHit:
     """从 :class:`MatchResult` 构造 :class:`RuleHit`，字段映射集中在此处。
 
     扫描器与压缩包扫描器在「匹配器命中后构造 RuleHit」路径共用本函数，
-    避免字段遗漏（iter-146 修复 archive 路径缺失 ``match_texts``/
+    避免字段遗漏（修复 archive 路径缺失 ``match_texts``/
     ``match_description`` 的 BUG）与字段名漂移。
 
     :param rule: 命中的规则（提供 ``name``/``severity``）
@@ -168,7 +168,7 @@ def default_extract_content_with_hash(entry: FileEntry) -> tuple[str, str]:
     返回空内容与空字节哈希；``Scanner`` 在缓存模式下走自己的
     :meth:`Scanner._extract_with_cache`，使用可配置的 ``max_file_size``。
 
-    iter-119：使用 :func:`extract_content_from_bytes_with_retry` 替代
+    使用 :func:`extract_content_from_bytes_with_retry` 替代
     :func:`extract_content_from_bytes`，对瞬时 ``OSError``（Windows AV 文件锁、
     网络盘抖动）重试一次（退避 50ms），避免不必要的纯文本降级。
 

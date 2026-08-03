@@ -119,7 +119,7 @@ def run_archive_phase(
 ) -> tuple[int, int, int, int]:
     """扫描压缩包内条目，返回 (scanned, matched, errors, matches) 增量。
 
-    archive 文件级别并行（iter-39 P3）：``max_workers > 1`` 时不同 archive
+    archive 文件级别并行（P3）：``max_workers > 1`` 时不同 archive
     文件用线程池并行扫描，单个 archive 内条目仍顺序执行（避免 reader
     共享导致的线程安全问题）。每个 archive 在 worker 内创建独立 reader，
     ArchiveScanner 自身状态（``_compiled`` 等）只读，CacheStore 内部
@@ -165,7 +165,7 @@ def run_archive_phase(
     # 多线程：archive 文件级别并行
     # 不使用 with 语句：取消时 shutdown(wait=False) 立即返回，避免大型压缩包
     # list_entries() 卡住时 with 退出无限阻塞。已运行 worker 在后台完成。
-    # iter-139：使用 DaemonThreadPoolExecutor，finally 中 shutdown(wait=False)
+    # 使用 DaemonThreadPoolExecutor，finally 中 shutdown(wait=False)
     # 不阻塞主线程，避免取消路径下 worker 卡在慢 I/O 时 ScanWorker.run 不返回。
     future_to_entry: dict[Future[tuple[ScanResult, ...]], FileEntry] = {}
     pool = DaemonThreadPoolExecutor(max_workers=scanner._max_workers)
@@ -188,6 +188,6 @@ def run_archive_phase(
         errors += d_errors
         matches += d_matches
     finally:
-        # iter-139：wait=False 不阻塞主线程，daemon worker 由 OS 回收
+        # wait=False 不阻塞主线程，daemon worker 由 OS 回收
         pool.shutdown(wait=False)
     return scanned, matched, errors, matches

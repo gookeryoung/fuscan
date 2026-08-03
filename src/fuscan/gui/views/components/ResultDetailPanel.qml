@@ -53,7 +53,7 @@ Rectangle {
     // 空态：未选中结果时提示
     // 注意：ScanController 一律通过 workspaceController.currentScanController.xxx 链式访问，
     // 不绑定到本地 property。PySide2 5.15 中将 @Property(ScanController) 返回的 QObject
-    // 绑定到本地 property var/ScanControllerType 时类型推断失败会识别为 null（iter-101），
+    // 绑定到本地 property var/ScanControllerType 时类型推断失败会识别为 null，
     // 链式访问每次 binding 求值都重新读取 Property，与 ScanProgressCard 稳定模式一致。
     Label {
         anchors.centerIn: parent
@@ -149,7 +149,7 @@ Rectangle {
                             wrapMode: Text.WrapAnywhere
                         }
                         // 定位文件按钮：调用 workspaceController.currentScanController.openLocation()（无参 Slot）
-                        // iter-133：压缩包内部条目也启用——定位到压缩包文件本身
+                        // 压缩包内部条目也启用——定位到压缩包文件本身
                         IconButton {
                             iconSource: "qrc:/icons/folder.svg"
                             text: "定位"
@@ -326,7 +326,7 @@ Rectangle {
                                 wrapMode: Text.WrapAnywhere
                             }
 
-                            // 上下文（iter-124：实时读取文件内容，匹配行用 >>> 标记）
+                            // 上下文（实时读取文件内容，匹配行用 >>> 标记）
                             // >>> 匹配行按严重程度颜色高亮整行（RichText + HTML span）
                             TextArea {
                                 visible: modelData.context !== ""
@@ -408,7 +408,7 @@ Rectangle {
             Item { Layout.fillWidth: true }
         }
 
-        // 第二行：替换为输入框 + 替换内容按钮（iter-124：自定义替换文本，默认 ...）
+        // 第二行：替换为输入框 + 替换内容按钮（自定义替换文本，默认 ...）
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
@@ -457,7 +457,7 @@ Rectangle {
                     opMsgLabel.text = msg
                 }
             }
-            // iter-133：标记为误报——加入白名单，下次扫描起在命中聚合阶段过滤
+            // 标记为误报——加入白名单，下次扫描起在命中聚合阶段过滤
             IconButton {
                 iconSource: "qrc:/icons/stop.svg"
                 text: "标记误报"
@@ -473,7 +473,7 @@ Rectangle {
             }
         }
 
-        // iter-113：第三行 - 批量替换与撤销（针对过滤后的全部结果）
+        // 第三行 - 批量替换与撤销（针对过滤后的全部结果）
         RowLayout {
             Layout.fillWidth: true
             spacing: 8

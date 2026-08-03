@@ -95,7 +95,7 @@ _ARCHIVE_VIRTUAL_ROWS: tuple[tuple[str, str, str], ...] = (
     ("SevenZArchiveExtractor", "7z 压缩包", "7z"),
 )
 
-# 扩展名较多的提取器代表性格式标签（iter-103）：
+# 扩展名较多的提取器代表性格式标签：
 # 当提取器支持的扩展名超过 4 个时，formatLabel（如 "CODE"）不足以体现覆盖范围，
 # 因此在文件类型树中以多个代表性 tag 展示（如 HTML/XML/JSON/JS/C/CPP/PY/SH）。
 # 未在此映射中的提取器默认使用 ``(format_label,)`` 单标签。
@@ -177,7 +177,7 @@ class _ExtractorRow:
         self.engine_info = engine_info
         self.category = _classify(class_name)
         # 代表性格式标签列表：扩展名较多的提取器使用预设多标签（如 HTML/C/CPP/PY），
-        # 其余默认为 ``(format_label,)`` 单标签（iter-103）
+        # 其余默认为 ``(format_label,)`` 单标签
         self.format_tags: tuple[str, ...] = _FORMAT_TAGS_BY_CLASS.get(class_name, (self.format_label,))
 
 
@@ -186,7 +186,7 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
 
     行按 ``(category_order, display_name)`` 排序，QML ``ListView`` 可通过
     ``section.property: "category"`` 实现分组渲染。类别头部仅展示类别名，
-    勾选状态由各行提取器 CheckBox 体现（iter-102 移除三态 CheckBox）。
+    勾选状态由各行提取器 CheckBox 体现（移除三态 CheckBox）。
     """
 
     def __init__(self, parent: object | None = None) -> None:
@@ -225,7 +225,7 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
             # 返回 list（QML 端 Repeater 可直接用 modelData 访问）
             return list(row.format_tags)
         if role == Qt.UserRole + 10:
-            # iter-139：返回引擎信息字符串（如 "pypdf" / "python-calamine"）
+            # 返回引擎信息字符串（如 "pypdf" / "python-calamine"）
             return row.engine_info
         return ""
 
@@ -323,7 +323,7 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
                 return
 
     def set_category_enabled(self, category: str, enabled: bool) -> bool:
-        """批量设置某类别下所有提取器的勾选状态（iter-104 父节点统一勾选）。
+        """批量设置某类别下所有提取器的勾选状态（父节点统一勾选）。
 
         :param category: 类别名（如 ``"Office 文档"``/``"文本"``）
         :param enabled: True=全部勾选，False=全部取消勾选
@@ -339,7 +339,7 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
         return changed
 
     def category_enabled_state(self, category: str) -> int:
-        """返回类别勾选状态（iter-104 父节点三态显示）。
+        """返回类别勾选状态（父节点三态显示）。
 
         :param category: 类别名
         :return: 三态值

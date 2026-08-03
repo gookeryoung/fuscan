@@ -116,7 +116,7 @@ def element_text(elem: Any) -> str:
     ODF 单元格常包含多层 ``<text:p>`` / ``<text:span>`` 嵌套，需收集
     :attr:`Element.text` 与 :attr:`Element.tail` 才能拼出完整文本。
 
-    性能优化（iter-111）：双路径策略。
+    性能优化：双路径策略。
 
     - **快速路径**（``len(elem) == 0``）：元素无子元素，直接返回
       ``elem.text``，避免迭代器/递归开销。ODT/ODS 中 90%+ 的 ``text:p``

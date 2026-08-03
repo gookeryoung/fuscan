@@ -4,7 +4,7 @@ FilterWorker 在独立 QThread 中执行 filter_and_sort 纯函数，通过信�
 过滤后的元组传回主线程。10 万结果过滤+排序约 50-100ms，移至后台后
 UI 不阻塞。
 
-iter-165：同时在后台构建倒排索引（严重度 / 规则名），通过 ``done``
+同时在后台构建倒排索引（严重度 / 规则名），通过 ``done``
 信号一并传回，避免主线程在 ``set_results`` 阶段同步构建索引阻塞 UI。
 
 信号：
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
     """后台过滤+排序工作线程。
 
-    iter-165：同时在后台线程构建倒排索引（严重度/规则名），避免主线程
+    同时在后台线程构建倒排索引（严重度/规则名），避免主线程
     在大结果集（>= ``_ASYNC_THRESHOLD``）场景下同步构建索引阻塞 UI。
     索引仅在结果数 >= ``_INDEX_THRESHOLD`` 时构建；小结果集返回空字典。
 
@@ -90,7 +90,7 @@ class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
             self._sort_field,
             self._sort_ascending,
         )
-        # iter-165：后台构建倒排索引（仅对原始结果 >= 阈值时）
+        # 后台构建倒排索引（仅对原始结果 >= 阈值时）
         if self._build_index and len(self._results) >= self._index_threshold:
             severity_index, rule_index = build_indices(self._results)
         else:

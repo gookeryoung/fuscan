@@ -63,7 +63,7 @@ class ArchiveReader(ABC):
 
     子类须实现 :meth:`_close_resource` 关闭底层句柄；:meth:`close` 与
     :meth:`__enter__`/:meth:`__exit__` 由基类统一提供，避免 3 个子类重复
-    try/except 包装与上下文管理器样板（iter-146 抽取）。
+    try/except 包装与上下文管理器样板。
     """
 
     @property

@@ -9,7 +9,7 @@
 
 设计要点：
 
-- **读写连接分离**（iter-68）：写操作经主连接 + ``RLock`` 串行化；
+- **读写连接分离**：写操作经主连接 + ``RLock`` 串行化；
   读操作使用线程本地只读连接，WAL 模式下完全并行，消除锁竞争
 - WAL 模式：读不阻塞写，提升并发扫描吞吐
 - 缓存键为 ``(file_hash, rule_hash)``：路径无关，规则变更感知
@@ -17,16 +17,16 @@
 - **进程内 LRU 命中缓存**：``get_cached_hits`` 结果在内存中再缓存一份，
   热点文件（如 node_modules 中重复依赖）查询次数大幅降低；``put_result``
   / ``register_file`` 等写入操作自动 invalidate 对应 ``file_hash`` 条目
-- **路径预筛 LRU 缓存**（iter-73）：``lookup_file_hash`` 按 ``(path, mtime, size)``
+- **路径预筛 LRU 缓存**：``lookup_file_hash`` 按 ``(path, mtime, size)``
   查询 ``file_paths`` 索引，结果在内存中再缓存一份；``register_path`` /
   ``batch_put_results`` 写入后主动填充对应条目，使热缓存二次扫描完全命中内存，
   消除 SQLite 查询开销。文件 ``mtime`` 变化时 LRU 键自然不同，自动失效
-- **提取内容 LRU 缓存**（iter-118）：``get_extracted_content`` 结果在内存中
+- **提取内容 LRU 缓存**：``get_extracted_content`` 结果在内存中
   再缓存一份；node_modules 重复依赖等场景下，同一 ``file_hash`` 的内容查询
   二次及后续完全命中内存，跳过 SQLite 查询。``put_extracted_content`` 写入后
   主动填充 LRU
 
-模块结构（iter-108 拆分）：
+模块结构：
 
 - :mod:`fuscan.cache._helpers`：数据类与无状态工具函数（CacheStats/BatchWriteItem/时间工具）
 - :mod:`fuscan.cache._queries`：只读查询子流程（命中缓存、路径预筛、提取内容）
@@ -80,7 +80,7 @@ __all__ = ["BatchWriteItem", "CacheStats", "CacheStore", "default_cache_path"]
 
 logger = logging.getLogger(__name__)
 
-# iter-110：PRAGMA 调优常量。集中在模块级便于调整与诊断，所有连接（读/写）
+# PRAGMA 调优常量。集中在模块级便于调整与诊断，所有连接（读/写）
 # 共用同一组参数，避免行为不一致。
 # - mmap_size=256MB：内存映射 I/O，大缓存库（>10MB）读路径减少 syscall 与
 #   用户态/内核态数据拷贝；64 位系统地址空间充裕，256MB 上限足够覆盖
@@ -95,7 +95,7 @@ _PRAGMA_WAL_AUTOCHECKPOINT: int = 10000
 
 
 def _apply_pragmas(conn: sqlite3.Connection, read_only: bool) -> None:
-    """对连接应用 PRAGMA 调优（iter-110）。
+    """对连接应用 PRAGMA 调优。
 
     :param conn: 待配置的 SQLite 连接
     :param read_only: ``True`` 表示只读连接（应用 ``query_only=ON`` 防误写）；
@@ -129,7 +129,7 @@ def _apply_pragmas(conn: sqlite3.Connection, read_only: bool) -> None:
 
 
 class _ConnRef:
-    """``sqlite3.Connection`` 的弱引用包装（iter-147）。
+    """``sqlite3.Connection`` 的弱引用包装。
 
     ``sqlite3.Connection`` 是 C 扩展类型，未设 ``tp_weaklistoffset``，
     不支持 ``weakref.ref``。用本包装类间接实现弱引用跟踪：
@@ -167,7 +167,7 @@ class CacheStore:
     5. ``close()`` 释放连接
 
     所有公共方法线程安全。写操作经 ``RLock`` 串行化，读操作使用线程本地
-    只读连接并行执行（iter-68 起读写分离）。
+    只读连接并行执行（读写分离）。
 
     本类仅负责连接生命周期与内存 LRU 缓存管理；具体 SQL 操作委托到
     ``_queries``/``_writes``/``_cleanup`` 子模块，保持职责单一。
@@ -187,17 +187,17 @@ class CacheStore:
         # 进程内 LRU 命中缓存：file_hash -> (rule_hashes_tuple, result_dict)
         # 用 OrderedDict 实现 LRU 语义：访问时 move_to_end，超容量时 popitem(last=False)
         self._hit_cache: OrderedDict[str, tuple[tuple[str, ...], dict[str, RuleHit | None]]] = OrderedDict()
-        # 路径预筛 LRU 缓存（iter-73）：(path_str, mtime, size) -> file_hash
+        # 路径预筛 LRU 缓存：(path_str, mtime, size) -> file_hash
         # lookup_file_hash 命中时跳过 SQLite 查询；register_path / batch_put_results
         # 写入后主动填充，使热缓存二次扫描完全命中内存。文件 mtime 变化时键不同，自动失效
         self._path_cache: OrderedDict[tuple[str, float, int], str] = OrderedDict()
-        # 提取内容 LRU 缓存（iter-118）：file_hash -> content
+        # 提取内容 LRU 缓存：file_hash -> content
         # get_extracted_content 命中时跳过 SQLite 查询；put_extracted_content
         # 写入后主动填充。node_modules 重复依赖场景下显著减少 SQLite 查询次数
         self._extract_cache: OrderedDict[str, str] = OrderedDict()
         # 线程本地只读连接：每线程一个，WAL 模式下读完全并行
         self._read_local: threading.local = threading.local()
-        # iter-147：读连接弱引用集合（close 时统一关闭，用 _lru_lock 保护）。
+        # 读连接弱引用集合（close 时统一关闭，用 _lru_lock 保护）。
         # 用 WeakSet[_ConnRef] 替代原 list[sqlite3.Connection]：worker 线程正常
         # 退出后 threading.local 数据 slot 被清理，_ConnRef 失去强引用被 GC，
         # WeakSet 自动移除条目，避免原 list 强引用导致连接永不释放、list 膨胀。
@@ -224,7 +224,7 @@ class CacheStore:
         每个线程首次调用时创建独立连接，配置 WAL + ``query_only = ON``
         防止误写。WAL 模式下读不阻塞写，读连接可完全并行执行查询。
 
-        iter-147 修复：原实现每次调用都创建新连接并覆盖 ``_read_local.conn``，
+        原实现每次调用都创建新连接并覆盖 ``_read_local.conn``，
         导致 ``_read_conns`` 列表无限膨胀（每次扫描每文件查询都新增连接）。
         现改为先检查 ``_read_local.ref`` 是否已存在，有则复用，避免重复创建。
         连接经 :class:`_ConnRef` 包装后登记到 ``_read_conns`` 弱引用集合，
@@ -367,12 +367,12 @@ class CacheStore:
             return len(self._hit_cache)
 
     def path_cache_size(self) -> int:
-        """返回路径预筛 LRU 缓存当前条目数（诊断用，iter-73）。"""
+        """返回路径预筛 LRU 缓存当前条目数（诊断用）。"""
         with self._lru_lock:
             return len(self._path_cache)
 
     def extract_cache_size(self) -> int:
-        """返回提取内容 LRU 缓存当前条目数（诊断用，iter-118）。"""
+        """返回提取内容 LRU 缓存当前条目数（诊断用）。"""
         with self._lru_lock:
             return len(self._extract_cache)
 
@@ -434,7 +434,7 @@ class CacheStore:
         self,
         keys: Collection[tuple[Path, float, int]],
     ) -> dict[tuple[Path, float, int], str | None]:
-        """批量查询多个 ``(path, mtime, size)`` 的 ``file_hash``（iter-158 预热）。
+        """批量查询多个 ``(path, mtime, size)`` 的 ``file_hash``（预热）。
 
         单条 SQL 批量化查询，比 N 次 ``lookup_file_hash`` 快 10~30 倍；
         查询结果写回路径预筛 LRU，后续 ``lookup_file_hash`` 直接命中内存。
@@ -473,7 +473,7 @@ class CacheStore:
     def close(self) -> None:
         """关闭数据库连接。重复调用安全（幂等）。
 
-        关闭主写连接与所有线程本地读连接。iter-147 改为遍历 :class:`_ConnRef`
+        关闭主写连接与所有线程本地读连接。遍历 :class:`_ConnRef`
         弱引用集合，关闭仍存在的 ``ref.conn``；正常路径下 worker 退出后
         ``_ConnRef`` 已被 GC，此处仅关闭残留连接。
         """

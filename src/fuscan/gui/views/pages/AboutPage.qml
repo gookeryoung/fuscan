@@ -10,7 +10,7 @@ Item {
     property ThemeController theme: Theme
     property AboutControllerType aboutController: AboutController
 
-    // iter-139：打开手册/配置目录失败时的 Toast 提示
+    // 打开手册/配置目录失败时的 Toast 提示
     Rectangle {
         id: openToast
         property string message: ""

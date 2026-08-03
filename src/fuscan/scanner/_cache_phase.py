@@ -127,7 +127,7 @@ def extract_with_cache(
     max_file_size: int,
     perf: PerfStats,
 ) -> tuple[str, str]:
-    """缓存模式的提取+哈希：优先复用提取内容缓存（iter-39）。
+    """缓存模式的提取+哈希：优先复用提取内容缓存。
 
     与 :func:`default_extract_content_with_hash` 的区别：
 
@@ -140,7 +140,7 @@ def extract_with_cache(
     ``read_bytes`` / ``hash`` / ``cache_lookup_extract`` / ``extract`` /
     ``cache_put_extract``，便于定位 I/O 与 CPU 瓶颈。
 
-    iter-119：使用 :func:`extract_content_from_bytes_with_retry` 替代
+    使用 :func:`extract_content_from_bytes_with_retry` 替代
     :func:`extract_content_from_bytes`，对瞬时 ``OSError`` 重试一次（退避 50ms），
     避免不必要的纯文本降级。
 

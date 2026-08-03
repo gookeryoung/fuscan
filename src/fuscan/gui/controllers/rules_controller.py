@@ -4,7 +4,7 @@
 :class:`RuleListModel` 暴露给 QML ``ListView`` 绑定，规则文件列表通过
 ``@Property`` 暴露简单字符串列表（条目数少，无需 Model）。
 
-iter-137：规则配置改为全局模式——所有工作区共享同一规则集，直接读写
+规则配置改为全局模式——所有工作区共享同一规则集，直接读写
 :class:`Config` 的 ``rules_paths``/``use_builtin``，影响全局默认规则。
 不再支持工作区绑定编辑。
 
@@ -14,8 +14,8 @@ iter-137：规则配置改为全局模式——所有工作区共享同一规则
 - :meth:`RulesController.load_file_from_path`：加载规则文件（QML FileDialog 选定后调用）
 - :meth:`RulesController.move_up` / :meth:`move_down` / :meth:`remove_selected`：顺序管理
 - :meth:`RulesController.set_use_builtin`：勾选内置规则
-- :meth:`RulesController.export_ruleset`：导出当前规则集到 YAML/JSON（iter-122）
-- :meth:`RulesController.import_ruleset`：从 YAML/JSON 文件导入规则（iter-122）
+- :meth:`RulesController.export_ruleset`：导出当前规则集到 YAML/JSON
+- :meth:`RulesController.import_ruleset`：从 YAML/JSON 文件导入规则
 """
 
 from __future__ import annotations
@@ -122,7 +122,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def rulesFileModel(self) -> list[dict[str, object]]:
         """规则文件列表（QML 直接 ListView 绑定）。
 
-        iter-139：每项包含 ``fileName``/``path``/``exists`` 三个字段，
+        每项包含 ``fileName``/``path``/``exists`` 三个字段，
         QML delegate 据此显示「缺失」标记（文件被删除/移动后仍保留在配置中）。
         """
         return [{"fileName": Path(p).name, "path": p, "exists": Path(p).exists()} for p in self._config.rules_paths]
@@ -251,11 +251,11 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.selectionChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
 
-    # ------------------- iter-122：导入/导出 -------------------
+    # ------------------- 导入/导出 -------------------
 
     @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
     def exportRuleset(self, path_str: str) -> bool:
-        """导出当前规则集到 YAML/JSON 文件（iter-122）。
+        """导出当前规则集到 YAML/JSON 文件。
 
         将当前合并后的 :class:`RuleSet`（内置 + 用户规则）序列化到目标路径。
         格式根据扩展名推断（.yaml/.yml → YAML，.json → JSON）。
@@ -288,7 +288,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
     def importRuleset(self, path_str: str) -> bool:
-        """从 YAML/JSON 文件导入规则集（iter-122）。
+        """从 YAML/JSON 文件导入规则集。
 
         导入即将该文件加入规则文件列表（等价于 :meth:`loadFileFromPath`），
         但带有版本兼容性校验（不兼容版本会在加载阶段抛 ``RuleParseError``）。

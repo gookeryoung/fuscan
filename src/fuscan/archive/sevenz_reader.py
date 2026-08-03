@@ -6,7 +6,7 @@
 
 - ``py7zr.SevenZipFile.read(targets)`` 多次调用同一 ``SevenZipFile`` 实例时，
   第二次起的 ``decompress`` 会因内部流状态污染而**死锁**（py7zr 0.22 复现）。
-- iter-126 优化：不再在 ``__init__`` 中一次性 ``readall()`` 预读全部条目
+- 优化：不再在 ``__init__`` 中一次性 ``readall()`` 预读全部条目
   （大压缩包极慢、内存峰值高、无法中途取消），改为 **惰性读取**：
   ``read_entry`` 时每次创建新的 ``SevenZipFile`` 实例读取单个条目。
   虽然每次打开有头部解析开销（毫秒级），但解压才是耗时主体，且：
@@ -43,7 +43,7 @@ class SevenZReader(ArchiveReader):
     使用 py7zr 库读取 7z 格式（纯 Python 实现，无需系统工具）。
     加密条目需要密码；未提供密码或密码错误时跳过并记录。
 
-    iter-126：惰性读取优化，``__init__`` 仅解析元数据（list），
+    惰性读取优化，``__init__`` 仅解析元数据（list），
     ``read_entry`` 按需解压单个条目，避免 ``readall()`` 预读全部内容。
     """
 
@@ -70,7 +70,7 @@ class SevenZReader(ArchiveReader):
         # 预构建 entry_name -> FileInfo 映射（仅元数据，不解压内容）
         # py7zr.SevenZipFile 无 getinfo 方法，list() 返回 List[FileInfo]
         self._info_map: dict[str, Any] = {info.filename: info for info in self._sevenz.list()}
-        # iter-126：不再 _preload_bytes()，改为 read_entry 惰性读取
+        # 不再 _preload_bytes()，改为 read_entry 惰性读取
         # 加密条目集合：首次 read_entry 失败时标记，后续直接跳过
         self._encrypted_entries: set[str] = set()
         # 已读取条目字节缓存（避免重复解压同一条目）

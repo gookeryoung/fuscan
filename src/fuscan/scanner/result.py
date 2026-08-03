@@ -12,7 +12,7 @@
 二进制导出（PDF/Excel）已拆分到 :mod:`fuscan.export.report`，本模块仅保留
 数据结构与文本序列化（csv/json/text）。
 
-iter-142：``FileFingerprint`` 与 :class:`IncrementalManifest` 已迁出至
+``FileFingerprint`` 与 :class:`IncrementalManifest` 已迁出至
 :mod:`fuscan.scanner.manifest`，本模块通过 ``TYPE_CHECKING`` 引用以便
 :class:`WalkResult.manifest` 字段标注类型。JSON 助手 ``_json_dumps`` /
 ``_json_dumps_bytes`` / ``_json_loads`` 同步迁至 :mod:`fuscan.scanner.manifest`，
@@ -66,7 +66,7 @@ def format_size(size: int) -> str:
 class MatchResult:
     """单次匹配求值结果。
 
-    iter-163：保留 ``frozen=True`` —— 该对象在匹配器内部被多次复用（AND/OR
+    保留 ``frozen=True`` —— 该对象在匹配器内部被多次复用（AND/OR
     组合器收集子匹配结果时需要作为 dict key 或 set 元素使用 tuple 转换，
     但 MatchResult 本身不进入 hash 路径，此处保留 frozen 仅为明确不可变
     语义；若后续性能基准证明 ``__hash__`` 开销可接受再考虑替换为 ``__slots__``。
@@ -115,7 +115,7 @@ class ProgressInfo:
     def summary(self) -> str:
         """返回实时进度状态栏文本（含速度计算）。
 
-        根据 ``phase`` 返回不同文案（iter-79 四阶段命名）：
+        根据 ``phase`` 返回不同文案（四阶段命名）：
         walk 阶段（解析目录）突出已发现文件数与白名单跳过数，
         scan 阶段（文件解析）展示完整扫描指标，
         archive 阶段突出压缩包扫描进度。
@@ -142,7 +142,7 @@ class ProgressInfo:
 class RuleHit:
     """规则命中记录：一条规则对一个文件的命中信息。
 
-    iter-163：保留 ``frozen=True`` 不可变语义；命中对象在 GUI 详情区、
+    保留 ``frozen=True`` 不可变语义；命中对象在 GUI 详情区、
     导出、缓存重建等多路径复用，不变性可防止误修改。若后续性能基准证明
     构造开销显著，可引入 ``__slots__`` + 手动 ``__hash__`` 方案。
 
@@ -173,16 +173,16 @@ class RuleHit:
 class ScanResult:
     """单个文件的扫描结果。
 
-    iter-163：保留 ``frozen=True`` 不可变语义。``ScanResult`` 进入
+    保留 ``frozen=True`` 不可变语义。``ScanResult`` 进入
     GUI 展示层与报告序列化后不应被修改；frozen 不可变约束在 dataclass
     层面保证该不变式。若后续基准证明构造开销成为瓶颈，可引入 ``__slots__``
     + 手动 ``__hash__`` 方案。
 
-    ``user_skipped`` 标识该文件是否被用户在结果详情区「标记为跳过」（iter-77）。
+    ``user_skipped`` 标识该文件是否被用户在结果详情区「标记为跳过」。
     标记后本次扫描结果中仍保留该条目（带跳过标记），下一次扫描起扫描器在遍历
     阶段直接跳过该路径并计入 ``ScanStats.user_skipped`` 统计。
 
-    ``archive_path`` 标识压缩包内部条目（iter-89）：非 None 时表示该结果来自
+    ``archive_path`` 标识压缩包内部条目：非 None 时表示该结果来自
     压缩包内某个文件，``archive_path`` 指向压缩根本身（可 stat/打开），
     ``path`` 为 ``archive.zip!inner/file.txt`` 格式的展示路径。GUI 据此跳过
     内容预览（避免解压耗时）并展示"压缩包路径 / 内部条目路径"双字段。
@@ -267,7 +267,7 @@ class ScanResult:
         ``extra`` 用于 GUI 追加自身状态相关的字段（如"可切换位置"数），
         为已格式化的 HTML 片段，将以 `` | `` 分隔附加在末尾。
 
-        压缩包内部条目（``archive_path`` 非 None，iter-89）：跳过 ``stat`` 调用
+        压缩包内部条目（``archive_path`` 非 None）：跳过 ``stat`` 调用
         （内部条目路径在文件系统不存在），改为显示"压缩包路径 / 内部条目路径"
         双字段，修改时间显示"压缩包内部条目，无法获取"。
         """
@@ -343,7 +343,7 @@ class ScanStats:
 
         :param cancelled: 是否在摘要前缀"已取消"，GUI/CLI 取消场景共用。
 
-        iter-137：当 ``archive_entries > 0`` 时在"扫描"后注明含压缩包内条目数，
+        当 ``archive_entries > 0`` 时在"扫描"后注明含压缩包内条目数，
         避免 ``scanned_files > total_files`` 时用户误解为统计异常。
         """
         prefix = "已取消" if cancelled else "完成"
@@ -376,10 +376,10 @@ class WalkResult:
     :param user_skipped: 用户标记跳过的文件数（区别于 skipped）
     :param skipped_dirs: walk 阶段跳过的目录路径元组（最近条目，供 UI 展示）
     :param cancelled: walk 是否被取消
-    :param unchanged_count: 增量扫描时未变更文件数（iter-133：供 scan_entries
+    :param unchanged_count: 增量扫描时未变更文件数（供 scan_entries
         合并未变更命中结果；全量扫描时为 0）
     :param manifest: 本次 collect_entries 构建的新 manifest（含变更+未变更所有
-        walk 到的文件指纹）。iter-135：scan_entries 用其 keys() 过滤已删除文件，
+        walk 到的文件指纹）。scan_entries 用其 keys() 过滤已删除文件，
         避免增量合并时把已删除文件的命中结果重新加入结果列表。ScanWorker 用
         precollected 模式调 scan_entries 时，Scanner 实例自身 _current_manifest
         为 None（collect_entries 未被本实例调用），需从 WalkResult 恢复。
@@ -552,7 +552,7 @@ class ScanReport:
         重启后通过 ``from_json()`` 恢复结果到 :class:`ScanController`，
         避免用户重启后被迫重新扫描。
 
-        iter-128：改用 ``_json_loads``（orjson），接受 str 或 bytes，
+        改用 ``_json_loads``（orjson），接受 str 或 bytes，
         配合 ``read_bytes()`` 跳过 ``.decode()`` + ``.encode()`` 往返。
 
         :param json_str: ``to_json()`` 输出的 JSON 字符串或字节串
@@ -767,7 +767,7 @@ class ScanReport:
     ) -> None:
         """流式分块写入 JSON 文件，避免大结果集内存峰值。
 
-        iter-166：原始 :meth:`to_json` / :meth:`to_json_bytes` 会在内存中构造完整
+        原始 :meth:`to_json` / :meth:`to_json_bytes` 会在内存中构造完整
         JSON 对象 + 序列化 str/bytes，10 万命中场景下内存峰值约为结果本身的
         3-5 倍。本方法按 ``chunk_size`` 条 :class:`ScanResult` 为单位分批序列化
         并写盘，常驻内存仅与单批大小相关，峰值约为原始方案的 20-30%。
@@ -849,7 +849,7 @@ class ScanReport:
     ) -> None:
         """流式分块写入 CSV 文件，避免大结果集内存峰值。
 
-        iter-166：CSV 每行对应一条 :class:`RuleHit`（单条 :class:`ScanResult`
+        CSV 每行对应一条 :class:`RuleHit`（单条 :class:`ScanResult`
         可能对应多行）。原始 :meth:`to_csv` 会在内存 :class:`io.StringIO` 中
         累积全部内容，对 100 万行 CSV 不友好。本方法按 ``chunk_size`` 条
         :class:`ScanResult` 为单位分批 flush 到磁盘，常驻内存与单批大小相关。

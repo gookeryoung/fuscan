@@ -69,10 +69,10 @@ class FileStatsWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         :param scan_archives: 是否扫描压缩包（构造 ArchiveScanner 进入压缩包扫描阶段）
         :param ignore_dirs: 忽略的目录名（如 ``.git``、``__pycache__``）
         :param progress_interval: 进度回调最小间隔（秒）
-        :param scan_extensions: 全局后缀白名单（iter-87 起统一白名单制），
+        :param scan_extensions: 全局后缀白名单（统一白名单制），
             None 表示扫描所有文件；非空 tuple 按白名单过滤；空 tuple 不扫描任何文件
         :param skip_paths: 用户标记跳过的路径集合
-        :param incremental_manifest: 增量扫描清单（iter-124），非 None 启用增量模式，
+        :param incremental_manifest: 增量扫描清单，非 None 启用增量模式，
             walk 阶段对比指纹跳过未变更文件；None 走全量模式
         :param parent: 父 QObject
         """

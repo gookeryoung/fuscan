@@ -1,7 +1,7 @@
 """增量扫描清单持久化纯函数。
 
 将 :class:`ScanController` 中 ``_load_manifest`` / ``_save_manifest`` /
-``invalidate_manifest`` 的纯 I/O 逻辑抽离到模块级（iter-142），便于独立测试。
+``invalidate_manifest`` 的纯 I/O 逻辑抽离到模块级，便于独立测试。
 ``ScanController`` 对应方法改为薄包装：传入工作区 ID 与清单目录后委托本模块。
 
 公共 API：

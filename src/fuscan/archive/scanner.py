@@ -38,7 +38,7 @@ __all__ = ["ArchiveScanner"]
 
 logger = logging.getLogger(__name__)
 
-# iter-135：单压缩包条目数上限与取消检查频率默认值。
+# 单压缩包条目数上限与取消检查频率默认值。
 # - DEFAULT_MAX_ARCHIVE_ENTRIES：超过此值的压缩包截断扫描，避免恶意/损坏压缩包
 #   （如 zip bomb）耗尽内存与时间。5000 条目足够覆盖常规工程压缩包。
 # - CANCEL_CHECK_INTERVAL：每处理 N 个条目检查一次取消信号，避免逐条检查的
@@ -55,7 +55,7 @@ class ArchiveScanner:
     - 内容提取策略：读取条目字节 → 通过 ``extract_content_from_bytes_with_retry`` 从内存直接提取
     - 加密条目未提供密码时跳过并记录错误
 
-    iter-135：``max_entries`` 与 ``cancel_check`` 提供保护，避免恶意/损坏压缩包
+    ``max_entries`` 与 ``cancel_check`` 提供保护，避免恶意/损坏压缩包
     （如 zip bomb、超大归档）卡死扫描，并支持用户取消信号在压缩包内部及时生效。
 
     - ``max_entries``：单压缩包扫描条目数上限，超过后截断并记录 warning
@@ -76,7 +76,7 @@ class ArchiveScanner:
         self._ruleset = ruleset
         self._password = password
         self._max_entry_size = max_entry_size
-        # iter-135：单压缩包条目数上限与取消检查回调
+        # 单压缩包条目数上限与取消检查回调
         self._max_entries: int = max_entries
         self._cancel_check: Callable[[], bool] | None = cancel_check
         # 压缩包内部条目同样按白名单过滤：
@@ -133,7 +133,7 @@ class ArchiveScanner:
             )
 
         results: list[ScanResult] = []
-        # iter-135：processed_count 同时驱动取消检查（每 CANCEL_CHECK_INTERVAL 条）
+        # processed_count 同时驱动取消检查（每 CANCEL_CHECK_INTERVAL 条）
         # 与条目数上限保护（超过 max_entries 截断）。仅统计实际进入扫描的条目
         # （已剔除 is_dir 与白名单过滤），与 results 长度一致。
         processed_count = 0
@@ -156,7 +156,7 @@ class ArchiveScanner:
             # 空 frozenset 表示用户全部取消勾选，跳过所有条目。
             if self._scan_extensions is not None and entry.extension not in self._scan_extensions:
                 continue
-            # iter-135：条目数上限保护，超过 max_entries 截断避免 zip bomb 卡死
+            # 条目数上限保护，超过 max_entries 截断避免 zip bomb 卡死
             if processed_count >= self._max_entries:
                 truncated = True
                 logger.warning(
@@ -362,7 +362,7 @@ class ArchiveScanner:
     def _extract_content_from_bytes(self, data: bytes, entry: ArchiveEntry) -> str:
         """从字节提取文本内容，复用提取器链或直接解码。
 
-        iter-119：使用 ``extract_content_from_bytes_with_retry`` 替代
+        使用 ``extract_content_from_bytes_with_retry`` 替代
         ``extract_content_from_bytes``，对瞬时 ``OSError``（解压临时文件锁）
         重试一次（退避 50ms），避免不必要的纯文本降级。
         """

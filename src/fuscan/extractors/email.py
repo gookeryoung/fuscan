@@ -3,7 +3,7 @@
 EML 使用标准库 email 解析，提取主题、发件人与正文。
 MSG 使用 extract-msg 库解析 Outlook 邮件格式。
 
-iter-126：MSG 在 kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
+MSG 在 kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
 不可用时回退到 extract-msg 纯 Python 实现（T3 中速）。
 """
 
@@ -64,7 +64,7 @@ class EmlExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：标准库 email 模块。"""
+        """标准库 email 模块。"""
         return "email（标准库）"
 
     @override
@@ -140,7 +140,7 @@ class EmlExtractor(Extractor):
 class MsgExtractor(Extractor):
     """Outlook MSG 邮件文件文本提取器。
 
-    iter-126：kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
+    kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
     不可用时回退到 extract-msg 纯 Python 实现（T3 中速）。
     """
 
@@ -167,7 +167,7 @@ class MsgExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：kreuzberg 可用时优先，回退 extract-msg。"""
+        """kreuzberg 可用时优先，回退 extract-msg。"""
         return "kreuzberg" if kreuzberg_available() else "extract-msg"
 
     @override
@@ -198,7 +198,7 @@ class MsgExtractor(Extractor):
     def extract_from_bytes(self, data: bytes) -> str:
         """从内存字节解析 MSG 邮件。
 
-        iter-127：kreuzberg 可用时通过临时文件走 Rust 核心加速（压缩包内条目同样加速），
+        kreuzberg 可用时通过临时文件走 Rust 核心加速（压缩包内条目同样加速），
         不可用时回退到 extract-msg 纯 Python 实现。
         """
         if kreuzberg_available():

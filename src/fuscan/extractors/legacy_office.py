@@ -4,7 +4,7 @@ XLS 通过 calamine（Rust + PyO3）读取 Excel 97-2003 工作簿，与 XLSX
 共用同一 Rust 后端（``_extract_calamine_workbook``）。DOC/PPT 仍使用 olefile
 读取 OLE 复合文档，从文本流中提取 UTF-16LE 编码内容。
 
-iter-126：DOC/PPT 在 kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
+DOC/PPT 在 kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
 不可用时回退到 olefile + UTF-16LE 正则扫描（T3 中速）。kreuzberg 仅支持
 文件路径提取，``extract_from_bytes``（压缩包内条目）仍走 olefile。
 
@@ -66,7 +66,7 @@ def _extract_utf16le_text(data: bytes) -> str:
 class XlsExtractor(Extractor):
     """XLS (Excel 97-2003) 工作簿文本提取器。
 
-    iter-92 起切换到 calamine (Rust + PyO3) 后端，从 T4 慢速降至 T2 快速，
+    切换到 calamine (Rust + PyO3) 后端，从 T4 慢速降至 T2 快速，
     与 XLSX/ODS 共用同一 Rust 后端。
     """
 
@@ -91,7 +91,7 @@ class XlsExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：python-calamine (Rust + PyO3)。"""
+        """python-calamine (Rust + PyO3)。"""
         return "python-calamine"
 
     @override
@@ -117,7 +117,7 @@ class DocExtractor(Extractor):
     通过 olefile 读取 OLE 复合文档中的 WordDocument 流，提取 UTF-16LE
     编码的文本。仅做简单文本提取，不解析复杂格式。
 
-    iter-126：kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
+    kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
     不可用时回退到 olefile + UTF-16LE 正则扫描（T3 中速）。
     """
 
@@ -144,7 +144,7 @@ class DocExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：kreuzberg 可用时优先，回退 olefile。"""
+        """kreuzberg 可用时优先，回退 olefile。"""
         return "kreuzberg" if kreuzberg_available() else "olefile"
 
     @override
@@ -169,7 +169,7 @@ class DocExtractor(Extractor):
     def extract_from_bytes(self, data: bytes) -> str:
         """从内存字节解析 DOC 文档。
 
-        iter-127：kreuzberg 可用时通过临时文件走 Rust 核心加速（压缩包内条目同样加速），
+        kreuzberg 可用时通过临时文件走 Rust 核心加速（压缩包内条目同样加速），
         不可用时回退到 olefile + UTF-16LE 正则扫描。
         """
         if kreuzberg_available():
@@ -204,7 +204,7 @@ class PptExtractor(Extractor):
     通过 olefile 读取 OLE 复合文档中的 PowerPoint Document 流，提取
     UTF-16LE 编码的文本。仅做简单文本提取，不解析幻灯片结构。
 
-    iter-126：kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
+    kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
     不可用时回退到 olefile + UTF-16LE 正则扫描（T3 中速）。
     """
 
@@ -231,7 +231,7 @@ class PptExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：kreuzberg 可用时优先，回退 olefile。"""
+        """kreuzberg 可用时优先，回退 olefile。"""
         return "kreuzberg" if kreuzberg_available() else "olefile"
 
     @override
@@ -256,7 +256,7 @@ class PptExtractor(Extractor):
     def extract_from_bytes(self, data: bytes) -> str:
         """从内存字节解析 PPT 演示文稿。
 
-        iter-127：kreuzberg 可用时通过临时文件走 Rust 核心加速（压缩包内条目同样加速），
+        kreuzberg 可用时通过临时文件走 Rust 核心加速（压缩包内条目同样加速），
         不可用时回退到 olefile + UTF-16LE 正则扫描。
         """
         if kreuzberg_available():

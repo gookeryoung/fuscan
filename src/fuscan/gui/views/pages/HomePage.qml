@@ -44,7 +44,7 @@ Item {
         }
     }
 
-    // PDF 导出文件保存对话框（iter-136）
+    // PDF 导出文件保存对话框
     FileDialog {
         id: exportPdfDialog
         title: "导出扫描结果为 PDF"
@@ -324,7 +324,7 @@ Item {
                 anchors.fill: parent
                 model: workspaceController.workspaceModel
                 spacing: 12
-                // iter-106 P1：预渲染屏幕外 delegate，避免滚动时 WorkspaceCard 重建
+                // 预渲染屏幕外 delegate，避免滚动时 WorkspaceCard 重建
                 cacheBuffer: 500
                 implicitHeight: contentHeight
 
@@ -380,9 +380,9 @@ Item {
             }
         }
 
-        // ---------- 全局规则配置区（iter-137） ----------
+        // ---------- 全局规则配置区 ----------
         // 规则配置全局化：所有工作区共享同一规则集，首页下方提供编辑入口
-        // iter-138：改为可折叠，默认收起仅显示标题栏，点击展开显示完整规则面板
+        // 改为可折叠，默认收起仅显示标题栏，点击展开显示完整规则面板
         Rectangle {
             Layout.fillWidth: true
             // 收起时不占额外空间（仅标题栏 ~48px），展开时与上方工作区列表弹性分配

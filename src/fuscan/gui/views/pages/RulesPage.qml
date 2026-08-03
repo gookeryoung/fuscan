@@ -6,7 +6,7 @@ import fuscan.controllers 1.0
 import "../components"
 
 // 规则页（独立页，向后兼容）
-// iter-137：规则配置全局化后，首页已内嵌 RulesPanel 提供完整编辑入口。
+// 规则配置全局化后，首页已内嵌 RulesPanel 提供完整编辑入口。
 // 本页保留供 Sidebar 「规则」入口跳转，复用 RulesPanel 组件。
 Item {
     id: rulesPage
@@ -31,7 +31,7 @@ Item {
                 onClicked: rulesPage.backRequested()
             }
             Label {
-                // iter-137：固定显示「全局规则」（不再有工作区绑定）
+                // 固定显示「全局规则」（不再有工作区绑定）
                 text: "全局规则"
                 font.pixelSize: 22
                 font.bold: true

@@ -1,6 +1,6 @@
 """扫描器：协调遍历器与匹配引擎，输出扫描报告。
 
-两阶段扫描架构（iter-71）：
+两阶段扫描架构：
 
 1. 单线程遍历目录树收集待扫描文件清单（按全局 ``scan_extensions`` 过滤）
 2. ``max_workers > 1`` 时用 ThreadPoolExecutor 并发扫描清单，否则顺序扫描
@@ -94,7 +94,7 @@ logger = logging.getLogger(__name__)
 
 
 def extract_required_exts(match: MatchSpec | None) -> frozenset[str] | None:  # noqa: PLR0912
-    """iter-164：从 MatchSpec 提取**必须匹配任一扩展名**的集合。
+    """从 MatchSpec 提取**必须匹配任一扩展名**的集合。
 
     若规则对扩展名无任何约束（例如纯 CONTENT 匹配、OR 组合的各分支提取不出来），
     返回 ``None``（表示所有扩展名都「可能命中」，不能在预筛阶段跳过）。
@@ -210,7 +210,7 @@ def _flags_to_chars(flags: int) -> str:
 
 @dataclass
 class _ContentRuleBucket:
-    """iter-154：一组同 mode + 同 case_sensitive 的顶层纯 CONTENT 规则。
+    """一组同 mode + 同 case_sensitive 的顶层纯 CONTENT 规则。
 
     组内规则使用命名捕获组的 OR 复合正则（``(?P<_f0>pat0)|(?P<_f1>pat1)|...``）
     一次 ``finditer`` 得到全部命中后按 ``lastgroup`` 分派到各规则，
@@ -237,7 +237,7 @@ class Scanner:
     - 构造时一次性编译规则集为 Matcher 列表，避免重复编译
     - 默认使用提取器注册表（extractors）提取文件内容，支持多格式
     - 支持自定义内容提供器覆盖默认提取逻辑
-    - 两阶段架构（iter-71）：先单线程遍历收集文件清单（按全局 ``scan_extensions``
+    - 两阶段架构：先单线程遍历收集文件清单（按全局 ``scan_extensions``
       过滤），再 ``max_workers > 1`` 时用线程池并发扫描清单
     - ``on_progress`` 回调在扫描过程中按时间节流（默认 150ms）反馈进度
     """
@@ -270,7 +270,7 @@ class Scanner:
         # 大文件跳过阈值：None 或 0 表示不限制，否则超过此大小的文件不读取内容
         self._max_file_size: int = normalize_max_file_size(max_file_size)
         self._compiled: list[tuple[Rule, Matcher]] = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
-        # iter-154 + iter-164：规则按 required_exts 分组 + 分别 CONTENT 桶合并
+        # 规则按 required_exts 分组 + 分别 CONTENT 桶合并
         #
         # - 无扩展名约束（纯 CONTENT / NOT / OR 混合）的规则 → global pairs（对所有文件执行）
         # - 有扩展名约束（如 filename endswith ".env" AND ...）的规则 → 对每个
@@ -302,7 +302,7 @@ class Scanner:
             for b in buckets:
                 for r in b.rules:
                     all_bucketed_names.add(r.name)
-        # iter-155：缓存模式下快速判断规则是否被桶覆盖（避免每次扫文件重建 set）
+        # 缓存模式下快速判断规则是否被桶覆盖（避免每次扫文件重建 set）
         self._bucketed_rule_names: frozenset[str] = frozenset(all_bucketed_names)
         # 兼容性别名：老代码（_scan_entry_uncached 等）可先临时指向 global 版本，
         # 实际扫描时再叠加 ext 的 buckets/rules
@@ -347,7 +347,7 @@ class Scanner:
                 for rule, matcher in self._compiled
                 if rule.name in self._rule_hashes
             ]
-        # iter-135：_cancel_event 在 _archive_scanner 前创建，以便传入 cancel_check
+        # _cancel_event 在 _archive_scanner 前创建，以便传入 cancel_check
         # bound method（避免 lambda 触发 PLW0108，且 bound method 调用更快）
         self._pause_event = threading.Event()
         self._pause_event.set()
@@ -365,31 +365,31 @@ class Scanner:
                 # 压缩包内条目同样按白名单过滤：None 表示全选快速路径，
                 # 非 frozenset 表示按白名单过滤内部条目（如压缩包内 .txt 在白名单不含 txt 时跳过）
                 scan_extensions=self._scan_extensions,
-                # iter-135：传 cancel_check 让压缩包内部循环能及时响应取消信号。
+                # 传 cancel_check 让压缩包内部循环能及时响应取消信号。
                 # 每 CANCEL_CHECK_INTERVAL 条检查一次，平衡响应性与开销。
                 cancel_check=self._cancel_event.is_set,
             )
         self._on_progress = on_progress
         self._progress_interval = progress_interval
         self._last_progress_time: float = 0.0
-        # iter-160：双门限节流的「上次已发送进度快照」，用于计算 scanned/matched 增量。
+        # 双门限节流的「上次已发送进度快照」，用于计算 scanned/matched 增量。
         # 初始值为 0，首次 emit 会直接通过（因 elapsed >= 0），后续与当前值比较。
         self._last_progress_scanned: int = 0
         self._last_progress_matched: int = 0
-        # iter-111：自适应 GIL 让步间隔。
+        # 自适应 GIL 让步间隔。
         # 顺序扫描（max_workers<=1）：主线程独占 GIL，需每 20 个文件让步一次避免 UI 卡死。
         # 并发扫描（max_workers>1）：PyO3 提取器（pdf_oxide/calamine）在 Rust 层释放 GIL，
         # worker 线程在 I/O 与提取期间不持 GIL，主线程自然获得调度机会；
-        # iter-152：让步间隔从 50 提高到 200，进一步减少 sleep(0) 系统调用开销
+        # 让步间隔从 50 提高到 200，进一步减少 sleep(0) 系统调用开销
         # （10万文件节省约 10ms），PyO3 释放 GIL 下调度仍顺畅。
         self._gil_yield_interval: int = (
             GIL_YIELD_INTERVAL if not max_workers or max_workers <= 1 else GIL_YIELD_INTERVAL * 10
         )
-        # iter-111：进度 emit 批处理阈值。
+        # 进度 emit 批处理阈值。
         # 并发扫描时每 N 个 future 完成才调用一次 _emit_progress（内部仍有 150ms 节流），
         # 减少 time.perf_counter() + 比较的函数调用开销。
         # 顺序扫描保持每文件 emit（用户期望实时反馈）。
-        # iter-152：默认并发 batch=10，后续 scan_entries 按 entries 规模自适应调整
+        # 默认并发 batch=10，后续 scan_entries 按 entries 规模自适应调整
         # （见 _adapt_progress_batch），避免一刀切导致小清单过度丢实时性或大清单开销高。
         self._progress_emit_batch: int = 10 if (max_workers and max_workers > 1) else 1
         # 扫描进度上下文（scan() 期间设置，供 _emit_progress 使用）
@@ -403,14 +403,14 @@ class Scanner:
         self._base_errors: int = 0
         self._base_matches: int = 0
         # 批量写入缓冲：缓存模式下累积 BatchWriteItem，达阈值后单次事务 flush。
-        # iter-109：抽取为 :class:`BatchBuffer` 子模块，消除 scanner.py 内的锁与
+        # 抽取为 :class:`BatchBuffer` 子模块，消除 scanner.py 内的锁与
         # 缓冲管理细节；无缓存模式下 :attr:`_cache` 为 None，BatchBuffer 不创建。
         self._batch_buffer: BatchBuffer | None = None
         # 性能聚合统计：PerfStats 始终启用，仅做聚合统计无日志开销，不影响生产性能。
         self._perf: PerfStats = PerfStats()
         if cache is not None:
             self._batch_buffer = BatchBuffer(cache, self._perf)
-        # 增量扫描上下文（iter-124）：
+        # 增量扫描上下文：
         # - _incremental_manifest 非 None 时启用增量模式，walk 阶段对比指纹跳过未变更文件
         # - _prev_report 提供未变更文件的命中结果，scan 阶段合并到本次报告
         # - _unchanged_hits 缓存未变更文件中仍有命中的结果（按相对路径索引），供合并
@@ -421,7 +421,7 @@ class Scanner:
         self._unchanged_count: int = 0
         # 本次 collect_entries 构建的新 manifest（供调用方持久化，下次增量扫描用）
         self._current_manifest: IncrementalManifest | None = None
-        # iter-133：_unchanged_hits 只依赖 prev_report 预索引上次命中结果，
+        # _unchanged_hits 只依赖 prev_report 预索引上次命中结果，
         # 与 incremental_manifest 无关（manifest 仅用于 walk 阶段对比指纹）。
         # 此前条件为 `incremental_manifest is not None and prev_report is not None`，
         # 但 ScanWorker 构造 Scanner 时不传 incremental_manifest（manifest 在
@@ -433,10 +433,10 @@ class Scanner:
                     continue  # 压缩包内部条目不参与增量合并（每次重新扫描压缩包）
                 rel = IncrementalManifest.rel_key(sr.path, prev_report.root)
                 self._unchanged_hits[rel] = sr
-        # iter-133：误报白名单快照——扫描期间持有不可变快照，UI 增删不影响本次扫描。
+        # 误报白名单快照——扫描期间持有不可变快照，UI 增删不影响本次扫描。
         # 在 scan_entries 命中聚合阶段过滤命中白名单的结果（不计入 ScanReport.hits）。
         self._whitelist: Whitelist | None = whitelist
-        # iter-134：高熵字符串检测——作为正则规则的兜底，识别未在规则集中显式定义
+        # 高熵字符串检测——作为正则规则的兜底，识别未在规则集中显式定义
         # 的密钥格式（如自定义生成的 Base64/Hex 串）。启用后在 _scan_entry_uncached/
         # _scan_entry_cached 的规则匹配后对 content 执行熵检测，命中构造 RuleHit
         # （rule_name=E001-高熵字符串，severity=WARNING）。
@@ -444,7 +444,7 @@ class Scanner:
         self._entropy_threshold: float = (
             entropy_threshold if entropy_threshold is not None else DEFAULT_ENTROPY_THRESHOLD
         )
-        # iter-158：collect_entries 阶段 1 walk 结束后批量预热的 file_hash 结果。
+        # collect_entries 阶段 1 walk 结束后批量预热的 file_hash 结果。
         # 键为 str(Path)，值为 file_hash（64 hex，None 表示未登记/不适用）。
         # _scan_entry_cached 优先查本 dict，省掉 SQLite/路径 LRU 查询。
         self._precomputed_file_hashes: dict[str, str | None] = {}
@@ -493,7 +493,7 @@ class Scanner:
     def scan(self, root: Path) -> ScanReport:
         """扫描根目录，返回完整报告（``collect_entries`` + ``scan_entries`` 串联）。
 
-        两阶段扫描架构（iter-71）：
+        两阶段扫描架构：
 
         1. **阶段 1 - 收集**：:meth:`collect_entries` 单线程遍历目录树，按全局
            ``scan_extensions`` 过滤生成待扫描文件清单。遍历为 I/O 轻量操作，单线程已足够。
@@ -520,11 +520,11 @@ class Scanner:
 
         - ``skip_paths``：用户标记跳过的文件计入 ``user_skipped``，不进入清单
         - ``scan_extensions``：不在白名单的文件计入 ``skipped``，不进入清单
-          （iter-87 起统一白名单制：None 全选，空集合都不扫，非空按白名单过滤）
+          （统一白名单制：None 全选，空集合都不扫，非空按白名单过滤）
         - ``ignore_dirs``：在 ``FileWalker`` 内部过滤，
           跳过的目录收集到 ``skipped_dirs`` 供 UI 展示
 
-        增量模式（iter-124）：构造时传入 ``incremental_manifest`` 启用。walk 阶段
+        增量模式：构造时传入 ``incremental_manifest`` 启用。walk 阶段
         对比 ``(mtime, size)`` 指纹，未变更文件跳过（不加入 entries），仅变更/
         新增文件进入扫描队列。未变更文件数累计到 ``_unchanged_count``，供
         :meth:`scan_entries` 合并统计。
@@ -572,7 +572,7 @@ class Scanner:
                     if not self._should_scan(entry):
                         skipped += 1
                         continue
-                    # iter-150：rel_key 仅计算一次（之前两分支各算一次，
+                    # rel_key 仅计算一次（之前两分支各算一次，
                     # 大目录下省几十万次 path.relative_to + 字符串替换）
                     rel = IncrementalManifest.rel_key(entry.path, root)
                     # 增量模式：指纹匹配的未变更文件跳过（不加入扫描队列），
@@ -608,7 +608,7 @@ class Scanner:
         cancelled = self.is_cancelled
         self._cancel_event.clear()
 
-        # iter-158：预热路径预筛 file_hash（批量 SQL 查询）
+        # 预热路径预筛 file_hash（批量 SQL 查询）
         # 对进入扫描队列的变更/新文件，一条 CTE JOIN 批量查 SQLite，
         # 结果写入 _precomputed_file_hashes + 主动填充路径预筛 LRU，
         # 使后续 _scan_entry_cached 内 lookup_file_hash 全部命中内存，
@@ -639,9 +639,9 @@ class Scanner:
             user_skipped=user_skipped,
             skipped_dirs=tuple(self._skipped_dirs),
             cancelled=cancelled,
-            # iter-133：传递未变更文件数到 scan_entries，供合并未变更命中结果
+            # 传递未变更文件数到 scan_entries，供合并未变更命中结果
             unchanged_count=self._unchanged_count,
-            # iter-135：传递本次构建的 manifest，供 scan_entries 合并循环过滤
+            # 传递本次构建的 manifest，供 scan_entries 合并循环过滤
             # 已删除文件（keys() 即本次 walk 访问到的所有文件，含变更+未变更）
             manifest=self._current_manifest,
         )
@@ -658,7 +658,7 @@ class Scanner:
     def _adapt_progress_batch(self, n_entries: int) -> None:
         """根据待扫描条目数自适应设置 _progress_emit_batch。
 
-        iter-152：取代一刀切 batch=10 的默认值，按清单规模在 10~50 之间分档：
+        取代一刀切 batch=10 的默认值，按清单规模在 10~50 之间分档：
         - 小清单（<=1000）：batch=10，保留实时反馈
         - 中等清单（1001~10000）：batch=20，平衡实时性与开销
         - 大清单（10001~50000）：batch=35，降低主线程 as_completed 循环 overhead
@@ -700,13 +700,13 @@ class Scanner:
         total = walk_result.total
         skipped = walk_result.skipped
         user_skipped = walk_result.user_skipped
-        # iter-133：从 WalkResult 恢复未变更文件数——collect_entries 在
+        # 从 WalkResult 恢复未变更文件数——collect_entries 在
         # FileStatsWorker 的 Scanner 实例中累加 _unchanged_count，但 ScanWorker
         # 使用新 Scanner 实例调 scan_entries，_unchanged_count 初始为 0。
         # 若不从 WalkResult 恢复，合并条件 _unchanged_count > 0 永远为 False，
         # 未变更命中结果不会被合并，导致增量扫描结果清零。
         self._unchanged_count = walk_result.unchanged_count
-        # iter-135：从 WalkResult 恢复 manifest——collect_entries 在 FileStatsWorker
+        # 从 WalkResult 恢复 manifest——collect_entries 在 FileStatsWorker
         # 的 Scanner 实例中构建 _current_manifest，但 ScanWorker 使用新 Scanner
         # 实例调 scan_entries，_current_manifest 初始为 None。若不从 WalkResult
         # 恢复，合并循环无法过滤已删除文件（_current_manifest.fingerprints.keys()
@@ -721,7 +721,7 @@ class Scanner:
         matched = 0
         errors = 0
         matches = 0
-        # iter-137：压缩包内条目数（archive 阶段扫描的条目，含在 scanned 中）
+        # 压缩包内条目数（archive 阶段扫描的条目，含在 scanned 中）
         archive_entries = 0
         # 复位 walk 累积的进度上下文，供 _emit_progress 在 scan 阶段使用。
         # scan 阶段 total 必须为实际待扫描文件数 len(entries)（符合类型的文件），
@@ -729,20 +729,20 @@ class Scanner:
         # 否则 progress = scanned / walk_total * 100 会偏低，与"已扫描 N / M 个文件"
         # 数值不匹配（如 1000 个发现 / 300 跳过 → entries=700，但 total=1000 导致
         # 进度条 350/1000=35% 而非正确的 350/700=50%）。
-        # iter-133：total 须纳入未变更文件数（_unchanged_count），因为 scanned
+        # total 须纳入未变更文件数（_unchanged_count），因为 scanned
         # 在合并阶段会累加 _unchanged_count（未变更文件视为已扫描），若 total 不含
         # 此部分会导致 scanned > total（分子超出分母）。
         self._progress_total = len(entries) + self._unchanged_count
         self._progress_skipped = skipped
         self._progress_user_skipped = user_skipped
-        # iter-152：根据 entries 规模自适应 emit batch，避免一刀切 10 导致
+        # 根据 entries 规模自适应 emit batch，避免一刀切 10 导致
         # 小清单丢实时性或大清单主线程 as_completed 循环 overhead 过高。
         self._adapt_progress_batch(len(entries))
 
         try:
             if not cancelled:
                 # 阶段 2：并发扫描（max_workers > 1）或顺序扫描
-                # iter-117：_scan_sequential/_scan_concurrent/_collect_concurrent_results
+                # _scan_sequential/_scan_concurrent/_collect_concurrent_results
                 # 抽离到 _pipeline_phase.py，本类仅做分派调用
                 scanned, matched, errors, matches = run_pipeline_phase(self, entries, results)  # pyrefly: ignore [bad-argument-type]
 
@@ -762,9 +762,9 @@ class Scanner:
                 matched += d_matched
                 errors += d_errors
                 matches += d_matches
-                # iter-137：记录压缩包内条目数，用于摘要注明
+                # 记录压缩包内条目数，用于摘要注明
                 archive_entries += d_scanned
-                # iter-133：压缩包内条目纳入分母，避免 scanned > total（分子超出分母）
+                # 压缩包内条目纳入分母，避免 scanned > total（分子超出分母）
                 self._progress_total += d_scanned
         finally:
             # 异常路径（如 MemoryError、walker 未捕获错误）也 flush 已累积批次，
@@ -784,15 +784,15 @@ class Scanner:
 
         duration = time.perf_counter() - self._progress_start
 
-        # 增量扫描合并（iter-124）：
+        # 增量扫描合并：
         # 本次 scan 仅扫描变更文件（entries），未变更文件的命中结果从上次
         # ScanReport 复用（_unchanged_hits 按相对路径索引）。合并后 results
         # 包含变更文件 + 未变更命中文件，统计需相应累加。
-        # iter-135：合并时过滤已删除文件（不在本次 walk manifest 中）。
+        # 合并时过滤已删除文件（不在本次 walk manifest 中）。
         if self._unchanged_count > 0 and self._prev_report is not None:
             matched, matches, scanned = self._merge_unchanged_hits(results, root, matched, matches, scanned)
 
-        # iter-133：误报白名单过滤——在命中聚合阶段过滤命中白名单的结果。
+        # 误报白名单过滤——在命中聚合阶段过滤命中白名单的结果。
         # 过滤位置在增量合并之后、stats 构造之前，确保本次扫描与未变更合并的
         # 命中结果都被同一份白名单覆盖。一个 ScanResult 仅在其所有命中规则
         # 都被白名单覆盖时才整体过滤（部分命中过滤会让用户漏看不需过滤的部分）。
@@ -822,9 +822,9 @@ class Scanner:
             total_matches=matches,
             # 用户标记跳过的文件数，与 skipped_files 区分
             user_skipped=user_skipped,
-            # iter-137：压缩包内条目数，用于摘要注明
+            # 压缩包内条目数，用于摘要注明
             archive_entries=archive_entries,
-            # iter-150：增量扫描未变更文件数（本次从 prev_report 复用的文件数）
+            # 增量扫描未变更文件数（本次从 prev_report 复用的文件数）
             unchanged_files=self._unchanged_count,
             # PerfStats 始终启用，导出各阶段统计供 GUI/CLI 展示与持久化
             perf_summary=self._perf.to_dict(),
@@ -841,10 +841,10 @@ class Scanner:
     ) -> tuple[int, int, int]:
         """合并未变更文件的命中结果到 results，返回更新后的 (matched, matches, scanned)。
 
-        iter-124：未变更文件的命中结果从 prev_report 复用（_unchanged_hits 按相对
+        未变更文件的命中结果从 prev_report 复用（_unchanged_hits 按相对
         路径索引），避免重新 I/O 读取未变更文件内容。
 
-        iter-135：合并时用 _current_manifest.fingerprints.keys() 过滤已删除文件。
+        合并时用 _current_manifest.fingerprints.keys() 过滤已删除文件。
         manifest 来自 WalkResult（FileStatsWorker 构建并传递），其 keys() 即本次
         walk 访问到的所有文件（含变更+未变更）。已删除文件不会被 walk 到，故不在
         keys() 中，据此跳过其命中结果，避免已删除文件的命中重新出现在结果列表。
@@ -852,13 +852,13 @@ class Scanner:
         """
         # 收集本次扫描中仍有命中的文件相对路径，避免合并时重复
         changed_hit_rels: set[str] = {IncrementalManifest.rel_key(r.path, root) for r in results if r.has_hit}
-        # iter-135：本次 walk 访问到的所有文件相对路径集合（含变更+未变更）
+        # 本次 walk 访问到的所有文件相对路径集合（含变更+未变更）
         current_rels: set[str] = (
             set(self._current_manifest.fingerprints.keys()) if self._current_manifest is not None else set()
         )
         # 合并未变更文件中仍有命中的结果（本次未重新扫描的文件）
         for rel, sr in self._unchanged_hits.items():
-            # iter-135：跳过已删除文件（不在本次 walk 访问集合中）
+            # 跳过已删除文件（不在本次 walk 访问集合中）
             if current_rels and rel not in current_rels:
                 continue
             if rel not in changed_hit_rels:
@@ -879,7 +879,7 @@ class Scanner:
         force: bool = False,
         phase: str = "scan",
     ) -> None:
-        """iter-160：双门限节流后调用 on_progress 回调。
+        """双门限节流后调用 on_progress 回调。
 
         相比旧版本仅按 ``_progress_interval`` 做时间节流，新增**增量门限**作为
         「附加抑制条件」（AND 抑制，不会导致慢阶段漏报）：
@@ -893,7 +893,7 @@ class Scanner:
 
         :param matches: 累计匹配文本条数（区别于 matched 的命中文件数）。
         :param force: 为 True 时跳过节流，强制发送（如最终进度）。
-        :param phase: 当前扫描阶段（iter-75）：``"walk"``/``"scan"``/``"archive"``，
+        :param phase: 当前扫描阶段：``"walk"``/``"scan"``/``"archive"``，
             GUI 据此显示不同提示文案，避免 walk 阶段 scanned=0 被误以为卡住。
         """
         if self._on_progress is None:
@@ -902,18 +902,18 @@ class Scanner:
         if not force:
             if now - self._last_progress_time < self._progress_interval:
                 return
-            # iter-160：双门限的「增量抑制」分支——时间窗满足但进度无实质变化时跳过
+            # 双门限的「增量抑制」分支——时间窗满足但进度无实质变化时跳过
             # 仅当已有基线（不是首次 emit 或基准不为 0）时才检查增量
             if self._last_progress_scanned > 0 or self._last_progress_matched > 0:
                 scanned_delta = scanned - self._last_progress_scanned
                 matched_delta = matched - self._last_progress_matched
                 if scanned_delta < PROGRESS_MIN_DELTA_FILES and matched_delta < PROGRESS_MIN_DELTA_MATCHES:
                     return
-        # iter-160：更新基线，供下一轮增量门限使用
+        # 更新基线，供下一轮增量门限使用
         self._last_progress_time = now
         self._last_progress_scanned = scanned
         self._last_progress_matched = matched
-        # iter-160：快照仅取最近 PROGRESS_SNAPSHOT_TAIL 条，避免大规模扫描 O(N) 拷贝
+        # 快照仅取最近 PROGRESS_SNAPSHOT_TAIL 条，避免大规模扫描 O(N) 拷贝
         if self._skipped_dirs:
             recent_skipped = tuple(list(self._skipped_dirs)[-PROGRESS_SNAPSHOT_TAIL:])
         else:
@@ -956,7 +956,7 @@ class Scanner:
     def _should_scan(self, entry: FileEntry) -> bool:
         """根据全局白名单 ``scan_extensions`` 判断是否扫描该文件。
 
-        iter-87 起统一为白名单制，三种语义：
+        统一为白名单制，三种语义：
 
         - ``None``：用户全选，扫描所有文件（快速路径，不进入扩展名检查）
         - 空 frozenset：用户全部取消勾选，不扫描任何文件（防御性边界）
@@ -976,7 +976,7 @@ class Scanner:
         self,
         entry: FileEntry,
     ) -> tuple[list[_ContentRuleBucket], list[tuple[Rule, Matcher]]]:
-        """iter-164：基于 entry.extension 返回当前文件真正需要执行的 CONTENT 桶
+        """基于 entry.extension 返回当前文件真正需要执行的 CONTENT 桶
         和 remaining 规则对（global + ext 专属）。
 
         - 无扩展名的文件（如 .env、Makefile、Dockerfile）：entry.extension == ""，
@@ -1002,10 +1002,10 @@ class Scanner:
         self,
         pairs: list[tuple[Rule, Matcher]] | None = None,
     ) -> tuple[list[_ContentRuleBucket], list[tuple[Rule, Matcher]]]:
-        """iter-154：从 compiled pairs 中挑出顶层纯 LeafMatch(target=CONTENT)
+        """从 compiled pairs 中挑出顶层纯 LeafMatch(target=CONTENT)
         规则按 (mode, case_sensitive) 合并为复合 OR 正则桶。
 
-        iter-164：增加 ``pairs`` 可选参数。不为 None 时用传入 pairs（按 ext
+        增加 ``pairs`` 可选参数。不为 None 时用传入 pairs（按 ext
         拆分后的子集），否则回退到 ``self._compiled``（全局全量规则）。
 
         :return: (buckets, remaining_pairs)
@@ -1096,9 +1096,9 @@ class Scanner:
         content: str,
         buckets: list[_ContentRuleBucket],
     ) -> list[RuleHit]:
-        """iter-154：对指定的 CONTENT 桶执行一次 finditer 分派并返回命中列表。
+        """对指定的 CONTENT 桶执行一次 finditer 分派并返回命中列表。
 
-        iter-164：抽出 impl，可接受任意 buckets 列表（global + ext 专属）。
+        抽出 impl，可接受任意 buckets 列表（global + ext 专属）。
         """
         hits: list[RuleHit] = []
         for bucket in buckets:
@@ -1168,7 +1168,7 @@ class Scanner:
         return hits
 
     def _match_content_via_buckets(self, content: str) -> list[RuleHit]:
-        """iter-154：通过合并的 CONTENT 桶对 content 执行一次 finditer 分派。
+        """通过合并的 CONTENT 桶对 content 执行一次 finditer 分派。
 
         所有桶均使用 named-group OR 复合正则，遍历 ``compiled.finditer(content)``
         拿到匹配后按 ``m.lastgroup`` 映射到对应规则，按规则汇总：
@@ -1188,7 +1188,7 @@ class Scanner:
         hits: list[RuleHit],
         batch_hits: list[tuple[str, RuleHit | None]],
     ) -> int:
-        """iter-155：对 bucket_applicable（被 CONTENT 桶覆盖的规则集）执行：
+        """对 bucket_applicable（被 CONTENT 桶覆盖的规则集）执行：
         缓存命中先取，再跑一次 `_match_content_via_buckets(content)` 拿命中，
         最后对未缓存 + 未命中规则写 ``None`` 缓存占位。
 
@@ -1270,10 +1270,10 @@ class Scanner:
         - 规则集不含任何 CONTENT 规则（``_content_rule_names`` 为空）——所有文件均跳过 I/O
         - 文件超过 ``max_file_size`` ——大文件跳过避免一次性读入内存导致卡死
 
-        iter-134：启用 ``entropy_enabled`` 时，对内容执行高熵字符串检测，
+        启用 ``entropy_enabled`` 时，对内容执行高熵字符串检测，
         命中构造 ``E001-高熵字符串`` RuleHit（severity=WARNING）。
 
-        iter-164：通过 ``_get_effective_buckets_and_rules`` 仅取当前 entry.extension
+        通过 ``_get_effective_buckets_and_rules`` 仅取当前 entry.extension
         真正需要的 CONTENT 桶 + remaining 规则，减少 60%+ 非必要 CONTENT re 调用。
         """
         # 是否需要读取内容：含 CONTENT 规则或启用熵检测时均需读取
@@ -1286,10 +1286,10 @@ class Scanner:
         hits: list[RuleHit] = []
         rule_errors = 0
 
-        # iter-164：仅取当前 entry.ext 真需要的 buckets + remaining
+        # 仅取当前 entry.ext 真需要的 buckets + remaining
         effective_buckets, effective_remaining = self._get_effective_buckets_and_rules(entry)
 
-        # iter-154：对不 skip_content 且有桶的情况，先走合并 CONTENT 桶匹配
+        # 对不 skip_content 且有桶的情况，先走合并 CONTENT 桶匹配
         # （一次 finditer + 分派取代 N 次独立 re 调用）
         if not skip_content and effective_buckets:
             try:
@@ -1316,7 +1316,7 @@ class Scanner:
             if result.matched:
                 hits.append(build_hit_from_match(rule, result))
 
-        # iter-134：高熵字符串兜底检测（仅在启用且未跳过内容时执行）
+        # 高熵字符串兜底检测（仅在启用且未跳过内容时执行）
         if self._entropy_enabled and not skip_content:
             entropy_hits = self._detect_entropy(entry, context)
             hits.extend(entropy_hits)
@@ -1369,7 +1369,7 @@ class Scanner:
     def _extract_with_cache(self, entry: FileEntry) -> tuple[str, str]:
         """缓存模式的提取+哈希（委托 :func:`extract_with_cache`）。
 
-        iter-109：实际逻辑抽离到 :mod:`fuscan.scanner._cache_phase`，
+        实际逻辑抽离到 :mod:`fuscan.scanner._cache_phase`，
         本方法保留为薄包装以维持调用点简洁。
         """
         assert self._cache is not None  # 调用方已保证非 None
@@ -1384,7 +1384,7 @@ class Scanner:
     ) -> ScanResult:
         """全部规则已缓存命中时，从缓存重建 ScanResult。
 
-        iter-134：熵检测启用时，即便全部正则规则命中缓存也需读取内容执行熵检测，
+        熵检测启用时，即便全部正则规则命中缓存也需读取内容执行熵检测，
         因为熵检测结果未纳入缓存（每次扫描均重新计算）。该路径相对全量重扫仍快
         （跳过正则匹配与哈希计算），仅多一次文件 I/O，可接受。
         """
@@ -1414,7 +1414,7 @@ class Scanner:
         2. **mtime 预筛跳过 read_bytes**：``CacheStore.lookup_file_hash`` 按
            ``(path, mtime, size)`` 查询已登记的 ``file_hash``。若所有适用规则
            都已缓存（命中或未命中），则**完全跳过文件读取**，仅复用缓存结果
-        3. **提取内容缓存**（iter-39）：``CacheStore.get_extracted_content`` 按
+        3. **提取内容缓存**：``CacheStore.get_extracted_content`` 按
            ``file_hash`` 查询提取器结果，命中则跳过 ``extract_content_from_bytes``；
            同内容不同路径（如 node_modules 重复依赖）可跳过 docx/pptx 提取开销
         4. **常规路径**：一次 I/O 同时取内容和文件哈希
@@ -1432,7 +1432,7 @@ class Scanner:
         applicable: list[tuple[Rule, Matcher, str]] = list(self._compiled_with_hash)
         rule_hashes = [rh for _, _, rh in applicable]
 
-        # iter-155：缓存键仅包含内容哈希，不区分路径/文件名。
+        # 缓存键仅包含内容哈希，不区分路径/文件名。
         # 当规则集中存在 **任何** 非 CONTENT 目标规则（文件名匹配、路径匹配、
         # 以及所有组合器匹配——组合器可能嵌有非 CONTENT 子规则）时，
         # 内容相同但路径/文件名不同的文件（如全部空文件）会从缓存读到
@@ -1455,7 +1455,7 @@ class Scanner:
         cached_file_hash: str | None = None
         if not disable_cache:
             with self._perf.measure("cache_lookup"):
-                # iter-158：优先查批量预热的预计算结果，省掉 LRU 锁/SQLite
+                # 优先查批量预热的预计算结果，省掉 LRU 锁/SQLite
                 pre_key = str(entry.path)
                 if pre_key in self._precomputed_file_hashes:
                     cached_file_hash = self._precomputed_file_hashes[pre_key]
@@ -1476,7 +1476,7 @@ class Scanner:
         context = MatchContext(entry, content_provider=_static_provider)
 
         with self._perf.measure("cache_lookup_hits"):
-            # iter-155：disable_cache 或 file_hash 为 None（无法提取内容）
+            # disable_cache 或 file_hash 为 None（无法提取内容）
             # 时跳过缓存查询，避免命中结果串号。
             if disable_cache or file_hash is None or not rule_hashes:
                 cached = {}
@@ -1486,7 +1486,7 @@ class Scanner:
         hits: list[RuleHit] = []
         rule_errors = 0
         batch_hits: list[tuple[str, RuleHit | None]] = []
-        # iter-155：applicable 拆分为桶覆盖（bucket_applicable）+ 剩余原循环（remaining）
+        # applicable 拆分为桶覆盖（bucket_applicable）+ 剩余原循环（remaining）
         # 前者一次桶匹配取代 N 条 content 规则的 matcher.matches()
         bucket_applicable: list[tuple[Rule, Matcher, str]] = []
         remaining_applicable: list[tuple[Rule, Matcher, str]] = []
@@ -1525,7 +1525,7 @@ class Scanner:
                 batch_hits.append((rule_hash, None))
 
         # 累积到批量缓冲，达到阈值后由 _add_to_batch 自动 flush
-        # iter-155：disable_cache 或 file_hash 为 None（空文件 / 无法提取内容）
+        # disable_cache 或 file_hash 为 None（空文件 / 无法提取内容）
         # 时跳过写入缓存，防止命中结果串号。
         if not disable_cache and file_hash is not None:
             self._add_to_batch(
@@ -1538,7 +1538,7 @@ class Scanner:
                 )
             )
 
-        # iter-134：高熵字符串兜底检测（内容已读取，直接复用 context）
+        # 高熵字符串兜底检测（内容已读取，直接复用 context）
         if self._entropy_enabled:
             hits.extend(self._detect_entropy(entry, context))
 
@@ -1547,7 +1547,7 @@ class Scanner:
     def _add_to_batch(self, item: BatchWriteItem) -> None:
         """累积写入请求到批量缓冲，达到阈值时自动 flush（委托 :class:`BatchBuffer`）。
 
-        iter-109：实际逻辑抽离到 :mod:`fuscan.scanner._cache_phase`。
+        实际逻辑抽离到 :mod:`fuscan.scanner._cache_phase`。
         无缓存模式下 ``_batch_buffer`` 为 None，调用方 :meth:`_scan_entry_cached` 已保证。
         """
         if self._batch_buffer is not None:

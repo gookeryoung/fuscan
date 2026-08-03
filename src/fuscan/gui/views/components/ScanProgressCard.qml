@@ -11,7 +11,7 @@ import fuscan.controllers 1.0
 //
 // 注意：ScanController 一律通过 workspaceController.activeScanController.xxx 链式访问，
 // 不绑定到本地 property。PySide2 5.15 中将 @Property(ScanController) 返回的 QObject
-// 绑定到本地 property var/ScanControllerType 时类型推断失败会识别为 null（iter-101），
+// 绑定到本地 property var/ScanControllerType 时类型推断失败会识别为 null，
 // 链式访问每次 binding 求值都重新读取 Property，与 StatsPage 稳定模式一致。
 Rectangle {
     id: card
@@ -97,7 +97,7 @@ Rectangle {
             }
         }
 
-        // ---------- 第二行：任务元数据（iter-138 整合当前文件） ----------
+        // ---------- 第二行：任务元数据（整合当前文件） ----------
         GridLayout {
             Layout.fillWidth: true
             columns: 2
@@ -128,8 +128,8 @@ Rectangle {
                 Layout.fillWidth: true
                 elide: Text.ElideMiddle
             }
-            // iter-138/139：资源配置（CPU 线程 / 最大文件 / 扫描深度）
-            // 改读 activeScanController.effective* 以反映任务级 override（iter-139 修复）。
+            // 资源配置（CPU 线程 / 最大文件 / 扫描深度）
+            // 改读 activeScanController.effective* 以反映任务级 override。
             Label {
                 text: "配置"
                 font.pixelSize: 11
@@ -144,7 +144,7 @@ Rectangle {
                 Layout.fillWidth: true
                 elide: Text.ElideRight
             }
-            // iter-138：当前文件并入元数据网格作为第4行（原独立行整合）
+            // 当前文件并入元数据网格作为第4行（原独立行整合）
             Label {
                 text: "当前文件"
                 font.pixelSize: 11
@@ -161,7 +161,7 @@ Rectangle {
             }
         }
 
-        // ---------- 第三行：双进度条（收集 + 解析，iter-105） ----------
+        // ---------- 第三行：双进度条（收集 + 解析） ----------
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 8
@@ -195,7 +195,7 @@ Rectangle {
                                : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary))
                     }
                     Item { Layout.fillWidth: true }
-                    // iter-138：统计文字精简——去掉冗长前缀，改为「纳入 / 发现 · 跳过 N」紧凑格式
+                    // 统计文字精简——去掉冗长前缀，改为「纳入 / 发现 · 跳过 N」紧凑格式
                     // 跳过数 = 类型不符 + 用户标记，仅在有跳过时显示，避免空载噪音
                     Label {
                         text: workspaceController.activeScanController.walkIndeterminate
@@ -287,7 +287,7 @@ Rectangle {
                     Layout.fillWidth: true
                     // scan 阶段未开始时 indeterminate（walk 进行中）
                     indeterminate: workspaceController.activeScanController.progressIndeterminate
-                    // iter-138：改用 progress 百分比（0-100），扫描完成时 progress=100 进度条满。
+                    // 改用 progress 百分比（0-100），扫描完成时 progress=100 进度条满。
                     // 原 progressScanned/progressTotal 在扫描完成时可能 scanned<total
                     // （错误文件未计入），导致 visualPosition<1 进度条未满。
                     from: 0.0
@@ -312,8 +312,8 @@ Rectangle {
             }
         }
 
-        // ---------- 第四行：分类计数 + 控制按钮（iter-138 整合原五六两行） ----------
-        // iter-139：移除左侧 statusSummary 文本——其"命中/错误"与右侧计数标签重复，
+        // ---------- 第四行：分类计数 + 控制按钮（整合原五六两行） ----------
+        // 移除左侧 statusSummary 文本——其"命中/错误"与右侧计数标签重复，
         // "总计/扫描数"已在上方进度条显示，"跳过"在 walk 统计中，"耗时"完成后才准确。
         // 计数靠左，控制按钮靠右
         RowLayout {
@@ -339,7 +339,7 @@ Rectangle {
                 font.bold: true
                 font.pixelSize: 12
             }
-            // iter-151：增量扫描显示复用与变更文件数（仅当有复用时显示，避免空载噪音）
+            // 增量扫描显示复用与变更文件数（仅当有复用时显示，避免空载噪音）
             Label {
                 text: "复用 " + workspaceController.activeScanController.reusedFiles
                 color: theme.colorPrimary

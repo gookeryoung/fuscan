@@ -1,6 +1,6 @@
 """OpenDocument 文档提取器：ODT 文字文档。
 
-iter-109 起改用 ``zipfile`` + ``lxml`` 直接解析 ODT 的 ``content.xml``，
+改用 ``zipfile`` + ``lxml`` 直接解析 ODT 的 ``content.xml``，
 移除 odfpy 依赖（odfpy 在 PyPI 上仅有 sdist，无预编译 wheel，与 fspack
 的 ``--only-binary=:all:`` 打包策略冲突）。lxml 基于 libxml2 C 扩展，
 比 ElementTree 快 3-5x；lxml 不可用时自动回退到 ElementTree。
@@ -52,7 +52,7 @@ class OdtExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """iter-139：lxml 可用时优先使用，回退 ElementTree。"""
+        """lxml 可用时优先使用，回退 ElementTree。"""
         from fuscan.extractors._odf_xml import _LXML_AVAILABLE
 
         return "lxml" if _LXML_AVAILABLE else "ElementTree"

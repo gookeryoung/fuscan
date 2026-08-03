@@ -56,7 +56,9 @@ from fuscan.gui.controllers._task_overrides import (
     effective_max_depth,
     effective_max_file_size,
     effective_max_workers,
+    effective_rules_paths,
     effective_scan_archives,
+    effective_use_builtin,
 )
 from fuscan.gui.explorer import open_path_in_explorer
 from fuscan.gui.models.result_model import ResultListModel
@@ -73,6 +75,12 @@ from fuscan.gui.scan_mode import (
 )
 from fuscan.gui.workers import FileStatsWorker, ScanWorker
 from fuscan.processing.skip_store import SkipStore
+from fuscan.rules import (
+    RuleError,
+    load_ruleset,
+    load_with_builtin,
+    merge_multiple_rulesets,
+)
 from fuscan.rules.model import Severity
 from fuscan.scanner import ScanReport
 from fuscan.scanner.manifest import IncrementalManifest
@@ -243,9 +251,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 选中结果
         self._selected_result_index: int = -1
 
-        # 规则配置全局化——启动时一次性快照全局 RulesController.ruleset
-        # 作为占位（避免 None 状态），startScan 时再次取最新（保证规则变更立即生效）
-        self._ruleset = self._rules_controller.ruleset
+        # 规则配置——self._ruleset 缓存 effective ruleset
+        # （任务级 rules_paths/use_builtin 覆盖优先，回退全局 RulesController.ruleset）。
+        # 启动时计算一次占位，startScan 时再次计算最新（保证规则变更立即生效）。
+        self._ruleset = self._compute_effective_ruleset()
         # 全局 Config 变更时同步 emit effectiveConfigChanged，
         # 让 QML effective* 绑定（如 effectiveMaxWorkers）跟随全局配置更新。
         # 任务级 override 变更由 setTaskOverride 内部 emit，不在此处处理。
@@ -290,15 +299,15 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(bool, notify=canStartScanChanged)  # pyrefly: ignore [not-callable]
     def canStartScan(self) -> bool:
-        """是否可开始扫描（规则集已加载 + 目标已选）。
+        """是否可开始扫描（effective 规则集已加载 + 目标已选）。
 
-        直接读 ``self._rules_controller.ruleset`` 而非缓存值，
-        确保规则加载/移除后立即反映到 canStartScan（用户反馈：加载规则后
-        仍无法启动扫描，因为读的是 ``__init__`` 时的快照）。
+        读 ``self._ruleset``（effective ruleset 缓存，任务级覆盖优先回退全局），
+        规则加载/移除/任务级覆盖变更后由 ``_on_ruleset_changed``/``setTaskOverride``
+        重算并 emit ``canStartScanChanged`` 触发重算。
         """
         if self._scan_state == STATE_SCANNING:
             return False
-        if self._rules_controller.ruleset is None:
+        if self._ruleset is None:
             return False
         return self._can_build_roots()
 
@@ -524,7 +533,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """设置任务级配置覆盖。
 
         :param key: Config 字段名（``scan_archives``/``max_workers``/
-            ``max_file_size``/``max_depth``/``ignore_dirs``）
+            ``max_file_size``/``max_depth``/``ignore_dirs``/``rules_paths``/
+            ``use_builtin``）
         :param value: 覆盖值（类型须与 Config 字段一致）
 
         覆盖值在 :meth:`_effective_scan_archives`/`_effective_max_workers` 等
@@ -534,10 +544,18 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         ``max_depth``）变更时 emit :attr:`effectiveConfigChanged`，让
         ``effectiveMaxWorkers``/``effectiveMaxFileSizeMB``/``effectiveMaxDepth``
         绑定重算。
+
+        ``rules_paths``/``use_builtin`` 变更时重算 effective ruleset 缓存并
+        emit ``canStartScanChanged``/``rulesCountChanged``，让 QML 侧
+        ``canStartScan``/``rulesCount`` 绑定反映任务级规则集。
         """
         self._task_overrides[key] = value
         if key in ("max_workers", "max_file_size", "max_depth"):
             self.effectiveConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
+        elif key in ("rules_paths", "use_builtin"):
+            self._ruleset = self._compute_effective_ruleset()
+            self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
+            self.rulesCountChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def _emit_effective_config_changed(self) -> None:
         """configController.configChanged → effectiveConfigChanged 桥接。
@@ -548,14 +566,15 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.effectiveConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def _on_ruleset_changed(self) -> None:
-        """rulesController.rulesetChanged → 同步缓存与 QML 绑定信号。
+        """rulesController.rulesetChanged → 同步 effective ruleset 缓存与 QML 绑定信号。
 
-        规则集变更时同步 ``self._ruleset`` 缓存（供 startScan
-        快速访问、避免每次读取属性的开销），并 emit canStartScanChanged
-        与 rulesCountChanged 让 QML 侧绑定重算。修复用户反馈：加载规则后
-        canStartScan 仍为 False 因读的是 ``__init__`` 时的快照。
+        全局规则集变更时重算 ``self._ruleset``（effective ruleset：任务级覆盖
+        优先，回退全局）。无任务级覆盖时直接取全局；有任务级覆盖时按覆盖
+        配置重新加载（覆盖优先级高于全局变更）。
+
+        emit ``canStartScanChanged`` 与 ``rulesCountChanged`` 让 QML 侧绑定重算。
         """
-        self._ruleset = self._rules_controller.ruleset
+        self._ruleset = self._compute_effective_ruleset()
         self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.rulesCountChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -583,6 +602,41 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def _effective_ignore_dirs(self) -> tuple[str, ...]:
         """任务级覆盖优先的 ignore_dirs。"""
         return effective_ignore_dirs(self._task_overrides, self._config)
+
+    def _effective_rules_paths(self) -> tuple[str, ...]:
+        """任务级覆盖优先的 rules_paths（不过滤不存在文件）。"""
+        return effective_rules_paths(self._task_overrides, self._config)
+
+    def _effective_use_builtin(self) -> bool:
+        """任务级覆盖优先的 use_builtin。"""
+        return effective_use_builtin(self._task_overrides, self._config)
+
+    def _compute_effective_ruleset(self) -> RuleSet | None:
+        """计算 effective ruleset（任务级覆盖优先，回退全局 :class:`RulesController`）。
+
+        无任务级 ``rules_paths``/``use_builtin`` 覆盖时直接取全局
+        :attr:`_rules_controller.ruleset`（避免重复加载）；
+        有覆盖时按 effective 配置重新加载（内置 + 用户规则合并）。
+
+        :return: :class:`RuleSet` 实例；无可用规则（未勾选内置且无用户规则文件，
+            或加载失败）时返回 ``None``
+        """
+        has_override = "rules_paths" in self._task_overrides or "use_builtin" in self._task_overrides
+        if not has_override:
+            return self._rules_controller.ruleset
+        # 有任务级覆盖：按 effective 配置加载（逻辑与 RulesController._reload_ruleset 一致）
+        paths = [Path(p) for p in self._effective_rules_paths() if Path(p).exists()]
+        use_builtin = self._effective_use_builtin()
+        try:
+            if use_builtin:
+                return load_with_builtin(paths)
+            if paths:
+                rulesets = [load_ruleset(p) for p in paths]
+                return merge_multiple_rulesets(*rulesets)
+            return None
+        except RuleError as exc:
+            logger.warning("任务级规则集加载失败: %s", exc)
+            return None
 
     @Property(int, notify=effectiveConfigChanged)  # pyrefly: ignore [not-callable]
     def effectiveMaxWorkers(self) -> int:
@@ -614,13 +668,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(int, notify=rulesCountChanged)  # pyrefly: ignore [not-callable]
     def rulesCount(self) -> int:
-        """当前规则集规则数。
+        """effective 规则集规则数。
 
-        直接读 ``self._rules_controller.ruleset`` 而非缓存值，
+        读 ``self._ruleset``（effective ruleset 缓存，任务级覆盖优先回退全局），
         与 :attr:`canStartScan` 同步确保规则变更后 UI 立即更新。
         """
-        ruleset = self._rules_controller.ruleset
-        return len(ruleset.rules) if ruleset is not None else 0
+        return len(self._ruleset.rules) if self._ruleset is not None else 0
 
     @Property(QObject, notify=scanStateChanged)  # pyrefly: ignore [not-callable]
     def resultModel(self) -> ResultListModel:
@@ -1002,8 +1055,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         if self._scan_state == STATE_SCANNING:
             return
-        # 每次扫描前重新取最新全局 ruleset，保证规则变更立即生效
-        self._ruleset = self._rules_controller.ruleset
+        # 每次扫描前重新计算 effective ruleset（任务级覆盖优先，回退全局），
+        # 保证规则变更或任务级覆盖变更立即生效
+        self._ruleset = self._compute_effective_ruleset()
         if self._ruleset is None:
             logger.warning("未加载规则集，无法开始扫描")
             return
@@ -1095,8 +1149,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         if self._scan_state == STATE_SCANNING:
             return
-        # 每次扫描前重新取最新全局 ruleset，保证规则变更立即生效
-        self._ruleset = self._rules_controller.ruleset
+        # 每次扫描前重新计算 effective ruleset（任务级覆盖优先，回退全局），
+        # 保证规则变更或任务级覆盖变更立即生效
+        self._ruleset = self._compute_effective_ruleset()
         if self._ruleset is None:
             logger.warning("未加载规则集，无法开始增量扫描")
             return
@@ -1446,7 +1501,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         )
 
     def _build_cache_context(self) -> tuple[CacheStore | None, dict[Path, str] | None]:
-        """构造扫描缓存上下文（使用全局规则路径与内置开关）。"""
+        """构造扫描缓存上下文（使用 effective 规则路径与内置开关）。"""
         if not self._config.cache_enabled:
             return None, None
         if self._cache is None:
@@ -1456,11 +1511,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._cache = CacheStore(cache_path)
         from fuscan.cache import compute_source_files
 
-        # 直接读取全局 RulesController 的 rules_paths/use_builtin
-        global_paths = self._rules_controller.rules_paths
+        # 使用 effective rules_paths/use_builtin（任务级覆盖优先，回退全局）
+        effective_paths = [Path(p) for p in self._effective_rules_paths() if Path(p).exists()]
         source_files = compute_source_files(
-            global_paths,
-            use_builtin=self._rules_controller.use_builtin,
+            effective_paths,
+            use_builtin=self._effective_use_builtin(),
         )
         return self._cache, source_files
 

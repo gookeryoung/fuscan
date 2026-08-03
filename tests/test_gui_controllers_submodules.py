@@ -61,7 +61,9 @@ try:
         effective_max_depth,
         effective_max_file_size,
         effective_max_workers,
+        effective_rules_paths,
         effective_scan_archives,
+        effective_use_builtin,
     )
     from fuscan.history import STATUS_CANCELLED, STATUS_COMPLETED, ScanHistoryEntry
     from fuscan.processing.skip_store import SkipStore
@@ -243,6 +245,41 @@ class TestTaskOverrides:
         result = effective_ignore_dirs({}, config)
         assert result == (".git", "node_modules")
         assert isinstance(result, tuple)
+
+    def test_effective_rules_paths_tuple_override(self) -> None:
+        """rules_paths tuple 覆盖值优先（不过滤不存在文件）。"""
+        custom = ("/tmp/a.yaml", "/tmp/b.yaml")
+        overrides: dict[str, object] = {"rules_paths": custom}
+        assert effective_rules_paths(overrides, _make_config()) == custom
+
+    def test_effective_rules_paths_falls_back(self) -> None:
+        """rules_paths 无覆盖回退到全局配置（list 转 tuple）。"""
+        config = _make_config()
+        config.rules_paths = ["/tmp/a.yaml", "/tmp/b.yaml"]
+        result = effective_rules_paths({}, config)
+        assert result == ("/tmp/a.yaml", "/tmp/b.yaml")
+        assert isinstance(result, tuple)
+
+    def test_effective_rules_paths_wrong_type_falls_back(self) -> None:
+        """rules_paths 非 tuple 类型回退到全局配置。"""
+        config = _make_config()
+        config.rules_paths = ["/tmp/a.yaml"]
+        # list 而非 tuple 应回退
+        overrides: dict[str, object] = {"rules_paths": ["/tmp/x.yaml"]}
+        assert effective_rules_paths(overrides, config) == ("/tmp/a.yaml",)
+
+    def test_effective_use_builtin_override(self) -> None:
+        """use_builtin bool 覆盖值优先。"""
+        overrides: dict[str, object] = {"use_builtin": False}
+        assert effective_use_builtin(overrides, _make_config()) is False
+
+    def test_effective_use_builtin_falls_back(self) -> None:
+        """use_builtin 无覆盖或类型不符回退到全局配置。"""
+        config = _make_config()
+        config.use_builtin = True
+        assert effective_use_builtin({}, config) is True
+        # 类型不符（int 而非 bool）也应回退
+        assert effective_use_builtin({"use_builtin": 1}, config) is True
 
 
 # ----------------------------- _result_detail -----------------------------
@@ -963,20 +1000,27 @@ class TestSerializeTaskOverridesRoundtrip:
     """iter-113：serialize/deserialize task_overrides 往返一致性。"""
 
     def test_roundtrip_basic(self) -> None:
-        """基本字段往返保持一致（ignore_dirs tuple <-> list）。"""
+        """基本字段往返保持一致（ignore_dirs/rules_paths tuple <-> list）。"""
         original: dict[str, object] = {
             "scan_archives": True,
             "max_workers": 5,
             "max_file_size": 1024,
             "max_depth": 10,
             "ignore_dirs": ("/path/a", "/path/b"),
+            "rules_paths": ("/rules/x.yaml", "/rules/y.yaml"),
+            "use_builtin": False,
         }
         serialized = serialize_task_overrides(original)
-        # ignore_dirs 应转为 list
+        # ignore_dirs/rules_paths 应转为 list
         assert serialized["ignore_dirs"] == ["/path/a", "/path/b"]
+        assert serialized["rules_paths"] == ["/rules/x.yaml", "/rules/y.yaml"]
+        # use_builtin 原样
+        assert serialized["use_builtin"] is False
         # 反序列化后应回到 tuple
         restored = deserialize_task_overrides(serialized)
         assert restored["ignore_dirs"] == ("/path/a", "/path/b")
+        assert restored["rules_paths"] == ("/rules/x.yaml", "/rules/y.yaml")
+        assert restored["use_builtin"] is False
         assert restored["max_workers"] == 5
         assert restored["scan_archives"] is True
 
@@ -1015,6 +1059,18 @@ class TestDeserializeTaskOverridesFaultTolerance:
         raw: dict[str, object] = {"ignore_dirs": "not a list"}
         result = deserialize_task_overrides(raw)
         assert "ignore_dirs" not in result
+
+    def test_rules_paths_wrong_element_type_skipped(self) -> None:
+        """rules_paths 含非 str 元素 → 跳过该字段。"""
+        raw: dict[str, object] = {"rules_paths": [1, 2, 3]}
+        result = deserialize_task_overrides(raw)
+        assert "rules_paths" not in result
+
+    def test_rules_paths_not_list_skipped(self) -> None:
+        """rules_paths 非 list → 跳过该字段。"""
+        raw: dict[str, object] = {"rules_paths": "not a list"}
+        result = deserialize_task_overrides(raw)
+        assert "rules_paths" not in result
 
     def test_int_field_wrong_type_skipped(self) -> None:
         """int 字段传入 str → 跳过该字段。"""

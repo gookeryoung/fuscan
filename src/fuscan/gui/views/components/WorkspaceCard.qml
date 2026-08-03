@@ -257,12 +257,12 @@ Rectangle {
                 }
             }
 
-            // 配置规则：跳转到设置页规则 Tab（secondary 描边，与启动扫描同高）
-            // 工作区展示的规则 TAG 来自全局规则集，提供快捷入口便于修改
+            // 配置规则：打开任务级规则配置对话框（secondary 描边，与启动扫描同高）
+            // 工作区展示的规则 TAG 反映该任务 effective 规则集（任务级覆盖优先，回退全局）
             IconButton {
                 iconSource: "qrc:/icons/rules.svg"
                 text: "配置规则"
-                tooltip: "跳转到设置页配置全局规则集"
+                tooltip: "为本任务配置规则集（勾选内置 + 加载用户规则文件）"
                 accent: "secondary"
                 onClicked: card.configureRulesRequested(card.workspaceId)
             }

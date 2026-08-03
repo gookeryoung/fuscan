@@ -14,6 +14,8 @@
 - :func:`effective_max_file_size`：任务级覆盖优先的 max_file_size
 - :func:`effective_max_depth`：任务级覆盖优先的 max_depth
 - :func:`effective_ignore_dirs`：任务级覆盖优先的 ignore_dirs
+- :func:`effective_rules_paths`：任务级覆盖优先的 rules_paths
+- :func:`effective_use_builtin`：任务级覆盖优先的 use_builtin
 """
 
 from __future__ import annotations
@@ -28,7 +30,9 @@ __all__ = [
     "effective_max_depth",
     "effective_max_file_size",
     "effective_max_workers",
+    "effective_rules_paths",
     "effective_scan_archives",
+    "effective_use_builtin",
 ]
 
 
@@ -74,3 +78,27 @@ def effective_ignore_dirs(overrides: dict[str, object], config: Config) -> tuple
     if isinstance(value, tuple):
         return value
     return tuple(config.ignore_dirs)
+
+
+def effective_rules_paths(overrides: dict[str, object], config: Config) -> tuple[str, ...]:
+    """任务级覆盖优先的 rules_paths。
+
+    :return: ``tuple[str, ...]``，规则文件路径元组（按配置顺序）。
+        任务级覆盖为 tuple 时直接返回；否则回退到 ``config.rules_paths``。
+        与 :attr:`RulesController.rules_paths` 不同，此处**不**过滤不存在
+        的文件——过滤逻辑由 :meth:`ScanController._effective_ruleset` 在
+        加载阶段处理（避免此处与 RulesController 产生重复的 ``Path.exists()``
+        调用语义分歧）。
+    """
+    value = overrides.get("rules_paths")
+    if isinstance(value, tuple):
+        return value
+    return tuple(config.rules_paths)
+
+
+def effective_use_builtin(overrides: dict[str, object], config: Config) -> bool:
+    """任务级覆盖优先的 use_builtin。"""
+    value = overrides.get("use_builtin")
+    if isinstance(value, bool):
+        return value
+    return config.use_builtin

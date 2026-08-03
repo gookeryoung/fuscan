@@ -112,15 +112,14 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 使白名单变更对所有工作区生效；为 None 时（独立测试）ScanController
         # 内部回退到自建 WhitelistStore，保持向后兼容。
         self._whitelist_controller: WhitelistController | None = whitelist_controller
-        # 规则配置全局化——RulesController 不再绑定工作区，
+        # 规则配置——RulesController 管理全局规则集，工作区可通过任务级
+        # rules_paths/use_builtin 覆盖（覆盖时 ScanController 按任务级配置加载）。
         # 全局 rulesetChanged 时清除所有工作区 manifest，使下次增量扫描回退全量，
         # 确保新规则被实际执行（manifest 指纹只记录 mtime+size，不感知规则变化）
         self._rules_controller.rulesetChanged.connect(self._invalidate_all_manifests)  # pyrefly: ignore [missing-attribute]
-        # 全局规则变化时同步刷新所有工作区的 rules_paths/use_builtin，
-        # 使 WorkspaceCard 的 rules_tags 标签反映当前全局规则配置。
-        # 规则全局化后，WorkspaceItem.rules_paths/use_builtin 字段不再
-        # 决定扫描时使用的规则（ScanController 直接读全局 RulesController），
-        # 但 rules_tags 派生属性仍依赖这些字段，需同步以保持 UI 一致。
+        # 全局规则变化时同步刷新无规则覆盖工作区的 rules_paths/use_builtin 字段
+        # 为全局值（有任务级覆盖的工作区保留覆盖值），使 WorkspaceCard 的
+        # rules_tags 标签反映 effective 规则集。
         self._rules_controller.rulesetChanged.connect(self._sync_all_workspaces_rules)  # pyrefly: ignore [missing-attribute]
         self._rules_controller.rulesFileListChanged.connect(self._sync_all_workspaces_rules)  # pyrefly: ignore [missing-attribute]
         self._rules_controller.useBuiltinChanged.connect(self._sync_all_workspaces_rules)  # pyrefly: ignore [missing-attribute]
@@ -635,10 +634,14 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         :param key: Config 字段名（如 ``"scan_archives"``/``"max_workers"``）
         :param value_json: 值的 JSON 字符串（如 ``"false"``/``"8"``/``"["a","b"]"``）
 
-        支持 5 个字段：``scan_archives``/``max_workers``/``max_file_size``/
-        ``max_depth``/``ignore_dirs``。其他字段忽略。
-        int 字段会做范围钳制（与全局 :class:`ConfigController` 一致），
-        越界值拒绝并 warning。修改后持久化并同步到对应 ScanController。
+        支持 7 个字段：``scan_archives``/``max_workers``/``max_file_size``/
+        ``max_depth``/``ignore_dirs``/``rules_paths``/``use_builtin``。
+        其他字段忽略。``ignore_dirs``/``rules_paths`` 接受 ``list[str]``，
+        内部转 ``tuple[str, ...]``。int 字段做范围钳制（与全局
+        :class:`ConfigController` 一致），越界值拒绝并 warning。
+        ``rules_paths``/``use_builtin`` 覆盖时同步刷新 :attr:`WorkspaceItem`
+        对应字段，使 :attr:`WorkspaceItem.rules_tags` 标签反映 effective 规则集。
+        修改后持久化并同步到对应 ScanController。
         """
         item = self._model.get_workspace(ws_id)
         if item is None:
@@ -655,10 +658,10 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return
         # 类型校验
         expected_type = TASK_OVERRIDE_KEYS[key]
-        if key == "ignore_dirs":
+        if key in ("ignore_dirs", "rules_paths"):
             # JSON 反序列化为 list，校验后转 tuple
             if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
-                logger.warning("ignore_dirs 应为 list[str]")
+                logger.warning("%s 应为 list[str]", key)
                 return
             value = tuple(value)
         elif not isinstance(value, expected_type):
@@ -674,7 +677,14 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 更新 WorkspaceItem.task_overrides（replace 重建 frozen dataclass）
         new_overrides = dict(item.task_overrides)
         new_overrides[key] = value
-        self._model.update_workspace(ws_id, task_overrides=new_overrides)
+        # rules_paths/use_builtin 覆盖时同步 WorkspaceItem 对应字段，
+        # 使 rules_tags/rules_text 派生属性反映 effective 规则集
+        extra_fields: dict[str, object] = {}
+        if key == "rules_paths":
+            extra_fields["rules_paths"] = value
+        elif key == "use_builtin":
+            extra_fields["use_builtin"] = value
+        self._model.update_workspace(ws_id, task_overrides=new_overrides, **extra_fields)
         # 同步到 ScanController
         controller = self._ensure_scan_controller(ws_id)
         if controller is not None:
@@ -702,7 +712,14 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return  # 无覆盖，无需清除
         new_overrides = dict(item.task_overrides)
         new_overrides.pop(key, None)
-        self._model.update_workspace(ws_id, task_overrides=new_overrides)
+        # rules_paths/use_builtin 清除时回退到全局值，同步 WorkspaceItem 字段
+        # 使 rules_tags/rules_text 反映全局规则配置
+        extra_fields: dict[str, object] = {}
+        if key in ("rules_paths", "use_builtin"):
+            global_value = self._config_controller.get_config_value(key)
+            if global_value is not None:
+                extra_fields[key] = global_value
+        self._model.update_workspace(ws_id, task_overrides=new_overrides, **extra_fields)
         # 同步到 ScanController：用 ConfigController 全局值回填
         controller = self._ensure_scan_controller(ws_id)
         if controller is not None:
@@ -993,24 +1010,38 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         return paths, use_builtin
 
     def _sync_all_workspaces_rules(self) -> None:
-        """全局规则变化时同步刷新所有工作区的 ``rules_paths``/``use_builtin`` 字段。
+        """同步刷新所有工作区的 ``rules_paths``/``use_builtin`` 字段为 effective 值。
 
-        规则全局化后，:attr:`WorkspaceItem.rules_paths`/
-        ``use_builtin`` 字段不再决定扫描时使用的规则（ScanController 直接读
-        全局 :class:`RulesController`），但 :attr:`WorkspaceItem.rules_tags`
-        派生属性仍依赖这些字段。本方法在全局规则变化时将所有工作区的
-        ``rules_paths``/``use_builtin`` 同步为全局值，使 QML ``WorkspaceCard``
-        的规则标签反映当前全局规则配置。
+        effective 值 = 任务级覆盖优先，回退全局 :class:`RulesController`。
+        :attr:`WorkspaceItem.rules_paths`/``use_builtin`` 字段同时被
+        :attr:`WorkspaceItem.rules_tags`/``rules_text` 派生属性使用，
+        同步后 QML ``WorkspaceCard`` 的规则标签反映 effective 规则集。
+
+        触发场景：
+        - 全局规则变更（``rulesetChanged``/``rulesFileListChanged``/``useBuiltinChanged``）
+          → 无覆盖工作区跟随全局变化，有覆盖工作区保留覆盖值
+        - 启动恢复持久化（``_load_persisted``）→ 修正可能陈旧的持久化字段
         """
         global_paths, global_use_builtin = self._read_global_rules_snapshot()
         changed = False
         for item in self._model.all_workspaces():
-            if item.rules_paths != global_paths or item.use_builtin != global_use_builtin:
-                self._model.update_workspace(
-                    item.workspace_id,
-                    rules_paths=global_paths,
-                    use_builtin=global_use_builtin,
-                )
+            extra_fields: dict[str, object] = {}
+            # rules_paths：有覆盖用覆盖值，无覆盖用全局值
+            desired_paths = item.task_overrides.get("rules_paths")
+            if isinstance(desired_paths, tuple):
+                if item.rules_paths != desired_paths:
+                    extra_fields["rules_paths"] = desired_paths
+            elif item.rules_paths != global_paths:
+                extra_fields["rules_paths"] = global_paths
+            # use_builtin：有覆盖用覆盖值，无覆盖用全局值
+            desired_use_builtin = item.task_overrides.get("use_builtin")
+            if isinstance(desired_use_builtin, bool):
+                if item.use_builtin != desired_use_builtin:
+                    extra_fields["use_builtin"] = desired_use_builtin
+            elif item.use_builtin != global_use_builtin:
+                extra_fields["use_builtin"] = global_use_builtin
+            if extra_fields:
+                self._model.update_workspace(item.workspace_id, **extra_fields)
                 changed = True
         if changed:
             self._persist()

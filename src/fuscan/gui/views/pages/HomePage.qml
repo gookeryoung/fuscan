@@ -23,6 +23,7 @@ Item {
     property string _pendingEditTargetWsId: ""
     property string _pendingTaskSettingsWsId: ""
     property string _pendingHistoryWsId: ""
+    property string _pendingConfigureRulesWsId: ""
 
     // ========== 导出文件保存对话框 ==========
     FileDialog {
@@ -580,6 +581,256 @@ Item {
         }
     }
 
+    // ========== 配置规则对话框（共享单例，任务级规则覆盖） ==========
+    // 与 taskSettingsDialog 同模式：临时编辑状态 + onAccepted 与全局对比，
+    // 相同则 clearTaskOverride（回退全局），不同则 setTaskOverride（任务级覆盖）。
+    // 仅覆盖 rules_paths（list[str]）与 use_builtin（bool）两个键；
+    // 内置规则勾选 + 用户规则文件列表的 UI 子集复用 RulesPanel 设计。
+    Dialog {
+        id: configureRulesDialog
+        title: "配置规则 — " + workspaceController.workspaceName(homePage._pendingConfigureRulesWsId)
+        modal: true
+        anchors.centerIn: parent
+        width: 460
+        standardButtons: Dialog.Cancel | Dialog.Ok
+
+        // 临时编辑状态（由 delegate onConfigureRulesRequested 从 taskOverridesJson 初始化）
+        property bool editUseBuiltin: true
+        // editRulesPaths 为 list[str]，与全局 rules_paths 对比决定是否覆盖
+        property var editRulesPaths: []
+        // 选中规则文件行号（-1 表示未选中）
+        property int selectedFileIndex: -1
+
+        contentItem: ColumnLayout {
+            spacing: 12
+
+            Label {
+                text: "仅对该任务生效，不影响全局设置。与全局一致时使用全局配置。"
+                font.pixelSize: 11
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+
+            // 内置规则勾选
+            RowLayout {
+                Layout.fillWidth: true
+                CheckBox {
+                    text: "内置通用规则"
+                    checked: configureRulesDialog.editUseBuiltin
+                    onCheckedChanged: configureRulesDialog.editUseBuiltin = checked
+                }
+                Item { Layout.fillWidth: true }
+            }
+
+            // 规则文件列表
+            Label {
+                text: "规则文件"
+                font.pixelSize: theme.fontSizeBody
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 200
+                color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                border.width: 1
+                radius: 8
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 6
+
+                    ListView {
+                        id: configureRulesFileList
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        cacheBuffer: 200
+                        // editRulesPaths 为 list[str]，delegate 用 modelData 访问路径
+                        model: configureRulesDialog.editRulesPaths
+                        currentIndex: configureRulesDialog.selectedFileIndex
+                        onCurrentIndexChanged: configureRulesDialog.selectedFileIndex = currentIndex
+                        delegate: ItemDelegate {
+                            width: configureRulesFileList.width
+                            height: 32
+                            text: {
+                                // 取路径最后一段作为文件名显示
+                                var p = String(modelData)
+                                var idx = p.lastIndexOf("/")
+                                if (idx >= 0) return p.substring(idx + 1)
+                                // Windows 路径分隔符
+                                idx = p.lastIndexOf("\\")
+                                if (idx >= 0) return p.substring(idx + 1)
+                                return p
+                            }
+                            font.pixelSize: 12
+                            font.bold: ListView.isCurrentItem
+                            highlighted: ListView.isCurrentItem
+                            onClicked: configureRulesFileList.currentIndex = index
+                            background: Rectangle {
+                                color: ListView.isCurrentItem
+                                    ? Qt.rgba(theme.colorPrimary.r,
+                                              theme.colorPrimary.g,
+                                              theme.colorPrimary.b,
+                                              0.15)
+                                    : (parent.hovered
+                                        ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
+                                        : "transparent")
+                                Behavior on color { ColorAnimation { duration: 120 } }
+                                Rectangle {
+                                    visible: ListView.isCurrentItem
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    width: 3
+                                    color: theme.colorPrimary
+                                }
+                            }
+                            contentItem: Label {
+                                text: parent.text
+                                font: parent.font
+                                color: parent.highlighted
+                                    ? theme.colorPrimary
+                                    : (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
+                                elide: Text.ElideMiddle
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: 10
+                            }
+                        }
+                    }
+
+                    // 空态提示
+                    Label {
+                        Layout.fillWidth: true
+                        visible: configureRulesDialog.editRulesPaths.length === 0
+                        text: "未加载用户规则文件"
+                        font.pixelSize: 11
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+
+                    // 操作按钮：上移/下移/移除/加载
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+                        IconButton {
+                            iconSource: "qrc:/icons/up_arrow.svg"
+                            tooltip: "上移"
+                            accent: "ghost"
+                            enabled: configureRulesDialog.selectedFileIndex > 0
+                            onClicked: {
+                                var idx = configureRulesDialog.selectedFileIndex
+                                var paths = configureRulesDialog.editRulesPaths.slice()
+                                var tmp = paths[idx - 1]
+                                paths[idx - 1] = paths[idx]
+                                paths[idx] = tmp
+                                configureRulesDialog.editRulesPaths = paths
+                                configureRulesDialog.selectedFileIndex = idx - 1
+                            }
+                        }
+                        IconButton {
+                            iconSource: "qrc:/icons/down_arrow.svg"
+                            tooltip: "下移"
+                            accent: "ghost"
+                            enabled: configureRulesDialog.selectedFileIndex >= 0
+                                && configureRulesDialog.selectedFileIndex < configureRulesDialog.editRulesPaths.length - 1
+                            onClicked: {
+                                var idx = configureRulesDialog.selectedFileIndex
+                                var paths = configureRulesDialog.editRulesPaths.slice()
+                                var tmp = paths[idx + 1]
+                                paths[idx + 1] = paths[idx]
+                                paths[idx] = tmp
+                                configureRulesDialog.editRulesPaths = paths
+                                configureRulesDialog.selectedFileIndex = idx + 1
+                            }
+                        }
+                        IconButton {
+                            iconSource: "qrc:/icons/minus.svg"
+                            tooltip: "移除选中规则文件"
+                            accent: "ghost"
+                            enabled: configureRulesDialog.selectedFileIndex >= 0
+                                && configureRulesDialog.selectedFileIndex < configureRulesDialog.editRulesPaths.length
+                            onClicked: {
+                                var idx = configureRulesDialog.selectedFileIndex
+                                var paths = configureRulesDialog.editRulesPaths.slice()
+                                paths.splice(idx, 1)
+                                configureRulesDialog.editRulesPaths = paths
+                                configureRulesDialog.selectedFileIndex = -1
+                            }
+                        }
+                        Item { Layout.fillWidth: true }
+                        IconButton {
+                            iconSource: "qrc:/icons/load_list.svg"
+                            text: "加载"
+                            tooltip: "加载规则文件"
+                            accent: "ghost"
+                            onClicked: configureRulesFileDialog.open()
+                        }
+                    }
+                }
+            }
+        }
+
+        onAccepted: {
+            // 与全局值相同的字段清除覆盖，不同的字段才下发 setTaskOverride
+            var wsId = homePage._pendingConfigureRulesWsId
+            // use_builtin
+            var useBuiltinValue = configureRulesDialog.editUseBuiltin
+            var globalUseBuiltin = rulesController.useBuiltin
+            if (useBuiltinValue === globalUseBuiltin) {
+                workspaceController.clearTaskOverride(wsId, "use_builtin")
+            } else {
+                workspaceController.setTaskOverride(wsId, "use_builtin", JSON.stringify(useBuiltinValue))
+            }
+            // rules_paths：将全局 rulesFileModel 转为 path 字符串数组对比
+            var globalFileModel = rulesController.rulesFileModel
+            var globalPaths = []
+            for (var i = 0; i < globalFileModel.length; i++) {
+                globalPaths.push(String(globalFileModel[i].path))
+            }
+            var editPaths = configureRulesDialog.editRulesPaths
+            // 深比较（顺序敏感）
+            var same = editPaths.length === globalPaths.length
+            if (same) {
+                for (var j = 0; j < editPaths.length; j++) {
+                    if (String(editPaths[j]) !== globalPaths[j]) {
+                        same = false
+                        break
+                    }
+                }
+            }
+            if (same) {
+                workspaceController.clearTaskOverride(wsId, "rules_paths")
+            } else {
+                workspaceController.setTaskOverride(wsId, "rules_paths", JSON.stringify(editPaths))
+            }
+        }
+    }
+
+    // 配置规则对话框的文件选择器
+    Dialogs.FileDialog {
+        id: configureRulesFileDialog
+        title: "选择规则文件"
+        nameFilters: ["YAML 文件 (*.yaml *.yml)", "所有文件 (*.*)"]
+        onAccepted: {
+            var pathStr = configureRulesFileDialog.fileUrl.toString()
+            if (pathStr.startsWith("file:///")) {
+                pathStr = decodeURIComponent(pathStr.substring(8))
+            }
+            // 避免重复加载
+            var existing = configureRulesDialog.editRulesPaths
+            for (var i = 0; i < existing.length; i++) {
+                if (String(existing[i]) === pathStr) return
+            }
+            var paths = configureRulesDialog.editRulesPaths.slice()
+            paths.push(pathStr)
+            configureRulesDialog.editRulesPaths = paths
+        }
+    }
+
     // ========== 扫描历史对话框（共享单例） ==========
     Dialog {
         id: historyDialog
@@ -1092,9 +1343,20 @@ Item {
                         try { historyDialog.comparison = JSON.parse(cmpJson) } catch(e) { historyDialog.comparison = {} }
                         historyDialog.open()
                     }
-                    // 配置规则：转发给 ContentArea 跳转到设置页规则 Tab
+                    // 配置规则：打开共享对话框，按工作区初始化任务级规则覆盖
                     onConfigureRulesRequested: function(wsId) {
-                        homePage.configureRulesRequested(wsId)
+                        homePage._pendingConfigureRulesWsId = wsId
+                        var jsonStr = workspaceController.taskOverridesJson(wsId)
+                        var overrides = {}
+                        try { overrides = JSON.parse(jsonStr) } catch(e) { overrides = {} }
+                        var globalPaths = rulesController.rulesFileModel
+                        var ovPaths = overrides.rules_paths !== undefined ? overrides.rules_paths : null
+                        var ovUseBuiltin = overrides.use_builtin !== undefined
+                            ? overrides.use_builtin : rulesController.useBuiltin
+                        configureRulesDialog.editUseBuiltin = ovUseBuiltin
+                        // 任务级覆盖的文件路径列表（tuple 序列化为 list）
+                        configureRulesDialog.editRulesPaths = Array.isArray(ovPaths) ? ovPaths.slice() : []
+                        configureRulesDialog.open()
                     }
                 }
             }
@@ -1141,6 +1403,4 @@ Item {
     // 信号：通知 ContentArea 切换页面
     signal viewResultsRequested(string workspaceId)
     signal viewStatsRequested(string workspaceId)
-    // 信号：通知 ContentArea 跳转到设置页规则 Tab
-    signal configureRulesRequested(string workspaceId)
 }

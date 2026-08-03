@@ -1694,6 +1694,57 @@ class TestTaskOverrides:
         sc = controller._ensure_scan_controller(ws_id)  # type: ignore[attr-defined]
         assert sc._task_overrides["ignore_dirs"] == (".git", "node_modules")  # type: ignore[attr-defined]
 
+    def test_set_task_override_rules_paths_list_to_tuple(self, controller: WorkspaceController) -> None:
+        """rules_paths 列表应在内部转为 tuple，并同步 WorkspaceItem 字段。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setTaskOverride(ws_id, "rules_paths", '["/tmp/a.yaml", "/tmp/b.yaml"]')
+
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        # 序列化时 tuple 转为 list
+        assert overrides == {"rules_paths": ["/tmp/a.yaml", "/tmp/b.yaml"]}
+        # 内部存储为 tuple
+        sc = controller._ensure_scan_controller(ws_id)  # type: ignore[attr-defined]
+        assert sc._task_overrides["rules_paths"] == ("/tmp/a.yaml", "/tmp/b.yaml")  # type: ignore[attr-defined]
+        # WorkspaceItem.rules_paths 同步为覆盖值（使 rules_tags 反映 effective 规则）
+        item = controller.get_workspace(ws_id)  # type: ignore[attr-defined]
+        assert item is not None
+        assert item.rules_paths == ("/tmp/a.yaml", "/tmp/b.yaml")
+
+    def test_set_task_override_use_builtin(self, controller: WorkspaceController) -> None:
+        """use_builtin 覆盖应同步 WorkspaceItem 字段。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # 默认 use_builtin=True（从全局快照），覆盖为 False
+        controller.setTaskOverride(ws_id, "use_builtin", "false")
+
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert overrides == {"use_builtin": False}
+        # WorkspaceItem.use_builtin 同步为覆盖值
+        item = controller.get_workspace(ws_id)  # type: ignore[attr-defined]
+        assert item is not None
+        assert item.use_builtin is False
+
+    def test_set_task_override_rules_paths_wrong_type_noop(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """rules_paths 非 list[str] 应被拒绝。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # JSON 123 是 int 不是 list
+        controller.setTaskOverride(ws_id, "rules_paths", "123")
+
+        assert controller.taskOverridesJson(ws_id) == "{}"
+
+    def test_set_task_override_use_builtin_wrong_type_noop(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """use_builtin 非 bool 应被拒绝。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        # JSON 字符串 "yes" 不是 bool
+        controller.setTaskOverride(ws_id, "use_builtin", '"yes"')
+
+        assert controller.taskOverridesJson(ws_id) == "{}"
+
     def test_set_task_override_invalid_key_noop(self, controller: WorkspaceController) -> None:
         """不允许覆盖的字段应被拒绝。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
@@ -2024,6 +2075,45 @@ class TestClearTaskOverride:
         rules2 = RulesController(cfg2)
         ctrl2 = WorkspaceController(cfg2, rules2)
         assert ctrl2.taskOverridesJson(ws_id) == "{}"
+
+    def test_clear_rules_paths_backfills_global(self, controller: WorkspaceController) -> None:
+        """清除 rules_paths 覆盖应回填全局值到 WorkspaceItem 与 ScanController。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setTaskOverride(ws_id, "rules_paths", '["/tmp/x.yaml"]')
+        item = controller.get_workspace(ws_id)  # type: ignore[attr-defined]
+        assert item is not None
+        assert item.rules_paths == ("/tmp/x.yaml",)
+
+        # 清除覆盖
+        controller.clearTaskOverride(ws_id, "rules_paths")
+
+        # task_overrides 中应不再包含 rules_paths
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert "rules_paths" not in overrides
+        # WorkspaceItem.rules_paths 回退到全局值
+        global_paths = tuple(controller._config_controller.config.rules_paths)  # type: ignore[attr-defined]
+        item_after = controller.get_workspace(ws_id)  # type: ignore[attr-defined]
+        assert item_after is not None
+        assert item_after.rules_paths == global_paths
+
+    def test_clear_use_builtin_backfills_global(self, controller: WorkspaceController) -> None:
+        """清除 use_builtin 覆盖应回填全局值到 WorkspaceItem。"""
+        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.setTaskOverride(ws_id, "use_builtin", "false")
+        item = controller.get_workspace(ws_id)  # type: ignore[attr-defined]
+        assert item is not None
+        assert item.use_builtin is False
+
+        # 清除覆盖
+        controller.clearTaskOverride(ws_id, "use_builtin")
+
+        overrides = json.loads(controller.taskOverridesJson(ws_id))
+        assert "use_builtin" not in overrides
+        # WorkspaceItem.use_builtin 回退到全局值
+        global_use_builtin = controller._config_controller.config.use_builtin  # type: ignore[attr-defined]
+        item_after = controller.get_workspace(ws_id)  # type: ignore[attr-defined]
+        assert item_after is not None
+        assert item_after.use_builtin == global_use_builtin
 
 
 class TestNonexistentWorkspaceEdgeCases:

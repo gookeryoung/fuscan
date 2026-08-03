@@ -38,11 +38,6 @@ Pane {
         HomePage {
             onViewResultsRequested: contentArea.sidebarRef.currentPage = "results"
             onViewStatsRequested: contentArea.sidebarRef.currentPage = "stats"
-            // 跳转到设置页规则 Tab（索引 2 = ["扫描","忽略目录","规则","通用"]）
-            onConfigureRulesRequested: {
-                contentArea.sidebarRef.currentPage = "settings"
-                settingsPageItem.switchToTab(2)
-            }
         }
 
         ResultsPage {
@@ -53,9 +48,7 @@ Pane {
             onBackRequested: contentArea.sidebarRef.currentPage = "home"
         }
 
-        SettingsPage {
-            id: settingsPageItem
-        }
+        SettingsPage {}
 
         AboutPage {}
     }

@@ -63,7 +63,7 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         供 :meth:`WorkspaceController.clearTaskOverride` 在清除任务级覆盖后
         回填全局值到 ScanController。``max_file_size`` 返回字节（与
-        ``task_overrides`` 单位一致），``ignore_dirs`` 返回 tuple。
+        ``task_overrides`` 单位一致），``ignore_dirs``/``rules_paths`` 返回 tuple。
 
         :param key: ``TASK_OVERRIDE_KEYS`` 中的字段名
         :return: 全局配置值；未知字段返回 ``None``
@@ -78,6 +78,10 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return self._config.max_depth or 0
         if key == "ignore_dirs":
             return tuple(self._config.ignore_dirs)
+        if key == "rules_paths":
+            return tuple(self._config.rules_paths)
+        if key == "use_builtin":
+            return self._config.use_builtin
         return None
 
     # ----------------------------- 扫描设置 -----------------------------

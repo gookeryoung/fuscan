@@ -128,12 +128,16 @@ PERSIST_VERSION = 1
 
 # 允许任务级覆盖的 Config 字段及类型校验器
 # 补充范围钳制函数，与 ConfigController.setMax* 语义一致
+# rules_paths/use_builtin：任务级规则覆盖，覆盖时扫描使用任务专属规则集，
+# 未覆盖时回退全局 RulesController（与 scan_archives/max_workers 等同语义）
 TASK_OVERRIDE_KEYS: dict[str, type] = {
     "scan_archives": bool,
     "max_workers": int,
     "max_file_size": int,
     "max_depth": int,
     "ignore_dirs": tuple,
+    "rules_paths": tuple,
+    "use_builtin": bool,
 }
 
 # 任务级覆盖 int 字段范围（与 ConfigController 全局钳制一致）
@@ -163,8 +167,8 @@ def clamp_task_override_int(key: str, value: int) -> int | None:
 def serialize_task_overrides(overrides: dict[str, object]) -> dict[str, object]:
     """序列化 task_overrides 供 JSON 持久化。
 
-    ``ignore_dirs`` 的 tuple 转为 list（JSON 不支持 tuple），其余字段原样返回。
-    非白名单字段被剔除。
+    ``ignore_dirs``/``rules_paths`` 的 tuple 转为 list（JSON 不支持 tuple），
+    其余字段原样返回。非白名单字段被剔除。
 
     :param overrides: 原始 task_overrides 字典
     :return: 可 JSON 序列化的 dict
@@ -173,7 +177,7 @@ def serialize_task_overrides(overrides: dict[str, object]) -> dict[str, object]:
     for key, value in overrides.items():
         if key not in TASK_OVERRIDE_KEYS:
             continue
-        if key == "ignore_dirs" and isinstance(value, tuple):
+        if key in ("ignore_dirs", "rules_paths") and isinstance(value, tuple):
             out[key] = list(value)
         else:
             out[key] = value
@@ -183,7 +187,7 @@ def serialize_task_overrides(overrides: dict[str, object]) -> dict[str, object]:
 def deserialize_task_overrides(raw: object) -> dict[str, object]:
     """反序列化 task_overrides（容错：跳过类型不符字段）。
 
-    ``ignore_dirs`` 的 list 转为 tuple，类型不符字段跳过并 warning。
+    ``ignore_dirs``/``rules_paths`` 的 list 转为 tuple，类型不符字段跳过并 warning。
 
     :param raw: 从 JSON 解析得到的原始数据
     :return: 类型安全的 task_overrides 字典
@@ -195,11 +199,11 @@ def deserialize_task_overrides(raw: object) -> dict[str, object]:
         if key not in TASK_OVERRIDE_KEYS:
             logger.warning("反序列化 task_overrides：跳过未知字段 %s", key)
             continue
-        if key == "ignore_dirs":
+        if key in ("ignore_dirs", "rules_paths"):
             if isinstance(value, list) and all(isinstance(x, str) for x in value):
                 out[key] = tuple(value)
             else:
-                logger.warning("task_overrides.ignore_dirs 类型不符，跳过: %r", value)
+                logger.warning("task_overrides.%s 类型不符，跳过: %r", key, value)
         elif isinstance(value, TASK_OVERRIDE_KEYS[key]):
             out[key] = value
         else:

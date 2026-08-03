@@ -18,12 +18,6 @@ Item {
     // （Windows 数百字体，同步调用阻塞主线程），避免设置页构造期阻塞
     property bool _fontListLoaded: false
 
-    // 外部跳转入口：切换到指定 Tab 索引（供 ContentArea 调用）
-    // 索引对应 ["扫描","忽略目录","规则","通用"]
-    function switchToTab(index) {
-        settingsTabBar.currentIndex = index
-    }
-
     // 白名单导入/导出文件对话框
     Dialogs.FileDialog {
         id: whitelistImportDialog

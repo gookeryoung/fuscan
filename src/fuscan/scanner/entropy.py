@@ -71,8 +71,6 @@ def shannon_entropy(data: str) -> float:
     if not data:
         return 0.0
     length = len(data)
-    if length == 0:
-        return 0.0
     # iter-157 快速路径：字符均为 ASCII（ord(ch) < 256）且长度 <= 4096，用数组计频
     if length <= 4096:
         # 先检测是否全 ASCII（ord < 256）。Base64/Hex 必然满足，自然语言大概率也满足
@@ -125,8 +123,6 @@ def _shannon_entropy_ge(data: str, threshold: float) -> bool:  # noqa: PLR0912
     if not data:
         return threshold <= 0.0
     length = len(data)
-    if length == 0:
-        return threshold <= 0.0
     log2 = _LOG2
     # --------------------------- 小 token 快速路径 ---------------------------
     # 绝大多数场景（Base64/Hex 密钥 32~128 字符），直接精确算熵（数组路径 <100μs）

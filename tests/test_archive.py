@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import zipfile
+from concurrent.futures import Future
 from pathlib import Path
 from typing import Callable
 
@@ -33,7 +34,9 @@ from fuscan.rules.model import (
     Severity,
 )
 from fuscan.scanner import Scanner
-from fuscan.scanner.result import ProgressInfo
+from fuscan.scanner._archive_phase import _collect_archive_futures, run_archive_phase
+from fuscan.scanner.context import FileEntry
+from fuscan.scanner.result import ProgressInfo, ScanResult
 
 # ----------------------------- 工具函数 -----------------------------
 
@@ -2233,3 +2236,115 @@ class TestArchiveParallelScan:
         # good.zip 内 secret.txt 仍被扫描到
         hit_paths = [str(r.path) for r in report.results if r.has_hit]
         assert any("secret.txt" in p for p in hit_paths)
+
+
+class TestArchivePhaseInternalBranches:
+    """针对 ``_archive_phase`` 内部函数的取消/异常分支单元测试。
+
+    这些分支（单线程取消、扫描异常、多线程提交取消、future 结果异常）在端到端
+    扫描中依赖时序难以稳定触发，改用真实 :class:`Scanner` + monkeypatch
+    ``_check_control`` / ``scan_archive`` 直接驱动 :func:`run_archive_phase` 与
+    :func:`_collect_archive_futures`，保证分支确定性覆盖。
+    """
+
+    @staticmethod
+    def _entry(path: Path) -> FileEntry:
+        """构造指向真实 zip 文件的 FileEntry（extension 保留 .zip 供 is_archive 识别）。"""
+        return FileEntry(path=path, name=path.name, size=1, mtime=0.0, extension="zip")
+
+    def test_single_thread_cancel_skips_scan(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """单线程路径：_check_control 返回 True 时立即 break，不调用 scan_archive。"""
+        _make_zip(tmp_path / "a.zip", {"secret.txt": "x"})
+        rs = _build_ruleset(_filename_rule("r", "secret"))
+        scanner = Scanner(rs, scan_archives=True, max_workers=1)
+        scan_called = False
+
+        def fake_scan(path: Path) -> tuple[ScanResult, ...]:
+            nonlocal scan_called
+            scan_called = True
+            return ()
+
+        monkeypatch.setattr(scanner, "_check_control", lambda: True)
+        monkeypatch.setattr(scanner._archive_scanner, "scan_archive", fake_scan)
+        results: list[ScanResult] = []
+        delta = run_archive_phase(scanner, [self._entry(tmp_path / "a.zip")], results)
+        assert delta == (0, 0, 0, 0)
+        assert not scan_called
+        assert results == []
+
+    def test_single_thread_scan_exception_counts_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """单线程路径：scan_archive 抛异常时 errors 递增并继续下一个 entry。"""
+        _make_zip(tmp_path / "a.zip", {"secret.txt": "x"})
+        rs = _build_ruleset(_filename_rule("r", "secret"))
+        scanner = Scanner(rs, scan_archives=True, max_workers=1)
+
+        def boom(path: Path) -> tuple[ScanResult, ...]:
+            raise RuntimeError("扫描失败")
+
+        monkeypatch.setattr(scanner, "_check_control", lambda: False)
+        monkeypatch.setattr(scanner._archive_scanner, "scan_archive", boom)
+        results: list[ScanResult] = []
+        scanned, matched, errors, matches = run_archive_phase(scanner, [self._entry(tmp_path / "a.zip")], results)
+        assert errors == 1
+        assert scanned == matched == matches == 0
+        assert results == []
+
+    def test_multithread_cancel_during_submit(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """多线程路径：提交阶段 _check_control 返回 True 立即取消，零增量返回。"""
+        _make_zip(tmp_path / "a.zip", {"secret.txt": "x"})
+        _make_zip(tmp_path / "b.zip", {"secret.txt": "y"})
+        rs = _build_ruleset(_filename_rule("r", "secret"))
+        scanner = Scanner(rs, scan_archives=True, max_workers=2)
+        monkeypatch.setattr(scanner, "_check_control", lambda: True)
+        results: list[ScanResult] = []
+        delta = run_archive_phase(
+            scanner,
+            [self._entry(tmp_path / "a.zip"), self._entry(tmp_path / "b.zip")],
+            results,
+        )
+        assert delta == (0, 0, 0, 0)
+        assert results == []
+
+    def test_collect_cancel_shuts_down_pool(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """_collect_archive_futures：收集时 _check_control 返回 True 立即 break。"""
+        from fuscan.scanner._executor import DaemonThreadPoolExecutor
+
+        _make_zip(tmp_path / "a.zip", {"secret.txt": "x"})
+        rs = _build_ruleset(_filename_rule("r", "secret"))
+        scanner = Scanner(rs, scan_archives=True, max_workers=2)
+        monkeypatch.setattr(scanner, "_check_control", lambda: True)
+        results: list[ScanResult] = []
+        pool = DaemonThreadPoolExecutor(max_workers=1)
+        try:
+            entry = self._entry(tmp_path / "a.zip")
+            future = pool.submit(lambda: ())
+            future_to_entry: dict[Future[tuple[ScanResult, ...]], FileEntry] = {future: entry}
+            delta = _collect_archive_futures(scanner, future_to_entry, results, pool)
+        finally:
+            pool.shutdown(wait=False)
+        assert delta == (0, 0, 0, 0)
+        assert results == []
+
+    def test_collect_future_result_raises_counts_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """_collect_archive_futures：future.result() 抛异常时 errors 递增。"""
+        from fuscan.scanner._executor import DaemonThreadPoolExecutor
+
+        _make_zip(tmp_path / "a.zip", {"secret.txt": "x"})
+        rs = _build_ruleset(_filename_rule("r", "secret"))
+        scanner = Scanner(rs, scan_archives=True, max_workers=2)
+        monkeypatch.setattr(scanner, "_check_control", lambda: False)
+        results: list[ScanResult] = []
+        pool = DaemonThreadPoolExecutor(max_workers=1)
+
+        def boom() -> tuple[ScanResult, ...]:
+            raise RuntimeError("worker 失败")
+
+        try:
+            entry = self._entry(tmp_path / "a.zip")
+            future = pool.submit(boom)
+            future_to_entry: dict[Future[tuple[ScanResult, ...]], FileEntry] = {future: entry}
+            scanned, matched, errors, matches = _collect_archive_futures(scanner, future_to_entry, results, pool)
+        finally:
+            pool.shutdown(wait=False)
+        assert errors == 1
+        assert scanned == matched == matches == 0

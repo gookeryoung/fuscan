@@ -7,6 +7,9 @@
 - :func:`find_high_entropy_strings` 多 token 提取与去重
 - 100 样本误报率验证（< 10%）
 - 真实密钥样本识别（Base64/Hex/AWS/GitHub 等）
+- 长字符串与 Unicode 分支：``shannon_entropy`` 的 Counter 退化路径（>4096 字符 /
+  非 ASCII）与 ``_shannon_entropy_ge`` 的大 token 分块路径、提前终止及分块估算
+  与精确熵背离的边界
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from fuscan.scanner.entropy import (
     DEFAULT_ENTROPY_THRESHOLD,
     DEFAULT_MIN_ENTROPY_LENGTH,
     ENTROPY_RULE_NAME,
+    _shannon_entropy_ge,
     find_high_entropy_strings,
     is_high_entropy,
     shannon_entropy,
@@ -370,3 +374,75 @@ class TestRandomKeyDetection:
         else:
             # 降低阈值应能识别
             assert is_high_entropy(mixed, threshold=3.5)
+
+
+class TestLongAndUnicodePaths:
+    """长字符串与 Unicode 分支：覆盖 Counter 退化路径与大 token 分块路径。"""
+
+    def test_shannon_entropy_counter_path_over_4096(self) -> None:
+        """>4096 字符走 Counter 退化路径，熵值仍正确（4 符号等概率约 2.0）。"""
+        # 5000 字符、4 个符号等概率 -> 熵 = log2(4) = 2.0；长度触发 Counter 分支
+        data = "abcd" * 1250
+        assert len(data) > 4096
+        assert shannon_entropy(data) == pytest.approx(2.0)
+
+    def test_shannon_entropy_non_ascii_short_falls_back(self) -> None:
+        """短串含 ord>255 的 CJK 字符时退化到 Counter 路径，熵值正确。"""
+        # 4 个 CJK 字符等概率 -> 熵 2.0；长度 <=4096 但非 ASCII，触发 82-83 分支后退化
+        data = "中文字符" * 10
+        assert all(ord(ch) > 255 for ch in "中文字符")
+        assert shannon_entropy(data) == pytest.approx(2.0)
+
+    def test_ge_large_ascii_token_early_return(self) -> None:
+        """>=256 字符的高熵 ASCII 大 token 应在分块路径提前返回 True。"""
+        # 536 字符随机 base64（每字符高熵），分块路径首块即越过阈值
+        token = base64.b64encode(os.urandom(400)).decode("ascii")
+        assert len(token) >= 256
+        assert _shannon_entropy_ge(token, 4.5) is True
+
+    def test_ge_large_ascii_token_final_entropy_below(self) -> None:
+        """>=256 字符低熵 ASCII 大 token：各块均不越阈值，走最终完整熵返回 False。"""
+        # 400 字符、4 符号 -> 熵 2.0，任何块都不越 4.5，触发 164-170 最终熵分支
+        token = "abcd" * 100
+        assert len(token) >= 256
+        assert _shannon_entropy_ge(token, 4.5) is False
+
+    def test_ge_large_unicode_token_early_return(self) -> None:
+        """>=256 字符的非 ASCII 大 token 走 Counter 退化路径，低阈值提前返回 True。"""
+        # 300 CJK 字符（ord>255），触发 171-179 退化路径，低阈值累积即提前返回
+        token = "中文字符测试" * 50
+        assert len(token) >= 256
+        assert all(ord(ch) > 255 for ch in "中文字符测试")
+        assert _shannon_entropy_ge(token, 2.0) is True
+
+    def test_ge_large_unicode_token_below_threshold(self) -> None:
+        """>=256 字符的非 ASCII 大 token 熵低于高阈值时返回 False。"""
+        # 同上但阈值 9.0（不可能达到），退化路径循环结束返回 False
+        token = "中文字符测试" * 50
+        assert _shannon_entropy_ge(token, 9.0) is False
+
+    def test_ge_empty_string_uses_threshold_sign(self) -> None:
+        """空字符串时 _shannon_entropy_ge 按阈值符号返回（<=0 为 True）。"""
+        # 空串熵视为 0：阈值 <=0 应为 True，>0 应为 False（覆盖 126 空串分支）
+        assert _shannon_entropy_ge("", 0.0) is True
+        assert _shannon_entropy_ge("", -1.0) is True
+        assert _shannon_entropy_ge("", 4.5) is False
+
+    def test_find_chunk_estimate_diverges_from_precise(self) -> None:
+        """分块估算越阈值但精确熵不足时，find_high_entropy_strings 应剔除该 token。
+
+        构造 token：高熵前缀（62 个不同字符）+ 长低熵尾部（大量 ``a``）。
+        分块路径首块估算越过阈值使 ``_shannon_entropy_ge`` 返回 True，但整体精确熵
+        被长尾稀释到远低于阈值，精确复算后被剔除（覆盖 239->228 回边分支）。
+        """
+        import string  # 局部导入仅本用例构造字符集
+
+        head = string.ascii_letters + string.digits  # 62 个不同字符，高熵前缀
+        token = head + "a" * 400  # 单一 token（全部落在 [A-Za-z0-9] 字符集）
+        assert len(token) >= 256
+        # 分块估算认为高熵
+        assert _shannon_entropy_ge(token, 4.5) is True
+        # 但精确熵远低于阈值
+        assert shannon_entropy(token) < 4.5
+        # find 复算精确熵后剔除，结果为空
+        assert find_high_entropy_strings(token, threshold=4.5, min_length=32) == []

@@ -1092,6 +1092,10 @@ Item {
                         try { historyDialog.comparison = JSON.parse(cmpJson) } catch(e) { historyDialog.comparison = {} }
                         historyDialog.open()
                     }
+                    // 配置规则：转发给 ContentArea 跳转到设置页规则 Tab
+                    onConfigureRulesRequested: function(wsId) {
+                        homePage.configureRulesRequested(wsId)
+                    }
                 }
             }
         }
@@ -1137,4 +1141,6 @@ Item {
     // 信号：通知 ContentArea 切换页面
     signal viewResultsRequested(string workspaceId)
     signal viewStatsRequested(string workspaceId)
+    // 信号：通知 ContentArea 跳转到设置页规则 Tab
+    signal configureRulesRequested(string workspaceId)
 }

@@ -40,6 +40,8 @@ Rectangle {
     signal exportCsvRequested(string workspaceId)
     signal exportJsonRequested(string workspaceId)
     signal exportPdfRequested(string workspaceId)
+    // 跳转到设置页规则 Tab 配置全局规则集（不依赖工作区状态，始终可用）
+    signal configureRulesRequested(string workspaceId)
 
     implicitHeight: contentColumn.implicitHeight + 24
     color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
@@ -253,6 +255,16 @@ Rectangle {
                         workspaceController.startScan(card.workspaceId)
                     }
                 }
+            }
+
+            // 配置规则：跳转到设置页规则 Tab（secondary 描边，与启动扫描同高）
+            // 工作区展示的规则 TAG 来自全局规则集，提供快捷入口便于修改
+            IconButton {
+                iconSource: "qrc:/icons/rules.svg"
+                text: "配置规则"
+                tooltip: "跳转到设置页配置全局规则集"
+                accent: "secondary"
+                onClicked: card.configureRulesRequested(card.workspaceId)
             }
 
             Item { Layout.fillWidth: true }

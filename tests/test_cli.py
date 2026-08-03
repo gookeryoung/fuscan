@@ -718,3 +718,251 @@ class TestCacheCommand:
         rc = main(["scan", str(scan_root), "-r", str(rules_file), "--cache-path", str(cache_path)])
         assert rc == 0
         assert cache_path.exists()
+
+
+class TestBenchmarkCommand:
+    """benchmark 子命令测试。"""
+
+    def test_parse_benchmark_command(self) -> None:
+        """benchmark 子命令参数解析。"""
+        parser = build_parser()
+        args = parser.parse_args(["benchmark", "some_path", "-r", "r.yaml", "--rounds", "3", "--warmup", "2"])
+        assert args.command == "benchmark"
+        assert str(args.path) == "some_path"
+        assert args.rounds == 3
+        assert args.warmup == 2
+
+    def test_bench_alias(self) -> None:
+        """bench 是 benchmark 的别名。"""
+        parser = build_parser()
+        args = parser.parse_args(["bench", "p"])
+        assert args.command == "bench"
+
+    def test_benchmark_table_output(
+        self,
+        scan_root: Path,
+        rules_file: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """table 输出应含阶段表头与测量信息。"""
+        rc = main(["benchmark", str(scan_root), "-r", str(rules_file), "--rounds", "1", "--warmup", "0", "--no-cache"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "基准测量" in out
+        assert "均值(ms)" in out
+        assert "占比" in out
+
+    def test_benchmark_json_output(
+        self,
+        scan_root: Path,
+        rules_file: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """json 输出应为合法 JSON，含 stages 数组。"""
+        rc = main(
+            [
+                "benchmark",
+                str(scan_root),
+                "-r",
+                str(rules_file),
+                "--rounds",
+                "1",
+                "--warmup",
+                "0",
+                "--no-cache",
+                "-o",
+                "json",
+            ]
+        )
+        assert rc == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["rounds"] == 1
+        assert "stages" in data
+        assert isinstance(data["stages"], list)
+
+    def test_benchmark_save_baseline(
+        self,
+        scan_root: Path,
+        rules_file: Path,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--save-baseline 应写出基准线 JSON 文件。"""
+        baseline = tmp_path / "baseline.json"
+        rc = main(
+            [
+                "benchmark",
+                str(scan_root),
+                "-r",
+                str(rules_file),
+                "--rounds",
+                "1",
+                "--warmup",
+                "0",
+                "--no-cache",
+                "--save-baseline",
+                str(baseline),
+            ]
+        )
+        assert rc == 0
+        assert baseline.exists()
+        data = json.loads(baseline.read_text(encoding="utf-8"))
+        assert "stages" in data
+        assert "meta" in data
+        err = capsys.readouterr().err
+        assert "基准线已保存" in err
+
+    def test_benchmark_compare_baseline(
+        self,
+        scan_root: Path,
+        rules_file: Path,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--baseline 应加载历史基准线并输出对比表。"""
+        baseline = tmp_path / "baseline.json"
+        rc = main(
+            [
+                "benchmark",
+                str(scan_root),
+                "-r",
+                str(rules_file),
+                "--rounds",
+                "1",
+                "--warmup",
+                "0",
+                "--no-cache",
+                "--save-baseline",
+                str(baseline),
+            ]
+        )
+        assert rc == 0
+        capsys.readouterr()
+        # 用刚保存的基准线对比自身
+        rc = main(
+            [
+                "benchmark",
+                str(scan_root),
+                "-r",
+                str(rules_file),
+                "--rounds",
+                "1",
+                "--warmup",
+                "0",
+                "--no-cache",
+                "--baseline",
+                str(baseline),
+            ]
+        )
+        # 对比自身可能因抖动判回归（退出码 0 或 1 均合法），只校验输出含对比表
+        assert rc in (0, 1)
+        out = capsys.readouterr().out
+        assert "对比基准线" in out
+
+    def test_benchmark_regression_exit_code(
+        self,
+        scan_root: Path,
+        rules_file: Path,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """本次耗时远超基准线时以退出码 1 提示回归。"""
+        # 手工写一个各阶段极小的基准线，确保本次必然回归
+        baseline = tmp_path / "tiny.json"
+        baseline.write_text(
+            json.dumps(
+                {
+                    "timestamp": "2026-01-01T00:00:00",
+                    "stages": {"match": {"mean_ms": 0.0001}, "walk": {"mean_ms": 0.0001}},
+                    "meta": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        rc = main(
+            [
+                "benchmark",
+                str(scan_root),
+                "-r",
+                str(rules_file),
+                "--rounds",
+                "1",
+                "--warmup",
+                "0",
+                "--no-cache",
+                "--baseline",
+                str(baseline),
+            ]
+        )
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "回归" in out
+
+    def test_benchmark_nonexistent_path(self, tmp_path: Path, rules_file: Path) -> None:
+        """路径不存在返回 1。"""
+        rc = main(["benchmark", str(tmp_path / "missing"), "-r", str(rules_file), "--no-cache"])
+        assert rc == 1
+
+    def test_benchmark_invalid_rounds(
+        self, scan_root: Path, rules_file: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--rounds 0 返回 1 并提示。"""
+        rc = main(["benchmark", str(scan_root), "-r", str(rules_file), "--no-cache", "--rounds", "0"])
+        assert rc == 1
+        assert "rounds" in capsys.readouterr().err
+
+    def test_benchmark_invalid_warmup(
+        self, scan_root: Path, rules_file: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--warmup -1 返回 1 并提示。"""
+        rc = main(["benchmark", str(scan_root), "-r", str(rules_file), "--no-cache", "--warmup", "-1"])
+        assert rc == 1
+        assert "warmup" in capsys.readouterr().err
+
+    def test_benchmark_missing_baseline_file(
+        self, scan_root: Path, rules_file: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--baseline 指向不存在文件时返回 1 并提示。"""
+        rc = main(
+            [
+                "benchmark",
+                str(scan_root),
+                "-r",
+                str(rules_file),
+                "--no-cache",
+                "--baseline",
+                str(tmp_path / "nope.json"),
+            ]
+        )
+        assert rc == 1
+        assert "加载基准线失败" in capsys.readouterr().err
+
+    def test_benchmark_bad_ruleset(self, scan_root: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """--no-builtin 无 -r 返回 1。"""
+        rc = main(["benchmark", str(scan_root), "--no-cache", "--no-builtin"])
+        assert rc == 1
+
+    def test_benchmark_with_cache(
+        self,
+        scan_root: Path,
+        rules_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        """启用缓存路径分支：--cache-path 创建缓存后 benchmark 正常完成。"""
+        cache_path = tmp_path / "cache.db"
+        rc = main(
+            [
+                "benchmark",
+                str(scan_root),
+                "-r",
+                str(rules_file),
+                "--rounds",
+                "1",
+                "--warmup",
+                "0",
+                "--cache-path",
+                str(cache_path),
+            ]
+        )
+        assert rc == 0
+        assert cache_path.exists()

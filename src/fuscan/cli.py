@@ -3,6 +3,7 @@
 支持子命令：
 
 - ``scan``：扫描指定路径，输出命中报告
+- ``benchmark``（别名 ``bench``）：多轮扫描测量各阶段性能，支持导出/对比基准线
 - ``rules``：校验规则文件格式
 - ``version``：显示版本信息
 - ``gui``：启动图形界面
@@ -13,18 +14,22 @@
 .. code-block:: bash
 
     fuscan scan /path/to/scan -r rules/custom.yaml -o json -f report.json
+    fuscan benchmark /path/to/scan --rounds 5 --save-baseline baseline.json
+    fuscan benchmark /path/to/scan --baseline baseline.json
     fuscan rules -r rules/custom.yaml
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from fuscan import __version__
+from fuscan.benchmark import BaselineComparison, BenchmarkResult
 from fuscan.config import load_config
 from fuscan.export.cli_output import output_report
 from fuscan.rules import RuleError, RuleSet, load_ruleset, load_with_builtin, merge_multiple_rulesets
@@ -91,6 +96,45 @@ def build_parser() -> argparse.ArgumentParser:
         "--perf-save", type=Path, default=None, metavar="FILE", help="将性能统计保存为 JSON 文件供后续分析"
     )
 
+    # benchmark 子命令：多轮扫描测量各阶段性能，支持导出/对比基准线
+    bench_parser = subparsers.add_parser("benchmark", aliases=["bench"], help="多轮扫描测量各阶段性能并支持基准线对比")
+    bench_parser.add_argument("path", type=Path, help="要基准测试的目录或文件路径")
+    bench_parser.add_argument(
+        "-r",
+        "--rules",
+        type=Path,
+        action="append",
+        default=None,
+        metavar="FILE",
+        help="规则文件路径（YAML，可重复指定多个，后面的覆盖前面的同名规则）",
+    )
+    bench_parser.add_argument("--rounds", type=int, default=5, metavar="N", help="正式测量轮数（默认 5）")
+    bench_parser.add_argument("--warmup", type=int, default=1, metavar="N", help="预热轮数，不计入统计（默认 1）")
+    bench_parser.add_argument(
+        "--save-baseline", type=Path, default=None, metavar="FILE", help="将本次结果导出为基准线 JSON 文件"
+    )
+    bench_parser.add_argument(
+        "--baseline", type=Path, default=None, metavar="FILE", help="加载历史基准线并与本次结果逐阶段对比回归"
+    )
+    bench_parser.add_argument(
+        "-o", "--output-format", choices=["table", "json"], default="table", help="输出格式，默认 table"
+    )
+    bench_parser.add_argument(
+        "--max-file-size",
+        type=int,
+        default=None,
+        metavar="MB",
+        help="跳过大于此大小（MB）的文件；0 表示不限制（默认走配置或 100MB）",
+    )
+    bench_parser.add_argument(
+        "--ignore-dir", action="append", default=[], metavar="DIR", help="额外忽略目录名（可重复）"
+    )
+    bench_parser.add_argument("--no-builtin", action="store_true", help="禁用内置通用规则（需配合 -r 使用）")
+    bench_parser.add_argument("--no-cache", action="store_true", help="禁用扫描结果缓存")
+    bench_parser.add_argument(
+        "--cache-path", type=Path, default=None, metavar="DB", help="自定义缓存数据库路径（默认 ~/.fuscan/cache.db）"
+    )
+
     # rules 子命令
     rules_parser = subparsers.add_parser("rules", help="校验规则文件")
     rules_parser.add_argument("-r", "--rules", type=Path, required=True, help="规则文件路径（YAML）")
@@ -130,6 +174,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "scan":
             return _cmd_scan(args)
+        if args.command in ("benchmark", "bench"):
+            return _cmd_benchmark(args)
         if args.command == "rules":
             return _cmd_rules(args)
         if args.command == "gui":
@@ -262,6 +308,159 @@ def _run_scan(scanner: Scanner, scan_path: Path, args: argparse.Namespace) -> Sc
     rules_desc = f"规则: {args.rules}" if args.rules else "内置通用规则"
     logger.info("开始扫描 %s（%s，规则数: %d）", scan_path, rules_desc, len(scanner.ruleset.rules))
     return scanner.scan(scan_path)
+
+
+def _cmd_benchmark(args: argparse.Namespace) -> int:
+    """执行 benchmark 子命令：多轮扫描测量各阶段性能，支持导出/对比基准线。"""
+    from fuscan.benchmark import compare_to_baseline, load_baseline, run_benchmark, save_baseline
+
+    scan_path: Path = args.path
+    if not scan_path.exists():
+        print(f"错误: 路径不存在: {scan_path}", file=sys.stderr)
+        return 1
+    if args.rounds < 1:
+        print(f"错误: --rounds 必须 >= 1（收到 {args.rounds}）", file=sys.stderr)
+        return 1
+    if args.warmup < 0:
+        print(f"错误: --warmup 必须 >= 0（收到 {args.warmup}）", file=sys.stderr)
+        return 1
+
+    ruleset = _load_ruleset_from_args(args)
+    if ruleset is None:
+        return 1
+
+    # --baseline 若指定，先加载校验，避免跑完多轮才发现文件缺失
+    baseline: dict[str, object] | None = None
+    if args.baseline is not None:
+        try:
+            baseline = load_baseline(args.baseline)
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"错误: 加载基准线失败: {exc}", file=sys.stderr)
+            return 1
+
+    config = load_config()
+    ignore_dirs = _merge_ignore_dirs(config.ignore_dirs, args.ignore_dir)
+    use_cache = config.cache_enabled and not args.no_cache
+    cache_path = _resolve_cache_path(args.cache_path, config.cache_path)
+    max_file_size = _resolve_max_file_size(args.max_file_size, config.max_file_size)
+
+    def on_round(idx: int, total: int, label: str) -> None:
+        logger.info("基准 %s 第 %d/%d 轮", label, idx, total)
+
+    if use_cache and cache_path is not None:
+        from fuscan.cache import CacheStore, compute_source_files
+
+        cache = CacheStore(cache_path)
+        try:
+            source_files = compute_source_files(args.rules or [], use_builtin=not args.no_builtin)
+            scanner = Scanner(
+                ruleset,
+                max_file_size=max_file_size,
+                ignore_dirs=ignore_dirs,
+                cache=cache,
+                source_files=source_files,
+            )
+            result = run_benchmark(scanner, scan_path, rounds=args.rounds, warmup=args.warmup, on_round=on_round)
+        finally:
+            cache.close()
+    else:
+        scanner = Scanner(ruleset, max_file_size=max_file_size, ignore_dirs=ignore_dirs)
+        result = run_benchmark(scanner, scan_path, rounds=args.rounds, warmup=args.warmup, on_round=on_round)
+
+    comparison = compare_to_baseline(result, baseline) if baseline is not None else None
+
+    if args.output_format == "json":
+        print(_benchmark_json(result, comparison))
+    else:
+        print(_benchmark_table(result, comparison))
+
+    if args.save_baseline is not None:
+        save_baseline(result, args.save_baseline)
+        print(f"基准线已保存到: {args.save_baseline}", file=sys.stderr)
+
+    # 存在回归时以非 0 退出码提示（便于 CI 门禁使用）
+    return 1 if (comparison is not None and comparison.has_regression) else 0
+
+
+def _benchmark_table(result: BenchmarkResult, comparison: BaselineComparison | None) -> str:
+    """将基准结果（及可选对比）格式化为表格字符串。"""
+    lines = [
+        f"基准测量: {result.root}",
+        f"轮数 {result.rounds}（预热 {result.warmup}）| 文件 {result.scanned_files} | "
+        f"单轮均值 {result.mean_duration_ms:.1f} ms",
+        "",
+    ]
+    header = f"{'阶段':<24} {'均值(ms)':>10} {'最小':>9} {'最大':>9} {'标准差':>9} {'占比':>7}"
+    lines.append(header)
+    lines.append("-" * len(header))
+    total_mean = sum(s.mean_ms for s in result.stages) or 1.0
+    for s in result.stages:
+        pct = s.mean_ms / total_mean * 100.0
+        lines.append(
+            f"{s.name:<24} {s.mean_ms:>10.2f} {s.min_ms:>9.2f} {s.max_ms:>9.2f} {s.stddev_ms:>9.2f} {pct:>6.1f}%"
+        )
+
+    if comparison is not None:
+        lines.append("")
+        lines.append(f"对比基准线（{comparison.baseline_timestamp}，回归阈值 {comparison.threshold * 100:.0f}%）:")
+        cmp_header = f"{'阶段':<24} {'本次(ms)':>10} {'基准(ms)':>10} {'变化':>9} {'状态':>6}"
+        lines.append(cmp_header)
+        lines.append("-" * len(cmp_header))
+        for d in comparison.deltas:
+            cur = f"{d.current_ms:.2f}" if d.current_ms is not None else "-"
+            base = f"{d.baseline_ms:.2f}" if d.baseline_ms is not None else "-"
+            if d.change_ratio is None:
+                change = "新增" if d.baseline_ms is None else "消失"
+                status = ""
+            else:
+                change = f"{d.change_ratio * 100:+.1f}%"
+                status = "回归" if d.regressed else "正常"
+            lines.append(f"{d.name:<24} {cur:>10} {base:>10} {change:>9} {status:>6}")
+        if comparison.has_regression:
+            lines.append("")
+            lines.append("检测到性能回归（见上表标记为“回归”的阶段）")
+
+    return "\n".join(lines)
+
+
+def _benchmark_json(result: BenchmarkResult, comparison: BaselineComparison | None) -> str:
+    """将基准结果（及可选对比）格式化为 JSON 字符串。"""
+    payload: dict[str, object] = {
+        "root": result.root,
+        "timestamp": result.timestamp,
+        "rounds": result.rounds,
+        "warmup": result.warmup,
+        "scanned_files": result.scanned_files,
+        "mean_duration_ms": round(result.mean_duration_ms, 3),
+        "stages": [
+            {
+                "name": s.name,
+                "mean_ms": s.mean_ms,
+                "min_ms": s.min_ms,
+                "max_ms": s.max_ms,
+                "stddev_ms": s.stddev_ms,
+                "samples": s.samples,
+            }
+            for s in result.stages
+        ],
+    }
+    if comparison is not None:
+        payload["comparison"] = {
+            "baseline_timestamp": comparison.baseline_timestamp,
+            "threshold": comparison.threshold,
+            "has_regression": comparison.has_regression,
+            "deltas": [
+                {
+                    "name": d.name,
+                    "current_ms": d.current_ms,
+                    "baseline_ms": d.baseline_ms,
+                    "change_ratio": d.change_ratio,
+                    "regressed": d.regressed,
+                }
+                for d in comparison.deltas
+            ],
+        }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def _cmd_rules(args: argparse.Namespace) -> int:

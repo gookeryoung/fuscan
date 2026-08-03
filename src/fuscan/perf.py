@@ -1,19 +1,22 @@
 """性能测量基础设施（GUI 与扫描器共用）。
 
-提供三类工具：
+提供四类工具：
 
 - :class:`PerfTimer`：单阶段上下文计时器，用于 GUI 卡滞定位
 - :class:`PerfStats`：线程安全的聚合统计，用于扫描器分阶段瓶颈分析
 - :class:`timed`：装饰器 + 上下文两用计时器，用于入口流程（如 GUI 启动）
   分阶段展示各部分用时（INFO 级）
+- :class:`PerfReport` + :func:`render_startup_summary`：启动流程分阶段计时收集器
+  与 rich 汇总表渲染器，把各环节耗时与占比汇总为**单张表格**直观展示，
+  便于一眼识别瓶颈（rich 惰性导入，缺失时回退纯文本 INFO 汇总）
 
 启用方式：
 - :class:`PerfStats` **始终启用**（iter-66 起）：仅做聚合统计（无日志输出），
   开销约 1-2μs/次，对扫描性能影响 < 0.3%。扫描结果通过 :meth:`PerfStats.to_dict`
   导出，填入 :attr:`ScanStats.perf_summary` 供 GUI/CLI 展示与持久化。
-- :class:`PerfTimer` / :class:`timed` / :func:`record_event` 需 ``FUSCAN_PERF=1``
-  或 CLI ``--perf`` 启用（发布版默认关闭，零开销），适合定向卡滞定位与启动耗时
-  分析，不适合日常使用。
+- :class:`PerfTimer` / :class:`timed` / :func:`record_event` /
+  :func:`render_startup_summary` 需 ``FUSCAN_PERF=1`` 或 CLI ``--perf`` 启用
+  （发布版默认关闭，零开销），适合定向卡滞定位与启动耗时分析，不适合日常使用。
 
 设计要点：
 - :class:`PerfStats` 始终记录：``measure`` 仅 ``perf_counter`` + Lock，无 enabled 检查
@@ -23,12 +26,17 @@
 - 聚合统计：``PerfStats`` 累计各阶段总耗时/调用次数/最大值，扫描结束时
   :meth:`PerfStats.report` 输出汇总，便于一眼定位瓶颈
 - 持久化：:meth:`PerfStats.save_to_json` 将统计写入 JSON 文件供后续分析
+- 启动汇总：``timed`` 传入 :class:`PerfReport` 时额外登记各阶段耗时，外层块退出后
+  :func:`render_startup_summary` 渲染为单张 rich 表格（占比以最外层为 100% 基准）
 
 公共 API：
 - :data:`PERF_ENABLED`：PerfTimer 详细日志开关（模块加载时快照，运行时切换用 :func:`set_perf_enabled`）
 - :class:`PerfTimer`：上下文管理器计时器（单阶段，需启用）
 - :class:`PerfStats`：聚合统计计时器（多阶段累计，始终启用）
 - :class:`timed`：装饰器 + 上下文两用计时器（入口流程分阶段用时，需启用）
+- :class:`StageTiming`：单个启动阶段计时记录（供 :class:`PerfReport` 收集）
+- :class:`PerfReport`：启动流程分阶段计时收集器
+- :func:`render_startup_summary`：将 :class:`PerfReport` 渲染为 rich 汇总表（需启用）
 - :func:`record_event`：记录离散事件（需启用）
 - :func:`set_perf_enabled`：运行时切换 PerfTimer/timed/record_event 开关
 """
@@ -41,6 +49,7 @@ import os
 import threading
 import time
 from contextlib import ContextDecorator, contextmanager
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from types import TracebackType
@@ -48,9 +57,12 @@ from typing import Callable, Generator
 
 __all__ = [
     "PERF_ENABLED",
+    "PerfReport",
     "PerfStats",
     "PerfTimer",
+    "StageTiming",
     "record_event",
+    "render_startup_summary",
     "set_perf_enabled",
     "timed",
 ]
@@ -161,9 +173,12 @@ class timed(ContextDecorator):
         上下文模式取 ``"<anonymous>"``
     :param level: 日志级别（如 :data:`logging.INFO`），默认 :data:`logging.INFO`
     :param threshold_ms: 仅当耗时超过该阈值（毫秒）才记录耗时行，默认 0 总是记录
+    :param report: 传入 :class:`PerfReport` 时，在退出后额外登记本阶段耗时与嵌套层级，
+        供外层块结束时 :func:`render_startup_summary` 渲染汇总表；默认 ``None`` 保持
+        纯日志行为（不影响任何既有调用点与测试）
     """
 
-    __slots__ = ("_level", "_name", "_start", "_threshold_ms")
+    __slots__ = ("_depth", "_level", "_name", "_report", "_start", "_threshold_ms")
 
     def __init__(
         self,
@@ -171,11 +186,14 @@ class timed(ContextDecorator):
         *,
         level: int = logging.INFO,
         threshold_ms: float = 0.0,
+        report: PerfReport | None = None,
     ) -> None:
         self._name = name
         self._level = level
         self._threshold_ms = threshold_ms
+        self._report = report
         self._start: float = 0.0
+        self._depth: int = 0
 
     def __call__(self, func: Callable[..., object]) -> Callable[..., object]:
         """装饰器入口：未显式命名时用被装饰函数的限定名。"""
@@ -187,6 +205,10 @@ class timed(ContextDecorator):
         if not _PerfState.enabled:
             return self
         self._start = time.perf_counter()
+        # 仅在收集模式下维护嵌套层级（记录进入时的层级供退出登记）
+        if self._report is not None:
+            self._depth = _PerfState.depth
+            _PerfState.depth += 1
         logger.log(self._level, "%s…", self._name or "<anonymous>")
         return self
 
@@ -199,9 +221,110 @@ class timed(ContextDecorator):
         if not _PerfState.enabled:
             return False
         elapsed_ms = (time.perf_counter() - self._start) * 1000.0
+        if self._report is not None:
+            _PerfState.depth -= 1
+            self._report.add(self._name or "<anonymous>", elapsed_ms, self._depth)
         if elapsed_ms >= self._threshold_ms:
             logger.log(self._level, "%s 完成，用时 %.1fms", self._name or "<anonymous>", elapsed_ms)
         return False
+
+
+@dataclass(slots=True)
+class StageTiming:
+    """单个启动阶段的计时记录。
+
+    :ivar name: 阶段名称（如 ``"构造主控制器"``）
+    :ivar elapsed_ms: 该阶段耗时（毫秒）
+    :ivar depth: 嵌套层级，0 为最外层（如 ``"启动流程"``），子阶段为 1
+    :ivar order: 登记顺序（保持时间顺序展示，启动各阶段天然串行）
+    """
+
+    name: str
+    elapsed_ms: float
+    depth: int
+    order: int
+
+
+@dataclass(slots=True)
+class PerfReport:
+    """启动流程分阶段计时收集器。
+
+    由 :class:`timed` 在 ``report`` 参数非空时登记各阶段耗时，外层块退出后交给
+    :func:`render_startup_summary` 渲染为单张 rich 表格。仅在 GUI 主线程顺序调用，
+    无需加锁。
+
+    用法::
+
+        report = PerfReport()
+        with timed("启动流程", report=report):
+            with timed("构造主控制器", report=report):
+                ...
+        render_startup_summary(report)
+    """
+
+    stages: list[StageTiming] = field(default_factory=list)
+
+    def add(self, name: str, elapsed_ms: float, depth: int) -> None:
+        """登记一个阶段的耗时，``order`` 自动按登记顺序递增。"""
+        self.stages.append(StageTiming(name, elapsed_ms, depth, len(self.stages)))
+
+    def total_ms(self) -> float:
+        """返回总计耗时：优先取最外层（``depth==0``）阶段耗时，无则取全部最大值。"""
+        outer = [s.elapsed_ms for s in self.stages if s.depth == 0]
+        if outer:
+            return max(outer)
+        return max((s.elapsed_ms for s in self.stages), default=0.0)
+
+
+def _render_plain(rows: list[StageTiming], total_ms: float, log: logging.Logger) -> None:
+    """rich 缺失时的纯文本回退：逐行 INFO 打印阶段耗时与占比 + 总计行。"""
+    log.info("=== 启动性能汇总 ===")
+    for stage in rows:
+        indent = "  " * (stage.depth - 1)
+        pct = stage.elapsed_ms / total_ms * 100.0
+        log.info("%s%-24s %8.1f ms  %5.1f%%", indent, stage.name, stage.elapsed_ms, pct)
+    log.info("%-24s %8.1f ms  100.0%%", "总计", total_ms)
+
+
+def render_startup_summary(report: PerfReport, *, log: logging.Logger | None = None) -> None:
+    """将启动分阶段计时渲染为单张 rich 表格并打印到控制台。
+
+    仅在性能测量启用（:data:`_PerfState.enabled`）且有数据时输出；未启用时直接返回，
+    保证零开销。rich 采用惰性导入：缺失时回退 :func:`_render_plain` 纯文本 INFO 汇总，
+    因此核心库无需强依赖 rich（作为 ``perf`` 可选依赖按需安装）。
+
+    表格列：阶段（子阶段按 ``depth`` 缩进）/ 耗时 / 占比；占比 = 阶段耗时 / 总计
+    （最外层 ``"启动流程"`` 耗时）× 100%。行序保持登记的时间顺序（启动阶段天然串行），
+    末尾追加加粗 ``"总计"`` 行。
+
+    :param report: 已收集完毕的启动阶段计时
+    :param log: rich 缺失时的回退 logger，默认模块 logger
+    """
+    if not _PerfState.enabled or not report.stages:
+        return
+
+    log = log or logger
+    total_ms = report.total_ms() or 1.0
+    # 子阶段（排除最外层）构成表格主体，按登记顺序（时间顺序）展示
+    rows = [s for s in sorted(report.stages, key=lambda s: s.order) if s.depth > 0]
+
+    try:
+        from rich.console import Console
+        from rich.table import Table
+    except ImportError:
+        _render_plain(rows, total_ms, log)
+        return
+
+    table = Table(title="启动性能汇总", title_style="bold magenta")
+    table.add_column("阶段", style="cyan", no_wrap=True)
+    table.add_column("耗时", justify="right", style="green")
+    table.add_column("占比", justify="right")
+    for stage in rows:
+        indent = "  " * (stage.depth - 1)
+        pct = stage.elapsed_ms / total_ms * 100.0
+        table.add_row(f"{indent}{stage.name}", f"{stage.elapsed_ms:.1f} ms", f"{pct:.1f}%")
+    table.add_row("总计", f"{total_ms:.1f} ms", "100.0%", style="bold")
+    Console().print(table)
 
 
 class _StageStats:

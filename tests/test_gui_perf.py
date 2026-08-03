@@ -1,11 +1,14 @@
 """性能测量基础设施测试。
 
 验证 ``fuscan.perf`` 的零开销开关、计时记录、事件记录与嵌套缩进，
-以及 :class:`PerfStats` 聚合统计的线程安全与汇总输出。
+以及 :class:`PerfStats` 聚合统计的线程安全与汇总输出，
+并覆盖 :class:`PerfReport` 启动阶段收集与 :func:`render_startup_summary`
+rich 汇总表渲染（含无 rich 时的纯文本回退）。
 """
 
 from __future__ import annotations
 
+import builtins
 import logging
 import threading
 from typing import Iterator
@@ -363,3 +366,133 @@ def test_timed_propagates_exception(caplog: pytest.LogCaptureFixture) -> None:
     # 进入行 + 耗时行均记录（__exit__ 在异常时仍执行）
     assert len(records) == 2
     assert "会失败的阶段 完成，用时" in records[1].getMessage()
+
+
+# ---- PerfReport / render_startup_summary（启动性能汇总表）----
+
+
+def test_perf_report_add_collects_stages() -> None:
+    """PerfReport.add 应按登记顺序累积阶段，order 递增，total_ms 取 depth==0。"""
+    report = perf_mod.PerfReport()
+    report.add("启动流程", 100.0, 0)
+    report.add("构造主控制器", 40.0, 1)
+    report.add("加载主 QML", 55.0, 1)
+    assert len(report.stages) == 3
+    assert [s.order for s in report.stages] == [0, 1, 2]
+    assert [s.name for s in report.stages] == ["启动流程", "构造主控制器", "加载主 QML"]
+    # total_ms 取最外层 depth==0 的耗时
+    assert report.total_ms() == 100.0
+
+
+def test_perf_report_total_ms_fallback() -> None:
+    """无 depth==0 阶段时 total_ms 应回退取全部最大值；空报告为 0。"""
+    report = perf_mod.PerfReport()
+    assert report.total_ms() == 0.0
+    report.add("子阶段A", 12.0, 1)
+    report.add("子阶段B", 30.0, 1)
+    # 无最外层，取最大值
+    assert report.total_ms() == 30.0
+
+
+def test_timed_with_report_registers_stage(caplog: pytest.LogCaptureFixture) -> None:
+    """启用后 timed 传 report 应登记 1 条阶段，且仍产生 2 条日志（并存）。"""
+    caplog.set_level(logging.INFO, logger="fuscan.perf")
+    perf_mod.set_perf_enabled(True)
+    report = perf_mod.PerfReport()
+    with perf_mod.timed("构造主控制器", report=report):
+        pass
+    # 阶段被登记
+    assert len(report.stages) == 1
+    assert report.stages[0].name == "构造主控制器"
+    assert report.stages[0].depth == 0
+    assert report.stages[0].elapsed_ms >= 0.0
+    # 逐阶段日志仍照常产生（与汇总收集并存）
+    records = _collect_info_records(caplog)
+    assert len(records) == 2
+    assert records[0].getMessage() == "构造主控制器…"
+
+
+def test_timed_with_report_disabled_no_collect() -> None:
+    """未启用时 timed 传 report 不应登记任何阶段（零开销路径）。"""
+    perf_mod.set_perf_enabled(False)
+    report = perf_mod.PerfReport()
+    with perf_mod.timed("构造主控制器", report=report):
+        pass
+    assert report.stages == []
+
+
+def test_timed_nested_report_depth() -> None:
+    """嵌套 timed 传 report 应记录正确层级：外层 depth==0、内层 depth==1。"""
+    perf_mod.set_perf_enabled(True)
+    report = perf_mod.PerfReport()
+    with perf_mod.timed("启动流程", report=report), perf_mod.timed("构造主控制器", report=report):
+        pass
+    # 内层先退出登记（depth==1），外层后退出（depth==0）
+    by_name = {s.name: s for s in report.stages}
+    assert by_name["构造主控制器"].depth == 1
+    assert by_name["启动流程"].depth == 0
+    # 退出后 depth 复位为 0，无泄漏
+    assert perf_mod._PerfState.depth == 0
+
+
+def test_render_startup_summary_disabled_no_output(caplog: pytest.LogCaptureFixture, capsys) -> None:  # type: ignore[no-untyped-def]
+    """未启用时 render_startup_summary 应无输出、无异常。"""
+    caplog.set_level(logging.INFO, logger="fuscan.perf")
+    perf_mod.set_perf_enabled(False)
+    report = perf_mod.PerfReport()
+    report.add("启动流程", 100.0, 0)
+    report.add("构造主控制器", 40.0, 1)
+    perf_mod.render_startup_summary(report)
+    assert _collect_info_records(caplog) == []
+    assert capsys.readouterr().out == ""
+
+
+def test_render_startup_summary_with_rich(capsys) -> None:  # type: ignore[no-untyped-def]
+    """启用后有 rich 时应打印含标题、阶段名、总计与占比的表格到 stdout。"""
+    pytest.importorskip("rich")
+    perf_mod.set_perf_enabled(True)
+    report = perf_mod.PerfReport()
+    report.add("启动流程", 200.0, 0)
+    report.add("构造主控制器", 40.0, 1)
+    report.add("加载主 QML", 120.0, 1)
+    perf_mod.render_startup_summary(report)
+    out = capsys.readouterr().out
+    assert "启动性能汇总" in out
+    assert "构造主控制器" in out
+    assert "加载主 QML" in out
+    assert "总计" in out
+    assert "%" in out
+    # 最外层"启动流程"不作为普通行，仅作总计基准（占比 120/200=60%）
+    assert "60.0%" in out
+
+
+def test_render_startup_summary_fallback_no_rich(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """无 rich 时应回退纯文本 INFO 汇总（含标题与总计），不抛异常。"""
+    caplog.set_level(logging.INFO, logger="fuscan.perf")
+    perf_mod.set_perf_enabled(True)
+
+    real_import = builtins.__import__
+
+    def _fake_import(name: str, *args: object, **kwargs: object) -> object:
+        """拦截 rich 导入抛 ImportError，其余走真实导入。"""
+        if name.startswith("rich"):
+            raise ImportError("no rich for test")
+        return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+
+    report = perf_mod.PerfReport()
+    report.add("启动流程", 200.0, 0)
+    report.add("构造主控制器", 40.0, 1)
+    report.add("加载主 QML", 120.0, 1)
+    perf_mod.render_startup_summary(report)
+
+    records = _collect_info_records(caplog)
+    messages = "\n".join(r.getMessage() for r in records)
+    assert "启动性能汇总" in messages
+    assert "构造主控制器" in messages
+    assert "加载主 QML" in messages
+    assert "总计" in messages

@@ -239,6 +239,100 @@ Item {
         }
     }
 
+    // ========== 拖拽接收区：覆盖整个首页，拖入文件夹即创建扫描任务 ==========
+    DropArea {
+        id: dropArea
+        anchors.fill: parent
+        keys: ["text/uri-list"]
+
+        onDropped: {
+            if (drop.hasUrls) {
+                var paths = []
+                for (var i = 0; i < drop.urls.length; i++) {
+                    var url = drop.urls[i].toString()
+                    if (url.startsWith("file:///")) {
+                        paths.push(decodeURIComponent(url.substring(8)))
+                    }
+                }
+                if (paths.length > 0) {
+                    var count = workspaceController.addWorkspacesFromPaths(paths)
+                    if (count === 0) {
+                        dropToast.show("拖拽的目标不是文件夹", false)
+                    } else {
+                        dropToast.show("已添加 " + count + " 个扫描任务", true)
+                    }
+                }
+            }
+        }
+
+        // 拖拽悬浮提示遮罩
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.rgba(theme.colorPrimary.r, theme.colorPrimary.g, theme.colorPrimary.b, 0.08)
+            border.color: theme.colorPrimary
+            border.width: 2
+            radius: theme.radiusLg
+            visible: dropArea.containsDrag
+            z: 1000
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 12
+                Image {
+                    source: "qrc:/icons/folder.svg"
+                    sourceSize: Qt.size(48, 48)
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+                Label {
+                    text: "松开以添加扫描任务"
+                    font.pixelSize: 16
+                    font.bold: true
+                    color: theme.colorPrimary
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+            }
+        }
+    }
+
+    // ========== 拖拽结果 Toast ==========
+    Rectangle {
+        id: dropToast
+        property bool success: false
+        property string message: ""
+        visible: message.length > 0
+        anchors.top: parent.top
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.topMargin: 16
+        width: Math.min(dropToastLabel.implicitWidth + 32, parent.width - 32)
+        height: dropToastLabel.implicitHeight + 16
+        radius: 6
+        color: success ? theme.colorSuccess : theme.colorDanger
+        opacity: 0.95
+        z: 1001
+
+        Label {
+            id: dropToastLabel
+            anchors.centerIn: parent
+            text: dropToast.message
+            color: "#FFFFFF"
+            font.pixelSize: 12
+            elide: Text.ElideRight
+        }
+
+        Timer {
+            id: dropToastTimer
+            interval: 3000
+            repeat: false
+            onTriggered: dropToast.message = ""
+        }
+
+        function show(msg, ok) {
+            dropToast.success = ok
+            dropToast.message = msg
+            dropToastTimer.restart()
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 16
@@ -315,7 +409,6 @@ Item {
         ScrollView {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.preferredHeight: 1  // 与下方规则区弹性分配
             clip: true
             visible: !workspaceController.hasActiveScan
 
@@ -332,7 +425,7 @@ Item {
                 Label {
                     anchors.centerIn: parent
                     visible: workspaceList.count === 0
-                    text: "暂无任务\n点击左侧「添加任务」开始"
+                    text: "拖拽文件夹到此处创建扫描任务"
                     font.pixelSize: 13
                     color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                     horizontalAlignment: Text.AlignHCenter
@@ -377,32 +470,6 @@ Item {
                         homePage.taskSettingsRequested(wsId)
                     }
                 }
-            }
-        }
-
-        // ---------- 全局规则配置区 ----------
-        // 规则配置全局化：所有工作区共享同一规则集，首页下方提供编辑入口
-        // 改为可折叠，默认收起仅显示标题栏，点击展开显示完整规则面板
-        Rectangle {
-            Layout.fillWidth: true
-            // 收起时不占额外空间（仅标题栏 ~48px），展开时与上方工作区列表弹性分配
-            Layout.fillHeight: !rulesPanelInner.collapsed
-            Layout.preferredHeight: rulesPanelInner.collapsed ? 48 : 1
-            Layout.minimumHeight: 48
-            visible: !workspaceController.hasActiveScan
-            color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
-            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-            border.width: 1
-            radius: theme.radiusLg
-
-            RulesPanel {
-                id: rulesPanelInner
-                anchors.fill: parent
-                anchors.margins: 12
-                // 首页内嵌启用可折叠，默认收起（用户日常聚焦工作区列表，
-                // 需要编辑规则时点击展开）
-                collapsible: true
-                collapsed: true
             }
         }
     }

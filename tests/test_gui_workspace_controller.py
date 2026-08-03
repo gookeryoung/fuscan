@@ -670,6 +670,77 @@ class TestAddWorkspace:
         assert item is not None
         assert item.rules_paths == ()
 
+    def test_add_workspace_from_path_creates_with_folder_name(
+        self,
+        controller: WorkspaceController,
+        tmp_path: Path,
+    ) -> None:
+        """拖拽入口：传入文件夹路径应创建工作区，任务名取文件夹名。"""
+        folder = tmp_path / "我的项目"
+        folder.mkdir()
+        ws_id = controller.addWorkspaceFromPath(str(folder))
+        assert ws_id != ""
+        item = controller.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+        assert item.name == "我的项目"
+        assert item.mode_str == "folder"
+        assert item.target == str(folder)
+
+    def test_add_workspace_from_path_rejects_file(
+        self,
+        controller: WorkspaceController,
+        tmp_path: Path,
+    ) -> None:
+        """拖拽入口：传入文件路径（非文件夹）应返回空串，不创建工作区。"""
+        file_path = tmp_path / "not_a_folder.txt"
+        file_path.write_text("hello", encoding="utf-8")
+        ws_id = controller.addWorkspaceFromPath(str(file_path))
+        assert ws_id == ""
+        assert controller.workspaceModel.rowCount() == 0
+
+    def test_add_workspace_from_path_rejects_empty(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """拖拽入口：空路径返回空串。"""
+        assert controller.addWorkspaceFromPath("") == ""
+
+    def test_add_workspace_from_path_nonexistent(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """拖拽入口：不存在的路径返回空串。"""
+        ws_id = controller.addWorkspaceFromPath("/不/存在/的/路径/abcxyz")
+        assert ws_id == ""
+
+    def test_add_workspaces_from_paths_batch(
+        self,
+        controller: WorkspaceController,
+        tmp_path: Path,
+    ) -> None:
+        """拖拽多选：批量传入文件夹路径，返回成功创建数。"""
+        f1 = tmp_path / "dir1"
+        f2 = tmp_path / "dir2"
+        f1.mkdir()
+        f2.mkdir()
+        count = controller.addWorkspacesFromPaths([str(f1), str(f2)])
+        assert count == 2
+        assert controller.workspaceModel.rowCount() == 2
+
+    def test_add_workspaces_from_paths_mixed(
+        self,
+        controller: WorkspaceController,
+        tmp_path: Path,
+    ) -> None:
+        """拖拽多选：混合文件夹与文件，只创建文件夹的工作区。"""
+        folder = tmp_path / "dir"
+        file_path = tmp_path / "file.txt"
+        folder.mkdir()
+        file_path.write_text("x", encoding="utf-8")
+        count = controller.addWorkspacesFromPaths([str(folder), str(file_path)])
+        assert count == 1
+        assert controller.workspaceModel.rowCount() == 1
+
     def test_sync_all_workspaces_rules_on_global_change(
         self,
         controller: WorkspaceController,

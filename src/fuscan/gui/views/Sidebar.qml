@@ -62,15 +62,11 @@ Pane {
         }
 
         // ---------- 顶部主导航 ----------
+        // 入口精简：日常扫描由首页拖拽文件夹完成，全盘/盘符扫描入口在设置页
         NavItem {
             iconSource: "qrc:/icons/home.svg"; label: "首页"; pageId: "home"
             selected: sidebar.currentPage === "home"
             onClicked: { sidebar.currentPage = "home" }
-        }
-        NavItem {
-            iconSource: "qrc:/icons/add.svg"; label: "添加任务"; pageId: "addTask"
-            selected: sidebar.currentPage === "addTask"
-            onClicked: { sidebar.currentPage = "addTask" }
         }
 
         Item { Layout.fillHeight: true }  // 弹性撑开

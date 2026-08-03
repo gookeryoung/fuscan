@@ -12,6 +12,11 @@ Item {
     property ThemeController theme: Theme
     property ConfigControllerType configController: ConfigController
     property WhitelistControllerType whitelistController: WhitelistController
+    property RulesControllerType rulesController: RulesController
+    property WorkspaceControllerType workspaceController: WorkspaceController
+
+    // 高级扫描创建后通知 ContentArea 跳转首页
+    signal scanCreated()
 
     // 白名单导入/导出文件对话框
     Dialogs.FileDialog {
@@ -85,7 +90,7 @@ Item {
                 }
             }
             Repeater {
-                model: ["扫描", "通用", "忽略目录", "白名单"]
+                model: ["扫描", "通用", "忽略目录", "白名单", "规则", "高级扫描"]
                 TabButton {
                     id: tabBtn
                     text: modelData
@@ -1116,6 +1121,93 @@ Item {
                                     iconSize: 14
                                     btnSize: 24
                                     onClicked: whitelistController.removeEntry(index)
+                                }
+                            }
+                        }
+                    }
+
+                    Item { Layout.fillHeight: true }
+                }
+            }
+
+            // ===== Tab 5: 规则 =====
+            // 规则配置从首页移入设置页，首页聚焦工作区列表
+            RulesPanel {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                // 设置页内嵌不启用折叠，完整展示
+                collapsible: false
+                collapsed: false
+            }
+
+            // ===== Tab 6: 高级扫描 =====
+            // 全盘/盘符扫描入口（日常扫描请用首页拖拽文件夹）
+            // 待用户复核：按「全面极简」方案合并进设置页
+            ScrollView {
+                clip: true
+                contentWidth: availableWidth
+                ColumnLayout {
+                    width: settingsStack.width
+                    spacing: 16
+
+                    GroupBox {
+                        Layout.fillWidth: true
+                        title: "高级扫描模式"
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 12
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: "日常扫描请直接在首页拖拽文件夹。此处提供全盘与盘符扫描入口，创建后自动跳转首页。"
+                                font.pixelSize: theme.fontSizeCaption
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                wrapMode: Text.WordWrap
+                            }
+
+                            // 全盘扫描
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label {
+                                    text: "全盘扫描"
+                                    Layout.fillWidth: true
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                }
+                                Button {
+                                    text: "创建全盘扫描任务"
+                                    enabled: !workspaceController.hasActiveScan
+                                    onClicked: {
+                                        workspaceController.addWorkspace("", "full", "", "[]", true)
+                                        settingsPage.scanCreated()
+                                    }
+                                }
+                            }
+
+                            // 盘符扫描
+                            Label {
+                                Layout.fillWidth: true
+                                text: "盘符扫描"
+                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                Repeater {
+                                    model: configController.drives
+                                    delegate: Button {
+                                        text: modelData
+                                        enabled: !workspaceController.hasActiveScan
+                                        onClicked: {
+                                            workspaceController.addWorkspace("", "drive", modelData, "[]", true)
+                                            settingsPage.scanCreated()
+                                        }
+                                    }
+                                }
+                                Label {
+                                    visible: configController.drives.length === 0
+                                    text: "未检测到可用盘符"
+                                    font.pixelSize: 12
+                                    color: theme.colorWarning
                                 }
                             }
                         }

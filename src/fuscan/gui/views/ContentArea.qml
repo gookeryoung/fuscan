@@ -23,12 +23,10 @@ Pane {
     // 符合 PySide SKILL 硬约束「复用控件（hide/show + 刷数据），禁止反复创建销毁」。
     readonly property var _pageIndex: ({
         "home": 0,
-        "addTask": 1,
-        "rules": 2,
-        "results": 3,
-        "stats": 4,
-        "settings": 5,
-        "about": 6
+        "results": 1,
+        "stats": 2,
+        "settings": 3,
+        "about": 4
     })
 
     StackLayout {
@@ -43,16 +41,6 @@ Pane {
             onTaskSettingsRequested: contentArea.sidebarRef.currentPage = "settings"
         }
 
-        AddTaskPage {
-            onCreated: contentArea.sidebarRef.currentPage = "home"
-            onCancelRequested: contentArea.sidebarRef.currentPage = "home"
-        }
-
-        RulesPage {
-            // 规则配置全局化——不再有工作区绑定，直接返回首页
-            onBackRequested: contentArea.sidebarRef.currentPage = "home"
-        }
-
         ResultsPage {
             onBackRequested: contentArea.sidebarRef.currentPage = "home"
         }
@@ -61,7 +49,10 @@ Pane {
             onBackRequested: contentArea.sidebarRef.currentPage = "home"
         }
 
-        SettingsPage {}
+        SettingsPage {
+            // 高级扫描创建后跳转首页
+            onScanCreated: contentArea.sidebarRef.currentPage = "home"
+        }
 
         AboutPage {}
     }

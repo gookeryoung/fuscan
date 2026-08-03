@@ -324,6 +324,39 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
         return ws_id
 
+    @Slot(str, result=str)  # pyrefly: ignore [not-callable]
+    def addWorkspaceFromPath(self, path_str: str) -> str:
+        """从文件夹路径创建工作区（拖拽入口）。
+
+        验证路径是文件夹后创建工作区，任务名默认取文件夹名。
+        非文件夹或空路径返回空串，不创建。
+
+        :param path_str: 文件夹路径（QML DropArea 已剥离 ``file:///`` 前缀）
+        :return: 新工作区 ID；非文件夹或空路径返回空串
+        """
+        if not path_str:
+            return ""
+        path = Path(path_str)
+        if not path.is_dir():
+            logger.warning("拖拽目标不是文件夹: %s", path_str)
+            return ""
+        # 任务名取文件夹名；根目录等无 name 时由 addWorkspace 内部回退为「任务 N」
+        name = path.name or ""
+        return self.addWorkspace(name, "folder", str(path), "[]", True)
+
+    @Slot("QVariantList", result=int)  # pyrefly: ignore [not-callable]
+    def addWorkspacesFromPaths(self, paths: list[object]) -> int:
+        """批量从文件夹路径创建工作区（拖拽多选）。
+
+        :param paths: 文件夹路径列表（QML 端已剥离 ``file:///`` 前缀）
+        :return: 成功创建的工作区数
+        """
+        count = 0
+        for path_str in paths:
+            if self.addWorkspaceFromPath(str(path_str)):
+                count += 1
+        return count
+
     def _create_workspace(
         self,
         ws_id: str,

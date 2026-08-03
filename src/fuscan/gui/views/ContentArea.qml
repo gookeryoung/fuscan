@@ -38,7 +38,6 @@ Pane {
         HomePage {
             onViewResultsRequested: contentArea.sidebarRef.currentPage = "results"
             onViewStatsRequested: contentArea.sidebarRef.currentPage = "stats"
-            onTaskSettingsRequested: contentArea.sidebarRef.currentPage = "settings"
         }
 
         ResultsPage {

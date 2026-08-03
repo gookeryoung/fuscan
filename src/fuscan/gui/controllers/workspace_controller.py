@@ -603,6 +603,16 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         return self._model.get_workspace(ws_id)
 
     @Slot(str, result=str)  # pyrefly: ignore [not-callable]
+    def workspaceName(self, ws_id: str) -> str:
+        """返回指定工作区的名称（供共享对话框标题显示）。
+
+        :param ws_id: 工作区 ID
+        :return: 工作区名称；不存在返回空串
+        """
+        item = self._model.get_workspace(ws_id)
+        return item.name if item is not None else ""
+
+    @Slot(str, result=str)  # pyrefly: ignore [not-callable]
     def taskOverridesJson(self, ws_id: str) -> str:
         """返回指定工作区的任务级配置覆盖 JSON 字符串。
 

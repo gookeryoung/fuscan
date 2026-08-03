@@ -2,12 +2,15 @@ import QtQuick 2.15
 import QtQuick.Dialogs 1.3
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtQuick.Dialogs 1.3 as Dialogs
 import QtGraphicalEffects 1.15
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
 import "../components"
 
-// 首页：工作区列表
+// 首页：工作区列表。
+// 对话框（切换目标/任务级设置/扫描历史）共享单例，由 WorkspaceCard 发信号触发，
+// 避免 N 个工作区各持一份对话框对象（复用控件约束）。
 Item {
     id: homePage
     property ThemeController theme: Theme
@@ -15,10 +18,13 @@ Item {
     property ConfigControllerType configController: ConfigController
     property RulesControllerType rulesController: RulesController
 
-    // 当前待导出的目标工作区
+    // 当前待操作的工作区 ID（共享对话框单次操作目标）
     property string _pendingExportWsId: ""
+    property string _pendingEditTargetWsId: ""
+    property string _pendingTaskSettingsWsId: ""
+    property string _pendingHistoryWsId: ""
 
-    // CSV 导出文件保存对话框（静态 nameFilters 避免 Windows 原生对话框过滤器乱码）
+    // ========== 导出文件保存对话框 ==========
     FileDialog {
         id: exportCsvDialog
         title: "导出扫描结果为 CSV"
@@ -30,8 +36,6 @@ Item {
             workspaceController.exportResults(homePage._pendingExportWsId, "csv", path)
         }
     }
-
-    // JSON 导出文件保存对话框
     FileDialog {
         id: exportJsonDialog
         title: "导出扫描结果为 JSON"
@@ -43,8 +47,6 @@ Item {
             workspaceController.exportResults(homePage._pendingExportWsId, "json", path)
         }
     }
-
-    // PDF 导出文件保存对话框
     FileDialog {
         id: exportPdfDialog
         title: "导出扫描结果为 PDF"
@@ -57,13 +59,12 @@ Item {
         }
     }
 
-    // 清空所有工作区确认对话框（自绘 Dialog，与应用本体风格一致）
+    // ========== 清空所有工作区确认对话框 ==========
     Dialog {
         id: clearConfirmDialog
         modal: true
         anchors.centerIn: parent
         width: 380
-        // 不用 standardButtons：自绘按钮以统一 theme 令牌配色
 
         contentItem: Rectangle {
             color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
@@ -161,7 +162,7 @@ Item {
         }
     }
 
-    // 清空结果提示对话框（扫描中拒绝清空时显示，自绘风格）
+    // 清空结果提示对话框（扫描中拒绝清空时显示）
     Dialog {
         id: clearResultDialog
         modal: true
@@ -233,6 +234,533 @@ Item {
                             radius: theme.radiusSm
                         }
                         onClicked: clearResultDialog.close()
+                    }
+                }
+            }
+        }
+    }
+
+    // ========== 切换扫描目标对话框（共享单例） ==========
+    Dialog {
+        id: editTargetDialog
+        title: "切换扫描目标"
+        modal: true
+        anchors.centerIn: parent
+        width: 420
+        standardButtons: Dialog.Cancel | Dialog.Ok
+
+        // 临时编辑状态（由 delegate 信号处理初始化）
+        property int editModeIndex: 2
+        property string editDrive: ""
+        property string editFolder: ""
+
+        contentItem: ColumnLayout {
+            spacing: 12
+
+            Label {
+                text: "扫描模式"
+                font.bold: true
+                font.pixelSize: theme.fontSizeBody
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+            }
+            TabBar {
+                id: editModeTabBar
+                Layout.fillWidth: true
+                currentIndex: editTargetDialog.editModeIndex
+                onCurrentIndexChanged: editTargetDialog.editModeIndex = currentIndex
+                TabButton {
+                    text: "全盘扫描"
+                    height: theme.btnHeightSecondary
+                }
+                TabButton {
+                    text: "盘符扫描"
+                    height: theme.btnHeightSecondary
+                }
+                TabButton {
+                    text: "文件夹扫描"
+                    height: theme.btnHeightSecondary
+                }
+            }
+
+            // 盘符选择（modeIndex === 1）
+            RowLayout {
+                Layout.fillWidth: true
+                visible: editTargetDialog.editModeIndex === 1
+                spacing: 6
+                Repeater {
+                    model: configController.drives
+                    delegate: Button {
+                        Layout.preferredWidth: 72
+                        Layout.preferredHeight: theme.btnHeightSecondary
+                        text: modelData
+                        checkable: true
+                        checked: editTargetDialog.editDrive === modelData
+                        onClicked: editTargetDialog.editDrive = modelData
+                        background: Rectangle {
+                            color: parent.checked
+                                  ? (parent.down ? theme.colorPrimaryDark : theme.colorPrimary)
+                                  : (parent.down
+                                      ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
+                                      : "transparent")
+                            border.color: parent.checked ? theme.colorPrimary
+                                : (theme.isDark ? theme.colorBorderDark : theme.colorBorder)
+                            border.width: 1
+                            radius: theme.btnRadiusSecondary
+                        }
+                        contentItem: Label {
+                            text: parent.text
+                            color: parent.checked ? theme.colorTextOnPrimary
+                                : (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
+                            font.pixelSize: 12
+                            font.bold: parent.checked
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                }
+                Label {
+                    visible: configController.drives.length === 0
+                    text: "未检测到可用盘符"
+                    font.pixelSize: 12
+                    color: theme.colorWarning
+                }
+            }
+
+            // 文件夹选择（modeIndex === 2）
+            RowLayout {
+                Layout.fillWidth: true
+                visible: editTargetDialog.editModeIndex === 2
+                spacing: 8
+                TextField {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: theme.btnHeightSecondary
+                    placeholderText: "选择或输入扫描目录"
+                    text: editTargetDialog.editFolder
+                    onTextChanged: editTargetDialog.editFolder = text
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    background: Rectangle {
+                        color: "transparent"
+                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                        border.width: 1
+                        radius: theme.btnRadiusSecondary
+                    }
+                }
+                IconButton {
+                    iconSource: "qrc:/icons/folder.svg"
+                    text: "选择"
+                    tooltip: "选择扫描目录"
+                    accent: "secondary"
+                    onClicked: folderDialogForEdit.open()
+                }
+            }
+        }
+
+        onAccepted: {
+            var modeStr = editTargetDialog.editModeIndex === 0 ? "full"
+                       : (editTargetDialog.editModeIndex === 1 ? "drive" : "folder")
+            var target = editTargetDialog.editModeIndex === 0 ? ""
+                       : (editTargetDialog.editModeIndex === 1 ? editTargetDialog.editDrive : editTargetDialog.editFolder)
+            workspaceController.updateWorkspaceTarget(homePage._pendingEditTargetWsId, modeStr, target)
+        }
+    }
+
+    // 切换目标对话框用的文件夹选择器
+    Dialogs.FileDialog {
+        id: folderDialogForEdit
+        title: "选择扫描目录"
+        selectFolder: true
+        selectExisting: true
+        folder: editTargetDialog.editFolder.length > 0
+            ? "file:///" + editTargetDialog.editFolder
+            : shortcuts.home
+        onAccepted: {
+            editTargetDialog.editFolder = folderDialogForEdit.fileUrl.toString().replace(/^file:\/\/\//, "")
+        }
+    }
+
+    // ========== 任务级设置对话框（共享单例） ==========
+    Dialog {
+        id: taskSettingsDialog
+        title: "任务级设置 — " + workspaceController.workspaceName(homePage._pendingTaskSettingsWsId)
+        modal: true
+        anchors.centerIn: parent
+        width: 460
+        standardButtons: Dialog.Cancel | Dialog.Ok
+
+        // 临时编辑状态（由 delegate 信号处理从 taskOverridesJson 读取初始化）
+        property bool editScanArchives: true
+        property int editMaxWorkers: 5
+        property int editMaxFileSizeMB: 50
+        property int editMaxDepth: 10
+        property string editIgnoreDirs: ""
+
+        contentItem: ColumnLayout {
+            spacing: 12
+
+            Label {
+                text: "仅对该任务生效，不影响全局设置。留空或默认值时使用全局配置。"
+                font.pixelSize: 11
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+
+            // 扫描压缩包
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: "扫描压缩包"
+                    Layout.fillWidth: true
+                    font.pixelSize: theme.fontSizeBody
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
+                Switch {
+                    checked: taskSettingsDialog.editScanArchives
+                    onCheckedChanged: taskSettingsDialog.editScanArchives = checked
+                }
+            }
+
+            // 最大工作线程
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: "最大工作线程"
+                    Layout.fillWidth: true
+                    font.pixelSize: theme.fontSizeBody
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
+                Label {
+                    text: "当前机器最大线程=" + configController.cpuCount
+                    font.pixelSize: theme.fontSizeCaption
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                }
+                SpinBox {
+                    id: taskMaxWorkersSpin
+                    from: 1
+                    to: Math.max(configController.cpuCount, 1)
+                    value: Math.min(taskSettingsDialog.editMaxWorkers, configController.cpuCount)
+                    editable: true
+                    // 用 onValueModified 替代 onValueChanged，避免 binding loop
+                    onValueModified: taskSettingsDialog.editMaxWorkers = value
+                }
+            }
+
+            // 最大文件大小（MB）
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: "最大文件大小（MB）"
+                    Layout.fillWidth: true
+                    font.pixelSize: theme.fontSizeBody
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
+                SpinBox {
+                    id: taskMaxFileSizeSpin
+                    from: 1
+                    to: 1024
+                    value: taskSettingsDialog.editMaxFileSizeMB
+                    editable: true
+                    stepSize: {
+                        var v = taskMaxFileSizeSpin.value
+                        if (v < 50) return 10
+                        if (v < 100) return 25
+                        return 100
+                    }
+                    onValueModified: taskSettingsDialog.editMaxFileSizeMB = value
+                }
+            }
+
+            // 最大递归深度
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    text: "最大递归深度"
+                    Layout.fillWidth: true
+                    font.pixelSize: theme.fontSizeBody
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
+                SpinBox {
+                    from: 1
+                    to: 64
+                    value: taskSettingsDialog.editMaxDepth
+                    editable: true
+                    onValueModified: taskSettingsDialog.editMaxDepth = value
+                }
+            }
+
+            // 忽略目录
+            Label {
+                text: "忽略目录（一行一个）"
+                font.pixelSize: theme.fontSizeBody
+                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+            }
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 100
+                clip: true
+                TextArea {
+                    text: taskSettingsDialog.editIgnoreDirs
+                    onTextChanged: taskSettingsDialog.editIgnoreDirs = text
+                    font.pixelSize: theme.fontSizeBody
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    background: Rectangle {
+                        color: "transparent"
+                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                        border.width: 1
+                        radius: theme.btnRadiusSecondary
+                    }
+                }
+            }
+        }
+
+        onAccepted: {
+            // 与全局值相同的字段清除覆盖，不同的字段才下发 setTaskOverride
+            var wsId = homePage._pendingTaskSettingsWsId
+            var keys = ["scan_archives", "max_workers", "max_file_size", "max_depth", "ignore_dirs"]
+            for (var i = 0; i < keys.length; i++) {
+                var key = keys[i]
+                var value
+                var globalValue
+                if (key === "scan_archives") {
+                    value = taskSettingsDialog.editScanArchives
+                    globalValue = configController.scanArchives
+                } else if (key === "max_workers") {
+                    value = taskSettingsDialog.editMaxWorkers
+                    globalValue = configController.maxWorkers
+                } else if (key === "max_file_size") {
+                    value = taskSettingsDialog.editMaxFileSizeMB * 1024 * 1024
+                    globalValue = configController.maxFileSizeMB * 1024 * 1024
+                } else if (key === "max_depth") {
+                    value = taskSettingsDialog.editMaxDepth
+                    globalValue = configController.maxDepth
+                } else if (key === "ignore_dirs") {
+                    var lines = taskSettingsDialog.editIgnoreDirs.split("\n")
+                    var cleaned = []
+                    for (var j = 0; j < lines.length; j++) {
+                        var line = lines[j].trim()
+                        if (line.length > 0) cleaned.push(line)
+                    }
+                    if (cleaned.length === 0) {
+                        workspaceController.clearTaskOverride(wsId, key)
+                    } else {
+                        workspaceController.setTaskOverride(wsId, key, JSON.stringify(cleaned))
+                    }
+                    continue
+                }
+                if (value === globalValue) {
+                    workspaceController.clearTaskOverride(wsId, key)
+                } else {
+                    workspaceController.setTaskOverride(wsId, key, JSON.stringify(value))
+                }
+            }
+        }
+    }
+
+    // ========== 扫描历史对话框（共享单例） ==========
+    Dialog {
+        id: historyDialog
+        title: "扫描历史 — " + workspaceController.workspaceName(homePage._pendingHistoryWsId)
+        modal: true
+        anchors.centerIn: parent
+        width: 640
+        height: 520
+        standardButtons: Dialog.Close
+
+        // 历史列表（按时间倒序）
+        property var historyList: []
+        // 对比结果对象（current/previous/summary/trend/...）
+        property var comparison: {}
+
+        contentItem: Rectangle {
+            color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+            border.width: 1
+            radius: theme.radiusMd
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 12
+
+                // ---------- 对比摘要区 ----------
+                Rectangle {
+                    Layout.fillWidth: true
+                    visible: !!(historyDialog.comparison && historyDialog.comparison.summary)
+                    color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                    border.width: 1
+                    radius: theme.radiusSm
+                    implicitHeight: cmpColumn.implicitHeight + 16
+
+                    ColumnLayout {
+                        id: cmpColumn
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 6
+
+                        Label {
+                            text: "对比摘要"
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: historyDialog.comparison ? (historyDialog.comparison.summary || "") : ""
+                            font.pixelSize: 11
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            wrapMode: Text.WordWrap
+                        }
+                        // 趋势标签
+                        Rectangle {
+                            visible: !!(historyDialog.comparison && historyDialog.comparison.trend)
+                            radius: 8
+                            height: 18
+                            width: trendLabel.width + 12
+                            color: {
+                                var t = historyDialog.comparison ? historyDialog.comparison.trend : ""
+                                if (t === "改善") return theme.colorSuccess
+                                if (t === "恶化") return theme.colorDanger
+                                if (t === "首次") return theme.colorPrimary
+                                return theme.colorTextSecondary
+                            }
+                            Label {
+                                id: trendLabel
+                                anchors.centerIn: parent
+                                text: historyDialog.comparison ? (historyDialog.comparison.trend || "") : ""
+                                font.pixelSize: 10
+                                font.bold: true
+                                color: theme.colorTextOnPrimary
+                            }
+                        }
+                    }
+                }
+
+                // ---------- 历史列表 ----------
+                Label {
+                    text: "历史记录"
+                    font.pixelSize: 12
+                    font.bold: true
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
+
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+
+                    ListView {
+                        id: historyListView
+                        model: historyDialog.historyList
+                        spacing: 6
+
+                        // 空态
+                        Label {
+                            anchors.centerIn: parent
+                            visible: historyListView.count === 0
+                            text: "暂无扫描历史"
+                            font.pixelSize: 12
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+
+                        delegate: Rectangle {
+                            width: historyListView.width
+                            height: histRow.implicitHeight + 16
+                            color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                            border.width: 1
+                            radius: theme.radiusSm
+
+                            RowLayout {
+                                id: histRow
+                                anchors.fill: parent
+                                anchors.margins: 10
+                                spacing: 10
+
+                                // 状态色条
+                                Rectangle {
+                                    width: 3
+                                    height: parent.height * 0.6
+                                    color: {
+                                        var s = modelData.status
+                                        if (s === "completed") return theme.colorSuccess
+                                        if (s === "cancelled") return theme.colorWarning
+                                        return theme.colorDanger
+                                    }
+                                    radius: 2
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+
+                                    // 第一行：完成时间 + 命中数
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: {
+                                            var ts = modelData.finished_at || ""
+                                            return ts.replace("T", " ").replace("Z", "") + " | 命中 " + modelData.matched_files
+                                        }
+                                        font.pixelSize: 12
+                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                        elide: Text.ElideRight
+                                    }
+                                    // 第二行：摘要
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: modelData.summary || ""
+                                        font.pixelSize: 10
+                                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                        elide: Text.ElideRight
+                                        visible: text.length > 0
+                                    }
+                                }
+
+                                // 状态徽标
+                                Rectangle {
+                                    radius: 8
+                                    height: 18
+                                    width: statusTag.width + 10
+                                    color: {
+                                        var s = modelData.status
+                                        if (s === "completed") return theme.colorSuccess
+                                        if (s === "cancelled") return theme.colorWarning
+                                        return theme.colorDanger
+                                    }
+                                    Label {
+                                        id: statusTag
+                                        anchors.centerIn: parent
+                                        text: {
+                                            var s = modelData.status
+                                            if (s === "completed") return "完成"
+                                            if (s === "cancelled") return "取消"
+                                            return "失败"
+                                        }
+                                        font.pixelSize: 10
+                                        color: theme.colorTextOnPrimary
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ---------- 清空历史按钮 ----------
+                RowLayout {
+                    Layout.fillWidth: true
+                    Item { Layout.fillWidth: true }
+                    Button {
+                        text: "清空历史"
+                        font.pixelSize: theme.fontSizeSmall
+                        flat: true
+                        implicitHeight: 32
+                        palette.buttonText: theme.colorDanger
+                        enabled: historyDialog.historyList.length > 0
+                        onClicked: {
+                            workspaceController.clearWorkspaceHistory(homePage._pendingHistoryWsId)
+                            historyDialog.historyList = []
+                            historyDialog.comparison = {}
+                        }
                     }
                 }
             }
@@ -375,9 +903,6 @@ Item {
             clip: true
             visible: workspaceController.hasActiveScan
 
-            // 用 anchors 而非 ColumnLayout：Rectangle 无 implicitWidth，
-            // Layout.fillWidth 在 ColumnLayout 内可能给 0 宽度；
-            // anchors.left/right 显式占满视口宽度，与工作区列表视觉宽度一致
             Item {
                 anchors.fill: parent
 
@@ -466,8 +991,44 @@ Item {
                         homePage._pendingExportWsId = wsId
                         exportPdfDialog.open()
                     }
+                    // 切换目标：初始化 editTargetDialog 并打开
+                    onEditTargetRequested: function(wsId) {
+                        homePage._pendingEditTargetWsId = wsId
+                        var modeStr = model.modeText === "全盘扫描" ? "full"
+                                   : (model.modeText === "盘符扫描" ? "drive" : "folder")
+                        editTargetDialog.editModeIndex = modeStr === "full" ? 0
+                            : (modeStr === "drive" ? 1 : 2)
+                        editTargetDialog.editDrive = modeStr === "drive" ? model.target : ""
+                        editTargetDialog.editFolder = modeStr === "folder" ? model.target : ""
+                        editTargetDialog.open()
+                    }
+                    // 任务级设置：从 taskOverridesJson 初始化并打开
                     onTaskSettingsRequested: function(wsId) {
-                        homePage.taskSettingsRequested(wsId)
+                        homePage._pendingTaskSettingsWsId = wsId
+                        var jsonStr = workspaceController.taskOverridesJson(wsId)
+                        var overrides = {}
+                        try { overrides = JSON.parse(jsonStr) } catch(e) { overrides = {} }
+                        taskSettingsDialog.editScanArchives = overrides.scan_archives !== undefined
+                            ? overrides.scan_archives : configController.scanArchives
+                        taskSettingsDialog.editMaxWorkers = overrides.max_workers !== undefined
+                            ? overrides.max_workers : configController.maxWorkers
+                        taskSettingsDialog.editMaxFileSizeMB = overrides.max_file_size !== undefined
+                            ? Math.floor(overrides.max_file_size / (1024 * 1024))
+                            : configController.maxFileSizeMB
+                        taskSettingsDialog.editMaxDepth = overrides.max_depth !== undefined
+                            ? overrides.max_depth : configController.maxDepth
+                        var dirs = overrides.ignore_dirs !== undefined ? overrides.ignore_dirs : []
+                        taskSettingsDialog.editIgnoreDirs = Array.isArray(dirs) ? dirs.join("\n") : ""
+                        taskSettingsDialog.open()
+                    }
+                    // 扫描历史：加载历史 JSON 与对比 JSON
+                    onViewHistoryRequested: function(wsId) {
+                        homePage._pendingHistoryWsId = wsId
+                        var histJson = workspaceController.workspaceHistoryJson(wsId)
+                        var cmpJson = workspaceController.compareWithPreviousScan(wsId)
+                        try { historyDialog.historyList = JSON.parse(histJson) } catch(e) { historyDialog.historyList = [] }
+                        try { historyDialog.comparison = JSON.parse(cmpJson) } catch(e) { historyDialog.comparison = {} }
+                        historyDialog.open()
                     }
                 }
             }
@@ -477,5 +1038,4 @@ Item {
     // 信号：通知 ContentArea 切换页面
     signal viewResultsRequested(string workspaceId)
     signal viewStatsRequested(string workspaceId)
-    signal taskSettingsRequested(string workspaceId)
 }

@@ -714,10 +714,17 @@ Item {
 
             // ===== Tab 3: 规则（含白名单误报抑制，二者均为匹配规则管理） =====
             // 白名单与规则都是匹配规则管理，合并为一个 Tab
-            ColumnLayout {
+            // 包裹 ScrollView：白名单表单 + 360px 列表 + RulesPanel 总高超过可视区时
+            // 允许滚动，避免 RulesPanel 被 Layout.fillHeight 挤到 0 高度导致
+            // 「加载到全局」按钮不可见（与 Tab 1/Tab 4 一致的滚动方案）
+            ScrollView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                spacing: 16
+                clip: true
+                contentWidth: availableWidth
+                ColumnLayout {
+                    width: settingsStack.width
+                    spacing: 16
 
                 // ---------- 白名单（误报抑制） ----------
                 Label {
@@ -980,12 +987,16 @@ Item {
 
                 // ---------- 规则配置 ----------
                 // 规则配置从首页移入设置页，首页聚焦工作区列表
+                // 不使用 Layout.fillHeight：在 ScrollView 内 fillHeight 会因内容高度
+                // 等于可视区高度而把 RulesPanel 挤到 0。改用 preferredHeight 给定
+                // 稳定显示高度，超出可视区时由外层 ScrollView 滚动兜底。
                 RulesPanel {
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    Layout.preferredHeight: 520
                     // 设置页内嵌不启用折叠，完整展示
                     collapsible: false
                     collapsed: false
+                }
                 }
             }
             // ===== Tab 4: 通用（字体设置） =====

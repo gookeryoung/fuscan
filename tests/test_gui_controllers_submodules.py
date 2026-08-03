@@ -138,60 +138,44 @@ def _make_result(
 class TestCanBuildRoots:
     """测试 can_build_roots 判断扫描根可构建性。"""
 
-    def test_full_mode_always_true(self) -> None:
-        """full 模式无条件返回 True。"""
-        assert can_build_roots(0, "", "") is True
-
     def test_drive_mode_with_selection(self) -> None:
         """drive 模式有选中盘符返回 True。"""
-        assert can_build_roots(1, "C:", "") is True
+        assert can_build_roots(0, "C:", "") is True
 
     def test_drive_mode_no_selection(self) -> None:
         """drive 模式无选中盘符返回 False。"""
-        assert can_build_roots(1, "", "") is False
+        assert can_build_roots(0, "", "") is False
 
     def test_folder_mode_with_root(self) -> None:
         """folder 模式有根路径返回 True。"""
-        assert can_build_roots(2, "", "/tmp") is True
+        assert can_build_roots(1, "", "/tmp") is True
 
     def test_folder_mode_no_root(self) -> None:
         """folder 模式无根路径返回 False。"""
-        assert can_build_roots(2, "", "") is False
+        assert can_build_roots(1, "", "") is False
 
 
 class TestBuildScanRoots:
     """测试 build_scan_roots 构建扫描根路径列表。"""
 
-    def test_full_mode_calls_list_drives(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """full 模式应调用 list_drives。"""
-        monkeypatch.setattr(
-            "fuscan.scanner.walker.list_drives",
-            lambda include_network=False: [Path("C:"), Path("D:")],
-        )
-        roots = build_scan_roots(0, "", "", _make_config())
-        assert roots == [Path("C:"), Path("D:")]
-
     def test_drive_mode_returns_selected(self) -> None:
         """drive 模式应返回选中盘符列表。"""
-        roots = build_scan_roots(1, "C:", "", _make_config())
+        roots = build_scan_roots(0, "C:", "", _make_config())
         assert roots == [Path("C:")]
 
     def test_drive_mode_no_selection_returns_empty(self) -> None:
         """drive 模式无选中盘符应返回空列表。"""
-        roots = build_scan_roots(1, "", "", _make_config())
+        roots = build_scan_roots(0, "", "", _make_config())
         assert roots == []
 
     def test_folder_mode_returns_root(self) -> None:
         """folder 模式应返回根路径列表。"""
-        roots = build_scan_roots(2, "", "/tmp/scan", _make_config())
+        roots = build_scan_roots(1, "", "/tmp/scan", _make_config())
         assert roots == [Path("/tmp/scan")]
 
     def test_folder_mode_empty_returns_empty(self) -> None:
         """folder 模式空路径应返回空列表。"""
-        roots = build_scan_roots(2, "", "", _make_config())
+        roots = build_scan_roots(1, "", "", _make_config())
         assert roots == []
 
 

@@ -250,7 +250,7 @@ Item {
         standardButtons: Dialog.Cancel | Dialog.Ok
 
         // 临时编辑状态（由 delegate 信号处理初始化）
-        property int editModeIndex: 2
+        property int editModeIndex: 1
         property string editDrive: ""
         property string editFolder: ""
 
@@ -269,10 +269,6 @@ Item {
                 currentIndex: editTargetDialog.editModeIndex
                 onCurrentIndexChanged: editTargetDialog.editModeIndex = currentIndex
                 TabButton {
-                    text: "全盘扫描"
-                    height: theme.btnHeightSecondary
-                }
-                TabButton {
                     text: "盘符扫描"
                     height: theme.btnHeightSecondary
                 }
@@ -282,10 +278,10 @@ Item {
                 }
             }
 
-            // 盘符选择（modeIndex === 1）
+            // 盘符选择（modeIndex === 0）
             RowLayout {
                 Layout.fillWidth: true
-                visible: editTargetDialog.editModeIndex === 1
+                visible: editTargetDialog.editModeIndex === 0
                 spacing: 6
                 Repeater {
                     model: configController.drives
@@ -326,10 +322,10 @@ Item {
                 }
             }
 
-            // 文件夹选择（modeIndex === 2）
+            // 文件夹选择（modeIndex === 1）
             RowLayout {
                 Layout.fillWidth: true
-                visible: editTargetDialog.editModeIndex === 2
+                visible: editTargetDialog.editModeIndex === 1
                 spacing: 8
                 TextField {
                     Layout.fillWidth: true
@@ -356,10 +352,10 @@ Item {
         }
 
         onAccepted: {
-            var modeStr = editTargetDialog.editModeIndex === 0 ? "full"
-                       : (editTargetDialog.editModeIndex === 1 ? "drive" : "folder")
-            var target = editTargetDialog.editModeIndex === 0 ? ""
-                       : (editTargetDialog.editModeIndex === 1 ? editTargetDialog.editDrive : editTargetDialog.editFolder)
+            var modeStr = editTargetDialog.editModeIndex === 0 ? "drive" : "folder"
+            var target = editTargetDialog.editModeIndex === 0
+                ? editTargetDialog.editDrive
+                : editTargetDialog.editFolder
             workspaceController.updateWorkspaceTarget(homePage._pendingEditTargetWsId, modeStr, target)
         }
     }
@@ -994,10 +990,8 @@ Item {
                     // 切换目标：初始化 editTargetDialog 并打开
                     onEditTargetRequested: function(wsId) {
                         homePage._pendingEditTargetWsId = wsId
-                        var modeStr = model.modeText === "全盘扫描" ? "full"
-                                   : (model.modeText === "盘符扫描" ? "drive" : "folder")
-                        editTargetDialog.editModeIndex = modeStr === "full" ? 0
-                            : (modeStr === "drive" ? 1 : 2)
+                        var modeStr = model.modeText === "盘符扫描" ? "drive" : "folder"
+                        editTargetDialog.editModeIndex = modeStr === "drive" ? 0 : 1
                         editTargetDialog.editDrive = modeStr === "drive" ? model.target : ""
                         editTargetDialog.editFolder = modeStr === "folder" ? model.target : ""
                         editTargetDialog.open()
@@ -1031,6 +1025,62 @@ Item {
                         historyDialog.open()
                     }
                 }
+            }
+        }
+
+        // ---------- 盘符扫描入口（工作区列表下方，补充拖拽创建任务） ----------
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 6
+            visible: !workspaceController.hasActiveScan
+
+            Label {
+                text: "盘符扫描"
+                font.pixelSize: theme.fontSizeCaption
+                font.bold: true
+                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                Repeater {
+                    model: configController.drives
+                    delegate: Button {
+                        text: modelData
+                        implicitHeight: theme.btnHeightSecondary
+                        font.pixelSize: theme.fontSizeBody
+                        enabled: !workspaceController.hasActiveScan
+                        onClicked: {
+                            workspaceController.addWorkspace("", "drive", modelData, "[]", true)
+                        }
+                        background: Rectangle {
+                            color: parent.down
+                                ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
+                                : (theme.isDark ? theme.colorBgCard : theme.colorBgCard)
+                            border.color: parent.enabled
+                                ? (theme.isDark ? theme.colorBorderDark : theme.colorBorder)
+                                : theme.colorBorder
+                            border.width: 1
+                            radius: theme.btnRadiusSecondary
+                        }
+                        contentItem: Label {
+                            text: parent.text
+                            color: parent.enabled
+                                ? (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
+                                : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
+                            font.pixelSize: parent.font.pixelSize
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                }
+                Label {
+                    visible: configController.drives.length === 0
+                    text: "未检测到可用盘符"
+                    font.pixelSize: 12
+                    color: theme.colorWarning
+                }
+                Item { Layout.fillWidth: true }
             }
         }
     }

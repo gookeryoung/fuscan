@@ -24,14 +24,12 @@ __all__ = ["build_scan_roots", "can_build_roots"]
 def can_build_roots(scan_mode_index: int, selected_drive: str, folder_root: str) -> bool:
     """判断当前是否可构建扫描根路径列表。
 
-    :param scan_mode_index: 扫描模式索引（0=full / 1=drive / 2=folder）
+    :param scan_mode_index: 扫描模式索引（0=drive / 1=folder）
     :param selected_drive: 选中的盘符（drive 模式用）
     :param folder_root: 文件夹根路径（folder 模式用）
     :return: 可构建返回 ``True``，否则 ``False``
     """
-    if scan_mode_index == 0:  # full
-        return True
-    if scan_mode_index == 1:  # drive
+    if scan_mode_index == 0:  # drive
         return bool(selected_drive)
     return bool(folder_root)  # folder
 
@@ -40,21 +38,17 @@ def build_scan_roots(
     scan_mode_index: int,
     selected_drive: str,
     folder_root: str,
-    config: Config,
+    config: Config,  # noqa: ARG001 保留签名兼容，当前无 full 模式不需要 config
 ) -> list[Path]:
     """构建扫描根路径列表。
 
-    :param scan_mode_index: 扫描模式索引（0=full / 1=drive / 2=folder）
+    :param scan_mode_index: 扫描模式索引（0=drive / 1=folder）
     :param selected_drive: 选中的盘符（drive 模式用）
     :param folder_root: 文件夹根路径（folder 模式用）
-    :param config: 全局配置（full 模式用 ``include_network_drives``）
+    :param config: 全局配置（保留参数以兼容既有调用签名）
     :return: 扫描根路径列表，空列表表示无有效根
     """
-    if scan_mode_index == 0:  # full
-        from fuscan.scanner.walker import list_drives
-
-        return list_drives(include_network=config.include_network_drives)
-    if scan_mode_index == 1:  # drive
+    if scan_mode_index == 0:  # drive
         return [Path(selected_drive)] if selected_drive else []
     # folder
     return [Path(folder_root)] if folder_root else []

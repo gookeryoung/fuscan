@@ -474,7 +474,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(int, notify=scanModeChanged)  # pyrefly: ignore [not-callable]
     def scanModeIndex(self) -> int:
-        """扫描模式索引（0=全盘 / 1=盘符 / 2=文件夹）。"""
+        """扫描模式索引（0=盘符 / 1=文件夹）。"""
         return self._scan_mode_index
 
     @Slot(int)  # pyrefly: ignore [not-callable]

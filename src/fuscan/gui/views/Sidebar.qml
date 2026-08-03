@@ -62,7 +62,7 @@ Pane {
         }
 
         // ---------- 顶部主导航 ----------
-        // 入口精简：日常扫描由首页拖拽文件夹完成，全盘/盘符扫描入口在设置页
+        // 入口精简：日常扫描由首页拖拽文件夹或盘符按钮完成
         NavItem {
             iconSource: "qrc:/icons/home.svg"; label: "首页"; pageId: "home"
             selected: sidebar.currentPage === "home"

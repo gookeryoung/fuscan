@@ -48,10 +48,7 @@ Pane {
             onBackRequested: contentArea.sidebarRef.currentPage = "home"
         }
 
-        SettingsPage {
-            // 高级扫描创建后跳转首页
-            onScanCreated: contentArea.sidebarRef.currentPage = "home"
-        }
+        SettingsPage {}
 
         AboutPage {}
     }

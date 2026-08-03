@@ -15,9 +15,6 @@ Item {
     property RulesControllerType rulesController: RulesController
     property WorkspaceControllerType workspaceController: WorkspaceController
 
-    // 高级扫描创建后通知 ContentArea 跳转首页
-    signal scanCreated()
-
     // 白名单导入/导出文件对话框
     Dialogs.FileDialog {
         id: whitelistImportDialog
@@ -454,70 +451,6 @@ Item {
                                             }
                                         }
                                     }
-                                }
-                            }
-                        }
-                    }
-
-                    // ===== 高级扫描模式（合并自原独立 Tab，日常扫描请用首页拖拽） =====
-                    GroupBox {
-                        Layout.fillWidth: true
-                        title: "高级扫描模式"
-                        ColumnLayout {
-                            anchors.fill: parent
-                            spacing: 12
-
-                            Label {
-                                Layout.fillWidth: true
-                                text: "日常扫描请直接在首页拖拽文件夹。此处提供全盘与盘符扫描入口，创建后自动跳转首页。"
-                                font.pixelSize: theme.fontSizeCaption
-                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                wrapMode: Text.WordWrap
-                            }
-
-                            // 全盘扫描
-                            RowLayout {
-                                Layout.fillWidth: true
-                                Label {
-                                    text: "全盘扫描"
-                                    Layout.fillWidth: true
-                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                }
-                                Button {
-                                    text: "创建全盘扫描任务"
-                                    enabled: !workspaceController.hasActiveScan
-                                    onClicked: {
-                                        workspaceController.addWorkspace("", "full", "", "[]", true)
-                                        settingsPage.scanCreated()
-                                    }
-                                }
-                            }
-
-                            // 盘符扫描
-                            Label {
-                                Layout.fillWidth: true
-                                text: "盘符扫描"
-                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                            }
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-                                Repeater {
-                                    model: configController.drives
-                                    delegate: Button {
-                                        text: modelData
-                                        enabled: !workspaceController.hasActiveScan
-                                        onClicked: {
-                                            workspaceController.addWorkspace("", "drive", modelData, "[]", true)
-                                            settingsPage.scanCreated()
-                                        }
-                                    }
-                                }
-                                Label {
-                                    visible: configController.drives.length === 0
-                                    text: "未检测到可用盘符"
-                                    font.pixelSize: 12
-                                    color: theme.colorWarning
                                 }
                             }
                         }

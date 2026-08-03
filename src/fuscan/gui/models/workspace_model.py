@@ -119,7 +119,7 @@ class WorkspaceItem:
 
     :param workspace_id: 唯一标识（``"ws-<8位hex>"`` 格式）
     :param name: 工作区名称（用户输入或自动生成）
-    :param mode_str: 扫描模式字符串（``"full"``/``"drive"``/``"folder"``）
+    :param mode_str: 扫描模式字符串（``"drive"``/``"folder"``）
     :param target: 扫描目标（盘符模式为盘符如 ``"C:\\"``，文件夹模式为路径）
     :param rules_paths: 规则文件路径列表（空列表表示仅用内置规则）
     :param use_builtin: 是否启用内置规则

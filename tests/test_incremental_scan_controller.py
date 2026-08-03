@@ -295,7 +295,7 @@ class TestStartIncrementalScanFallback:
     ) -> None:
         """无上次 ScanReport（_last_report=None）时应回退到 startScan。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)  # folder 模式
+        controller.setScanModeIndex(1)  # folder 模式
         controller.setFolderRoot(str(tmp_path))
         assert controller._last_report is None
 
@@ -315,7 +315,7 @@ class TestStartIncrementalScanFallback:
     ) -> None:
         """有 _last_report 但 manifest 文件不存在时应回退到 startScan。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller._last_report = _make_scan_report()
 
@@ -342,7 +342,7 @@ class TestStartIncrementalScanWithManifest:
     ) -> None:
         """有 _last_report 与 manifest 文件时应启用增量模式。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
 
         # 设置 _last_report（非 None）
@@ -382,7 +382,7 @@ class TestStartIncrementalScanWithManifest:
     ) -> None:
         """scanning 态重复调用应被忽略。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller._last_report = _make_scan_report()
         # 先创建 manifest 文件
@@ -406,7 +406,7 @@ class TestStartIncrementalScanWithManifest:
     ) -> None:
         """无规则集时应被忽略（已有 manifest 文件，但 ruleset=None）。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller._last_report = _make_scan_report()
         # iter-137：通过全局 RulesController 清空规则集
@@ -432,7 +432,7 @@ class TestStartIncrementalScanWithManifest:
     ) -> None:
         """无扫描目标时应被忽略。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot("")  # 空目标
         controller._last_report = _make_scan_report()
         from fuscan.gui.controllers import scan_controller as sc_module
@@ -552,7 +552,7 @@ class TestOnStatsFinishedReadsManifest:
     ) -> None:
         """stats 完成时 _pending_manifest 应被设置为 stats_worker.manifest。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -577,7 +577,7 @@ class TestOnScanFinishedSavesManifest:
     ) -> None:
         """_pending_manifest 非 None 且 _pending_ws_id 非空时应持久化到文件。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
 
         # 模拟 startIncrementalScan 设置的增量上下文
@@ -618,7 +618,7 @@ class TestOnScanFinishedSavesManifest:
     ) -> None:
         """_pending_ws_id 为空时（纯全量扫描）不应持久化 manifest。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
 
         # 模拟 stats worker 构建了 manifest，但 _pending_ws_id 为空
@@ -652,7 +652,7 @@ class TestOnScanFinishedSavesManifest:
     ) -> None:
         """_pending_manifest 为 None 时不应持久化（即使 _pending_ws_id 非空）。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
 
         controller._pending_ws_id = "ws-none-manifest"
@@ -686,7 +686,7 @@ class TestOnScanFinishedMergesOldHits:
     ) -> None:
         """增量回退全量后本次无命中时，应合并 _pending_prev_report 中的旧 hits。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
 
         # 设置 _last_report 有 hits，但不提供 manifest 文件 → startIncrementalScan 回退为全量
@@ -720,7 +720,7 @@ class TestOnScanFinishedMergesOldHits:
     ) -> None:
         """正常全量扫描（_pending_prev_report=None）无命中时不合并。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
 
         controller.startScan()
@@ -744,7 +744,7 @@ class TestOnScanFinishedMergesOldHits:
     ) -> None:
         """增量回退全量后本次有命中时，不合并旧 hits。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
 
         # 设置 _last_report 有 hits，manifest 不存在 → 回退为全量
@@ -928,7 +928,7 @@ class TestIncrementalContextAfterRestore:
     ) -> None:
         """restoreFromReport 设置 _last_report 后，startIncrementalScan 应使用增量。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
 
         # 先通过 restoreFromReport 设置 _last_report
@@ -969,7 +969,7 @@ class TestIncrementalScanPauseCancel:
     ) -> tuple[FakeStatsWorker, FakeScanWorker]:
         """辅助：启动增量扫描并推进到 scan 阶段（stats 完成 → scan worker 创建）。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller._last_report = _make_scan_report()
 
@@ -1099,7 +1099,7 @@ class TestScanControllerPropertiesCoverage:
         tmp_path: Path,
     ) -> None:
         """scanning 态 canStartScan 应为 False。"""
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
         assert controller.canStartScan is False
@@ -1299,7 +1299,7 @@ class TestInvalidateManifest:
     ) -> None:
         """规则变更后 invalidate_manifest 使增量扫描回退为全量扫描。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
 
         # 先保存 manifest 和 _last_report

@@ -134,11 +134,6 @@ class TestWorkspaceItem:
         assert item.status_text == "就绪"
         assert item.matched_count == 0
 
-    def test_mode_text_full(self) -> None:
-        """full 模式应显示「全盘扫描」。"""
-        item = WorkspaceItem(workspace_id="ws-1", name="t", mode_str="full")
-        assert item.mode_text == "全盘扫描"
-
     def test_mode_text_drive(self) -> None:
         item = WorkspaceItem(workspace_id="ws-1", name="t", mode_str="drive")
         assert item.mode_text == "盘符扫描"
@@ -322,7 +317,7 @@ class TestWorkspaceListModel:
         item = WorkspaceItem(
             workspace_id="ws-1",
             name="任务 1",
-            mode_str="full",
+            mode_str="drive",
             target="C:\\",
             rules_paths=("a.yaml",),
             use_builtin=True,
@@ -339,7 +334,7 @@ class TestWorkspaceListModel:
 
         assert model.data(idx, Qt.UserRole + 1) == "ws-1"
         assert model.data(idx, Qt.UserRole + 2) == "任务 1"
-        assert model.data(idx, Qt.UserRole + 3) == "全盘扫描"
+        assert model.data(idx, Qt.UserRole + 3) == "盘符扫描"
         assert model.data(idx, Qt.UserRole + 4) == "C:\\"
         assert model.data(idx, Qt.UserRole + 5) == "内置 + 1 文件"
         assert model.data(idx, Qt.UserRole + 6) == "扫描中"
@@ -796,22 +791,12 @@ class TestAddWorkspace:
         sc2 = controller.currentScanController
         assert sc1 is not sc2
 
-    def test_full_mode_initializes_scan_mode(
-        self,
-        controller: WorkspaceController,
-    ) -> None:
-        """full 模式应设置 ScanController.scanModeIndex=0。"""
-        ws_id = controller.addWorkspace("t", "full", "", "[]", True)
-        controller.setCurrentWorkspaceId(ws_id)
-        sc = controller.currentScanController
-        assert sc.scanModeIndex == 0
-
     def test_drive_mode_sets_selected_drive(self, controller: WorkspaceController) -> None:
         """drive 模式应同步设置 selectedDrive。"""
         ws_id = controller.addWorkspace("t", "drive", "C:\\", "[]", True)
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
-        assert sc.scanModeIndex == 1
+        assert sc.scanModeIndex == 0
         assert sc.selectedDrive == "C:\\"
 
     def test_folder_mode_sets_folder_root(self, controller: WorkspaceController) -> None:
@@ -819,18 +804,18 @@ class TestAddWorkspace:
         ws_id = controller.addWorkspace("t", "folder", "/custom/path", "[]", True)
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
-        assert sc.scanModeIndex == 2
+        assert sc.scanModeIndex == 1
         assert sc.folderRoot == "/custom/path"
 
     def test_unknown_mode_defaults_to_folder(
         self,
         controller: WorkspaceController,
     ) -> None:
-        """未知模式字符串应回退为 folder（索引 2）。"""
+        """未知模式字符串应回退为 folder（索引 1）。"""
         ws_id = controller.addWorkspace("t", "custom", "/x", "[]", True)
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
-        assert sc.scanModeIndex == 2
+        assert sc.scanModeIndex == 1
 
     def test_workspace_list_changed_emitted(
         self,
@@ -1291,7 +1276,7 @@ class TestActiveScan:
         controller: WorkspaceController,
     ) -> None:
         """activeScanWorkspaceName/ModeText/Target 应返回工作区元数据。"""
-        ws_id = controller.addWorkspace("我的任务", "full", "", "[]", True)
+        ws_id = controller.addWorkspace("我的任务", "drive", "C:\\", "[]", True)
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         sc._scan_state = "scanning"  # type: ignore[attr-defined]
@@ -1299,8 +1284,8 @@ class TestActiveScan:
         controller._sync_workspace_state(ws_id)
 
         assert controller.activeScanWorkspaceName == "我的任务"
-        assert controller.activeScanModeText == "全盘扫描"
-        assert controller.activeScanTarget == ""
+        assert controller.activeScanModeText == "盘符扫描"
+        assert controller.activeScanTarget == "C:\\"
 
     def test_active_scan_metadata_empty_when_no_active(
         self,
@@ -1431,16 +1416,6 @@ class TestUpdateWorkspaceTarget:
         assert item is not None
         assert item.mode_str == "drive"
         assert item.target == "C:\\"
-
-    def test_update_target_to_full_mode_ignores_target(self, controller: WorkspaceController) -> None:
-        """全盘模式应强制清空 target。"""
-        ws_id = controller.addWorkspace("t", "folder", "/old", "[]", True)
-        controller.updateWorkspaceTarget(ws_id, "full", "/should/be/ignored")
-
-        item = controller.workspaceModel.get_workspace(ws_id)
-        assert item is not None
-        assert item.mode_str == "full"
-        assert item.target == ""
 
     def test_update_target_rejected_when_scanning(
         self,

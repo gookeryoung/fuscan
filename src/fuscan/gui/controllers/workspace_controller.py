@@ -296,8 +296,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """新建工作区。
 
         :param name: 工作区名称（空串时自动生成）
-        :param mode_str: 扫描模式字符串（``"full"``/``"drive"``/``"folder"``）
-        :param target: 扫描目标（盘符或文件夹路径，全盘模式忽略）
+        :param mode_str: 扫描模式字符串（``"drive"``/``"folder"``）
+        :param target: 扫描目标（盘符或文件夹路径）
         :param rules_paths_json: 已废弃（规则全局化），保留向后兼容
         :param use_builtin: 已废弃（规则全局化），保留向后兼容
         :return: 新工作区 ID（``"ws-<8位hex>"`` 格式）
@@ -558,8 +558,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """更新工作区扫描目标（任务切换扫描目标）。
 
         :param ws_id: 工作区 ID
-        :param mode_str: 新的扫描模式（``"full"``/``"drive"``/``"folder"``）
-        :param target: 新的目标（盘符或文件夹路径，全盘模式忽略）
+        :param mode_str: 新的扫描模式（``"drive"``/``"folder"``）
+        :param target: 新的目标（盘符或文件夹路径）
 
         更新 :class:`WorkspaceItem` 的 mode_str/target 字段并同步到对应
         :class:`ScanController`；仅当工作区处于 ``就绪``/``已完成`` 状态时
@@ -577,9 +577,6 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if mode_str not in SCAN_MODE_STR_TO_INDEX:
             logger.warning("无效的扫描模式: %s", mode_str)
             return
-        # 全盘模式 target 强制为空
-        if mode_str == "full":
-            target = ""
         # 同步到 model
         self._model.update_workspace(ws_id, mode_str=mode_str, target=target)
         # 同步到 ScanController

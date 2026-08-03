@@ -243,8 +243,8 @@ class TestInitialState:
 
 class TestScanMode:
     def test_scan_mode_default_folder(self, controller: ScanController) -> None:
-        """默认扫描模式为 folder（索引 2）。"""
-        assert controller.scanModeIndex == 2
+        """默认扫描模式为 folder（索引 1）。"""
+        assert controller.scanModeIndex == 1
 
     def test_set_scan_mode_index_emits_signal(self, controller: ScanController) -> None:
         emitted: list[None] = []
@@ -305,7 +305,7 @@ class TestCanStartScan:
         """有规则集但无扫描目标时 canStartScan 为 False。"""
         controller = ScanController(config_controller, rules_controller)
         # folder 模式但 folder_root 为空
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot("")
         assert controller.canStartScan is False
 
@@ -317,7 +317,7 @@ class TestCanStartScan:
     ) -> None:
         """有规则集且有扫描目标时 canStartScan 为 True。"""
         controller = ScanController(config_controller, rules_controller)
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         assert controller.canStartScan is True
 
@@ -387,7 +387,7 @@ class TestRulesetChange:
         scan_root.mkdir()
 
         controller = ScanController(config_controller, rules_controller)
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(scan_root))
         # 默认启用内置规则，可启动
         assert controller.canStartScan is True
@@ -465,7 +465,7 @@ class TestStartScan:
     ) -> None:
         """startScan 应创建 stats worker 并切换到 scanning 状态。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)  # folder 模式
+        controller.setScanModeIndex(1)  # folder 模式
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -482,7 +482,7 @@ class TestStartScan:
     ) -> None:
         """scanning 态重复 startScan 应被忽略。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
         assert len(stats_instances) == 1
@@ -501,7 +501,7 @@ class TestStartScan:
         # iter-137：通过全局配置清空规则集（禁用内置 + 无规则文件）
         rules_controller.setUseBuiltin(False)
         assert rules_controller.ruleset is None
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
         assert len(stats_instances) == 0
@@ -514,7 +514,7 @@ class TestStartScan:
     ) -> None:
         """无扫描目标时 startScan 应被忽略。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot("")
         controller.startScan()
         assert len(stats_instances) == 0
@@ -531,7 +531,7 @@ class TestStatsWorkerCallbacks:
     ) -> None:
         """stats 完成 应创建 scan worker。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -550,7 +550,7 @@ class TestStatsWorkerCallbacks:
     ) -> None:
         """stats 失败应重置到 setup 状态。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -568,7 +568,7 @@ class TestStatsWorkerCallbacks:
     ) -> None:
         """stats 取消应重置到 setup 状态。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -590,7 +590,7 @@ class TestScanWorkerCallbacks:
     ) -> FakeScanWorker:
         """辅助：启动扫描并完成 stats 阶段，返回 scan worker。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
         stats_worker = stats_instances[0]
@@ -680,7 +680,7 @@ class TestProgressCallback:
     ) -> None:
         """进度回调应更新 controller 的进度属性。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -713,7 +713,7 @@ class TestProgressCallback:
     ) -> None:
         """超长文件路径应被截断显示。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -732,7 +732,7 @@ class TestProgressCallback:
     ) -> None:
         """取消中状态下进度回调应被忽略。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -765,7 +765,7 @@ class TestScanPhaseProgress:
         tmp_path: Path,
     ) -> None:
         """startScan 应将 scanPhase 切换为 walk，并标记 walk 阶段为 indeterminate。"""
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -782,7 +782,7 @@ class TestScanPhaseProgress:
     ) -> None:
         """walk 阶段进度回调应仅更新 walk_* 字段，scan 字段保持零。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -821,7 +821,7 @@ class TestScanPhaseProgress:
     ) -> None:
         """phase 从 walk 切换到 scan 时应标记 walk_done=True。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -862,7 +862,7 @@ class TestScanPhaseProgress:
     ) -> None:
         """walkDiscovered=0 时 walkProgress 应返回 0（避免除零）。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -880,7 +880,7 @@ class TestScanPhaseProgress:
     ) -> None:
         """stats 完成时应从 WalkResult 同步 walk 阶段最终统计。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -934,7 +934,7 @@ class TestScanPhaseProgress:
     ) -> None:
         """walk 进度回调后 walkClassified 应反映 (discovered - skipped - user_skipped)。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -962,7 +962,7 @@ class TestScanPhaseProgress:
     ) -> None:
         """scan 完成 应标记 scanDone=True 且 scanPhase=done。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
         stats_instances[0].emit_finished([_make_walk_result(tmp_path)])
@@ -982,7 +982,7 @@ class TestScanPhaseProgress:
     ) -> None:
         """scan 取消 也应标记 scanDone=True 避免进度条卡住。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
         stats_instances[0].emit_finished([_make_walk_result(tmp_path)])
@@ -1001,7 +1001,7 @@ class TestScanPhaseProgress:
     ) -> None:
         """iter-125：walkDone=True 时 walkProgress 固定返回 100，与进度条对应。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
         # 模拟 walk 阶段：发现 100，跳过 80（classified=20，占比 20%）
@@ -1023,7 +1023,7 @@ class TestScanPhaseProgress:
     ) -> None:
         """iter-125：scanDone=True 时 progress 固定返回 100，与进度条对应。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
         stats_instances[0].emit_finished([_make_walk_result(tmp_path)])
@@ -1051,7 +1051,7 @@ class TestTogglePause:
     ) -> None:
         """togglePause 应调用 stats worker.pause。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -1068,7 +1068,7 @@ class TestTogglePause:
     ) -> None:
         """二次 togglePause 应调用 stats worker.resume。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -1089,7 +1089,7 @@ class TestCancelScan:
     ) -> None:
         """cancelScan 应调用 stats worker.cancel。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
 
@@ -1792,45 +1792,31 @@ class TestBuildScanRoots:
         tmp_path: Path,
     ) -> None:
         """folder 模式应返回 folder_root 列表。"""
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         roots = controller._build_scan_roots()
         assert roots == [tmp_path]
 
     def test_build_roots_drive_mode(self, controller: ScanController) -> None:
         """drive 模式应返回选中盘符列表。"""
-        controller.setScanModeIndex(1)
+        controller.setScanModeIndex(0)
         controller.setSelectedDrive("C:")
         roots = controller._build_scan_roots()
         assert roots == [Path("C:")]
 
     def test_build_roots_drive_mode_no_selection(self, controller: ScanController) -> None:
         """drive 模式无选中盘符应返回空列表。"""
-        controller.setScanModeIndex(1)
+        controller.setScanModeIndex(0)
         controller.setSelectedDrive("")
         roots = controller._build_scan_roots()
         assert roots == []
 
     def test_build_roots_folder_mode_empty(self, controller: ScanController) -> None:
         """folder 模式空路径应返回空列表。"""
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot("")
         roots = controller._build_scan_roots()
         assert roots == []
-
-    def test_build_roots_full_mode(
-        self,
-        controller: ScanController,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """full 模式应调用 list_drives。"""
-        controller.setScanModeIndex(0)
-        monkeypatch.setattr(
-            "fuscan.scanner.walker.list_drives",
-            lambda include_network=False: [Path("C:"), Path("D:")],
-        )
-        roots = controller._build_scan_roots()
-        assert roots == [Path("C:"), Path("D:")]
 
 
 class TestBuildCacheContext:
@@ -1904,7 +1890,7 @@ class TestCleanupWithWorkers:
     ) -> None:
         """有 stats worker 时 cleanup 应取消并等待。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
         stats_worker = stats_instances[0]
@@ -1921,7 +1907,7 @@ class TestCleanupWithWorkers:
     ) -> None:
         """有 scan worker 时 cleanup 应取消并等待。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
         stats_instances[0].emit_finished([_make_walk_result(tmp_path)])
@@ -2297,7 +2283,7 @@ class TestIter143CoverageGaps:
     ) -> None:
         """_on_scan_finished 时 speed > 0 状态摘要应含速度（iter-143 覆盖 1364->1366）。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
         stats_instances[0].emit_finished([_make_walk_result(tmp_path)])
@@ -2351,7 +2337,7 @@ class TestIter143CoverageGaps:
     ) -> None:
         """quick_cancel 时 _worker.isRunning() True 应 cancel+wait（iter-143 覆盖 1614-1615）。"""
         stats_instances, scan_instances = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
         # 完成 stats 阶段以创建 scan worker
@@ -2370,7 +2356,7 @@ class TestIter143CoverageGaps:
     ) -> None:
         """quick_cancel 时 _stats_worker.isRunning() True 应 cancel+wait（iter-143 覆盖 1619-1621）。"""
         stats_instances, _ = fake_workers
-        controller.setScanModeIndex(2)
+        controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
         controller.startScan()
         stats_worker = stats_instances[0]

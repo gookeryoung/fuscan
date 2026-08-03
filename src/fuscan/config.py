@@ -217,7 +217,7 @@ def _default_disabled_extractors() -> list[str]:
 class Config:
     """应用配置。"""
 
-    # 扫描模式："full"（全盘）、"drive"（盘符）、"folder"（文件夹）
+    # 扫描模式："drive"（盘符）、"folder"（文件夹）
     scan_mode: str = "folder"
     # 历史扫描路径（最近优先）
     scan_paths: list[str] = field(default_factory=list)

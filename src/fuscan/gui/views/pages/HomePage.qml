@@ -1115,32 +1115,13 @@ Item {
                 spacing: 8
                 Repeater {
                     model: configController.drives
-                    delegate: Button {
+                    delegate: IconButton {
+                        iconSource: "qrc:/icons/disk.svg"
                         text: modelData
-                        implicitHeight: theme.btnHeightSecondary
-                        font.pixelSize: theme.fontSizeBody
+                        accent: "secondary"
                         enabled: !workspaceController.hasActiveScan
                         onClicked: {
                             workspaceController.addWorkspace("", "drive", modelData, "[]", true)
-                        }
-                        background: Rectangle {
-                            color: parent.down
-                                ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                                : (theme.isDark ? theme.colorBgCard : theme.colorBgCard)
-                            border.color: parent.enabled
-                                ? (theme.isDark ? theme.colorBorderDark : theme.colorBorder)
-                                : theme.colorBorder
-                            border.width: 1
-                            radius: theme.btnRadiusSecondary
-                        }
-                        contentItem: Label {
-                            text: parent.text
-                            color: parent.enabled
-                                ? (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
-                                : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
-                            font.pixelSize: parent.font.pixelSize
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
                         }
                     }
                 }

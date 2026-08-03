@@ -87,7 +87,7 @@ Item {
                 }
             }
             Repeater {
-                model: ["扫描", "通用", "规则"]
+                model: ["扫描", "忽略目录", "通用", "规则"]
                 TabButton {
                     id: tabBtn
                     text: modelData
@@ -125,7 +125,7 @@ Item {
             Layout.topMargin: 16
             currentIndex: settingsTabBar.currentIndex
 
-            // ===== Tab 1: 扫描（含忽略目录配置，忽略目录本质是扫描配置的一部分） =====
+            // ===== Tab 1: 扫描（扫描参数/缓存/性能/文件类型） =====
             ScrollView {
                 clip: true
                 contentWidth: availableWidth
@@ -456,7 +456,18 @@ Item {
                         }
                     }
 
-                    // ===== 忽略目录配置（合并自原独立 Tab，扫描时跳过匹配的目录名） =====
+                    Item { Layout.fillHeight: true }
+                }
+            }
+
+            // ===== Tab 2: 忽略目录（按目录名匹配，扫描时跳过） =====
+            ScrollView {
+                clip: true
+                contentWidth: availableWidth
+                ColumnLayout {
+                    width: settingsStack.width
+                    spacing: 16
+
                     Label {
                         text: "按目录名匹配（大小写不敏感，任意层级）。勾选表示扫描时跳过该目录。"
                         font.pixelSize: 11
@@ -687,7 +698,7 @@ Item {
                 }
             }
 
-            // ===== Tab 2: 通用（字体设置） =====
+            // ===== Tab 3: 通用（字体设置） =====
             ScrollView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -841,7 +852,7 @@ Item {
                 }
             }
 
-            // ===== Tab 3: 规则（含白名单误报抑制，二者均为匹配规则管理） =====
+            // ===== Tab 4: 规则（含白名单误报抑制，二者均为匹配规则管理） =====
             // 白名单与规则都是匹配规则管理，合并为一个 Tab
             ColumnLayout {
                 Layout.fillWidth: true

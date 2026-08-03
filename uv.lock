@@ -655,13 +655,10 @@ dependencies = [
     { name = "orjson" },
     { name = "pdf-oxide" },
     { name = "py7zr" },
-    { name = "pypdf" },
     { name = "pypdfium2" },
     { name = "pyside2", marker = "python_full_version < '3.11'" },
     { name = "pyside6", marker = "python_full_version >= '3.11'" },
     { name = "python-calamine" },
-    { name = "python-docx" },
-    { name = "python-pptx" },
     { name = "pyyaml" },
     { name = "rarfile" },
     { name = "reportlab" },
@@ -679,6 +676,8 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-html" },
     { name = "pytest-xdist" },
+    { name = "python-docx" },
+    { name = "python-pptx" },
     { name = "rich" },
     { name = "ruff" },
     { name = "tox" },
@@ -706,6 +705,8 @@ test = [
     { name = "pytest-cov" },
     { name = "pytest-html" },
     { name = "pytest-xdist" },
+    { name = "python-docx" },
+    { name = "python-pptx" },
     { name = "rich" },
 ]
 
@@ -728,7 +729,6 @@ requires-dist = [
     { name = "pdf-oxide", specifier = ">=0.3" },
     { name = "prek", marker = "extra == 'dev'", specifier = ">=0.4.5" },
     { name = "py7zr", specifier = ">=0.20.0,<1.0.0" },
-    { name = "pypdf", specifier = ">=4.0.0" },
     { name = "pypdfium2", specifier = ">=4.0" },
     { name = "pyrefly", marker = "extra == 'lint'", specifier = ">=1.1.1" },
     { name = "pyside2", marker = "python_full_version < '3.11'", specifier = ">=5.15.2.1" },
@@ -739,8 +739,8 @@ requires-dist = [
     { name = "pytest-html", marker = "extra == 'test'", specifier = ">=4.1.1" },
     { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3.6.1" },
     { name = "python-calamine", specifier = "==0.8.2" },
-    { name = "python-docx", specifier = ">=1.1.0" },
-    { name = "python-pptx", specifier = ">=0.6.23" },
+    { name = "python-docx", marker = "extra == 'test'", specifier = ">=1.1.0" },
+    { name = "python-pptx", marker = "extra == 'test'", specifier = ">=0.6.23" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rarfile", specifier = ">=4.1" },
     { name = "reportlab", specifier = ">=4.0.0" },
@@ -1682,18 +1682,6 @@ source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
 sdist = { url = "https://mirrors.aliyun.com/pypi/packages/f3/91/9c6ee907786a473bf81c5f53cf703ba0957b23ab84c264080fb5a450416f/pyparsing-3.3.2.tar.gz", hash = "sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc" }
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl", hash = "sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d" },
-]
-
-[[package]]
-name = "pypdf"
-version = "6.14.2"
-source = { registry = "https://mirrors.aliyun.com/pypi/simple/" }
-dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
-]
-sdist = { url = "https://mirrors.aliyun.com/pypi/packages/03/72/7dfd5ff1c9c37de97a731701f51af091325f123d9d4270361c9c69e4431f/pypdf-6.14.2.tar.gz", hash = "sha256:7873f502fe4385e79539b21d872392dc0c4e3714327c15881cbc7fbfd1f95b25" }
-wheels = [
-    { url = "https://mirrors.aliyun.com/pypi/packages/49/e6/136aa8993a2ae7214e0b0ef2edaa0d2e08d1d4e4982635b08a835ff31ec8/pypdf-6.14.2-py3-none-any.whl", hash = "sha256:3f07891af76dc002657e04993ab9b4de81de29f9013b9761d0b7968bff12e946" },
 ]
 
 [[package]]

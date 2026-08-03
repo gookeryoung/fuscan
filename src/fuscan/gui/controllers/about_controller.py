@@ -56,9 +56,8 @@ def _open_path_robustly(path: object) -> bool:
 _DEPENDENCIES: tuple[str, ...] = (
     "PySide2/PySide6 - Qt GUI 框架",
     "PyYAML - 配置与规则文件解析",
-    "python-docx - DOCX 文档提取",
-    "python-pptx - PPTX 演示提取",
-    "pypdf / pdf_oxide - PDF 文本提取",
+    "lxml - DOCX/PPTX/ODF 文档提取",
+    "pdf_oxide / pypdfium2 - PDF 文本提取",
     "python-calamine - XLSX/XLS 表格提取",
     "rarfile - RAR 压缩包读取",
     "py7zr - 7z 压缩包读取",

@@ -110,6 +110,9 @@ def _extract_docx_root_paragraphs(root: object) -> list[str]:
     :return: 段落文本列表（已去除空白段落）
     """
     paragraphs: list[str] = []
+    if root is None:
+        # recover 模式下严重损坏的 XML 可能解析为 None，视为无内容
+        return paragraphs
     for para in root.iter(_W_P):  # type: ignore[attr-defined]
         para_parts: list[str] = []
         for child in para.iter():  # type: ignore[attr-defined]
@@ -190,6 +193,9 @@ def _extract_pptx_root_texts(root: object) -> list[str]:
     :return: 非空文本列表
     """
     texts: list[str] = []
+    if root is None:
+        # recover 模式下严重损坏的 XML 可能解析为 None，视为无内容
+        return texts
     for t in root.iter(_A_T):  # type: ignore[attr-defined]
         if t.text and t.text.strip():
             texts.append(t.text)

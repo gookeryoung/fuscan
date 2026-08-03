@@ -195,7 +195,7 @@ class Extractor(ABC):
     def engine_info(self) -> str:
         """提取器使用的解析引擎名称（供 GUI tooltip 展示）。
 
-        如 ``"pypdf"`` / ``"python-docx"`` / ``"python-calamine"`` /
+        如 ``"pdf_oxide"`` / ``"lxml"`` / ``"python-calamine"`` /
         ``"olefile+ole"`` / ``"内置解码"`` 等。默认返回空字符串，子类应覆盖。
         用于 SettingsPage 解析速度 tooltip 中展示具体引擎，便于用户
         排查依赖缺失或性能问题。

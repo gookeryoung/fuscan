@@ -3,7 +3,7 @@
 WPS 文档格式（.wps/.et/.dps）有两种形态：
 
 1. **OOXML 兼容**：现代 WPS 默认保存格式，本质是 ZIP 打包的 XML，
-   可复用 python-docx/calamine(Rust)/python-pptx 提取。
+   复用 lxml（DOCX/PPTX）与 calamine(Rust)（XLSX）提取。
 2. **旧版二进制**：早期 WPS 私有格式，无法用 Office 库解析，
    记录告警并返回空字符串。
 
@@ -103,42 +103,14 @@ class WpsExtractor(Extractor):
     def _extract_as_docx(self, data: bytes) -> str:
         """以 DOCX 方式提取 WPS 文字文档。
 
-        优先使用 lxml 直接解析（与 :class:`DocxExtractor` 一致），
-        lxml 不可用时回退到 python-docx。
+        使用 lxml 直接解析（与 :class:`DocxExtractor` 一致）。
         """
-        from fuscan.extractors.office import _lxml_available
-
-        if _lxml_available():
-            from fuscan.extractors._ooxml_xml import extract_docx_text
-
-            try:
-                return extract_docx_text(data)
-            except Exception as exc:
-                if isinstance(exc, zipfile.BadZipFile):
-                    raise ExtractorError(f"WPS 文字文档解析失败: {exc}") from exc
-                logger.debug("lxml 解析 WPS 文字文档失败，回退 python-docx: %s", exc)
+        from fuscan.extractors._ooxml_xml import extract_docx_text
 
         try:
-            from docx import Document
-        except ImportError as exc:
-            raise ExtractorError("python-docx 未安装，无法提取 WPS 文字文档") from exc
-
-        try:
-            doc = Document(io.BytesIO(data))
-        except Exception as exc:
+            return extract_docx_text(data)
+        except zipfile.BadZipFile as exc:
             raise ExtractorError(f"WPS 文字文档解析失败: {exc}") from exc
-
-        parts = []
-        for para in doc.paragraphs:
-            text = para.text.strip()
-            if text:
-                parts.append(text)
-        for table in doc.tables:
-            for row in table.rows:
-                row_texts = [cell.text.strip() for cell in row.cells if cell.text.strip()]
-                if row_texts:
-                    parts.append("\t".join(row_texts))
-        return "\n".join(parts)
 
     def _extract_as_xlsx(self, data: bytes) -> str:
         """以 XLSX 方式提取 WPS 表格文档。
@@ -152,41 +124,11 @@ class WpsExtractor(Extractor):
     def _extract_as_pptx(self, data: bytes) -> str:
         """以 PPTX 方式提取 WPS 演示文档。
 
-        优先使用 lxml 直接解析（与 :class:`PptxExtractor` 一致），
-        lxml 不可用时回退到 python-pptx。
+        使用 lxml 直接解析（与 :class:`PptxExtractor` 一致）。
         """
-        from fuscan.extractors.office import _lxml_available
-
-        if _lxml_available():
-            from fuscan.extractors._ooxml_xml import extract_pptx_text
-
-            try:
-                return extract_pptx_text(data)
-            except Exception as exc:
-                if isinstance(exc, zipfile.BadZipFile):
-                    raise ExtractorError(f"WPS 演示解析失败: {exc}") from exc
-                logger.debug("lxml 解析 WPS 演示失败，回退 python-pptx: %s", exc)
+        from fuscan.extractors._ooxml_xml import extract_pptx_text
 
         try:
-            from pptx import Presentation
-        except ImportError as exc:
-            raise ExtractorError("python-pptx 未安装，无法提取 WPS 演示") from exc
-
-        try:
-            prs = Presentation(io.BytesIO(data))
-        except Exception as exc:
+            return extract_pptx_text(data)
+        except zipfile.BadZipFile as exc:
             raise ExtractorError(f"WPS 演示解析失败: {exc}") from exc
-
-        parts = []
-        for slide_index, slide in enumerate(prs.slides, 1):
-            slide_texts = []
-            for shape in slide.shapes:
-                if shape.has_text_frame:
-                    for para in shape.text_frame.paragraphs:  # pyrefly: ignore [missing-attribute]
-                        text = para.text.strip()
-                        if text:
-                            slide_texts.append(text)
-            if slide_texts:
-                parts.append(f"--- 幻灯片 {slide_index} ---")
-                parts.extend(slide_texts)
-        return "\n".join(parts)

@@ -14,9 +14,6 @@ class TestConfig:
     def test_default_config(self) -> None:
         """默认配置字段值。"""
         config = Config()
-        assert config.window_geometry == [300, 300, 720, 960]
-        assert config.window_state == "normal"
-        assert config.splitter_sizes == []
         assert config.scan_paths == []
         assert config.rules_paths == []
         assert config.use_builtin is True
@@ -87,7 +84,6 @@ class TestLoadConfig:
     def test_load_nonexistent_returns_default(self, tmp_path: Path) -> None:
         """文件不存在时返回默认配置。"""
         config = load_config(tmp_path / "missing.yaml")
-        assert config.window_geometry == [300, 300, 720, 960]
         assert config.scan_paths == []
         assert config.use_builtin is True
 
@@ -95,9 +91,7 @@ class TestLoadConfig:
         """加载合法 YAML 配置。"""
         config_file = tmp_path / "config.yaml"
         config_file.write_text(
-            "window_geometry: [100, 200, 800, 600]\n"
-            'window_state: "maximized"\n'
-            "splitter_sizes: [300, 700]\n"
+            "scan_mode: drive\n"
             "scan_paths:\n"
             "  - /path/a\n"
             "  - /path/b\n"
@@ -107,9 +101,7 @@ class TestLoadConfig:
             encoding="utf-8",
         )
         config = load_config(config_file)
-        assert config.window_geometry == [100, 200, 800, 600]
-        assert config.window_state == "maximized"
-        assert config.splitter_sizes == [300, 700]
+        assert config.scan_mode == "drive"
         assert config.scan_paths == ["/path/a", "/path/b"]
         assert config.rules_paths == ["/rules/r1.yaml"]
         assert config.use_builtin is False
@@ -143,12 +135,12 @@ class TestLoadConfig:
         """None 值字段使用默认值。"""
         config_file = tmp_path / "config.yaml"
         config_file.write_text(
-            "window_geometry: null\nuse_builtin: false\nscan_paths: null\n",
+            "scan_mode: null\nuse_builtin: false\nscan_paths: null\n",
             encoding="utf-8",
         )
         config = load_config(config_file)
         # None 值被过滤，使用默认值
-        assert config.window_geometry == [300, 300, 720, 960]
+        assert config.scan_mode == "folder"
         assert config.use_builtin is False
         assert config.scan_paths == []
 
@@ -178,9 +170,7 @@ class TestSaveConfig:
         """保存后重新加载应得到相同配置。"""
         config_file = tmp_path / "config.yaml"
         original = Config(
-            window_geometry=[10, 20, 300, 400],
-            window_state="normal",
-            splitter_sizes=[200, 800],
+            scan_mode="drive",
             scan_paths=["/a", "/b", "/c"],
             rules_paths=["/rules/r1.yaml", "/rules/r2.yaml"],
             use_builtin=False,
@@ -190,9 +180,7 @@ class TestSaveConfig:
         assert config_file.exists()
 
         loaded = load_config(config_file)
-        assert loaded.window_geometry == [10, 20, 300, 400]
-        assert loaded.window_state == "normal"
-        assert loaded.splitter_sizes == [200, 800]
+        assert loaded.scan_mode == "drive"
         assert loaded.scan_paths == ["/a", "/b", "/c"]
         assert loaded.rules_paths == ["/rules/r1.yaml", "/rules/r2.yaml"]
         assert loaded.use_builtin is False

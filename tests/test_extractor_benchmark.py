@@ -1,4 +1,4 @@
-"""提取器解析速度基准测试（iter-90）。
+"""提取器解析速度基准测试。
 
 为每类文件类型设计基准测试，验证 ``speed_tier`` 声明与实测性能一致。
 所有测试标记 ``@pytest.mark.slow``，CI 默认跳过（``-m "not slow"``）。
@@ -8,20 +8,19 @@
 - T1 极速（``VERY_FAST``）：< 10ms/MB，纯字节解码
   - 纯文本/源代码/配置文件/标记与数据/样式表 5 个子提取器
 - T2 快速（``FAST``）：10-50ms/MB，Rust 加速后端或 lxml C 扩展解析
-  - EML 邮件、PDF（pdf_oxide）、XLSX/XLS（calamine，iter-92）、
-    DOCX/PPTX/ODT/ODS（lxml 直接解析，iter-110）、
-    RTF/MSG/DOC/PPT（kreuzberg Rust 核心，iter-126）
+  - EML 邮件、PDF（pdf_oxide/pypdfium2）、XLSX/XLS（calamine）、
+    DOCX/PPTX/ODT/ODS（lxml 直接解析）、
+    RTF/MSG/DOC/PPT（kreuzberg Rust 核心）
 - T3 中速（``MEDIUM``）：50-200ms/MB，单次 XML 解析 + 树遍历或正则扫描
   - WPS（委托 DOCX/XLSX/PPTX，综合 T3）、
-    DOCX/ODT/ODS 的 ElementTree/python-docx 回退路径、
-    RTF/MSG/DOC/PPT 的纯 Python 回退路径（striprtf/extract-msg/olefile）
+    ODT/ODS 的 ElementTree 回退路径、
+    RTF/MSG/DOC/PPT 的纯 Python 回退路径（striprtf/extract-msg/olefile）、
+    PDF（pypdfium2）
 - T4 慢速（``SLOW``）：200-1000ms/MB，单元格遍历或字节级扫描
-  - PPTX 的 python-pptx 回退路径
-- T5 极慢（``VERY_SLOW``）：> 1000ms/MB，复杂页面布局分析
-  - PDF（pypdf 回退）
 
-注意：DOCX/PPTX/ODT/ODS/RTF/MSG/DOC/PPT 的 ``speed_tier`` 随 lxml/kreuzberg
-可用性动态变化，tier 声明测试用动态断言（根据依赖判断期望档位），非写死值。
+注意：ODT/ODS/RTF/MSG/DOC/PPT 的 ``speed_tier`` 随 lxml/kreuzberg
+可用性动态变化，tier 声明测试用动态断言（根据依赖判断期望档位）；
+DOCX/PPTX 固定走 lxml（T2），PDF 走 pdf_oxide（T2）/pypdfium2（T3）。
 
 基准测试设计原则：
 
@@ -307,20 +306,20 @@ class TestTier2Fast:
         assert "password" in content
 
     def test_pdf_extractor_tier_with_oxide(self) -> None:
-        """PdfExtractor 在 pdf_oxide 可用时声明为 T2 快速（iter-91）。"""
+        """PdfExtractor 在 pdf_oxide 可用时声明为 T2 快速。"""
         from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
 
         if not _PDF_OXIDE_AVAILABLE:
-            pytest.skip("pdf_oxide 未安装，PDF 走 pypdf 回退路径（T5）")
+            pytest.skip("pdf_oxide 未安装，PDF 走 pypdfium2 回退路径（T3）")
         extractor = PdfExtractor()
         _assert_tier(extractor, SpeedTier.FAST)
 
     def test_pdf_extraction_speed_with_oxide(self) -> None:
-        """pdf_oxide 后端的 PDF 提取应在 1s 内完成（T2 快速基准，iter-91）。"""
+        """pdf_oxide 后端的 PDF 提取应在 1s 内完成（T2 快速基准）。"""
         from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
 
         if not _PDF_OXIDE_AVAILABLE:
-            pytest.skip("pdf_oxide 未安装，PDF 走 pypdf 回退路径（T5）")
+            pytest.skip("pdf_oxide 未安装，PDF 走 pypdfium2 回退路径（T3）")
         extractor = PdfExtractor()
         data = _make_pdf_sample()
         elapsed = _measure(extractor.extract_from_bytes, data, iterations=1)
@@ -357,19 +356,16 @@ class TestTier3Medium:
     """T3 中速档次基准测试：单次 XML 解析 + 树遍历。"""
 
     def test_docx_extractor_tier(self) -> None:
-        """DocxExtractor 声明为 T2 快速（lxml）或 T3 中速（python-docx 回退）。"""
-        from fuscan.extractors.office import _lxml_available
-
-        expected = SpeedTier.FAST if _lxml_available() else SpeedTier.MEDIUM
+        """DocxExtractor 固定走 lxml，声明为 T2 快速。"""
         extractor = DocxExtractor()
-        _assert_tier(extractor, expected)
+        _assert_tier(extractor, SpeedTier.FAST)
 
     def test_docx_extraction_speed(self) -> None:
-        """典型 DOCX 文档提取应在 2s 内完成（T3 中速基准）。"""
+        """典型 DOCX 文档 lxml 提取应在 1s 内完成（T2 快速基准）。"""
         extractor = DocxExtractor()
         data = _make_docx_sample()
         elapsed = _measure(extractor.extract_from_bytes, data)
-        _assert_time_within_tier(elapsed, SpeedTier.MEDIUM, "DocxExtractor")
+        _assert_time_within_tier(elapsed, SpeedTier.FAST, "DocxExtractor")
         content = extractor.extract_from_bytes(data)
         assert "password" in content
 
@@ -456,19 +452,16 @@ class TestTier4Slow:
     """T4 慢速档次基准测试：单元格遍历或字节级扫描。"""
 
     def test_pptx_extractor_tier(self) -> None:
-        """PptxExtractor 声明为 T2 快速（lxml）或 T4 慢速（python-pptx 回退）。"""
-        from fuscan.extractors.office import _lxml_available
-
-        expected = SpeedTier.FAST if _lxml_available() else SpeedTier.SLOW
+        """PptxExtractor 固定走 lxml，声明为 T2 快速。"""
         extractor = PptxExtractor()
-        _assert_tier(extractor, expected)
+        _assert_tier(extractor, SpeedTier.FAST)
 
     def test_pptx_extraction_speed(self) -> None:
-        """典型 PPTX 演示文稿（5 张幻灯片）提取应在 5s 内完成（T4 慢速基准）。"""
+        """典型 PPTX 演示文稿（5 张幻灯片）lxml 提取应在 1s 内完成（T2 快速基准）。"""
         extractor = PptxExtractor()
         data = _make_pptx_sample()
         elapsed = _measure(extractor.extract_from_bytes, data)
-        _assert_time_within_tier(elapsed, SpeedTier.SLOW, "PptxExtractor")
+        _assert_time_within_tier(elapsed, SpeedTier.FAST, "PptxExtractor")
         content = extractor.extract_from_bytes(data)
         assert "password" in content
 
@@ -491,24 +484,24 @@ class TestTier4Slow:
         _assert_tier(extractor, expected)
 
 
-# ----------------------------- T5 极慢：复杂布局分析 -----------------------------
+# ----------------------------- PDF pypdfium2 回退路径 -----------------------------
 
 
 @pytest.mark.slow
-class TestTier5VerySlow:
-    """T5 极慢档次基准测试：复杂页面布局分析。"""
+class TestPdfPdfiumFallback:
+    """PDF pypdfium2 回退路径基准测试（pdf_oxide 不可用时）。"""
 
-    def test_pdf_extractor_tier_pypdf_fallback(self) -> None:
-        """PdfExtractor 在 pypdf 回退模式下声明为 T5 极慢（iter-91）。"""
+    def test_pdf_extractor_tier_pdfium_fallback(self) -> None:
+        """PdfExtractor 在 pypdfium2 回退模式下声明为 T3 中速。"""
         from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
 
         if _PDF_OXIDE_AVAILABLE:
             pytest.skip("pdf_oxide 已安装，PDF 走 T2 快速路径")
         extractor = PdfExtractor()
-        _assert_tier(extractor, SpeedTier.VERY_SLOW)
+        _assert_tier(extractor, SpeedTier.MEDIUM)
 
-    def test_pdf_extraction_speed_pypdf_fallback(self) -> None:
-        """pypdf 回退后端的 PDF 提取应在 10s 内完成（T5 极慢基准）。"""
+    def test_pdf_extraction_speed_pdfium_fallback(self) -> None:
+        """pypdfium2 回退后端的 PDF 提取应在 2s 内完成（T3 中速基准）。"""
         from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
 
         if _PDF_OXIDE_AVAILABLE:
@@ -516,7 +509,7 @@ class TestTier5VerySlow:
         extractor = PdfExtractor()
         data = _make_pdf_sample()
         elapsed = _measure(extractor.extract_from_bytes, data, iterations=1)
-        _assert_time_within_tier(elapsed, SpeedTier.VERY_SLOW, "PdfExtractor (pypdf)")
+        _assert_time_within_tier(elapsed, SpeedTier.MEDIUM, "PdfExtractor (pypdfium2)")
         content = extractor.extract_from_bytes(data)
         assert "password" in content
 

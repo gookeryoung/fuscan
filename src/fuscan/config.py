@@ -219,14 +219,6 @@ def _default_disabled_extractors() -> list[str]:
 class Config:
     """应用配置。"""
 
-    # 窗口几何：[x, y, width, height]
-    window_geometry: list[int] | None = field(default_factory=lambda: [300, 300, 720, 960])
-    # 窗口状态："maximized" 或 "normal"
-    window_state: str | None = field(default_factory=lambda: "normal")
-    # 盘符图标大小（像素）
-    drive_icon_size: int = 32
-    # 主分割器大小：[left_width, right_width]
-    splitter_sizes: list[int] | None = field(default_factory=list)
     # 扫描模式："full"（全盘）、"drive"（盘符）、"folder"（文件夹）
     scan_mode: str = "folder"
     # 历史扫描路径（最近优先）

@@ -374,6 +374,34 @@ Item {
         }
     }
 
+    // 首页「添加文件夹」按钮用的文件夹选择器（多选，创建多个任务）
+    Dialogs.FileDialog {
+        id: folderDialogForAdd
+        title: "选择要扫描的文件夹"
+        selectFolder: true
+        selectExisting: true
+        selectMultiple: true
+        folder: shortcuts.home
+        onAccepted: {
+            var paths = []
+            var urls = folderDialogForAdd.fileUrls
+            for (var i = 0; i < urls.length; i++) {
+                var url = urls[i].toString()
+                if (url.startsWith("file:///")) {
+                    paths.push(decodeURIComponent(url.substring(8)))
+                }
+            }
+            if (paths.length > 0) {
+                var count = workspaceController.addWorkspacesFromPaths(paths)
+                if (count === 0) {
+                    dropToast.show("选择的目标不是文件夹", false)
+                } else {
+                    dropToast.show("已添加 " + count + " 个扫描任务", true)
+                }
+            }
+        }
+    }
+
     // ========== 任务级设置对话框（共享单例） ==========
     Dialog {
         id: taskSettingsDialog
@@ -871,6 +899,16 @@ Item {
                 color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
             }
             Item { Layout.fillWidth: true }
+            // 添加文件夹按钮：扫描中隐藏；点击打开文件夹选择对话框（支持多选）
+            // 显眼入口，避免用户不知道可以拖拽文件夹添加任务
+            IconButton {
+                visible: !workspaceController.hasActiveScan
+                iconSource: "qrc:/icons/folder.svg"
+                text: "添加文件夹"
+                tooltip: "选择一个或多个文件夹创建扫描任务（也可直接拖拽到首页）"
+                accent: "secondary"
+                onClicked: folderDialogForAdd.open()
+            }
             // 清空按钮：仅在有任务且无扫描进行时显示，避免误清空运行中任务
             Button {
                 visible: !workspaceController.hasActiveScan && workspaceController.workspaceCount > 0
@@ -941,6 +979,38 @@ Item {
                 // 预渲染屏幕外 delegate，避免滚动时 WorkspaceCard 重建
                 cacheBuffer: 500
                 implicitHeight: contentHeight
+
+                // 已有任务时常驻顶部拖拽提示条（点击打开文件夹选择对话框）
+                header: Rectangle {
+                    width: workspaceList.width
+                    height: 36
+                    visible: workspaceList.count > 0
+                    color: dropArea.containsDrag
+                        ? Qt.rgba(theme.colorPrimary.r, theme.colorPrimary.g, theme.colorPrimary.b, 0.08)
+                        : (theme.isDark ? theme.colorBgApp : theme.colorBgApp)
+                    border.color: dropArea.containsDrag
+                        ? theme.colorPrimary
+                        : (theme.isDark ? theme.colorBorderDark : theme.colorBorder)
+                    border.width: 1
+                    radius: theme.radiusSm
+
+                    Label {
+                        anchors.centerIn: parent
+                        text: dropArea.containsDrag
+                            ? "松开以添加扫描任务"
+                            : "拖拽文件夹到此处添加任务，或点击右上角「添加文件夹」"
+                        font.pixelSize: 12
+                        color: dropArea.containsDrag
+                            ? theme.colorPrimary
+                            : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: folderDialogForAdd.open()
+                    }
+                }
 
                 // 空态引导
                 Label {

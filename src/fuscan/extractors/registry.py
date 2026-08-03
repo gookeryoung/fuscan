@@ -11,12 +11,11 @@
 from __future__ import annotations
 
 from fuscan.extractors.base import default_registry
-from fuscan.extractors.email import EmlExtractor, MsgExtractor
+from fuscan.extractors.email import EmlExtractor
 from fuscan.extractors.legacy_office import DocExtractor, PptExtractor, XlsExtractor
 from fuscan.extractors.odf import OdtExtractor
 from fuscan.extractors.office import DocxExtractor, PptxExtractor
 from fuscan.extractors.pdf import PdfExtractor
-from fuscan.extractors.rtf import RtfExtractor
 from fuscan.extractors.spreadsheet import OdsExtractor, XlsxExtractor
 from fuscan.extractors.text import PlainTextExtractor, SourceCodeExtractor
 from fuscan.extractors.wps import WpsExtractor
@@ -43,9 +42,7 @@ def register_all() -> None:
     default_registry.register(OdsExtractor())
     default_registry.register(OdtExtractor())
     default_registry.register(WpsExtractor())
-    default_registry.register(RtfExtractor())
     default_registry.register(EmlExtractor())
-    default_registry.register(MsgExtractor())
     default_registry.register(XlsExtractor())
     default_registry.register(DocExtractor())
     default_registry.register(PptExtractor())

@@ -62,9 +62,7 @@ _DEPENDENCIES: tuple[str, ...] = (
     "rarfile - RAR 压缩包读取",
     "py7zr - 7z 压缩包读取",
     "charset-normalizer - 编码检测",
-    "striprtf - RTF 文档提取",
     "olefile - OLE 复合文档",
-    "extract-msg - MSG 邮件解析",
     "reportlab - 用户手册 PDF 生成",
 )
 

@@ -9,18 +9,17 @@
   - 纯文本/源代码/配置文件/标记与数据/样式表 5 个子提取器
 - T2 快速（``FAST``）：10-50ms/MB，Rust 加速后端或 lxml C 扩展解析
   - EML 邮件、PDF（pdf_oxide/pypdfium2）、XLSX/XLS（calamine）、
-    DOCX/PPTX/ODT/ODS（lxml 直接解析）、
-    RTF/MSG/DOC/PPT（kreuzberg Rust 核心）
+    DOCX/PPTX/ODT/ODS（lxml 直接解析）
 - T3 中速（``MEDIUM``）：50-200ms/MB，单次 XML 解析 + 树遍历或正则扫描
   - WPS（委托 DOCX/XLSX/PPTX，综合 T3）、
     ODT/ODS 的 ElementTree 回退路径、
-    RTF/MSG/DOC/PPT 的纯 Python 回退路径（striprtf/extract-msg/olefile）、
+    DOC/PPT 的 olefile + UTF-16LE 正则扫描、
     PDF（pypdfium2）
 - T4 慢速（``SLOW``）：200-1000ms/MB，单元格遍历或字节级扫描
 
-注意：ODT/ODS/RTF/MSG/DOC/PPT 的 ``speed_tier`` 随 lxml/kreuzberg
-可用性动态变化，tier 声明测试用动态断言（根据依赖判断期望档位）；
-DOCX/PPTX 固定走 lxml（T2），PDF 走 pdf_oxide（T2）/pypdfium2（T3）。
+注意：ODT/ODS 的 ``speed_tier`` 随 lxml 可用性动态变化，tier 声明测试用
+动态断言（根据依赖判断期望档位）；DOCX/PPTX 固定走 lxml（T2），
+DOC/PPT 固定走 olefile（T3），PDF 走 pdf_oxide（T2）/pypdfium2（T3）。
 
 基准测试设计原则：
 
@@ -44,13 +43,11 @@ import pytest
 from fuscan.extractors import (
     DocxExtractor,
     EmlExtractor,
-    MsgExtractor,
     OdsExtractor,
     OdtExtractor,
     PdfExtractor,
     PlainTextExtractor,
     PptxExtractor,
-    RtfExtractor,
     SourceCodeExtractor,
     WpsExtractor,
     XlsExtractor,
@@ -177,14 +174,6 @@ def _make_pptx_sample() -> bytes:
     return buf.getvalue()
 
 
-def _make_rtf_sample() -> bytes:
-    """生成典型 RTF 富文本样本。"""
-    # 简单 RTF 格式：含多段落文本
-    text = "password secret 内容" * 50
-    rtf = r"{\rtf1\ansi\deff0 {\fonttbl {\f0 SimSun;}} \f0\fs24 " + text + r"}"
-    return rtf.encode("utf-8")
-
-
 def _make_pdf_sample() -> bytes:
     """生成最小 PDF 样本（单页文本）。
 
@@ -245,14 +234,6 @@ def _make_ppt_sample() -> bytes:
     PPT 为二进制 OLE 格式，难以程序化生成；用 mock 跳过。
     """
     pytest.skip("PPT 为二进制 OLE 格式，难以程序化生成，跳过 PPT 基准测试")
-
-
-def _make_msg_sample() -> bytes:
-    """生成典型 MSG 邮件样本。
-
-    MSG 为 Outlook 私有格式，难以程序化生成；用 mock 跳过。
-    """
-    pytest.skip("MSG 为 Outlook 私有格式，难以程序化生成，跳过 MSG 基准测试")
 
 
 # ----------------------------- T1 极速：纯文本解码 -----------------------------
@@ -403,23 +384,6 @@ class TestTier3Medium:
         content = extractor.extract_from_bytes(data)
         assert "password" in content
 
-    def test_rtf_extractor_tier(self) -> None:
-        """RtfExtractor 声明为 T2 快速（kreuzberg）或 T3 中速（striprtf 回退）。"""
-        from fuscan.extractors._kreuzberg import is_available as kreuzberg_available
-
-        expected = SpeedTier.FAST if kreuzberg_available() else SpeedTier.MEDIUM
-        extractor = RtfExtractor()
-        _assert_tier(extractor, expected)
-
-    def test_rtf_extraction_speed(self) -> None:
-        """典型 RTF 文档提取应在 2s 内完成（T3 中速基准）。"""
-        extractor = RtfExtractor()
-        data = _make_rtf_sample()
-        elapsed = _measure(extractor.extract_from_bytes, data)
-        _assert_time_within_tier(elapsed, SpeedTier.MEDIUM, "RtfExtractor")
-        content = extractor.extract_from_bytes(data)
-        assert "password" in content
-
     def test_wps_extractor_tier(self) -> None:
         """WpsExtractor 声明为 T3 中速。"""
         extractor = WpsExtractor()
@@ -433,15 +397,6 @@ class TestTier3Medium:
         _assert_time_within_tier(elapsed, SpeedTier.MEDIUM, "WpsExtractor")
         content = extractor.extract_from_bytes(data)
         assert "password" in content
-
-    def test_msg_extractor_tier(self) -> None:
-        """MsgExtractor 声明为 T2 快速（kreuzberg）或 T3 中速（extract-msg 回退）。"""
-        from fuscan.extractors._kreuzberg import is_available as kreuzberg_available
-
-        expected = SpeedTier.FAST if kreuzberg_available() else SpeedTier.MEDIUM
-        extractor = MsgExtractor()
-        _assert_tier(extractor, expected)
-        # MSG 样本难以程序化生成，仅验证档次声明
 
 
 # ----------------------------- T4 慢速：单元格遍历/字节扫描 -----------------------------
@@ -466,22 +421,18 @@ class TestTier4Slow:
         assert "password" in content
 
     def test_doc_extractor_tier(self) -> None:
-        """DocExtractor 声明为 T2 快速（kreuzberg）或 T3 中速（olefile 回退，样本无法程序化生成）。"""
-        from fuscan.extractors._kreuzberg import is_available as kreuzberg_available
+        """DocExtractor 固定走 olefile，声明为 T3 中速（样本无法程序化生成）。"""
         from fuscan.extractors.legacy_office import DocExtractor
 
-        expected = SpeedTier.FAST if kreuzberg_available() else SpeedTier.MEDIUM
         extractor = DocExtractor()
-        _assert_tier(extractor, expected)
+        _assert_tier(extractor, SpeedTier.MEDIUM)
 
     def test_ppt_extractor_tier(self) -> None:
-        """PptExtractor 声明为 T2 快速（kreuzberg）或 T3 中速（olefile 回退，样本无法程序化生成）。"""
-        from fuscan.extractors._kreuzberg import is_available as kreuzberg_available
+        """PptExtractor 固定走 olefile，声明为 T3 中速（样本无法程序化生成）。"""
         from fuscan.extractors.legacy_office import PptExtractor
 
-        expected = SpeedTier.FAST if kreuzberg_available() else SpeedTier.MEDIUM
         extractor = PptExtractor()
-        _assert_tier(extractor, expected)
+        _assert_tier(extractor, SpeedTier.MEDIUM)
 
 
 # ----------------------------- PDF pypdfium2 回退路径 -----------------------------

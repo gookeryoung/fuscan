@@ -7,8 +7,6 @@ PDF/ODT/ODS 等较难动态生成的格式，使用 mock 或跳过。
 from __future__ import annotations
 
 import io
-import sys
-import types
 import zipfile
 from pathlib import Path
 
@@ -23,12 +21,10 @@ from fuscan.extractors import (
     ExtractorError,
     ExtractorFailure,
     ExtractorRegistry,
-    MsgExtractor,
     OdtExtractor,
     PdfExtractor,
     PptExtractor,
     PptxExtractor,
-    RtfExtractor,
     TextExtractor,
     WpsExtractor,
     XlsExtractor,
@@ -1109,9 +1105,7 @@ class TestExtractorRegistry:
             OdsExtractor: "ODS 表格",
             OdtExtractor: "ODT 文档",
             WpsExtractor: "WPS 文档（WPS）",
-            RtfExtractor: "RTF",
             EmlExtractor: "邮件（EML）",
-            MsgExtractor: "Outlook 邮件（MSG）",
             XlsExtractor: "Excel（XLS）",
             DocExtractor: "Word（DOC）",
             PptExtractor: "PowerPoint（PPT）",
@@ -1120,7 +1114,7 @@ class TestExtractorRegistry:
             assert cls().display_name == expected, f"{cls.__name__}.display_name 应为 {expected}"
 
     def test_engine_info_returns_non_empty_str(self) -> None:
-        """iter-139：各提取器 engine_info 应返回非空字符串。"""
+        """各提取器 engine_info 应返回非空字符串。"""
         classes = [
             TextExtractor,
             PdfExtractor,
@@ -1130,9 +1124,7 @@ class TestExtractorRegistry:
             OdsExtractor,
             OdtExtractor,
             WpsExtractor,
-            RtfExtractor,
             EmlExtractor,
-            MsgExtractor,
             XlsExtractor,
             DocExtractor,
             PptExtractor,
@@ -1148,9 +1140,9 @@ class TestExtractorRegistry:
         assert XlsExtractor().engine_info == "python-calamine"
         # PDF 在 pdf_oxide 与 pypdfium2 之间切换
         assert PdfExtractor().engine_info in {"pdf_oxide", "pypdfium2"}
-        # DOC/PPT 在 kreuzberg 与 olefile 之间切换
-        assert DocExtractor().engine_info in {"kreuzberg", "olefile"}
-        assert PptExtractor().engine_info in {"kreuzberg", "olefile"}
+        # DOC/PPT 固定使用 olefile
+        assert DocExtractor().engine_info == "olefile"
+        assert PptExtractor().engine_info == "olefile"
         # DOCX/PPTX 固定使用 lxml
         assert DocxExtractor().engine_info == "lxml"
         assert PptxExtractor().engine_info == "lxml"
@@ -1571,75 +1563,6 @@ class TestLargeFileStreaming:
 
 
 # ---------------------------------------------------------------------------
-# RTF 提取器
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture()
-def rtf_file(tmp_path: Path) -> Path:
-    """生成包含 password 关键词的 RTF 测试文件。"""
-    rtf_content = (
-        r"{\rtf1\ansi\deff0 {\fonttbl {\f0 Times New Roman;}}"
-        r"\f0\fs24 Hello password world\par This is a test.}"
-    )
-    path = tmp_path / "test.rtf"
-    path.write_text(rtf_content, encoding="utf-8")
-    return path
-
-
-class TestRtfExtractor:
-    def test_supported_extensions(self) -> None:
-        assert RtfExtractor().supported_extensions == ("rtf",)
-
-    def test_extract_rtf_text(self, rtf_file: Path) -> None:
-        content = RtfExtractor().extract(rtf_file)
-        assert "Hello password world" in content
-        assert "This is a test" in content
-
-    def test_extract_from_bytes(self) -> None:
-        rtf = r"{\rtf1\ansi Hello password}"
-        content = RtfExtractor().extract_from_bytes(rtf.encode("utf-8"))
-        assert "Hello password" in content
-
-    def test_extract_nonexistent_raises_error(self, tmp_path: Path) -> None:
-        with pytest.raises(ExtractorError, match="文件读取失败"):
-            RtfExtractor().extract(tmp_path / "nonexistent.rtf")
-
-    def test_registry_has_rtf_extractor(self) -> None:
-        assert isinstance(get_extractor("rtf"), RtfExtractor)
-
-    def test_rtf_import_error_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """striprtf 未安装且 kreuzberg 不可用时应抛出 ExtractorError。"""
-        import builtins
-
-        # kreuzberg 可用时会走 Rust 核心路径，不走 striprtf 导入
-        monkeypatch.setattr("fuscan.extractors.rtf.kreuzberg_available", lambda: False)
-
-        original_import = builtins.__import__
-
-        def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
-            if name == "striprtf.striprtf":
-                raise ImportError("No module named 'striprtf'")
-            return original_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", fake_import)
-        with pytest.raises(ExtractorError, match="striprtf 未安装"):
-            RtfExtractor().extract_from_bytes(b"{\\rtf1 fake}")
-
-    def test_rtf_parse_error_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """rtf_to_text 抛异常且 kreuzberg 不可用时应包装为 ExtractorError。"""
-        # kreuzberg 可用时会走 Rust 核心路径，不走 striprtf
-        monkeypatch.setattr("fuscan.extractors.rtf.kreuzberg_available", lambda: False)
-
-        def raise_parse(text: str) -> None:
-            raise RuntimeError("解析失败")
-
-        monkeypatch.setattr("striprtf.striprtf.rtf_to_text", raise_parse)
-        with pytest.raises(ExtractorError, match="RTF 解析失败"):
-            RtfExtractor().extract_from_bytes(b"{\\rtf1 fake}")
-
-
-# ---------------------------------------------------------------------------
 # EML 提取器
 # ---------------------------------------------------------------------------
 
@@ -1765,140 +1688,6 @@ class TestEmlExtractor:
         path.write_bytes(raw)
         content = EmlExtractor().extract(path)
         assert "body password text" in content
-        assert "主题" not in content
-        assert "发件人" not in content
-
-
-# ---------------------------------------------------------------------------
-# MSG 提取器
-# ---------------------------------------------------------------------------
-
-
-class TestMsgExtractor:
-    def test_supported_extensions(self) -> None:
-        assert MsgExtractor().supported_extensions == ("msg",)
-
-    def test_extract_from_bytes_with_mock(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """mock extract_msg.Message 验证文本提取逻辑。"""
-        import extract_msg
-
-        class FakeMessage:
-            subject = "Test Subject"
-            sender = "sender@example.com"
-            body = "Hello password world"
-
-        monkeypatch.setattr(extract_msg, "Message", lambda data: FakeMessage())
-        content = MsgExtractor().extract_from_bytes(b"fake msg data")
-        assert "Test Subject" in content
-        assert "sender@example.com" in content
-        assert "Hello password world" in content
-
-    def test_extract_from_bytes_parse_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """MSG 解析失败抛 ExtractorError。"""
-        import extract_msg
-
-        def raise_parse(data: object) -> None:
-            raise ValueError("解析失败")
-
-        monkeypatch.setattr(extract_msg, "Message", raise_parse)
-        with pytest.raises(ExtractorError, match="MSG 解析失败"):
-            MsgExtractor().extract_from_bytes(b"bad data")
-
-    def test_extract_nonexistent_raises_error(self, tmp_path: Path) -> None:
-        with pytest.raises(ExtractorError, match="MSG 解析失败"):
-            MsgExtractor().extract(tmp_path / "nonexistent.msg")
-
-    def test_registry_has_msg_extractor(self) -> None:
-        assert isinstance(get_extractor("msg"), MsgExtractor)
-
-    def test_extract_from_path_with_mock(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """extract(path) 路径应正确提取文本。"""
-        import extract_msg
-
-        class FakeMessage:
-            subject = "路径测试"
-            sender = "path@example.com"
-            body = "password from path"
-
-        monkeypatch.setattr(extract_msg, "Message", lambda path: FakeMessage())
-        path = tmp_path / "test.msg"
-        path.write_bytes(b"fake msg")
-        content = MsgExtractor().extract(path)
-        assert "路径测试" in content
-        assert "path@example.com" in content
-        assert "password from path" in content
-
-    def test_extract_from_path_parse_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """extract(path) 解析失败抛 ExtractorError。"""
-        import extract_msg
-
-        def raise_parse(path: object) -> None:
-            raise ValueError("解析失败")
-
-        monkeypatch.setattr(extract_msg, "Message", raise_parse)
-        path = tmp_path / "bad.msg"
-        path.write_bytes(b"fake")
-        with pytest.raises(ExtractorError, match="MSG 解析失败"):
-            MsgExtractor().extract(path)
-
-    def test_msg_import_error_from_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """extract(path) 时 extract_msg 未安装应抛 ExtractorError。"""
-        import builtins
-
-        original_import = builtins.__import__
-
-        def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
-            if name == "extract_msg":
-                raise ImportError("No module named 'extract_msg'")
-            return original_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", fake_import)
-        path = tmp_path / "test.msg"
-        path.write_bytes(b"fake")
-        with pytest.raises(ExtractorError, match="extract-msg 未安装"):
-            MsgExtractor().extract(path)
-
-    def test_msg_import_error_from_bytes(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """extract_from_bytes 时 extract_msg 未安装应抛 ExtractorError。"""
-        import builtins
-
-        original_import = builtins.__import__
-
-        def fake_import(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
-            if name == "extract_msg":
-                raise ImportError("No module named 'extract_msg'")
-            return original_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", fake_import)
-        with pytest.raises(ExtractorError, match="extract-msg 未安装"):
-            MsgExtractor().extract_from_bytes(b"fake")
-
-    def test_msg_empty_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """body 为 None 时仅返回主题和发件人。"""
-        import extract_msg
-
-        class FakeMessage:
-            subject: str | None = "无正文"
-            sender: str | None = "nob@example.com"
-            body: str | None = None
-
-        monkeypatch.setattr(extract_msg, "Message", lambda data: FakeMessage())
-        content = MsgExtractor().extract_from_bytes(b"fake")
-        assert "无正文" in content
-        assert "nob@example.com" in content
-
-    def test_msg_no_subject_no_sender(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """subject 和 sender 为 None 时仅返回正文。"""
-        import extract_msg
-
-        class FakeMessage:
-            subject: str | None = None
-            sender: str | None = None
-            body: str | None = "password only body"
-
-        monkeypatch.setattr(extract_msg, "Message", lambda data: FakeMessage())
-        content = MsgExtractor().extract_from_bytes(b"fake")
-        assert "password only body" in content
         assert "主题" not in content
         assert "发件人" not in content
 
@@ -2278,27 +2067,6 @@ class TestPptExtractor:
 
 
 class TestScannerWithNewFormats:
-    def test_scan_rtf_content(self, rtf_file: Path) -> None:
-        from fuscan.rules.model import (
-            LeafMatch,
-            MatchMode,
-            MatchTarget,
-            Rule,
-            RuleSet,
-            Severity,
-        )
-        from fuscan.scanner import Scanner
-
-        rule = Rule(
-            name="敏感词",
-            severity=Severity.WARNING,
-            match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="password"),
-        )
-        rs = RuleSet(version="1.0", rules=(rule,))
-        scanner = Scanner(rs)
-        result = scanner.scan_file(rtf_file)
-        assert result.has_hit
-
     def test_scan_eml_content(self, eml_file: Path) -> None:
         from fuscan.rules.model import (
             LeafMatch,
@@ -2855,116 +2623,3 @@ class TestExtractorFailureDataclass:
         assert len(failures) == 1
         # _retry_loop 中通过 str(exc)[:200] 截断
         assert len(failures[0].error_message) == 200
-
-
-# ---------------------------------------------------------------------------
-# _kreuzberg 适配层测试
-# ---------------------------------------------------------------------------
-
-
-class TestKreuzbergAdaptor:
-    """``fuscan.extractors._kreuzberg`` 适配层测试。
-
-    覆盖 ``is_available``/``extract_text``/``extract_text_from_bytes``
-    的可用性检测、ImportError 回退与提取失败路径。
-    """
-
-    def test_is_available_returns_false_when_import_fails(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """``import kreuzberg`` 抛 ImportError 时 is_available 返回 False。"""
-        from fuscan.extractors import _kreuzberg
-
-        # 设置 sys.modules["kreuzberg"] = None 使 `import kreuzberg` 抛 ImportError
-        monkeypatch.setitem(sys.modules, "kreuzberg", None)
-        _kreuzberg.is_available.cache_clear()
-
-        assert _kreuzberg.is_available() is False
-
-        # 清理缓存，避免影响后续测试
-        _kreuzberg.is_available.cache_clear()
-
-    def test_extract_text_raises_when_kreuzberg_missing(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        """``from kreuzberg import extract_file_sync`` 抛 ImportError 时 raise RuntimeError。"""
-        from fuscan.extractors import _kreuzberg
-
-        # 构造一个不含 extract_file_sync 的伪 kreuzberg 模块
-        fake_module = types.ModuleType("kreuzberg")
-        monkeypatch.setitem(sys.modules, "kreuzberg", fake_module)
-
-        with pytest.raises(RuntimeError, match="kreuzberg 未安装"):
-            _kreuzberg.extract_text(tmp_path / "fake.doc")
-
-    def test_extract_text_raises_on_extraction_failure(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        """``extract_file_sync`` 抛异常时包装为 RuntimeError。"""
-        from fuscan.extractors import _kreuzberg
-
-        def _raise(_: str) -> None:
-            raise ValueError("解析失败")
-
-        monkeypatch.setattr("kreuzberg.extract_file_sync", _raise, raising=False)
-
-        with pytest.raises(RuntimeError, match="kreuzberg 提取失败"):
-            _kreuzberg.extract_text(tmp_path / "fake.doc")
-
-    def test_extract_text_returns_content_attribute(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        """result 含 content 属性时返回 content。"""
-        from fuscan.extractors import _kreuzberg
-
-        class _Result:
-            content = "提取的文本"
-
-        monkeypatch.setattr("kreuzberg.extract_file_sync", lambda _: _Result(), raising=False)
-
-        assert _kreuzberg.extract_text(tmp_path / "fake.doc") == "提取的文本"
-
-    def test_extract_text_from_bytes_writes_temp_file(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
-        """extract_text_from_bytes 写入临时文件后调用 extract_text。"""
-        from fuscan.extractors import _kreuzberg
-
-        called_paths: list[Path] = []
-
-        def _fake_extract(path: Path) -> str:
-            called_paths.append(path)
-            # 验证临时文件带正确扩展名且内容正确
-            assert path.suffix == ".rtf"
-            assert path.read_bytes() == b"test data"
-            return "提取结果"
-
-        monkeypatch.setattr(_kreuzberg, "extract_text", _fake_extract)
-
-        result = _kreuzberg.extract_text_from_bytes(b"test data", "rtf")
-        assert result == "提取结果"
-        assert len(called_paths) == 1
-
-    def test_extract_text_from_bytes_no_extension(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """extension 为空时临时文件无扩展名。"""
-        from fuscan.extractors import _kreuzberg
-
-        def _fake_extract(path: Path) -> str:
-            assert path.suffix == ""
-            return "ok"
-
-        monkeypatch.setattr(_kreuzberg, "extract_text", _fake_extract)
-
-        assert _kreuzberg.extract_text_from_bytes(b"data", "") == "ok"

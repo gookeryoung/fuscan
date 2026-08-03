@@ -200,13 +200,11 @@ def _default_ignore_dirs() -> list[str]:
 # 默认禁用的提取器类名列表：
 # - 文本：仅勾选纯文本（PlainTextExtractor），源代码/HTML/XML 等（SourceCodeExtractor）默认关闭
 # - 压缩包：仅勾选 ZIP、RAR，7z（SevenZArchiveExtractor）默认关闭
-# - 邮件：仅勾选 EML（EmlExtractor），MSG（MsgExtractor）默认关闭
+# - 邮件：仅勾选 EML（EmlExtractor）
 # - Office 文档：全部默认勾选
-# - PDF/RTF：全部默认勾选
 DEFAULT_DISABLED_EXTRACTORS: tuple[str, ...] = (
     "SourceCodeExtractor",
     "SevenZArchiveExtractor",
-    "MsgExtractor",
 )
 
 

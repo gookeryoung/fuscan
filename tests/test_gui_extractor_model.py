@@ -188,10 +188,10 @@ class TestData:
         assert model.data(model.index(target_idx), Qt.UserRole + 8) == "Office 文档"
 
     def test_data_returns_category_for_pdf(self, model: ExtractorListModel) -> None:
-        """PdfExtractor 应归类到「PDF/RTF」。"""
+        """PdfExtractor 应归类到「Office 文档」。"""
         for i in range(model.rowCount()):
             if model.data(model.index(i), Qt.UserRole + 1) == "PdfExtractor":
-                assert model.data(model.index(i), Qt.UserRole + 8) == "PDF/RTF"
+                assert model.data(model.index(i), Qt.UserRole + 8) == "Office 文档"
                 return
         pytest.fail("PdfExtractor 应在默认注册表中")
 

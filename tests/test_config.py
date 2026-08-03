@@ -70,14 +70,13 @@ class TestConfig:
         assert config.perf_log_enabled is False
 
     def test_default_disabled_extractors(self) -> None:
-        """默认禁用 SourceCodeExtractor/SevenZArchiveExtractor/MsgExtractor。"""
+        """默认禁用 SourceCodeExtractor/SevenZArchiveExtractor。"""
         config = Config()
         from fuscan.config import DEFAULT_DISABLED_EXTRACTORS
 
         assert config.disabled_extractors == list(DEFAULT_DISABLED_EXTRACTORS)
         assert "SourceCodeExtractor" in config.disabled_extractors
         assert "SevenZArchiveExtractor" in config.disabled_extractors
-        assert "MsgExtractor" in config.disabled_extractors
 
 
 class TestLoadConfig:

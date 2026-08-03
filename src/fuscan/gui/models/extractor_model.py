@@ -61,8 +61,8 @@ _ROLES: dict[int, bytes] = {
 # 提取 display_name 中全角括号内的格式标签（如 "Word（DOCX）" → "DOCX"）
 _PAREN_RE = re.compile(r"（([^）]*)）")
 
-# 类别显示顺序（按用户勾选习惯排列：文档优先 → PDF/RTF → 文本 → 邮件 → 压缩包 → 其他）
-_CATEGORY_ORDER: tuple[str, ...] = ("Office 文档", "PDF/RTF", "文本", "邮件", "压缩包", "其他")
+# 类别显示顺序（按用户勾选习惯排列：文档优先 → 文本 → 邮件 → 压缩包 → 其他）
+_CATEGORY_ORDER: tuple[str, ...] = ("Office 文档", "文本", "邮件", "压缩包", "其他")
 
 # 按提取器 class_name 映射到类别（避免 display_name 字符串匹配的脆弱性）
 _CATEGORY_BY_CLASS: dict[str, str] = {
@@ -75,12 +75,10 @@ _CATEGORY_BY_CLASS: dict[str, str] = {
     "WpsExtractor": "Office 文档",
     "OdtExtractor": "Office 文档",
     "OdsExtractor": "Office 文档",
-    "PdfExtractor": "PDF/RTF",
-    "RtfExtractor": "PDF/RTF",
+    "PdfExtractor": "Office 文档",
     "PlainTextExtractor": "文本",
     "SourceCodeExtractor": "文本",
     "EmlExtractor": "邮件",
-    "MsgExtractor": "邮件",
     "ZipArchiveExtractor": "压缩包",
     "RarArchiveExtractor": "压缩包",
     "SevenZArchiveExtractor": "压缩包",

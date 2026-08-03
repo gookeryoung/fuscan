@@ -1,7 +1,7 @@
 """文件内容提取器子包。
 
 按文件扩展名分发到对应提取器，支持纯文本、PDF、DOCX、PPTX、XLSX、
-ODS、ODT、WPS、RTF、EML、MSG、XLS、DOC、PPT 等格式。
+ODS、ODT、WPS、EML、XLS、DOC、PPT 等格式。
 提取器在 extract 方法内部懒加载第三方库依赖。
 
 原 ``ConfigFileExtractor``/``MarkupDataExtractor``/``StylesheetExtractor``
@@ -43,13 +43,12 @@ from fuscan.extractors.base import (
     is_retriable_error,
 )
 from fuscan.extractors.cache import clear_content_cache, extract_content_cached
-from fuscan.extractors.email import EmlExtractor, MsgExtractor
+from fuscan.extractors.email import EmlExtractor
 from fuscan.extractors.legacy_office import DocExtractor, PptExtractor, XlsExtractor
 from fuscan.extractors.odf import OdtExtractor
 from fuscan.extractors.office import DocxExtractor, PptxExtractor
 from fuscan.extractors.pdf import PdfExtractor
 from fuscan.extractors.registry import register_all
-from fuscan.extractors.rtf import RtfExtractor
 from fuscan.extractors.spreadsheet import OdsExtractor, XlsxExtractor
 from fuscan.extractors.text import (
     PLAIN_TEXT_EXTENSIONS,
@@ -75,14 +74,12 @@ __all__ = [
     "ExtractorError",
     "ExtractorFailure",
     "ExtractorRegistry",
-    "MsgExtractor",
     "OdsExtractor",
     "OdtExtractor",
     "PdfExtractor",
     "PlainTextExtractor",
     "PptExtractor",
     "PptxExtractor",
-    "RtfExtractor",
     "SourceCodeExtractor",
     "SpeedTier",
     "TextExtractor",

@@ -1,17 +1,12 @@
-"""邮件文件提取器：EML 与 MSG。
+"""邮件文件提取器：EML。
 
 EML 使用标准库 email 解析，提取主题、发件人与正文。
-MSG 使用 extract-msg 库解析 Outlook 邮件格式。
-
-MSG 在 kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
-不可用时回退到 extract-msg 纯 Python 实现（T3 中速）。
 """
 
 from __future__ import annotations
 
 import email
 import email.policy
-import io
 import logging
 import re
 from email.message import Message
@@ -19,12 +14,9 @@ from pathlib import Path
 
 from typing_extensions import override
 
-from fuscan.extractors._kreuzberg import extract_text as kreuzberg_extract
-from fuscan.extractors._kreuzberg import extract_text_from_bytes as kreuzberg_extract_bytes
-from fuscan.extractors._kreuzberg import is_available as kreuzberg_available
 from fuscan.extractors.base import Extractor, ExtractorError, SpeedTier
 
-__all__ = ["EmlExtractor", "MsgExtractor"]
+__all__ = ["EmlExtractor"]
 
 logger = logging.getLogger(__name__)
 
@@ -135,105 +127,3 @@ class EmlExtractor(Extractor):
         if html:
             return html.strip()
         return ""
-
-
-class MsgExtractor(Extractor):
-    """Outlook MSG 邮件文件文本提取器。
-
-    kreuzberg 可用时优先使用 Rust 核心加速提取（T2 快速），
-    不可用时回退到 extract-msg 纯 Python 实现（T3 中速）。
-    """
-
-    @property
-    @override
-    def supported_extensions(self) -> tuple[str, ...]:
-        """返回 MSG 提取器支持的扩展名。"""
-        return ("msg",)
-
-    @property
-    @override
-    def speed_tier(self) -> SpeedTier:
-        """kreuzberg 可用时 T2 快速（Rust 核心），否则 T3 中速（extract-msg）。"""
-        if kreuzberg_available():
-            return SpeedTier.FAST
-        return SpeedTier.MEDIUM
-
-    @override
-    @property
-    def display_name(self) -> str:
-        """返回提取器的中文显示名称。"""
-        return "Outlook 邮件（MSG）"
-
-    @override
-    @property
-    def engine_info(self) -> str:
-        """kreuzberg 可用时优先，回退 extract-msg。"""
-        return "kreuzberg" if kreuzberg_available() else "extract-msg"
-
-    @override
-    def extract(self, path: Path) -> str:
-        """提取 MSG 邮件主题、发件人与正文。
-
-        kreuzberg 可用时优先使用 Rust 核心加速提取；不可用时回退到 extract-msg。
-        """
-        if kreuzberg_available():
-            try:
-                return kreuzberg_extract(path)
-            except RuntimeError as exc:
-                logger.debug("kreuzberg MSG 提取失败，回退到 extract-msg: %s: %s", path, exc)
-        # 回退：extract-msg 纯 Python 实现
-        try:
-            from extract_msg import Message
-        except ImportError as exc:
-            raise ExtractorError("extract-msg 未安装，无法提取 MSG") from exc
-
-        try:
-            msg = Message(str(path))
-        except Exception as exc:
-            raise ExtractorError(f"MSG 解析失败: {exc}") from exc
-
-        return self._extract_from_message(msg)
-
-    @override
-    def extract_from_bytes(self, data: bytes) -> str:
-        """从内存字节解析 MSG 邮件。
-
-        kreuzberg 可用时通过临时文件走 Rust 核心加速（压缩包内条目同样加速），
-        不可用时回退到 extract-msg 纯 Python 实现。
-        """
-        if kreuzberg_available():
-            try:
-                return kreuzberg_extract_bytes(data, "msg")
-            except RuntimeError as exc:
-                logger.debug("kreuzberg MSG bytes 提取失败，回退到 extract-msg: %s", exc)
-        # 回退：extract-msg 纯 Python 实现
-        try:
-            from extract_msg import Message
-        except ImportError as exc:
-            raise ExtractorError("extract-msg 未安装，无法提取 MSG") from exc
-
-        try:
-            msg = Message(io.BytesIO(data))
-        except Exception as exc:
-            raise ExtractorError(f"MSG 解析失败: {exc}") from exc
-
-        return self._extract_from_message(msg)
-
-    def _extract_from_message(self, msg: object) -> str:
-        """从 extract_msg.Message 对象提取文本。
-
-        :param msg: extract_msg.Message 实例
-        :return: 邮件主题、发件人与正文拼接的纯文本
-        """
-        parts: list[str] = []
-        subject = getattr(msg, "subject", None)
-        if subject:
-            parts.append(f"主题: {subject}")
-        sender = getattr(msg, "sender", None)
-        if sender:
-            parts.append(f"发件人: {sender}")
-        body = getattr(msg, "body", None)
-        if body:
-            text = body if isinstance(body, str) else str(body)
-            parts.append(text.strip())
-        return "\n".join(parts)

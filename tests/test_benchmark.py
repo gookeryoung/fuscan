@@ -149,7 +149,6 @@ _EXTRACTOR_TIME_LIMITS_MS: dict[str, float] = {
     "csv": 15.0,
     "md": 15.0,
     "html": 15.0,
-    "rtf": 50.0,
     "docx": 30.0,
     "xlsx": 30.0,
     "pptx": 50.0,

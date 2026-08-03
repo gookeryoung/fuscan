@@ -5,10 +5,10 @@
 
 可生成格式：
     - 纯文本：txt/json/yaml/xml/csv/md/html
-    - 二进制：rtf/docx/xlsx/pptx/eml
+    - 二进制：docx/xlsx/pptx/eml
 
 不可生成格式（需外部工具或无法可靠生成）：
-    pdf/doc/ppt/xls/msg/odt/ods
+    pdf/doc/ppt/xls/odt/ods
 """
 
 from __future__ import annotations
@@ -151,17 +151,6 @@ def _gen_html(path: Path, content: str) -> None:
 # ---------------------------------------------------------------------------
 # 二进制格式
 # ---------------------------------------------------------------------------
-
-
-@_register("rtf", binary=True)
-def _gen_rtf(path: Path, content: str) -> None:
-    """生成包含文本内容的 RTF 文件。"""
-    lines = [line for line in content.split("\n") if line]
-    rtf = r"{\rtf1\ansi\deff0 {\fonttbl {\f0 Times New Roman;}}\f0\fs24 "
-    for line in lines:
-        rtf += line.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}") + r"\par "
-    rtf += "}"
-    path.write_text(rtf, encoding="utf-8")
 
 
 @_register("docx", binary=True)

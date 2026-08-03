@@ -352,3 +352,64 @@ class TestSpeedTierColors:
         assert theme.speedTierT3 == QColor("#FFC107")
         assert theme.speedTierT4 == QColor("#FD7E14")
         assert theme.speedTierT5 == QColor("#DC3545")
+
+
+class TestRawDarkGetters:
+    """暗色模式原始色值属性（QML 三元中直接引用的 ``colorXxxDark`` getter）。
+
+    这些 getter 在浅色模式下也可被 QML 显式绑定，需独立于 ``isDark`` 切换直接验证
+    返回值，避免仅由需真实 QML 引擎的 gui_qml 测试覆盖（headless CI 会跳过 gui_qml）。
+    """
+
+    def test_bg_hover_dark_raw(self, theme: ThemeController) -> None:
+        assert theme.colorBgHoverDark == QColor("#2A2B3A")
+
+    def test_bg_selected_dark_raw(self, theme: ThemeController) -> None:
+        assert theme.colorBgSelectedDark == QColor("#2A2B3A")
+
+    def test_border_dark_raw(self, theme: ThemeController) -> None:
+        assert theme.colorBorderDark == QColor("#2E2F3A")
+
+    def test_text_secondary_dark_raw(self, theme: ThemeController) -> None:
+        assert theme.colorTextSecondaryDark == QColor("#A0A0B0")
+
+
+class TestFontConfigGetters:
+    """字体配置相关 getter（``fontFamily`` 用户覆盖分支、``fontBold``、``fontSizeBase``）。"""
+
+    def test_font_family_returns_user_configured(self, theme: ThemeController) -> None:
+        """setFontConfig 设置非空字体族后，fontFamily 应返回用户配置值。"""
+        theme.setFontConfig("Custom Font", 14, False, 12)
+        assert theme.fontFamily == "Custom Font"
+
+    def test_font_bold_default_false(self, theme: ThemeController) -> None:
+        """默认非加粗。"""
+        assert theme.fontBold is False
+
+    def test_font_bold_reflects_config(self, theme: ThemeController) -> None:
+        """setFontConfig 设置加粗后 fontBold 应为 True。"""
+        theme.setFontConfig("", 14, True, 12)
+        assert theme.fontBold is True
+
+    def test_font_size_base_default_14(self, theme: ThemeController) -> None:
+        """默认基准字号 14。"""
+        assert theme.fontSizeBase == 14
+
+    def test_font_size_base_reflects_config(self, theme: ThemeController) -> None:
+        """setFontConfig 设置字号后 fontSizeBase 应同步。"""
+        theme.setFontConfig("", 18, False, 12)
+        assert theme.fontSizeBase == 18
+
+
+class TestIconPathGetters:
+    """图标路径 getter（``iconsDir`` 绝对路径与 ``iconsPrefix`` qrc 前缀）。"""
+
+    def test_icons_dir_ends_with_icons(self, theme: ThemeController) -> None:
+        """iconsDir 应返回以 icons 结尾的绝对路径字符串。"""
+        icons_dir = theme.iconsDir
+        assert isinstance(icons_dir, str)
+        assert icons_dir.replace("\\", "/").endswith("assets/icons")
+
+    def test_icons_prefix_is_qrc(self, theme: ThemeController) -> None:
+        """iconsPrefix 应返回 qrc 资源前缀。"""
+        assert theme.iconsPrefix == "qrc:/icons/"

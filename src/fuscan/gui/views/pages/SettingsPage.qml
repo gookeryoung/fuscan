@@ -90,7 +90,7 @@ Item {
                 }
             }
             Repeater {
-                model: ["扫描", "通用", "忽略目录", "白名单", "规则"]
+                model: ["扫描", "通用", "规则"]
                 TabButton {
                     id: tabBtn
                     text: modelData
@@ -128,7 +128,7 @@ Item {
             Layout.topMargin: 16
             currentIndex: settingsTabBar.currentIndex
 
-            // ===== Tab 1: 扫描 =====
+            // ===== Tab 1: 扫描（含忽略目录配置，忽略目录本质是扫描配置的一部分） =====
             ScrollView {
                 clip: true
                 contentWidth: availableWidth
@@ -458,6 +458,7 @@ Item {
                             }
                         }
                     }
+
                     // ===== 高级扫描模式（合并自原独立 Tab，日常扫描请用首页拖拽） =====
                     GroupBox {
                         Layout.fillWidth: true
@@ -518,6 +519,233 @@ Item {
                                     font.pixelSize: 12
                                     color: theme.colorWarning
                                 }
+                            }
+                        }
+                    }
+
+                    // ===== 忽略目录配置（合并自原独立 Tab，扫描时跳过匹配的目录名） =====
+                    Label {
+                        text: "按目录名匹配（大小写不敏感，任意层级）。勾选表示扫描时跳过该目录。"
+                        font.pixelSize: 11
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                    }
+
+                    // ---------- 忽略目录：顶部全选/全不选按钮 ----------
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        IconButton {
+                            iconSource: "qrc:/icons/check_box.svg"
+                            text: "全选"
+                            tooltip: "勾选所有预设分类下的忽略目录（自定义目录不动）"
+                            accent: "secondary"
+                            onClicked: configController.selectAllIgnoreDirs()
+                        }
+                        IconButton {
+                            iconSource: "qrc:/icons/check_box_blank.svg"
+                            text: "全不选"
+                            tooltip: "取消所有预设分类下的忽略目录（自定义目录不动）"
+                            accent: "secondary"
+                            onClicked: configController.unselectAllIgnoreDirs()
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+
+                    // ---------- 忽略目录：预设分类列表 ----------
+                    Repeater {
+                        model: configController.ignoreDirCategories
+
+                        // 分类卡片
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 0
+                            Layout.rightMargin: 0
+                            // 高度由内容撑开：header 高度 + 子目录列表高度
+                            height: categoryColumn.implicitHeight + 16
+                            color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                            border.width: 1
+                            radius: theme.radiusSm
+
+                            property var categoryData: modelData
+                            property string categoryName: modelData.category
+                            property var categoryDirs: modelData.dirs
+                            property bool categoryAllEnabled: modelData.allEnabled
+
+                            ColumnLayout {
+                                id: categoryColumn
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                spacing: 4
+
+                                // 分类标题行：全选 CheckBox + 分类名
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+
+                                    CheckBox {
+                                        // tristate=false 确保点击只两态切换
+                                        // PartiallyChecked 由 binding 根据子项状态自动显示
+                                        tristate: false
+                                        checkState: categoryData.allEnabled ? Qt.Checked : Qt.Unchecked
+                                        // 点击时切全选/全不选
+                                        onClicked: {
+                                            var willEnable = !(categoryData.allEnabled)
+                                            configController.setIgnoreDirCategoryEnabled(categoryName, willEnable)
+                                        }
+                                        ToolTip.visible: hovered
+                                        ToolTip.text: "统一勾选/取消该分类下所有目录"
+                                        ToolTip.delay: 400
+                                    }
+
+                                    Label {
+                                        text: categoryName
+                                        font.bold: true
+                                        font.pixelSize: theme.fontSizeBody
+                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                    }
+
+                                    Item { Layout.fillWidth: true }
+
+                                    // 目录计数
+                                    Label {
+                                        text: categoryDirs.length + " 项"
+                                        font.pixelSize: 11
+                                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    }
+                                }
+
+                                // 分类下目录列表
+                                Repeater {
+                                    model: categoryDirs
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Layout.leftMargin: 28
+                                        spacing: 8
+
+                                        CheckBox {
+                                            checked: modelData.enabled
+                                            onClicked: configController.toggleIgnoreDir(modelData.name, checked)
+                                        }
+
+                                        Label {
+                                            text: modelData.name
+                                            font.pixelSize: 12
+                                            font.family: "Consolas, Monaco, monospace"
+                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                        }
+
+                                        Item { Layout.fillWidth: true }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ---------- 忽略目录：自定义目录区 ----------
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: customColumn.implicitHeight + 16
+                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                        border.width: 1
+                        radius: theme.radiusSm
+
+                        ColumnLayout {
+                            id: customColumn
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            spacing: 4
+
+                            Label {
+                                text: "自定义目录"
+                                font.bold: true
+                                font.pixelSize: theme.fontSizeBody
+                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                            }
+
+                            Label {
+                                text: "添加不在预设分类中的目录名，扫描时同样跳过。"
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            }
+
+                            // 添加输入行
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                TextField {
+                                    id: customDirInput
+                                    Layout.fillWidth: true
+                                    font.pixelSize: 12
+                                    font.family: "Consolas, Monaco, monospace"
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                    placeholderText: "输入目录名后按 Enter 或点击添加"
+                                    onAccepted: {
+                                        if (text.trim().length > 0) {
+                                            configController.addCustomIgnoreDir(text)
+                                            text = ""
+                                        }
+                                    }
+                                    background: Rectangle {
+                                        color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                        border.width: 1
+                                        radius: theme.radiusSm
+                                    }
+                                }
+
+                                Button {
+                                    text: "添加"
+                                    implicitHeight: 32
+                                    font.pixelSize: theme.fontSizeSmall
+                                    enabled: customDirInput.text.trim().length > 0
+                                    onClicked: {
+                                        configController.addCustomIgnoreDir(customDirInput.text)
+                                        customDirInput.text = ""
+                                    }
+                                }
+                            }
+
+                            // 自定义目录列表
+                            Repeater {
+                                model: configController.customIgnoreDirs
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Layout.leftMargin: 8
+                                    spacing: 8
+
+                                    Label {
+                                        text: modelData
+                                        font.pixelSize: 12
+                                        font.family: "Consolas, Monaco, monospace"
+                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                        Layout.fillWidth: true
+                                    }
+
+                                    IconButton {
+                                        iconSource: "qrc:/icons/close.svg"
+                                        tooltip: "移除"
+                                        accent: "danger"
+                                        iconSize: 14
+                                        btnSize: 24
+                                        onClicked: configController.removeCustomIgnoreDir(modelData)
+                                    }
+                                }
+                            }
+
+                            // 空状态提示
+                            Label {
+                                visible: configController.customIgnoreDirs.length === 0
+                                text: "（暂无自定义目录）"
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                Layout.leftMargin: 8
                             }
                         }
                     }
@@ -680,528 +908,281 @@ Item {
                 }
             }
 
-            // ===== Tab 3: 忽略目录（分类管理） =====
-            ScrollView {
+            // ===== Tab 3: 规则（含白名单误报抑制，二者均为匹配规则管理） =====
+            // 白名单与规则都是匹配规则管理，合并为一个 Tab
+            ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                clip: true
-                contentWidth: availableWidth
+                spacing: 16
 
-                ColumnLayout {
-                    width: settingsStack.width
-                    spacing: 8
-
-                    Label {
-                        text: "按目录名匹配（大小写不敏感，任意层级）。勾选表示扫描时跳过该目录。"
-                        font.pixelSize: 11
-                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                        Layout.fillWidth: true
-                        wrapMode: Text.WordWrap
-                    }
-
-                    // ---------- 顶部全选/全不选按钮 ----------
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-                        IconButton {
-                            iconSource: "qrc:/icons/check_box.svg"
-                            text: "全选"
-                            tooltip: "勾选所有预设分类下的忽略目录（自定义目录不动）"
-                            accent: "secondary"
-                            onClicked: configController.selectAllIgnoreDirs()
-                        }
-                        IconButton {
-                            iconSource: "qrc:/icons/check_box_blank.svg"
-                            text: "全不选"
-                            tooltip: "取消所有预设分类下的忽略目录（自定义目录不动）"
-                            accent: "secondary"
-                            onClicked: configController.unselectAllIgnoreDirs()
-                        }
-                        Item { Layout.fillWidth: true }
-                    }
-
-                    // ---------- 预设分类列表 ----------
-                    Repeater {
-                        model: configController.ignoreDirCategories
-
-                        // 分类卡片
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.leftMargin: 0
-                            Layout.rightMargin: 0
-                            // 高度由内容撑开：header 高度 + 子目录列表高度
-                            height: categoryColumn.implicitHeight + 16
-                            color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
-                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                            border.width: 1
-                            radius: theme.radiusSm
-
-                            property var categoryData: modelData
-                            property string categoryName: modelData.category
-                            property var categoryDirs: modelData.dirs
-                            property bool categoryAllEnabled: modelData.allEnabled
-
-                            ColumnLayout {
-                                id: categoryColumn
-                                anchors.fill: parent
-                                anchors.margins: 8
-                                spacing: 4
-
-                                // 分类标题行：全选 CheckBox + 分类名
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 8
-
-                                    CheckBox {
-                                        // tristate=false 确保点击只两态切换
-                                        // PartiallyChecked 由 binding 根据子项状态自动显示
-                                        tristate: false
-                                        checkState: categoryData.allEnabled ? Qt.Checked : Qt.Unchecked
-                                        // 点击时切全选/全不选
-                                        onClicked: {
-                                            var willEnable = !(categoryData.allEnabled)
-                                            configController.setIgnoreDirCategoryEnabled(categoryName, willEnable)
-                                        }
-                                        ToolTip.visible: hovered
-                                        ToolTip.text: "统一勾选/取消该分类下所有目录"
-                                        ToolTip.delay: 400
-                                    }
-
-                                    Label {
-                                        text: categoryName
-                                        font.bold: true
-                                        font.pixelSize: theme.fontSizeBody
-                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                    }
-
-                                    Item { Layout.fillWidth: true }
-
-                                    // 目录计数
-                                    Label {
-                                        text: categoryDirs.length + " 项"
-                                        font.pixelSize: 11
-                                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                    }
-                                }
-
-                                // 分类下目录列表
-                                Repeater {
-                                    model: categoryDirs
-
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        Layout.leftMargin: 28
-                                        spacing: 8
-
-                                        CheckBox {
-                                            checked: modelData.enabled
-                                            onClicked: configController.toggleIgnoreDir(modelData.name, checked)
-                                        }
-
-                                        Label {
-                                            text: modelData.name
-                                            font.pixelSize: 12
-                                            font.family: "Consolas, Monaco, monospace"
-                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                        }
-
-                                        Item { Layout.fillWidth: true }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // ---------- 自定义目录区 ----------
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: customColumn.implicitHeight + 16
-                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
-                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                        border.width: 1
-                        radius: theme.radiusSm
-
-                        ColumnLayout {
-                            id: customColumn
-                            anchors.fill: parent
-                            anchors.margins: 8
-                            spacing: 4
-
-                            Label {
-                                text: "自定义目录"
-                                font.bold: true
-                                font.pixelSize: theme.fontSizeBody
-                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                            }
-
-                            Label {
-                                text: "添加不在预设分类中的目录名，扫描时同样跳过。"
-                                font.pixelSize: 11
-                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                            }
-
-                            // 添加输入行
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-
-                                TextField {
-                                    id: customDirInput
-                                    Layout.fillWidth: true
-                                    font.pixelSize: 12
-                                    font.family: "Consolas, Monaco, monospace"
-                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                    placeholderText: "输入目录名后按 Enter 或点击添加"
-                                    onAccepted: {
-                                        if (text.trim().length > 0) {
-                                            configController.addCustomIgnoreDir(text)
-                                            text = ""
-                                        }
-                                    }
-                                    background: Rectangle {
-                                        color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
-                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                                        border.width: 1
-                                        radius: theme.radiusSm
-                                    }
-                                }
-
-                                Button {
-                                    text: "添加"
-                                    implicitHeight: 32
-                                    font.pixelSize: theme.fontSizeSmall
-                                    enabled: customDirInput.text.trim().length > 0
-                                    onClicked: {
-                                        configController.addCustomIgnoreDir(customDirInput.text)
-                                        customDirInput.text = ""
-                                    }
-                                }
-                            }
-
-                            // 自定义目录列表
-                            Repeater {
-                                model: configController.customIgnoreDirs
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Layout.leftMargin: 8
-                                    spacing: 8
-
-                                    Label {
-                                        text: modelData
-                                        font.pixelSize: 12
-                                        font.family: "Consolas, Monaco, monospace"
-                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                        Layout.fillWidth: true
-                                    }
-
-                                    IconButton {
-                                        iconSource: "qrc:/icons/close.svg"
-                                        tooltip: "移除"
-                                        accent: "danger"
-                                        iconSize: 14
-                                        btnSize: 24
-                                        onClicked: configController.removeCustomIgnoreDir(modelData)
-                                    }
-                                }
-                            }
-
-                            // 空状态提示
-                            Label {
-                                visible: configController.customIgnoreDirs.length === 0
-                                text: "（暂无自定义目录）"
-                                font.pixelSize: 11
-                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                Layout.leftMargin: 8
-                            }
-                        }
-                    }
-
-                    Item { Layout.fillHeight: true }
+                // ---------- 白名单（误报抑制） ----------
+                Label {
+                    text: "白名单条目在扫描命中聚合阶段过滤：匹配 (路径 glob, 规则名) 组合的命中将被排除。规则名 * 表示匹配任意规则。"
+                    font.pixelSize: 11
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
                 }
-            }
 
-            // ===== Tab 4: 白名单（误报抑制） =====
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
-                contentWidth: availableWidth
+                // ---------- 白名单：添加表单 ----------
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: addFormColumn.implicitHeight + 16
+                    color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                    border.width: 1
+                    radius: theme.radiusSm
 
-                ColumnLayout {
-                    width: settingsStack.width
-                    spacing: 8
+                    ColumnLayout {
+                        id: addFormColumn
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 4
 
-                    Label {
-                        text: "白名单条目在扫描命中聚合阶段过滤：匹配 (路径 glob, 规则名) 组合的命中将被排除。规则名 * 表示匹配任意规则。"
-                        font.pixelSize: 11
-                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                        Layout.fillWidth: true
-                        wrapMode: Text.WordWrap
-                    }
+                        Label {
+                            text: "添加白名单条目"
+                            font.bold: true
+                            font.pixelSize: theme.fontSizeBody
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        }
 
-                    // ---------- 添加表单 ----------
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: addFormColumn.implicitHeight + 16
-                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
-                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                        border.width: 1
-                        radius: theme.radiusSm
-
-                        ColumnLayout {
-                            id: addFormColumn
-                            anchors.fill: parent
-                            anchors.margins: 8
-                            spacing: 4
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
 
                             Label {
-                                text: "添加白名单条目"
-                                font.bold: true
-                                font.pixelSize: theme.fontSizeBody
+                                text: "路径 glob"
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                Layout.preferredWidth: 60
+                            }
+                            TextField {
+                                id: wlPathGlobInput
+                                Layout.fillWidth: true
+                                font.pixelSize: 12
+                                font.family: "Consolas, Monaco, monospace"
                                 color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-
-                                Label {
-                                    text: "路径 glob"
-                                    font.pixelSize: 11
-                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                    Layout.preferredWidth: 60
+                                placeholderText: "如 /a/vendor/*.txt 或 /a/b/c.txt（* 匹配任意字符）"
+                                selectByMouse: true
+                                background: Rectangle {
+                                    color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                    border.width: 1
+                                    radius: theme.radiusSm
                                 }
-                                TextField {
-                                    id: wlPathGlobInput
-                                    Layout.fillWidth: true
-                                    font.pixelSize: 12
-                                    font.family: "Consolas, Monaco, monospace"
-                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                    placeholderText: "如 /a/vendor/*.txt 或 /a/b/c.txt（* 匹配任意字符）"
-                                    selectByMouse: true
-                                    background: Rectangle {
-                                        color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
-                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                                        border.width: 1
-                                        radius: theme.radiusSm
-                                    }
-                                    onAccepted: {
-                                        if (text.trim().length > 0) {
-                                            whitelistOpMsg.text = whitelistController.addEntry(text, wlRuleNameInput.text, wlNoteInput.text)
-                                            text = ""
-                                            wlRuleNameInput.text = ""
-                                            wlNoteInput.text = ""
-                                        }
-                                    }
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-
-                                Label {
-                                    text: "规则名"
-                                    font.pixelSize: 11
-                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                    Layout.preferredWidth: 60
-                                }
-                                TextField {
-                                    id: wlRuleNameInput
-                                    Layout.fillWidth: true
-                                    font.pixelSize: 12
-                                    font.family: "Consolas, Monaco, monospace"
-                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                    placeholderText: "留空表示匹配任意规则（*）"
-                                    selectByMouse: true
-                                    background: Rectangle {
-                                        color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
-                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                                        border.width: 1
-                                        radius: theme.radiusSm
-                                    }
-                                }
-                                Label {
-                                    text: "备注"
-                                    font.pixelSize: 11
-                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                    Layout.leftMargin: 8
-                                }
-                                TextField {
-                                    id: wlNoteInput
-                                    Layout.fillWidth: true
-                                    font.pixelSize: 12
-                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                    placeholderText: "可空"
-                                    selectByMouse: true
-                                    background: Rectangle {
-                                        color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
-                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                                        border.width: 1
-                                        radius: theme.radiusSm
-                                    }
-                                }
-                                Button {
-                                    text: "添加"
-                                    implicitHeight: 32
-                                    font.pixelSize: theme.fontSizeSmall
-                                    enabled: wlPathGlobInput.text.trim().length > 0
-                                    onClicked: {
-                                        whitelistOpMsg.text = whitelistController.addEntry(wlPathGlobInput.text, wlRuleNameInput.text, wlNoteInput.text)
-                                        wlPathGlobInput.text = ""
+                                onAccepted: {
+                                    if (text.trim().length > 0) {
+                                        whitelistOpMsg.text = whitelistController.addEntry(text, wlRuleNameInput.text, wlNoteInput.text)
+                                        text = ""
                                         wlRuleNameInput.text = ""
                                         wlNoteInput.text = ""
                                     }
                                 }
                             }
                         }
-                    }
 
-                    // ---------- 顶部操作行：导入/导出/清空 + 计数 ----------
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
 
-                        IconButton {
-                            iconSource: "qrc:/icons/export_json.svg"
-                            text: "导入"
-                            tooltip: "从 JSON 文件导入白名单（合并去重）"
-                            accent: "secondary"
-                            onClicked: whitelistImportDialog.open()
-                        }
-                        IconButton {
-                            iconSource: "qrc:/icons/export.svg"
-                            text: "导出"
-                            tooltip: "导出当前白名单到 JSON 文件"
-                            accent: "secondary"
-                            enabled: whitelistController.whitelistCount > 0
-                            onClicked: whitelistExportDialog.open()
-                        }
-                        IconButton {
-                            iconSource: "qrc:/icons/delete.svg"
-                            text: "清空"
-                            tooltip: "清空全部白名单条目"
-                            accent: "danger"
-                            enabled: whitelistController.whitelistCount > 0
-                            onClicked: {
-                                whitelistController.clearAll()
-                                whitelistOpMsg.text = "已清空白名单"
+                            Label {
+                                text: "规则名"
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                Layout.preferredWidth: 60
                             }
-                        }
-                        Item { Layout.fillWidth: true }
-                        Label {
-                            text: "共 " + whitelistController.whitelistCount + " 条"
-                            font.pixelSize: 11
-                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                        }
-                    }
-
-                    // 操作消息
-                    Label {
-                        id: whitelistOpMsg
-                        Layout.fillWidth: true
-                        visible: text !== ""
-                        font.pixelSize: 11
-                        color: {
-                            if (text.indexOf("已添加") >= 0 || text.indexOf("已导入") >= 0 || text.indexOf("已导出") >= 0 || text.indexOf("已清空") >= 0) return theme.colorSuccess
-                            if (text.indexOf("失败") >= 0 || text.indexOf("不能") >= 0) return theme.colorDanger
-                            return theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                        }
-                        wrapMode: Text.WordWrap
-                    }
-
-                    // ---------- 白名单条目列表 ----------
-                    ListView {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.preferredHeight: 360
-                        clip: true
-                        interactive: true
-                        cacheBuffer: 500
-                        model: whitelistController.whitelistEntries
-                        // 空状态提示
-                        Label {
-                            anchors.centerIn: parent
-                            visible: whitelistController.whitelistCount === 0
-                            text: "（暂无白名单条目）"
-                            font.pixelSize: 11
-                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                        }
-                        delegate: ItemDelegate {
-                            width: ListView.view.width
-                            height: 40
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 8
-                                anchors.rightMargin: 8
-                                spacing: 8
-
-                                // 路径 glob
-                                Label {
-                                    text: modelData.pathGlob
-                                    font.pixelSize: 12
-                                    font.family: "Consolas, Monaco, monospace"
-                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                    Layout.fillWidth: true
-                                    elide: Text.ElideMiddle
-                                }
-                                // 规则名 tag
-                                Rectangle {
+                            TextField {
+                                id: wlRuleNameInput
+                                Layout.fillWidth: true
+                                font.pixelSize: 12
+                                font.family: "Consolas, Monaco, monospace"
+                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                placeholderText: "留空表示匹配任意规则（*）"
+                                selectByMouse: true
+                                background: Rectangle {
+                                    color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                    border.width: 1
                                     radius: theme.radiusSm
-                                    color: modelData.ruleName === "*" ? theme.colorPrimary : theme.colorAccent
-                                    width: wlRuleTagLabel.implicitWidth + 12
-                                    height: wlRuleTagLabel.implicitHeight + 4
-                                    Label {
-                                        id: wlRuleTagLabel
-                                        anchors.centerIn: parent
-                                        text: modelData.ruleName === "*" ? "全部规则" : modelData.ruleName
-                                        font.pixelSize: 10
-                                        font.bold: true
-                                        color: theme.colorTextOnPrimary
-                                    }
                                 }
-                                // 创建时间
-                                Label {
-                                    text: modelData.createdAt
-                                    font.pixelSize: 10
-                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                    visible: modelData.createdAt !== ""
+                            }
+                            Label {
+                                text: "备注"
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                Layout.leftMargin: 8
+                            }
+                            TextField {
+                                id: wlNoteInput
+                                Layout.fillWidth: true
+                                font.pixelSize: 12
+                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                placeholderText: "可空"
+                                selectByMouse: true
+                                background: Rectangle {
+                                    color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+                                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                    border.width: 1
+                                    radius: theme.radiusSm
                                 }
-                                // 备注
-                                Label {
-                                    text: modelData.note
-                                    font.pixelSize: 10
-                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                    visible: modelData.note !== ""
-                                    elide: Text.ElideRight
-                                    Layout.maximumWidth: 160
-                                }
-                                IconButton {
-                                    iconSource: "qrc:/icons/close.svg"
-                                    tooltip: "移除"
-                                    accent: "danger"
-                                    iconSize: 14
-                                    btnSize: 24
-                                    onClicked: whitelistController.removeEntry(index)
+                            }
+                            Button {
+                                text: "添加"
+                                implicitHeight: 32
+                                font.pixelSize: theme.fontSizeSmall
+                                enabled: wlPathGlobInput.text.trim().length > 0
+                                onClicked: {
+                                    whitelistOpMsg.text = whitelistController.addEntry(wlPathGlobInput.text, wlRuleNameInput.text, wlNoteInput.text)
+                                    wlPathGlobInput.text = ""
+                                    wlRuleNameInput.text = ""
+                                    wlNoteInput.text = ""
                                 }
                             }
                         }
                     }
-
-                    Item { Layout.fillHeight: true }
                 }
-            }
 
-            // ===== Tab 5: 规则 =====
-            // 规则配置从首页移入设置页，首页聚焦工作区列表
-            RulesPanel {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                // 设置页内嵌不启用折叠，完整展示
-                collapsible: false
-                collapsed: false
+                // ---------- 白名单：顶部操作行（导入/导出/清空 + 计数） ----------
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    IconButton {
+                        iconSource: "qrc:/icons/export_json.svg"
+                        text: "导入"
+                        tooltip: "从 JSON 文件导入白名单（合并去重）"
+                        accent: "secondary"
+                        onClicked: whitelistImportDialog.open()
+                    }
+                    IconButton {
+                        iconSource: "qrc:/icons/export.svg"
+                        text: "导出"
+                        tooltip: "导出当前白名单到 JSON 文件"
+                        accent: "secondary"
+                        enabled: whitelistController.whitelistCount > 0
+                        onClicked: whitelistExportDialog.open()
+                    }
+                    IconButton {
+                        iconSource: "qrc:/icons/delete.svg"
+                        text: "清空"
+                        tooltip: "清空全部白名单条目"
+                        accent: "danger"
+                        enabled: whitelistController.whitelistCount > 0
+                        onClicked: {
+                            whitelistController.clearAll()
+                            whitelistOpMsg.text = "已清空白名单"
+                        }
+                    }
+                    Item { Layout.fillWidth: true }
+                    Label {
+                        text: "共 " + whitelistController.whitelistCount + " 条"
+                        font.pixelSize: 11
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    }
+                }
+
+                // 白名单操作消息
+                Label {
+                    id: whitelistOpMsg
+                    Layout.fillWidth: true
+                    visible: text !== ""
+                    font.pixelSize: 11
+                    color: {
+                        if (text.indexOf("已添加") >= 0 || text.indexOf("已导入") >= 0 || text.indexOf("已导出") >= 0 || text.indexOf("已清空") >= 0) return theme.colorSuccess
+                        if (text.indexOf("失败") >= 0 || text.indexOf("不能") >= 0) return theme.colorDanger
+                        return theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    }
+                    wrapMode: Text.WordWrap
+                }
+
+                // ---------- 白名单条目列表 ----------
+                // 固定高度，RulesPanel 占据剩余空间
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 360
+                    clip: true
+                    interactive: true
+                    cacheBuffer: 500
+                    model: whitelistController.whitelistEntries
+                    // 空状态提示
+                    Label {
+                        anchors.centerIn: parent
+                        visible: whitelistController.whitelistCount === 0
+                        text: "（暂无白名单条目）"
+                        font.pixelSize: 11
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    }
+                    delegate: ItemDelegate {
+                        width: ListView.view.width
+                        height: 40
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 8
+                            spacing: 8
+
+                            // 路径 glob
+                            Label {
+                                text: modelData.pathGlob
+                                font.pixelSize: 12
+                                font.family: "Consolas, Monaco, monospace"
+                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                Layout.fillWidth: true
+                                elide: Text.ElideMiddle
+                            }
+                            // 规则名 tag
+                            Rectangle {
+                                radius: theme.radiusSm
+                                color: modelData.ruleName === "*" ? theme.colorPrimary : theme.colorAccent
+                                width: wlRuleTagLabel.implicitWidth + 12
+                                height: wlRuleTagLabel.implicitHeight + 4
+                                Label {
+                                    id: wlRuleTagLabel
+                                    anchors.centerIn: parent
+                                    text: modelData.ruleName === "*" ? "全部规则" : modelData.ruleName
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                    color: theme.colorTextOnPrimary
+                                }
+                            }
+                            // 创建时间
+                            Label {
+                                text: modelData.createdAt
+                                font.pixelSize: 10
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                visible: modelData.createdAt !== ""
+                            }
+                            // 备注
+                            Label {
+                                text: modelData.note
+                                font.pixelSize: 10
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                visible: modelData.note !== ""
+                                elide: Text.ElideRight
+                                Layout.maximumWidth: 160
+                            }
+                            IconButton {
+                                iconSource: "qrc:/icons/close.svg"
+                                tooltip: "移除"
+                                accent: "danger"
+                                iconSize: 14
+                                btnSize: 24
+                                onClicked: whitelistController.removeEntry(index)
+                            }
+                        }
+                    }
+                }
+
+                // ---------- 规则配置 ----------
+                // 规则配置从首页移入设置页，首页聚焦工作区列表
+                RulesPanel {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    // 设置页内嵌不启用折叠，完整展示
+                    collapsible: false
+                    collapsed: false
+                }
             }
         }
     }

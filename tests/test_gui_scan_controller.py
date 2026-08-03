@@ -409,6 +409,148 @@ class TestRulesetChange:
         assert controller.rulesCount == 0
 
 
+class TestComputeEffectiveRulesetTempRules:
+    """``_compute_effective_ruleset`` 临时规则叠加测试（iter-138）。"""
+
+    def test_temp_rules_added_on_top_of_global(
+        self,
+        config_controller: ConfigController,
+        rules_controller: RulesController,
+        tmp_path: Path,
+    ) -> None:
+        """临时规则文件应叠加在全局规则集之上。"""
+        # 写入临时规则文件（包含一条全局没有的规则）
+        temp_file = tmp_path / "temp.yaml"
+        temp_file.write_text(
+            'version: "1.0"\n'
+            "rules:\n"
+            '  - name: "临时规则-unique_temp_marker"\n'
+            "    severity: warning\n"
+            "    match:\n"
+            "      type: content\n"
+            "      target: content\n"
+            "      mode: contains\n"
+            '      pattern: "unique_temp_marker_xyz"\n',
+            encoding="utf-8",
+        )
+        controller = ScanController(config_controller, rules_controller)
+        # 初始规则数（仅内置规则）
+        initial_count = controller.rulesCount
+        # 设置临时规则覆盖
+        controller.setTaskOverride("temp_rules_paths", (str(temp_file),))
+        # 规则数应增加（临时规则叠加）
+        assert controller.rulesCount > initial_count
+        # 验证临时规则确实被加载
+        assert controller._ruleset is not None
+        rule_names = [r.name for r in controller._ruleset.rules]
+        assert "临时规则-unique_temp_marker" in rule_names
+
+    def test_temp_rules_without_override_uses_global(
+        self,
+        config_controller: ConfigController,
+        rules_controller: RulesController,
+    ) -> None:
+        """无任务级覆盖且无临时规则时直接取全局 ruleset。"""
+        controller = ScanController(config_controller, rules_controller)
+        # 无 temp_rules_paths 时 ruleset 应等同于全局
+        assert controller._ruleset is rules_controller.ruleset
+
+    def test_temp_rules_nonexistent_file_filtered(
+        self,
+        config_controller: ConfigController,
+        rules_controller: RulesController,
+        tmp_path: Path,
+    ) -> None:
+        """不存在的临时规则文件应被过滤，不影响 ruleset。"""
+        controller = ScanController(config_controller, rules_controller)
+        initial_count = controller.rulesCount
+        # 设置不存在的临时规则文件
+        controller.setTaskOverride("temp_rules_paths", (str(tmp_path / "missing.yaml"),))
+        # 规则数应不变（不存在的文件被过滤）
+        assert controller.rulesCount == initial_count
+
+    def test_temp_rules_cleared(
+        self,
+        config_controller: ConfigController,
+        rules_controller: RulesController,
+        tmp_path: Path,
+    ) -> None:
+        """清除临时规则后 ruleset 应回退到全局。"""
+        temp_file = tmp_path / "temp.yaml"
+        temp_file.write_text(
+            'version: "1.0"\n'
+            "rules:\n"
+            '  - name: "临时规则"\n'
+            "    severity: warning\n"
+            "    match:\n"
+            "      type: content\n"
+            "      target: content\n"
+            "      mode: contains\n"
+            '      pattern: "temp_pattern"\n',
+            encoding="utf-8",
+        )
+        controller = ScanController(config_controller, rules_controller)
+        # 添加临时规则
+        controller.setTaskOverride("temp_rules_paths", (str(temp_file),))
+        count_with_temp = controller.rulesCount
+        assert count_with_temp > 0
+        # 清除临时规则（设为空元组）
+        controller.setTaskOverride("temp_rules_paths", ())
+        # 规则数应回退
+        assert controller.rulesCount < count_with_temp
+        # 等同于全局 ruleset
+        assert controller._ruleset is rules_controller.ruleset
+
+    def test_temp_rules_with_rules_paths_override(
+        self,
+        config_controller: ConfigController,
+        rules_controller: RulesController,
+        tmp_path: Path,
+    ) -> None:
+        """同时设置 rules_paths 覆盖和 temp_rules_paths 时两者都生效。"""
+        # 任务级 rules_paths 覆盖文件
+        override_file = tmp_path / "override.yaml"
+        override_file.write_text(
+            'version: "1.0"\n'
+            "rules:\n"
+            '  - name: "覆盖规则"\n'
+            "    severity: critical\n"
+            "    match:\n"
+            "      type: content\n"
+            "      target: content\n"
+            "      mode: contains\n"
+            '      pattern: "override_pattern"\n',
+            encoding="utf-8",
+        )
+        # 临时规则文件
+        temp_file = tmp_path / "temp.yaml"
+        temp_file.write_text(
+            'version: "1.0"\n'
+            "rules:\n"
+            '  - name: "临时规则"\n'
+            "    severity: warning\n"
+            "    match:\n"
+            "      type: content\n"
+            "      target: content\n"
+            "      mode: contains\n"
+            '      pattern: "temp_pattern"\n',
+            encoding="utf-8",
+        )
+        controller = ScanController(config_controller, rules_controller)
+        # 同时设置任务级 rules_paths 覆盖（禁用内置）和临时规则
+        controller.setTaskOverride("use_builtin", False)
+        controller.setTaskOverride("rules_paths", (str(override_file),))
+        controller.setTaskOverride("temp_rules_paths", (str(temp_file),))
+        # 验证两种规则都被加载
+        assert controller._ruleset is not None
+        rule_names = [r.name for r in controller._ruleset.rules]
+        assert "覆盖规则" in rule_names
+        assert "临时规则" in rule_names
+        # 内置规则应被禁用（use_builtin=False）
+        # 检查规则数 = 1（覆盖）+ 1（临时）= 2
+        assert len(controller._ruleset.rules) == 2
+
+
 class TestOpenLocation:
     def test_open_location_invalid_index_noop(self, controller: ScanController) -> None:
         """无效索引时 openLocation 不应抛异常。"""

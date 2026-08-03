@@ -63,6 +63,7 @@ try:
         effective_max_workers,
         effective_rules_paths,
         effective_scan_archives,
+        effective_temp_rules_paths,
         effective_use_builtin,
     )
     from fuscan.history import STATUS_CANCELLED, STATUS_COMPLETED, ScanHistoryEntry
@@ -280,6 +281,27 @@ class TestTaskOverrides:
         assert effective_use_builtin({}, config) is True
         # 类型不符（int 而非 bool）也应回退
         assert effective_use_builtin({"use_builtin": 1}, config) is True
+
+    def test_effective_temp_rules_paths_tuple_override(self) -> None:
+        """temp_rules_paths tuple 覆盖值原样返回。"""
+        custom = ("/tmp/a.yaml", "/tmp/b.yaml")
+        overrides: dict[str, object] = {"temp_rules_paths": custom}
+        assert effective_temp_rules_paths(overrides) == custom
+
+    def test_effective_temp_rules_paths_default_empty(self) -> None:
+        """temp_rules_paths 无覆盖时返回空元组（不回退到全局，因为是追加语义）。"""
+        assert effective_temp_rules_paths({}) == ()
+
+    def test_effective_temp_rules_paths_wrong_type_falls_back(self) -> None:
+        """temp_rules_paths 非 tuple 类型回退到空元组。"""
+        # list 而非 tuple 应回退
+        overrides: dict[str, object] = {"temp_rules_paths": ["/tmp/x.yaml"]}
+        assert effective_temp_rules_paths(overrides) == ()
+
+    def test_effective_temp_rules_paths_empty_tuple(self) -> None:
+        """temp_rules_paths 显式空元组返回空元组。"""
+        overrides: dict[str, object] = {"temp_rules_paths": ()}
+        assert effective_temp_rules_paths(overrides) == ()
 
 
 # ----------------------------- _result_detail -----------------------------

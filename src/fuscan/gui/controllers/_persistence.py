@@ -130,6 +130,8 @@ PERSIST_VERSION = 1
 # 补充范围钳制函数，与 ConfigController.setMax* 语义一致
 # rules_paths/use_builtin：任务级规则覆盖，覆盖时扫描使用任务专属规则集，
 # 未覆盖时回退全局 RulesController（与 scan_archives/max_workers 等同语义）
+# temp_rules_paths：任务级临时规则文件路径，叠加在全局规则之上（不覆盖），
+# 仅对当前工作区生效，扫描时与全局启用的规则合并
 TASK_OVERRIDE_KEYS: dict[str, type] = {
     "scan_archives": bool,
     "max_workers": int,
@@ -138,6 +140,7 @@ TASK_OVERRIDE_KEYS: dict[str, type] = {
     "ignore_dirs": tuple,
     "rules_paths": tuple,
     "use_builtin": bool,
+    "temp_rules_paths": tuple,
 }
 
 # 任务级覆盖 int 字段范围（与 ConfigController 全局钳制一致）
@@ -177,7 +180,7 @@ def serialize_task_overrides(overrides: dict[str, object]) -> dict[str, object]:
     for key, value in overrides.items():
         if key not in TASK_OVERRIDE_KEYS:
             continue
-        if key in ("ignore_dirs", "rules_paths") and isinstance(value, tuple):
+        if key in ("ignore_dirs", "rules_paths", "temp_rules_paths") and isinstance(value, tuple):
             out[key] = list(value)
         else:
             out[key] = value
@@ -199,7 +202,7 @@ def deserialize_task_overrides(raw: object) -> dict[str, object]:
         if key not in TASK_OVERRIDE_KEYS:
             logger.warning("反序列化 task_overrides：跳过未知字段 %s", key)
             continue
-        if key in ("ignore_dirs", "rules_paths"):
+        if key in ("ignore_dirs", "rules_paths", "temp_rules_paths"):
             if isinstance(value, list) and all(isinstance(x, str) for x in value):
                 out[key] = tuple(value)
             else:

@@ -227,6 +227,9 @@ class Config:
     rules_paths: list[str] = field(default_factory=list)
     # 是否使用通用规则
     use_builtin: bool = True
+    # 被禁用的全局规则文件路径（rules_paths 中的文件可单独禁用，
+    # 禁用后不参与规则集合并，但仍保留在 rules_paths 列表中以便重新启用）
+    disabled_rules_paths: list[str] = field(default_factory=list)
     # 是否包含网络映射盘（默认不包含）
     include_network_drives: bool = False
     # 是否扫描压缩包

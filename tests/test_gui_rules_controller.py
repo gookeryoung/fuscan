@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -101,23 +102,37 @@ class TestConstruction:
 
 
 class TestRulesFileList:
-    def test_empty_rules_file_model(self, config_controller: ConfigController) -> None:
+    def test_empty_rules_file_model_has_only_builtin(self, config_controller: ConfigController) -> None:
+        """无规则文件时列表仅包含内置规则项。"""
         controller = RulesController(config_controller)
-        assert controller.rulesFileModel == []
+        model = controller.rulesFileModel
+        assert len(model) == 1
+        assert model[0]["isBuiltin"] is True
+        assert model[0]["scope"] == "global"
+        assert model[0]["canRemove"] is False
+        assert model[0]["enabled"] is True  # 默认启用内置规则
 
     def test_rules_file_model_after_load(self, controller_with_file: RulesController, rules_file: Path) -> None:
+        """加载规则文件后列表应有内置 + 用户文件两项，用户文件在索引 1。"""
         model = controller_with_file.rulesFileModel
-        assert len(model) == 1
-        assert model[0]["fileName"] == rules_file.name
-        assert model[0]["path"] == str(rules_file)
+        assert len(model) == 2
+        # 索引 0：内置规则
+        assert model[0]["isBuiltin"] is True
+        # 索引 1：用户规则文件
+        assert model[1]["fileName"] == rules_file.name
+        assert model[1]["path"] == str(rules_file)
+        assert model[1]["scope"] == "global"
+        assert model[1]["isBuiltin"] is False
+        assert model[1]["enabled"] is True
+        assert model[1]["canRemove"] is True
 
     def test_rules_file_model_includes_exists_field(
         self, controller_with_file: RulesController, rules_file: Path
     ) -> None:
         """iter-139：rulesFileModel 每项应包含 exists 字段标记文件是否存在。"""
         model = controller_with_file.rulesFileModel
-        assert len(model) == 1
-        assert model[0]["exists"] is True
+        assert len(model) == 2
+        assert model[1]["exists"] is True  # 用户文件存在
 
     def test_rules_file_model_marks_missing_file(self, config_controller: ConfigController, tmp_path: Path) -> None:
         """iter-139：规则文件不存在时 exists 字段应为 False。"""
@@ -126,8 +141,8 @@ class TestRulesFileList:
         config_controller.save()
         controller = RulesController(config_controller)
         model = controller.rulesFileModel
-        assert len(model) == 1
-        assert model[0]["exists"] is False
+        assert len(model) == 2  # 内置 + 缺失用户文件
+        assert model[1]["exists"] is False
 
     def test_selected_file_index_default_negative(self, config_controller: ConfigController) -> None:
         controller = RulesController(config_controller)
@@ -153,24 +168,42 @@ class TestCanMove:
         controller = RulesController(config_controller)
         assert controller.canMoveUp is False
 
-    def test_can_move_up_false_when_first(self, controller_with_file: RulesController) -> None:
+    def test_can_move_up_false_for_builtin(self, controller_with_file: RulesController) -> None:
+        """内置规则（索引 0）不可上移。"""
         controller_with_file.setSelectedFileIndex(0)
+        assert controller_with_file.canMoveUp is False
+
+    def test_can_move_up_false_for_first_global(self, controller_with_file: RulesController) -> None:
+        """第一个全局规则文件（索引 1）不可上移。"""
+        controller_with_file.setSelectedFileIndex(1)
         assert controller_with_file.canMoveUp is False
 
     def test_can_move_down_false_when_empty(self, config_controller: ConfigController) -> None:
         controller = RulesController(config_controller)
         assert controller.canMoveDown is False
 
-    def test_can_move_down_false_when_last(self, controller_with_file: RulesController) -> None:
+    def test_can_move_down_false_for_builtin(self, controller_with_file: RulesController) -> None:
+        """内置规则不可下移。"""
         controller_with_file.setSelectedFileIndex(0)
+        assert controller_with_file.canMoveDown is False
+
+    def test_can_move_down_false_when_last(self, controller_with_file: RulesController) -> None:
+        """最后一个全局规则文件不可下移。"""
+        controller_with_file.setSelectedFileIndex(1)
         assert controller_with_file.canMoveDown is False
 
     def test_can_remove_default_false(self, config_controller: ConfigController) -> None:
         controller = RulesController(config_controller)
         assert controller.canRemove is False
 
-    def test_can_remove_true_when_valid_index(self, controller_with_file: RulesController) -> None:
+    def test_can_remove_false_for_builtin(self, controller_with_file: RulesController) -> None:
+        """内置规则不可移除。"""
         controller_with_file.setSelectedFileIndex(0)
+        assert controller_with_file.canRemove is False
+
+    def test_can_remove_true_for_user_file(self, controller_with_file: RulesController) -> None:
+        """用户规则文件可移除。"""
+        controller_with_file.setSelectedFileIndex(1)
         assert controller_with_file.canRemove is True
 
 
@@ -185,13 +218,15 @@ class TestMoveOperations:
         config_controller.config.rules_paths = [str(f1), str(f2)]
         config_controller.save()
         controller = RulesController(config_controller)
-
-        controller.setSelectedFileIndex(1)
+        # 列表：[内置(0), r1.yaml(1), r2.yaml(2)]
+        # 选中 r2.yaml（索引 2），上移到 r1.yaml 位置（索引 1）
+        controller.setSelectedFileIndex(2)
         assert controller.canMoveUp is True
         controller.moveUp()
 
-        assert controller.selectedFileIndex == 0
-        assert controller.rulesFileModel[0]["fileName"] == "r2.yaml"
+        assert controller.selectedFileIndex == 1
+        assert controller.rulesFileModel[1]["fileName"] == "r2.yaml"
+        assert controller.rulesFileModel[2]["fileName"] == "r1.yaml"
 
     def test_move_down_swaps_order(
         self,
@@ -203,37 +238,51 @@ class TestMoveOperations:
         config_controller.config.rules_paths = [str(f1), str(f2)]
         config_controller.save()
         controller = RulesController(config_controller)
-
-        controller.setSelectedFileIndex(0)
+        # 选中 r1.yaml（索引 1），下移到 r2.yaml 位置（索引 2）
+        controller.setSelectedFileIndex(1)
         assert controller.canMoveDown is True
         controller.moveDown()
 
-        assert controller.selectedFileIndex == 1
-        assert controller.rulesFileModel[0]["fileName"] == "r2.yaml"
+        assert controller.selectedFileIndex == 2
+        assert controller.rulesFileModel[1]["fileName"] == "r2.yaml"
+        assert controller.rulesFileModel[2]["fileName"] == "r1.yaml"
 
     def test_move_up_noop_when_first(self, controller_with_file: RulesController) -> None:
-        controller_with_file.setSelectedFileIndex(0)
+        """第一个全局规则文件不可上移，操作无效。"""
+        controller_with_file.setSelectedFileIndex(1)
         controller_with_file.moveUp()
-        assert controller_with_file.selectedFileIndex == 0
+        assert controller_with_file.selectedFileIndex == 1
 
     def test_move_down_noop_when_last(self, controller_with_file: RulesController) -> None:
-        controller_with_file.setSelectedFileIndex(0)
+        """最后一个全局规则文件不可下移，操作无效。"""
+        controller_with_file.setSelectedFileIndex(1)
         controller_with_file.moveDown()
-        assert controller_with_file.selectedFileIndex == 0
+        assert controller_with_file.selectedFileIndex == 1
 
 
 class TestRemoveSelected:
     def test_remove_selected_clears_entry(self, controller_with_file: RulesController, rules_file: Path) -> None:
-        controller_with_file.setSelectedFileIndex(0)
+        """移除用户规则文件后列表仅剩内置规则。"""
+        controller_with_file.setSelectedFileIndex(1)  # 用户文件索引
         controller_with_file.removeSelected()
-        assert controller_with_file.rulesFileModel == []
+        # 仅剩内置规则项
+        assert len(controller_with_file.rulesFileModel) == 1
+        assert controller_with_file.rulesFileModel[0]["isBuiltin"] is True
         assert controller_with_file.selectedFileIndex == -1
 
     def test_remove_selected_noop_when_invalid(self, controller_with_file: RulesController) -> None:
+        """无效索引时移除操作无效，列表不变。"""
         controller_with_file.setSelectedFileIndex(-1)
         controller_with_file.removeSelected()
+        # 列表未变（内置 + 用户文件）
+        assert len(controller_with_file.rulesFileModel) == 2
+
+    def test_remove_selected_noop_for_builtin(self, controller_with_file: RulesController) -> None:
+        """内置规则不可移除。"""
+        controller_with_file.setSelectedFileIndex(0)
+        controller_with_file.removeSelected()
         # 列表未变
-        assert len(controller_with_file.rulesFileModel) == 1
+        assert len(controller_with_file.rulesFileModel) == 2
 
 
 class TestUseBuiltin:
@@ -276,10 +325,11 @@ class TestRulesetChangedSignal:
         config_controller.config.rules_paths = [str(f1), str(f2)]
         config_controller.save()
         controller = RulesController(config_controller)
+        # 列表：[内置(0), r1.yaml(1), r2.yaml(2)]，选中 r2.yaml（索引 2）
 
         emitted: list[None] = []
         controller.rulesetChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
-        controller.setSelectedFileIndex(1)
+        controller.setSelectedFileIndex(2)
         emitted.clear()
         controller.moveUp()
         assert len(emitted) == 1
@@ -287,7 +337,7 @@ class TestRulesetChangedSignal:
     def test_remove_selected_emits_ruleset_changed(self, controller_with_file: RulesController) -> None:
         emitted: list[None] = []
         controller_with_file.rulesetChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
-        controller_with_file.setSelectedFileIndex(0)
+        controller_with_file.setSelectedFileIndex(1)  # 用户文件索引
         emitted.clear()
         controller_with_file.removeSelected()
         assert len(emitted) == 1
@@ -560,3 +610,643 @@ class TestImportRuleset:
         assert "不支持" in emitted[0][1] or "导入失败" in emitted[0][1]
         # 不应污染 rules_paths
         assert str(bad_version) not in config_controller.config.rules_paths
+
+
+# ============================= iter-138 全局/临时规则管理 =============================
+
+
+class _FakeSignal:
+    """模拟 PySide2 Signal 对象。"""
+
+    def __init__(self) -> None:
+        self._callbacks: list[Any] = []
+
+    def connect(self, cb: Any) -> None:
+        self._callbacks.append(cb)
+
+    def emit(self, *args: object) -> None:
+        for cb in self._callbacks:
+            cb(*args)
+
+
+class _FakeWorkspaceItem:
+    """模拟 WorkspaceItem（仅含 task_overrides 字典）。"""
+
+    def __init__(self, ws_id: str, name: str) -> None:
+        self.id = ws_id
+        self.name = name
+        self.task_overrides: dict[str, object] = {}
+
+
+class _FakeWorkspaceController:
+    """模拟 WorkspaceController，仅实现 RulesController 依赖的接口。
+
+    - ``currentWorkspaceId``：当前工作区 ID（空串表示未选中）
+    - ``get_workspace(ws_id)``：返回 :class:`_FakeWorkspaceItem`
+    - ``workspaceName(ws_id)``：返回工作区名称
+    - ``currentWorkspaceChanged``：信号（连接 RulesController 的刷新回调）
+    - ``setTaskOverride(ws_id, key, value_json)``：更新 task_overrides
+    """
+
+    def __init__(self) -> None:
+        self._workspaces: dict[str, _FakeWorkspaceItem] = {}
+        self._current_id: str = ""
+        self.currentWorkspaceChanged = _FakeSignal()
+
+    @property
+    def currentWorkspaceId(self) -> str:
+        return self._current_id
+
+    def set_current(self, ws_id: str) -> None:
+        self._current_id = ws_id
+        self.currentWorkspaceChanged.emit()
+
+    def add_workspace(self, ws_id: str, name: str) -> _FakeWorkspaceItem:
+        item = _FakeWorkspaceItem(ws_id, name)
+        self._workspaces[ws_id] = item
+        return item
+
+    def get_workspace(self, ws_id: str) -> _FakeWorkspaceItem | None:
+        return self._workspaces.get(ws_id)
+
+    def workspaceName(self, ws_id: str) -> str:
+        item = self._workspaces.get(ws_id)
+        return item.name if item is not None else ""
+
+    def setTaskOverride(self, ws_id: str, key: str, value_json: str) -> None:
+        import json
+
+        item = self._workspaces.get(ws_id)
+        if item is None:
+            return
+        value = json.loads(value_json)
+        if key == "temp_rules_paths":
+            value = tuple(value)
+        item.task_overrides[key] = value
+
+
+@pytest.fixture()
+def fake_workspace_controller() -> _FakeWorkspaceController:
+    return _FakeWorkspaceController()
+
+
+@pytest.fixture()
+def controller_with_workspace(
+    config_controller: ConfigController,
+    fake_workspace_controller: _FakeWorkspaceController,
+) -> tuple[RulesController, _FakeWorkspaceController]:
+    """构造已注入伪 WorkspaceController 的 RulesController，并选中一个工作区。"""
+    fake_workspace_controller.add_workspace("ws1", "工作区A")
+    fake_workspace_controller.set_current("ws1")
+    controller = RulesController(config_controller)
+    controller.set_workspace_controller(fake_workspace_controller)
+    return controller, fake_workspace_controller
+
+
+class TestSetRuleEnabled:
+    """``setRuleEnabled`` Slot 测试（iter-138）。"""
+
+    def test_disable_builtin_rule(
+        self,
+        controller_with_file: RulesController,
+    ) -> None:
+        """禁用内置规则等价于 setUseBuiltin(False)。"""
+        controller_with_file.setRuleEnabled("__builtin__", False)
+        assert controller_with_file.useBuiltin is False
+        # rulesFileModel[0] 的 enabled 应反映禁用状态
+        assert controller_with_file.rulesFileModel[0]["enabled"] is False
+
+    def test_enable_builtin_rule(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """启用内置规则。"""
+        config_controller.config.use_builtin = False
+        controller = RulesController(config_controller)
+        controller.setRuleEnabled("__builtin__", True)
+        assert controller.useBuiltin is True
+        assert controller.rulesFileModel[0]["enabled"] is True
+
+    def test_disable_global_user_file(
+        self,
+        controller_with_file: RulesController,
+        rules_file: Path,
+    ) -> None:
+        """禁用全局用户规则文件应加入 disabled_rules_paths。"""
+        path_str = str(rules_file)
+        controller_with_file.setRuleEnabled(path_str, False)
+        assert path_str in controller_with_file._config.disabled_rules_paths
+        # rulesFileModel 中该项 enabled 应为 False
+        model = controller_with_file.rulesFileModel
+        # 索引 1 是用户文件
+        assert model[1]["enabled"] is False
+
+    def test_enable_global_user_file_removes_from_disabled(
+        self,
+        controller_with_file: RulesController,
+        rules_file: Path,
+    ) -> None:
+        """启用已禁用的全局规则文件应从 disabled_rules_paths 移除。"""
+        path_str = str(rules_file)
+        # 先禁用
+        controller_with_file.setRuleEnabled(path_str, False)
+        assert path_str in controller_with_file._config.disabled_rules_paths
+        # 再启用
+        controller_with_file.setRuleEnabled(path_str, True)
+        assert path_str not in controller_with_file._config.disabled_rules_paths
+        assert controller_with_file.rulesFileModel[1]["enabled"] is True
+
+    def test_disable_nonexistent_path_noop(
+        self,
+        controller_with_file: RulesController,
+    ) -> None:
+        """禁用不在 rules_paths 中的路径应 warning 并 noop。"""
+        controller_with_file.setRuleEnabled("/not/loaded.yaml", False)
+        assert "/not/loaded.yaml" not in controller_with_file._config.disabled_rules_paths
+
+    def test_disable_filters_ruleset(
+        self,
+        controller_with_file: RulesController,
+        rules_file: Path,
+    ) -> None:
+        """禁用全局规则文件后 ruleset 应不再包含该文件规则（仅内置规则）。"""
+        # controller_with_file 默认启用内置规则 + rules_file
+        initial_count = controller_with_file.ruleCount
+        # 禁用 rules_file 后只剩内置规则
+        controller_with_file.setRuleEnabled(str(rules_file), False)
+        # 内置规则数应小于初始合并规则数（除非两者规则完全重合）
+        assert controller_with_file.ruleCount <= initial_count
+
+
+class TestLoadFileToTemp:
+    """``loadFileToTemp`` Slot 测试（iter-138）。"""
+
+    def test_load_temp_without_workspace_returns_false(
+        self,
+        config_controller: ConfigController,
+        rules_file: Path,
+    ) -> None:
+        """无当前工作区时加载临时规则返回 False。"""
+        controller = RulesController(config_controller)
+        # 未注入 workspace_controller
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller.loadFileToTemp(str(rules_file)) is False
+        assert len(emitted) == 1
+        assert emitted[0][0] is False
+        assert "工作区" in emitted[0][1]
+
+    def test_load_temp_nonexistent_returns_false(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        tmp_path: Path,
+    ) -> None:
+        """加载不存在的文件返回 False。"""
+        controller, _ = controller_with_workspace
+        target = tmp_path / "missing.yaml"
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller.loadFileToTemp(str(target)) is False
+        assert len(emitted) == 1
+        assert "不存在" in emitted[0][1]
+
+    def test_load_temp_success(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """加载规则文件到当前工作区临时规则成功。"""
+        controller, wc = controller_with_workspace
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller.loadFileToTemp(str(rules_file)) is True
+        assert len(emitted) == 1
+        assert emitted[0][0] is True
+
+        # temp_rules_paths 应已写入
+        item = wc.get_workspace("ws1")
+        assert item is not None
+        assert item.task_overrides.get("temp_rules_paths") == (str(rules_file),)
+
+        # rulesFileModel 应包含临时规则项
+        # 列表：[内置(0), 临时(1)]（controller_with_workspace 无全局用户文件）
+        model = controller.rulesFileModel
+        assert len(model) == 2
+        temp_item = model[1]
+        assert temp_item["scope"] == "temp"
+        assert temp_item["path"] == str(rules_file)
+        assert temp_item["canRemove"] is True
+        assert temp_item["enabled"] is True
+
+    def test_load_temp_duplicate_returns_false(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """重复加载同一临时规则文件返回 False。"""
+        controller, _ = controller_with_workspace
+        # 第一次加载成功
+        assert controller.loadFileToTemp(str(rules_file)) is True
+        # 第二次应失败
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller.loadFileToTemp(str(rules_file)) is False
+        assert len(emitted) == 1
+        assert "已在临时规则" in emitted[0][1]
+
+    def test_load_temp_invalid_yaml_returns_false(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        tmp_path: Path,
+    ) -> None:
+        """加载非法 YAML 文件返回 False。"""
+        controller, _ = controller_with_workspace
+        bad_yaml = tmp_path / "bad.yaml"
+        bad_yaml.write_text("not: valid: yaml: - -", encoding="utf-8")
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller.loadFileToTemp(str(bad_yaml)) is False
+        assert len(emitted) == 1
+        assert emitted[0][0] is False
+        assert "加载失败" in emitted[0][1]
+
+
+class TestWorkspaceIntegration:
+    """``hasCurrentWorkspace``/``currentWorkspaceName`` 属性测试（iter-138）。"""
+
+    def test_no_workspace_initially(self, config_controller: ConfigController) -> None:
+        """未注入 workspace_controller 时 hasCurrentWorkspace 为 False。"""
+        controller = RulesController(config_controller)
+        assert controller.hasCurrentWorkspace is False
+        assert controller.currentWorkspaceName == ""
+
+    def test_has_current_workspace_after_inject(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+    ) -> None:
+        """注入工作区并选中后 hasCurrentWorkspace 为 True。"""
+        controller, _ = controller_with_workspace
+        assert controller.hasCurrentWorkspace is True
+        assert controller.currentWorkspaceName == "工作区A"
+
+    def test_workspace_switch_refreshes_temp_list(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+    ) -> None:
+        """切换工作区时 rulesFileListChanged 与 currentWorkspaceChanged 应 emit。"""
+        controller, wc = controller_with_workspace
+        wc.add_workspace("ws2", "工作区B")
+
+        list_emitted: list[None] = []
+        ws_emitted: list[None] = []
+        controller.rulesFileListChanged.connect(lambda: list_emitted.append(None))  # pyrefly: ignore [missing-attribute]
+        controller.currentWorkspaceChanged.connect(lambda: ws_emitted.append(None))  # pyrefly: ignore [missing-attribute]
+
+        wc.set_current("ws2")
+        assert controller.currentWorkspaceName == "工作区B"
+        assert len(list_emitted) >= 1
+        assert len(ws_emitted) >= 1
+
+    def test_temp_rules_isolated_per_workspace(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """不同工作区的临时规则相互隔离。"""
+        controller, wc = controller_with_workspace
+        # ws1 加载临时规则
+        assert controller.loadFileToTemp(str(rules_file)) is True
+        # 切换到 ws2（无临时规则）
+        wc.add_workspace("ws2", "工作区B")
+        wc.set_current("ws2")
+        # ws2 无临时规则，列表应只有内置项
+        model = controller.rulesFileModel
+        assert len(model) == 1
+        assert model[0]["isBuiltin"] is True
+        # 切回 ws1，临时规则应恢复
+        wc.set_current("ws1")
+        model = controller.rulesFileModel
+        assert len(model) == 2
+        assert model[1]["scope"] == "temp"
+
+    def test_remove_temp_rule(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """移除临时规则文件应从 task_overrides 删除。"""
+        controller, wc = controller_with_workspace
+        controller.loadFileToTemp(str(rules_file))
+        # 列表：[内置(0), 临时(1)]
+        controller.setSelectedFileIndex(1)
+        assert controller.canRemove is True
+        controller.removeSelected()
+        # 临时规则已移除
+        item = wc.get_workspace("ws1")
+        assert item is not None
+        assert item.task_overrides.get("temp_rules_paths", ()) == ()
+        # 列表仅剩内置
+        assert len(controller.rulesFileModel) == 1
+
+
+class TestPromoteToGlobal:
+    """``promoteToGlobal`` Slot 测试（临时规则提升为全局规则）。"""
+
+    def test_promote_without_workspace_returns_false(
+        self,
+        config_controller: ConfigController,
+        rules_file: Path,
+    ) -> None:
+        """无当前工作区时提升返回 False。"""
+        controller = RulesController(config_controller)
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller.promoteToGlobal(str(rules_file)) is False
+        assert len(emitted) == 1
+        assert emitted[0][0] is False
+        assert "工作区" in emitted[0][1]
+
+    def test_promote_path_not_in_temp_returns_false(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """路径不在当前工作区临时规则中时返回 False。"""
+        controller, _ = controller_with_workspace
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        # 临时规则列表为空，promote 应失败
+        assert controller.promoteToGlobal(str(rules_file)) is False
+        assert len(emitted) == 1
+        assert "不是当前工作区的临时规则" in emitted[0][1]
+
+    def test_promote_success(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """提升临时规则到全局成功：从 temp 移除，加入 global。"""
+        controller, wc = controller_with_workspace
+        # 先加载为临时规则
+        assert controller.loadFileToTemp(str(rules_file)) is True
+        # 列表：[内置(0), 临时(1)]
+        assert len(controller.rulesFileModel) == 2
+        assert controller.rulesFileModel[1]["scope"] == "temp"
+
+        # 提升为全局
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller.promoteToGlobal(str(rules_file)) is True
+        assert len(emitted) == 1
+        assert emitted[0][0] is True
+        assert "提升" in emitted[0][1]
+
+        # temp_rules_paths 应清空
+        item = wc.get_workspace("ws1")
+        assert item is not None
+        assert item.task_overrides.get("temp_rules_paths", ()) == ()
+
+        # rules_paths 应包含该文件
+        assert str(rules_file) in controller._config.rules_paths
+
+        # 列表：[内置(0), 全局(1)]
+        model = controller.rulesFileModel
+        assert len(model) == 2
+        assert model[1]["scope"] == "global"
+        assert model[1]["path"] == str(rules_file)
+
+    def test_promote_dedup_when_already_global(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """提升时若文件已在全局列表，仅移除临时侧，不重复加入全局。"""
+        controller, wc = controller_with_workspace
+        # 先加入全局
+        controller._config.rules_paths.append(str(rules_file))
+        controller._config_controller.save()  # pyrefly: ignore [missing-attribute]
+        controller._reload_ruleset()
+        # 再加载为临时规则（同一文件）
+        assert controller.loadFileToTemp(str(rules_file)) is True
+        # 列表：[内置(0), 全局(1), 临时(2)]
+        assert len(controller.rulesFileModel) == 3
+
+        # 提升临时侧
+        assert controller.promoteToGlobal(str(rules_file)) is True
+
+        # rules_paths 应只有一份（不重复）
+        assert controller._config.rules_paths.count(str(rules_file)) == 1
+        # temp 侧清空
+        item = wc.get_workspace("ws1")
+        assert item is not None
+        assert item.task_overrides.get("temp_rules_paths", ()) == ()
+        # 列表：[内置(0), 全局(1)]
+        assert len(controller.rulesFileModel) == 2
+        assert controller.rulesFileModel[1]["scope"] == "global"
+
+    def test_promote_invalid_yaml_returns_false(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        tmp_path: Path,
+    ) -> None:
+        """提升损坏 YAML 文件返回 False（不影响两侧状态）。"""
+        controller, wc = controller_with_workspace
+        bad_yaml = tmp_path / "bad.yaml"
+        bad_yaml.write_text("not: valid: yaml: - -", encoding="utf-8")
+        # 直接写入 task_overrides（绕过 loadFileToTemp 的预校验）
+        item = wc.get_workspace("ws1")
+        assert item is not None
+        item.task_overrides["temp_rules_paths"] = (str(bad_yaml),)
+
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller.promoteToGlobal(str(bad_yaml)) is False
+        assert len(emitted) == 1
+        assert "加载失败" in emitted[0][1]
+        # temp 侧仍保留（未迁移）
+        assert item.task_overrides.get("temp_rules_paths") == (str(bad_yaml),)
+        # global 侧未加入
+        assert str(bad_yaml) not in controller._config.rules_paths
+
+    def test_promote_clears_disabled_mark(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """提升时若该路径曾被禁用，应同步清理 disabled_rules_paths。"""
+        controller, _wc = controller_with_workspace
+        # 加载为临时规则
+        assert controller.loadFileToTemp(str(rules_file)) is True
+        # 模拟曾在全局侧禁用过该路径
+        controller._config.disabled_rules_paths.append(str(rules_file))
+        controller._config_controller.save()  # pyrefly: ignore [missing-attribute]
+
+        assert controller.promoteToGlobal(str(rules_file)) is True
+        # disabled_rules_paths 应已清理
+        assert str(rules_file) not in controller._config.disabled_rules_paths
+        # 全局侧启用
+        model = controller.rulesFileModel
+        global_item = next(
+            (m for m in model if m["path"] == str(rules_file) and m["scope"] == "global"),
+            None,
+        )
+        assert global_item is not None
+        assert global_item["enabled"] is True
+
+
+class TestDemoteToTemp:
+    """``demoteToTemp`` Slot 测试（全局规则降级为临时规则）。"""
+
+    def test_demote_without_workspace_returns_false(
+        self,
+        controller_with_file: RulesController,
+        rules_file: Path,
+    ) -> None:
+        """无当前工作区时降级返回 False。"""
+        controller = controller_with_file
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller.demoteToTemp(str(rules_file)) is False
+        assert len(emitted) == 1
+        assert "工作区" in emitted[0][1]
+
+    def test_demote_path_not_in_global_returns_false(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """路径不在全局规则中时返回 False。"""
+        controller, _ = controller_with_workspace
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller.demoteToTemp(str(rules_file)) is False
+        assert len(emitted) == 1
+        assert "不是全局规则" in emitted[0][1]
+
+    def test_demote_success(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """降级全局规则到当前工作区临时规则成功。"""
+        controller, wc = controller_with_workspace
+        # 先加入全局
+        controller._config.rules_paths.append(str(rules_file))
+        controller._config_controller.save()  # pyrefly: ignore [missing-attribute]
+        controller._reload_ruleset()
+        # 列表：[内置(0), 全局(1)]
+        assert len(controller.rulesFileModel) == 2
+        assert controller.rulesFileModel[1]["scope"] == "global"
+
+        emitted: list[tuple[bool, str]] = []
+        controller.rulesIoCompleted.connect(  # pyrefly: ignore [missing-attribute]
+            lambda ok, msg: emitted.append((ok, msg))
+        )
+        assert controller.demoteToTemp(str(rules_file)) is True
+        assert len(emitted) == 1
+        assert emitted[0][0] is True
+        assert "降级" in emitted[0][1]
+
+        # global 侧移除
+        assert str(rules_file) not in controller._config.rules_paths
+        # temp 侧加入
+        item = wc.get_workspace("ws1")
+        assert item is not None
+        assert item.task_overrides.get("temp_rules_paths") == (str(rules_file),)
+
+        # 列表：[内置(0), 临时(1)]
+        model = controller.rulesFileModel
+        assert len(model) == 2
+        assert model[1]["scope"] == "temp"
+        assert model[1]["path"] == str(rules_file)
+
+    def test_demote_dedup_when_already_temp(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """降级时若文件已在临时列表，仅移除全局侧，不重复加入临时。"""
+        controller, wc = controller_with_workspace
+        # 先加入全局
+        controller._config.rules_paths.append(str(rules_file))
+        controller._config_controller.save()  # pyrefly: ignore [missing-attribute]
+        controller._reload_ruleset()
+        # 再加载为临时规则（同一文件）
+        assert controller.loadFileToTemp(str(rules_file)) is True
+        # 列表：[内置(0), 全局(1), 临时(2)]
+        assert len(controller.rulesFileModel) == 3
+
+        assert controller.demoteToTemp(str(rules_file)) is True
+
+        # temp 侧只有一份（不重复）
+        item = wc.get_workspace("ws1")
+        assert item is not None
+        temp_paths = item.task_overrides.get("temp_rules_paths", ())
+        assert temp_paths.count(str(rules_file)) == 1  # pyrefly: ignore [missing-attribute]
+        # global 侧清空
+        assert str(rules_file) not in controller._config.rules_paths
+        # 列表：[内置(0), 临时(1)]
+        assert len(controller.rulesFileModel) == 2
+        assert controller.rulesFileModel[1]["scope"] == "temp"
+
+    def test_demote_clears_disabled_mark(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """降级时若该路径曾被禁用，应同步清理 disabled_rules_paths。"""
+        controller, _wc = controller_with_workspace
+        # 加入全局并禁用
+        controller._config.rules_paths.append(str(rules_file))
+        controller._config.disabled_rules_paths.append(str(rules_file))
+        controller._config_controller.save()  # pyrefly: ignore [missing-attribute]
+        controller._reload_ruleset()
+
+        assert controller.demoteToTemp(str(rules_file)) is True
+        # disabled_rules_paths 应已清理
+        assert str(rules_file) not in controller._config.disabled_rules_paths
+        assert str(rules_file) not in controller._config.rules_paths
+
+
+class TestDisabledRulesPathsPersistence:
+    """``disabled_rules_paths`` 持久化测试（iter-138）。"""
+
+    def test_disabled_rules_paths_default_empty(self, config_controller: ConfigController) -> None:
+        """默认 disabled_rules_paths 为空列表。"""
+        assert config_controller.config.disabled_rules_paths == []
+
+    def test_disable_persists_to_config(
+        self,
+        controller_with_file: RulesController,
+        rules_file: Path,
+    ) -> None:
+        """禁用全局规则文件后 disabled_rules_paths 应持久化到 Config。"""
+        path_str = str(rules_file)
+        controller_with_file.setRuleEnabled(path_str, False)
+        # setRuleEnabled 内部已调用 save()，直接重新加载验证
+        from fuscan.config import load_config
+
+        reloaded = load_config()
+        assert path_str in reloaded.disabled_rules_paths

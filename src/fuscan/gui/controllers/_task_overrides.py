@@ -16,6 +16,7 @@
 - :func:`effective_ignore_dirs`：任务级覆盖优先的 ignore_dirs
 - :func:`effective_rules_paths`：任务级覆盖优先的 rules_paths
 - :func:`effective_use_builtin`：任务级覆盖优先的 use_builtin
+- :func:`effective_temp_rules_paths`：任务级临时规则文件路径（叠加在全局规则之上）
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ __all__ = [
     "effective_max_workers",
     "effective_rules_paths",
     "effective_scan_archives",
+    "effective_temp_rules_paths",
     "effective_use_builtin",
 ]
 
@@ -102,3 +104,19 @@ def effective_use_builtin(overrides: dict[str, object], config: Config) -> bool:
     if isinstance(value, bool):
         return value
     return config.use_builtin
+
+
+def effective_temp_rules_paths(overrides: dict[str, object]) -> tuple[str, ...]:
+    """任务级临时规则文件路径（叠加在全局规则之上，不覆盖）。
+
+    与 :func:`effective_rules_paths` 不同，临时规则不是对全局 rules_paths
+    的覆盖，而是额外追加的规则文件——扫描时与全局启用的规则文件合并。
+
+    :return: ``tuple[str, ...]``，临时规则文件路径元组。未设置时返回空元组。
+        与 :func:`effective_rules_paths` 一致，此处不过滤不存在的文件——
+        过滤逻辑由 :meth:`ScanController._compute_effective_ruleset` 处理。
+    """
+    value = overrides.get("temp_rules_paths")
+    if isinstance(value, tuple):
+        return value
+    return ()

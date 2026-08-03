@@ -5,9 +5,14 @@ import QtQuick.Dialogs 1.3 as Dialogs
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
 
-// 规则面板：全局规则配置区
+// 规则面板：全局规则 + 当前工作区临时规则配置区
 // 从 RulesPage.qml 提取，供 HomePage 内嵌与 RulesPage 独立页共用。
 // 包含：标题栏（标题 + 导入/导出 + 规则数）+ 左右分栏（规则文件列表 + 规则列表）
+//
+// 规则文件列表合并展示三类：
+//   1. 内置规则（固定第一行，可勾选启用/禁用，不可移除）
+//   2. 全局规则文件（可勾选启用/禁用，可移除，可上/下移排序）
+//   3. 临时规则文件（仅当前工作区生效，可移除，不可禁用/排序）
 Item {
     id: rulesPanel
     property ThemeController theme: Theme
@@ -18,10 +23,10 @@ Item {
     property bool collapsible: false
     property bool collapsed: false
 
-    // 规则文件选择对话框（QML FileDialog，替代 QWidget QFileDialog）
+    // 规则文件选择对话框（加载到全局规则）
     Dialogs.FileDialog {
         id: rulesFileDialog
-        title: "选择规则文件"
+        title: "选择规则文件（加载到全局）"
         nameFilters: ["YAML 文件 (*.yaml *.yml)", "所有文件 (*.*)"]
         onAccepted: {
             var pathStr = rulesFileDialog.fileUrl.toString()
@@ -30,6 +35,22 @@ Item {
                 pathStr = decodeURIComponent(pathStr.substring(8))
             }
             rulesController.loadFileFromPath(pathStr)
+        }
+    }
+
+    // 规则文件选择对话框（加载到当前工作区临时规则）
+    Dialogs.FileDialog {
+        id: tempRulesFileDialog
+        title: "选择规则文件（加载到临时规则" +
+               (rulesController.hasCurrentWorkspace ? " · " + rulesController.currentWorkspaceName : "")
+               + "）"
+        nameFilters: ["YAML 文件 (*.yaml *.yml)", "所有文件 (*.*)"]
+        onAccepted: {
+            var pathStr = tempRulesFileDialog.fileUrl.toString()
+            if (pathStr.startsWith("file:///")) {
+                pathStr = decodeURIComponent(pathStr.substring(8))
+            }
+            rulesController.loadFileToTemp(pathStr)
         }
     }
 
@@ -112,20 +133,40 @@ Item {
         anchors.fill: parent
         spacing: 12
 
-        // 标题行：标题 + 导入/导出 + 规则数 + 展开/收起按钮
+        // 标题行：标题 + 加载到全局/临时 + 导入/导出 + 规则数 + 展开/收起按钮
+        // 加载按钮从原底部工具栏移到标题栏，避免在 SettingsPage 中被白名单挤压不可见
         RowLayout {
             Layout.fillWidth: true
             Label {
-                text: "全局规则"
+                text: "规则配置"
                 font.pixelSize: 16
                 font.bold: true
                 color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
             }
             Item { Layout.fillWidth: true }
-            // 收起态隐藏导入/导出按钮，标题栏更紧凑
+            // 收起态隐藏操作按钮，标题栏更紧凑
+            IconButton {
+                iconSource: "qrc:/icons/load_list.svg"
+                text: "加载到全局"
+                tooltip: "从文件选择规则文件加载到全局规则（所有工作区共享）"
+                accent: "secondary"
+                visible: !rulesPanel.collapsed
+                onClicked: rulesFileDialog.open()
+            }
+            IconButton {
+                iconSource: "qrc:/icons/load_list.svg"
+                text: "加载到临时"
+                tooltip: rulesController.hasCurrentWorkspace
+                    ? "从文件选择规则文件加载到当前工作区临时规则（" + rulesController.currentWorkspaceName + "）"
+                    : "请先在首页选择工作区"
+                accent: "ghost"
+                enabled: rulesController.hasCurrentWorkspace
+                visible: !rulesPanel.collapsed
+                onClicked: tempRulesFileDialog.open()
+            }
             IconButton {
                 text: "导入"
-                tooltip: "从 YAML/JSON 文件导入规则集"
+                tooltip: "从 YAML/JSON 文件导入规则集到全局规则（带版本兼容性校验）"
                 accent: "ghost"
                 visible: !rulesPanel.collapsed
                 onClicked: importFileDialog.open()
@@ -151,7 +192,7 @@ Item {
                     ? "qrc:/icons/down_arrow.svg"
                     : "qrc:/icons/up_arrow.svg"
                 text: rulesPanel.collapsed ? "展开" : "收起"
-                tooltip: rulesPanel.collapsed ? "展开全局规则配置" : "收起全局规则配置"
+                tooltip: rulesPanel.collapsed ? "展开规则配置" : "收起规则配置"
                 accent: "ghost"
                 onClicked: rulesPanel.collapsed = !rulesPanel.collapsed
             }
@@ -164,7 +205,7 @@ Item {
             spacing: 12
             visible: !rulesPanel.collapsed
 
-            // ---------- 左侧：规则文件列表 ----------
+            // ---------- 左侧：规则文件列表（内置 + 全局 + 临时） ----------
             Rectangle {
                 Layout.fillHeight: true
                 Layout.fillWidth: true
@@ -186,17 +227,21 @@ Item {
                         color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                     }
 
-                    // 内置规则勾选
-                    RowLayout {
+                    // 临时规则区标题：显示当前工作区名或提示
+                    Label {
                         Layout.fillWidth: true
-                        CheckBox {
-                            text: "内置通用规则"
-                            checked: rulesController.useBuiltin
-                            onCheckedChanged: rulesController.setUseBuiltin(checked)
-                        }
+                        text: rulesController.hasCurrentWorkspace
+                            ? "临时规则 · " + rulesController.currentWorkspaceName
+                            : "临时规则（请先在首页选择工作区）"
+                        font.pixelSize: 11
+                        color: rulesController.hasCurrentWorkspace
+                            ? (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
+                            : theme.colorDanger
+                        font.italic: !rulesController.hasCurrentWorkspace
+                        visible: !rulesPanel.collapsed
                     }
 
-                    // 规则文件列表
+                    // 规则文件列表（合并内置 + 全局 + 临时）
                     ListView {
                         id: rulesFileList
                         Layout.fillWidth: true
@@ -209,16 +254,11 @@ Item {
                         onCurrentIndexChanged: rulesController.setSelectedFileIndex(currentIndex)
                         delegate: ItemDelegate {
                             width: rulesFileList.width
-                            height: 36
+                            height: 40
                             // QVariantList of dict 通过 modelData 访问字段
-                            text: modelData.fileName
-                            font.pixelSize: 12
-                            // 选中态文字加粗（在 delegate 上设置，contentItem
-                            // 通过 parent.font 继承，避免在 Label 上同时设 font 与 font.bold
-                            // 触发 "Property has already been assigned a value"）
-                            font.bold: ListView.isCurrentItem
+                            // 选中态文字加粗、主色高亮
                             highlighted: ListView.isCurrentItem
-                            // 文件缺失时禁用选中（仍可点击但视觉提示不可用）
+                            // 文件缺失时禁用（内置规则恒存在）
                             enabled: modelData.exists
                             // ItemDelegate 在 Qt Quick Controls 2 不会自动设置
                             // ListView.currentIndex，需在 onClicked 显式同步选中
@@ -247,29 +287,68 @@ Item {
                                 }
                             }
                             contentItem: RowLayout {
-                                spacing: 6
+                                spacing: 8
+
+                                // 启用/禁用勾选框
+                                // 临时规则恒启用且不可禁用（CheckBox 仅显示状态，不响应点击）
+                                CheckBox {
+                                    checked: modelData.enabled
+                                    enabled: modelData.scope === "global"
+                                    onClicked: {
+                                        rulesController.setRuleEnabled(
+                                            modelData.path, checked)
+                                    }
+                                    Layout.alignment: Qt.AlignVCenter
+                                }
+
+                                // 文件名
                                 Label {
-                                    text: parent.parent.text
-                                    font: parent.parent.font
-                                    color: parent.parent.highlighted
+                                    text: modelData.fileName
+                                    font.pixelSize: 12
+                                    font.bold: ListView.isCurrentItem
+                                    color: ListView.isCurrentItem
                                         ? theme.colorPrimary
                                         : (modelData.exists
                                             ? (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
                                             : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary))
                                     elide: Text.ElideMiddle
-                                    verticalAlignment: Text.AlignVCenter
                                     Layout.fillWidth: true
-                                    leftPadding: 12
+                                    verticalAlignment: Text.AlignVCenter
                                 }
+
+                                // 作用域标签（内置/全局/临时）
+                                Rectangle {
+                                    radius: 4
+                                    height: 18
+                                    width: scopeLabel.implicitWidth + 12
+                                    color: modelData.isBuiltin
+                                        ? theme.colorPrimary
+                                        : (modelData.scope === "temp"
+                                            ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
+                                            : (theme.isDark ? theme.colorBorderDark : theme.colorBorder))
+                                    Layout.alignment: Qt.AlignVCenter
+                                    Label {
+                                        id: scopeLabel
+                                        anchors.centerIn: parent
+                                        text: modelData.isBuiltin
+                                            ? "内置"
+                                            : (modelData.scope === "temp" ? "临时" : "全局")
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        color: modelData.isBuiltin
+                                            ? "#FFFFFF"
+                                            : (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
+                                    }
+                                }
+
                                 // 缺失文件显示"缺失"标记
                                 Rectangle {
                                     visible: !modelData.exists
                                     radius: 4
-                                    height: 16
-                                    width: missingLabel.implicitWidth + 8
+                                    height: 18
+                                    width: missingLabel.implicitWidth + 12
                                     color: theme.colorDanger
                                     Layout.alignment: Qt.AlignVCenter
-                                    Layout.rightMargin: 12
                                     Label {
                                         id: missingLabel
                                         anchors.centerIn: parent
@@ -279,25 +358,67 @@ Item {
                                         color: "#FFFFFF"
                                     }
                                 }
-                                Item { Layout.fillWidth: !modelData.exists; Layout.rightMargin: 12 }
+
+                                // 作用域迁移按钮（条目级关联操作）
+                                // - 临时规则：显示"提升为全局"，点击 promoteToGlobal
+                                // - 全局规则且当前有工作区：显示"降级为临时"，点击 demoteToTemp
+                                // - 内置规则：不显示
+                                IconButton {
+                                    text: modelData.scope === "temp" ? "提升为全局" : "降级为临时"
+                                    tooltip: modelData.scope === "temp"
+                                        ? "将该临时规则提升为全局规则（所有工作区共享）"
+                                        : "将该全局规则降级为当前工作区临时规则（" + rulesController.currentWorkspaceName + "）"
+                                    accent: "ghost"
+                                    // 临时规则可提升（需有当前工作区，临时规则本身就来自当前工作区所以一定有）
+                                    // 全局非内置规则可降级（需有当前工作区）
+                                    visible: !modelData.isBuiltin && (
+                                        modelData.scope === "temp"
+                                        || (modelData.scope === "global" && rulesController.hasCurrentWorkspace)
+                                    )
+                                    enabled: modelData.exists
+                                    Layout.alignment: Qt.AlignVCenter
+                                    onClicked: {
+                                        rulesFileList.currentIndex = index
+                                        if (modelData.scope === "temp") {
+                                            rulesController.promoteToGlobal(modelData.path)
+                                        } else {
+                                            rulesController.demoteToTemp(modelData.path)
+                                        }
+                                    }
+                                }
+
+                                // 移除按钮（内置规则不显示）
+                                IconButton {
+                                    iconSource: "qrc:/icons/close.svg"
+                                    tooltip: "移除该规则文件"
+                                    accent: "ghost"
+                                    visible: modelData.canRemove
+                                    Layout.alignment: Qt.AlignVCenter
+                                    Layout.rightMargin: 4
+                                    onClicked: {
+                                        rulesFileList.currentIndex = index
+                                        rulesController.removeSelected()
+                                    }
+                                }
                             }
                         }
                     }
 
-                    // 操作按钮
+                    // 操作按钮（仅作用于全局规则文件排序与移除）
+                    // 加载按钮已移至标题栏，避免在 SettingsPage 中被挤压不可见
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 4
                         IconButton {
                             iconSource: "qrc:/icons/up_arrow.svg"
-                            tooltip: "上移"
+                            tooltip: "上移选中全局规则文件"
                             accent: "ghost"
                             enabled: rulesController.canMoveUp
                             onClicked: rulesController.moveUp()
                         }
                         IconButton {
                             iconSource: "qrc:/icons/down_arrow.svg"
-                            tooltip: "下移"
+                            tooltip: "下移选中全局规则文件"
                             accent: "ghost"
                             enabled: rulesController.canMoveDown
                             onClicked: rulesController.moveDown()
@@ -310,12 +431,11 @@ Item {
                             onClicked: rulesController.removeSelected()
                         }
                         Item { Layout.fillWidth: true }
-                        IconButton {
-                            iconSource: "qrc:/icons/load_list.svg"
-                            text: "加载"
-                            tooltip: "加载规则文件"
-                            accent: "ghost"
-                            onClicked: rulesFileDialog.open()
+                        Label {
+                            text: "选中规则文件后可在条目内迁移作用域"
+                            font.pixelSize: 10
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            font.italic: true
                         }
                     }
                 }

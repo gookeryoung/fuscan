@@ -1,25 +1,35 @@
 """规则控制器：QML ↔ RuleSet/规则文件管理桥接。
 
-管理规则文件路径列表、内置规则勾选、规则集加载与合并。规则列表通过
-:class:`RuleListModel` 暴露给 QML ``ListView`` 绑定，规则文件列表通过
-``@Property`` 暴露简单字符串列表（条目数少，无需 Model）。
+管理全局规则与任务级临时规则两类规则文件：
 
-规则配置改为全局模式——所有工作区共享同一规则集，直接读写
-:class:`Config` 的 ``rules_paths``/``use_builtin``，影响全局默认规则。
-不再支持工作区绑定编辑。
+- **全局规则**：持久化到 :class:`Config`，所有工作区共享。
+  内置规则归入全局规则列表（默认启用、不可移除、可禁用）；
+  用户加载的全局规则文件可勾选启用/禁用、可移除。
+- **临时规则**：任务级覆盖，仅对当前选中工作区生效，叠加在全局规则之上。
+  通过 ``task_overrides["temp_rules_paths"]`` 持久化到工作区配置。
+
+规则列表通过 :class:`RuleListModel` 暴露给 QML ``ListView`` 绑定，
+规则文件列表（全局 + 临时合并）通过 ``@Property`` 暴露 ``QVariantList``。
 
 公共 API：
 
 - :class:`RulesController`：``QObject`` 子类
-- :meth:`RulesController.load_file_from_path`：加载规则文件（QML FileDialog 选定后调用）
-- :meth:`RulesController.move_up` / :meth:`move_down` / :meth:`remove_selected`：顺序管理
-- :meth:`RulesController.set_use_builtin`：勾选内置规则
-- :meth:`RulesController.export_ruleset`：导出当前规则集到 YAML/JSON
-- :meth:`RulesController.import_ruleset`：从 YAML/JSON 文件导入规则
+- :meth:`RulesController.loadFileFromPath`：加载规则文件到全局
+- :meth:`RulesController.loadFileToTemp`：加载规则文件到当前工作区临时规则
+- :meth:`RulesController.moveUp` / :meth:`moveDown`：全局规则文件顺序管理
+- :meth:`RulesController.removeSelected`：移除选中规则文件（按作用域分派）
+- :meth:`RulesController.setRuleEnabled`：勾选启用/禁用全局规则
+- :meth:`RulesController.setUseBuiltin`：勾选内置规则（等价于 setRuleEnabled("__builtin__"))
+- :meth:`RulesController.promoteToGlobal`：把当前工作区临时规则提升为全局规则
+- :meth:`RulesController.demoteToTemp`：把全局规则降级为当前工作区临时规则
+- :meth:`RulesController.exportRuleset`：导出当前规则集到 YAML/JSON
+- :meth:`RulesController.importRuleset`：从 YAML/JSON 文件导入规则
+- :meth:`RulesController.set_workspace_controller`：延迟注入工作区控制器
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -44,9 +54,12 @@ __all__ = ["RulesController"]
 
 logger = logging.getLogger(__name__)
 
+# 内置规则在 rulesFileModel 中的虚拟路径标识
+BUILTIN_PATH_MARKER = "__builtin__"
+
 
 class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
-    """规则控制器（全局模式）。
+    """规则控制器（全局 + 临时模式）。
 
     :param config_controller: 配置控制器（共享 :class:`Config` 实例）
     :param parent: 父 QObject
@@ -59,6 +72,8 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
     # 规则导入/导出操作结果通知（QML 据此显示 toast/对话框）
     # 参数：成功 True/False，消息文本
     rulesIoCompleted = Signal(bool, str)
+    # 当前工作区变更（切换或其临时规则变更）时触发，QML 据此刷新临时规则区
+    currentWorkspaceChanged = Signal()
 
     def __init__(self, config_controller: object, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -67,24 +82,70 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._ruleset: RuleSet | None = None
         self._rule_model: RuleListModel = RuleListModel(self)
         self._selected_file_index: int = -1
+        # 延迟注入的 WorkspaceController 引用（app_controller 构造后注入）
+        self._workspace_controller: object | None = None
         # 初始加载规则集
         self._reload_ruleset()
         self._rule_model.set_ruleset(self._ruleset)
 
+    # ----------------------------- 延迟注入 -----------------------------
+
+    def set_workspace_controller(self, wc: object) -> None:
+        """延迟注入 :class:`WorkspaceController`（避免构造期循环依赖）。
+
+        注入后连接 ``currentWorkspaceChanged`` 信号，使 RulesController
+        在当前工作区切换时自动刷新临时规则列表。
+        """
+        self._workspace_controller = wc
+        wc.currentWorkspaceChanged.connect(self._on_current_workspace_changed)  # pyrefly: ignore [missing-attribute]
+
+    def _on_current_workspace_changed(self) -> None:
+        """当前工作区切换时刷新临时规则列表（触发 rulesFileListChanged）。"""
+        self._selected_file_index = -1
+        self.rulesFileListChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.selectionChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.currentWorkspaceChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    # ----------------------------- 内部属性 -----------------------------
+
     @property
     def ruleset(self) -> RuleSet | None:
-        """当前规则集（供 ScanController 读取）。"""
+        """当前全局规则集（供 ScanController 读取，已过滤禁用的全局规则文件）。"""
         return self._ruleset
 
     @property
     def rules_paths(self) -> list[Path]:
-        """规则文件路径列表（供 ScanController 构造缓存上下文）。"""
-        return [Path(p) for p in self._config.rules_paths if Path(p).exists()]
+        """启用的全局规则文件路径列表（供 ScanController 构造缓存上下文）。
+
+        已过滤禁用的文件（``disabled_rules_paths``）和不存在的文件。
+        """
+        return [
+            Path(p) for p in self._config.rules_paths if Path(p).exists() and p not in self._config.disabled_rules_paths
+        ]
 
     @property
     def use_builtin(self) -> bool:
         """是否启用内置规则。"""
         return self._config.use_builtin
+
+    def _current_ws_id(self) -> str:
+        """当前选中工作区 ID（空串表示未选中）。"""
+        if self._workspace_controller is None:
+            return ""
+        return self._workspace_controller.currentWorkspaceId  # pyrefly: ignore [missing-attribute]
+
+    def _current_temp_paths(self) -> tuple[str, ...]:
+        """当前工作区的临时规则文件路径元组。"""
+        ws_id = self._current_ws_id()
+        if not ws_id or self._workspace_controller is None:
+            return ()
+        item = self._workspace_controller.get_workspace(ws_id)  # pyrefly: ignore [missing-attribute]
+        if item is None:
+            return ()
+        value = item.task_overrides.get("temp_rules_paths")
+        if isinstance(value, tuple):
+            return value
+        return ()
 
     # ----------------------------- QML 属性 -----------------------------
 
@@ -116,16 +177,77 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self.useBuiltinChanged.emit()  # pyrefly: ignore [missing-attribute]
             self._reload_ruleset()
             self._rule_model.set_ruleset(self._ruleset)
+            self.rulesFileListChanged.emit()  # pyrefly: ignore [missing-attribute]
             self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    @Property(bool, notify=currentWorkspaceChanged)  # pyrefly: ignore [not-callable]
+    def hasCurrentWorkspace(self) -> bool:
+        """是否有当前选中工作区（决定临时规则区是否可操作）。"""
+        return bool(self._current_ws_id())
+
+    @Property(str, notify=currentWorkspaceChanged)  # pyrefly: ignore [not-callable]
+    def currentWorkspaceName(self) -> str:
+        """当前工作区名称（供 QML 临时规则区标题显示）。"""
+        ws_id = self._current_ws_id()
+        if not ws_id or self._workspace_controller is None:
+            return ""
+        return self._workspace_controller.workspaceName(ws_id)  # pyrefly: ignore [missing-attribute]
 
     @Property("QVariantList", notify=rulesFileListChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
     def rulesFileModel(self) -> list[dict[str, object]]:
-        """规则文件列表（QML 直接 ListView 绑定）。
+        """规则文件列表（全局 + 临时合并，QML 直接 ListView 绑定）。
 
-        每项包含 ``fileName``/``path``/``exists`` 三个字段，
-        QML delegate 据此显示「缺失」标记（文件被删除/移动后仍保留在配置中）。
+        列表顺序：内置规则（固定第一项） → 全局规则文件 → 临时规则文件。
+
+        每项字段：
+        - ``fileName``：显示名（内置规则为"内置通用规则"）
+        - ``path``：文件路径（内置规则为 ``"__builtin__"`` 标识）
+        - ``exists``：文件是否存在（内置规则恒为 True）
+        - ``scope``：作用域，``"global"`` 或 ``"temp"``
+        - ``isBuiltin``：是否内置规则
+        - ``enabled``：是否启用（临时规则恒为 True，仅全局规则可禁用）
+        - ``canRemove``：是否可移除（内置规则为 False，其余为 True）
         """
-        return [{"fileName": Path(p).name, "path": p, "exists": Path(p).exists()} for p in self._config.rules_paths]
+        items: list[dict[str, object]] = []
+        # 内置规则（固定第一项）
+        items.append(
+            {
+                "fileName": "内置通用规则",
+                "path": BUILTIN_PATH_MARKER,
+                "exists": True,
+                "scope": "global",
+                "isBuiltin": True,
+                "enabled": self._config.use_builtin,
+                "canRemove": False,
+            }
+        )
+        # 全局规则文件
+        for p in self._config.rules_paths:
+            items.append(
+                {
+                    "fileName": Path(p).name,
+                    "path": p,
+                    "exists": Path(p).exists(),
+                    "scope": "global",
+                    "isBuiltin": False,
+                    "enabled": p not in self._config.disabled_rules_paths,
+                    "canRemove": True,
+                }
+            )
+        # 临时规则文件（当前工作区）
+        for p in self._current_temp_paths():
+            items.append(
+                {
+                    "fileName": Path(p).name,
+                    "path": p,
+                    "exists": Path(p).exists(),
+                    "scope": "temp",
+                    "isBuiltin": False,
+                    "enabled": True,
+                    "canRemove": True,
+                }
+            )
+        return items
 
     @Property(int, notify=selectionChanged)  # pyrefly: ignore [not-callable]
     def selectedFileIndex(self) -> int:
@@ -139,20 +261,40 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._selected_file_index = index
             self.selectionChanged.emit()  # pyrefly: ignore [missing-attribute]
 
+    def _selected_item(self) -> dict[str, object] | None:
+        """当前选中项的 dict（无选中返回 None）。"""
+        model = self.rulesFileModel
+        if 0 <= self._selected_file_index < len(model):
+            return model[self._selected_file_index]
+        return None
+
     @Property(bool, notify=selectionChanged)  # pyrefly: ignore [not-callable]
     def canMoveUp(self) -> bool:
-        """是否可上移选中规则文件。"""
-        return self._selected_file_index > 0
+        """是否可上移选中规则文件（仅全局非内置规则可移动）。"""
+        item = self._selected_item()
+        if item is None or item["isBuiltin"] or item["scope"] != "global":
+            return False
+        # 内置规则固定索引 0，全局规则文件从索引 1 开始
+        # 可上移条件：当前索引 > 1（即不是第一个全局规则文件）
+        return self._selected_file_index > 1
 
     @Property(bool, notify=selectionChanged)  # pyrefly: ignore [not-callable]
     def canMoveDown(self) -> bool:
-        """是否可下移选中规则文件。"""
-        return 0 <= self._selected_file_index < len(self._config.rules_paths) - 1
+        """是否可下移选中规则文件（仅全局非内置规则可移动）。"""
+        item = self._selected_item()
+        if item is None or item["isBuiltin"] or item["scope"] != "global":
+            return False
+        # 全局规则文件在列表中的范围：[1, 1+len(rules_paths))
+        global_end = 1 + len(self._config.rules_paths)
+        return 1 <= self._selected_file_index < global_end - 1
 
     @Property(bool, notify=selectionChanged)  # pyrefly: ignore [not-callable]
     def canRemove(self) -> bool:
-        """是否可移除选中规则文件。"""
-        return 0 <= self._selected_file_index < len(self._config.rules_paths)
+        """是否可移除选中规则文件（内置规则不可移除）。"""
+        item = self._selected_item()
+        if item is None:
+            return False
+        return bool(item["canRemove"])
 
     # ----------------------------- QML 调用槽 -----------------------------
 
@@ -178,7 +320,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
     def loadFileFromPath(self, path_str: str) -> bool:
-        """从路径加载规则文件（QML ``FileDialog`` 选定后调用）。
+        """从路径加载规则文件到全局规则列表。
 
         加入 ``Config.rules_paths``，重新加载规则集并持久化。
         """
@@ -204,15 +346,89 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
             logger.warning("加载规则失败: %s", exc)
             return False
 
+    @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
+    def loadFileToTemp(self, path_str: str) -> bool:
+        """从路径加载规则文件到当前工作区的临时规则列表。
+
+        :param path_str: 规则文件路径
+        :return: 是否加载成功。无当前工作区或文件不存在返回 False。
+        """
+        ws_id = self._current_ws_id()
+        if not ws_id or self._workspace_controller is None:
+            logger.warning("无当前工作区，无法加载临时规则")
+            self.rulesIoCompleted.emit(False, "请先在首页选择工作区")  # pyrefly: ignore [missing-attribute]
+            return False
+
+        path = Path(path_str)
+        if not path.exists():
+            logger.warning("规则文件不存在: %s", path_str)
+            self.rulesIoCompleted.emit(False, "规则文件不存在")  # pyrefly: ignore [missing-attribute]
+            return False
+
+        current = list(self._current_temp_paths())
+        if str(path) in current:
+            logger.info("临时规则文件已加载，跳过: %s", path_str)
+            self.rulesIoCompleted.emit(False, f"{path.name} 已在临时规则中")  # pyrefly: ignore [missing-attribute]
+            return False
+
+        # 预校验能否成功加载
+        try:
+            load_ruleset(path)
+        except RuleError as exc:
+            logger.warning("临时规则文件解析失败: %s", exc)
+            self.rulesIoCompleted.emit(False, f"加载失败：{exc}")  # pyrefly: ignore [missing-attribute]
+            return False
+
+        current.append(str(path))
+        # 通过 WorkspaceController.setTaskOverride 设置（自动同步到 ScanController）
+        self._workspace_controller.setTaskOverride(  # pyrefly: ignore [missing-attribute]
+            ws_id, "temp_rules_paths", json.dumps(current)
+        )
+        self.rulesFileListChanged.emit()  # pyrefly: ignore [missing-attribute]
+        msg = f"已加载临时规则 {path.name}"
+        self.rulesIoCompleted.emit(True, msg)  # pyrefly: ignore [missing-attribute]
+        return True
+
+    @Slot(str, bool)  # pyrefly: ignore [not-callable]
+    def setRuleEnabled(self, path: str, enabled: bool) -> None:
+        """勾选启用/禁用全局规则文件。
+
+        :param path: 规则文件路径（``"__builtin__"`` 表示内置规则）
+        :param enabled: 是否启用
+        """
+        if path == BUILTIN_PATH_MARKER:
+            self.setUseBuiltin(enabled)
+            return
+        # 全局规则文件：加入/移出 disabled_rules_paths
+        disabled = self._config.disabled_rules_paths
+        if enabled:
+            if path in disabled:
+                disabled.remove(path)
+            else:
+                return  # 无变化
+        else:
+            if path in disabled:
+                return  # 无变化
+            if path not in self._config.rules_paths:
+                logger.warning("规则文件不在全局列表中: %s", path)
+                return
+            disabled.append(path)
+        self._config_controller.save()  # pyrefly: ignore [missing-attribute]
+        self._reload_ruleset()
+        self._rule_model.set_ruleset(self._ruleset)
+        self.rulesFileListChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+
     @Slot()  # pyrefly: ignore [not-callable]
     def moveUp(self) -> None:
-        """上移选中规则文件。"""
+        """上移选中全局规则文件。"""
         if not self.canMoveUp:
             return
-        idx = self._selected_file_index
+        # 全局规则文件在 rules_paths 中的索引 = selected_file_index - 1
+        idx_in_paths = self._selected_file_index - 1
         paths = self._config.rules_paths
-        paths[idx - 1], paths[idx] = paths[idx], paths[idx - 1]
-        self._selected_file_index = idx - 1
+        paths[idx_in_paths - 1], paths[idx_in_paths] = paths[idx_in_paths], paths[idx_in_paths - 1]
+        self._selected_file_index = self._selected_file_index - 1
         self._config_controller.save()  # pyrefly: ignore [missing-attribute]
         self._reload_ruleset()
         self._rule_model.set_ruleset(self._ruleset)
@@ -222,13 +438,13 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot()  # pyrefly: ignore [not-callable]
     def moveDown(self) -> None:
-        """下移选中规则文件。"""
+        """下移选中全局规则文件。"""
         if not self.canMoveDown:
             return
-        idx = self._selected_file_index
+        idx_in_paths = self._selected_file_index - 1
         paths = self._config.rules_paths
-        paths[idx + 1], paths[idx] = paths[idx], paths[idx + 1]
-        self._selected_file_index = idx + 1
+        paths[idx_in_paths + 1], paths[idx_in_paths] = paths[idx_in_paths], paths[idx_in_paths + 1]
+        self._selected_file_index = self._selected_file_index + 1
         self._config_controller.save()  # pyrefly: ignore [missing-attribute]
         self._reload_ruleset()
         self._rule_model.set_ruleset(self._ruleset)
@@ -238,18 +454,178 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot()  # pyrefly: ignore [not-callable]
     def removeSelected(self) -> None:
-        """移除选中规则文件。"""
+        """移除选中规则文件（按作用域分派）。
+
+        - 全局规则文件：从 ``Config.rules_paths`` 移除，同步清理禁用列表
+        - 临时规则文件：从当前工作区的 ``temp_rules_paths`` 移除
+        """
         if not self.canRemove:
             return
-        idx = self._selected_file_index
-        self._config.rules_paths.pop(idx)
+        item = self._selected_item()
+        if item is None:
+            return
+        path = str(item["path"])
+        scope = str(item["scope"])
+
+        if scope == "global":
+            # 全局规则文件
+            if path in self._config.rules_paths:
+                self._config.rules_paths.remove(path)
+            if path in self._config.disabled_rules_paths:
+                self._config.disabled_rules_paths.remove(path)
+            self._config_controller.save()  # pyrefly: ignore [missing-attribute]
+            self._reload_ruleset()
+            self._rule_model.set_ruleset(self._ruleset)
+        elif scope == "temp":
+            # 临时规则文件
+            ws_id = self._current_ws_id()
+            if not ws_id or self._workspace_controller is None:
+                return
+            current = list(self._current_temp_paths())
+            if path in current:
+                current.remove(path)
+            self._workspace_controller.setTaskOverride(  # pyrefly: ignore [missing-attribute]
+                ws_id, "temp_rules_paths", json.dumps(current)
+            )
+
         self._selected_file_index = -1
+        self.rulesFileListChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.selectionChanged.emit()  # pyrefly: ignore [missing-attribute]
+        if scope == "global":
+            self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    # ------------------- 作用域迁移 -------------------
+
+    @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
+    def promoteToGlobal(self, path_str: str) -> bool:
+        """把当前工作区的临时规则文件提升为全局规则。
+
+        将 ``path`` 从当前工作区 ``temp_rules_paths`` 移除，加入
+        ``Config.rules_paths``（若已存在则跳过加入，仅移除临时侧以避免冗余）。
+        持久化两端配置，刷新规则集与文件列表。
+
+        :param path_str: 规则文件路径（必须是当前工作区已加载的临时规则）
+        :return: 是否迁移成功。无当前工作区、路径不在临时规则中或加载失败返回 False，
+            并通过 ``rulesIoCompleted`` 信号通知 QML。
+        """
+        ws_id = self._current_ws_id()
+        if not ws_id or self._workspace_controller is None:
+            logger.warning("无当前工作区，无法提升临时规则")
+            self.rulesIoCompleted.emit(False, "请先在首页选择工作区")  # pyrefly: ignore [missing-attribute]
+            return False
+
+        current_temp = list(self._current_temp_paths())
+        if path_str not in current_temp:
+            logger.warning("路径不在当前工作区临时规则中: %s", path_str)
+            self.rulesIoCompleted.emit(False, "该文件不是当前工作区的临时规则")  # pyrefly: ignore [missing-attribute]
+            return False
+
+        path = Path(path_str)
+        if not path.exists():
+            logger.warning("规则文件不存在: %s", path_str)
+            self.rulesIoCompleted.emit(False, "规则文件不存在")  # pyrefly: ignore [missing-attribute]
+            return False
+
+        # 预校验能否成功加载（避免把损坏文件加入全局）
+        try:
+            load_ruleset(path)
+        except RuleError as exc:
+            logger.warning("规则文件解析失败: %s", exc)
+            self.rulesIoCompleted.emit(False, f"加载失败：{exc}")  # pyrefly: ignore [missing-attribute]
+            return False
+
+        # 从临时规则移除
+        current_temp.remove(path_str)
+        self._workspace_controller.setTaskOverride(  # pyrefly: ignore [missing-attribute]
+            ws_id, "temp_rules_paths", json.dumps(current_temp)
+        )
+
+        # 加入全局规则（去重：已在全局列表则不重复加入）
+        added_to_global = False
+        if path_str not in self._config.rules_paths:
+            self._config.rules_paths.append(path_str)
+            added_to_global = True
+        # 同步清理禁用列表（若该路径曾被禁用，提升后默认启用）
+        if path_str in self._config.disabled_rules_paths:
+            self._config.disabled_rules_paths.remove(path_str)
         self._config_controller.save()  # pyrefly: ignore [missing-attribute]
+
         self._reload_ruleset()
         self._rule_model.set_ruleset(self._ruleset)
+        self._selected_file_index = -1
         self.rulesFileListChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.selectionChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+        msg = f"已提升 {path.name} 为全局规则" + ("（全局已存在，仅移除临时侧）" if not added_to_global else "")
+        logger.info(msg)
+        self.rulesIoCompleted.emit(True, msg)  # pyrefly: ignore [missing-attribute]
+        return True
+
+    @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
+    def demoteToTemp(self, path_str: str) -> bool:
+        """把全局规则文件降级为当前工作区临时规则。
+
+        将 ``path`` 从 ``Config.rules_paths`` 移除（同步清理禁用列表），
+        加入当前工作区 ``temp_rules_paths``（若已存在则跳过加入，仅移除全局侧）。
+        持久化两端配置，刷新规则集与文件列表。
+
+        :param path_str: 规则文件路径（必须是已加载的全局规则文件）
+        :return: 是否迁移成功。无当前工作区、路径不在全局规则中或加载失败返回 False，
+            并通过 ``rulesIoCompleted`` 信号通知 QML。
+        """
+        ws_id = self._current_ws_id()
+        if not ws_id or self._workspace_controller is None:
+            logger.warning("无当前工作区，无法降级全局规则")
+            self.rulesIoCompleted.emit(False, "请先在首页选择工作区")  # pyrefly: ignore [missing-attribute]
+            return False
+
+        if path_str not in self._config.rules_paths:
+            logger.warning("路径不在全局规则中: %s", path_str)
+            self.rulesIoCompleted.emit(False, "该文件不是全局规则")  # pyrefly: ignore [missing-attribute]
+            return False
+
+        path = Path(path_str)
+        if not path.exists():
+            logger.warning("规则文件不存在: %s", path_str)
+            self.rulesIoCompleted.emit(False, "规则文件不存在")  # pyrefly: ignore [missing-attribute]
+            return False
+
+        # 预校验能否成功加载
+        try:
+            load_ruleset(path)
+        except RuleError as exc:
+            logger.warning("规则文件解析失败: %s", exc)
+            self.rulesIoCompleted.emit(False, f"加载失败：{exc}")  # pyrefly: ignore [missing-attribute]
+            return False
+
+        # 从全局规则移除（同步清理禁用列表）
+        self._config.rules_paths.remove(path_str)
+        if path_str in self._config.disabled_rules_paths:
+            self._config.disabled_rules_paths.remove(path_str)
+        self._config_controller.save()  # pyrefly: ignore [missing-attribute]
+
+        # 加入当前工作区临时规则（去重）
+        current_temp = list(self._current_temp_paths())
+        added_to_temp = False
+        if path_str not in current_temp:
+            current_temp.append(path_str)
+            added_to_temp = True
+        self._workspace_controller.setTaskOverride(  # pyrefly: ignore [missing-attribute]
+            ws_id, "temp_rules_paths", json.dumps(current_temp)
+        )
+
+        self._reload_ruleset()
+        self._rule_model.set_ruleset(self._ruleset)
+        self._selected_file_index = -1
+        self.rulesFileListChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.selectionChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+        msg = f"已降级 {path.name} 为临时规则" + ("（临时已存在，仅移除全局侧）" if not added_to_temp else "")
+        logger.info(msg)
+        self.rulesIoCompleted.emit(True, msg)  # pyrefly: ignore [missing-attribute]
+        return True
 
     # ------------------- 导入/导出 -------------------
 
@@ -288,7 +664,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
     def importRuleset(self, path_str: str) -> bool:
-        """从 YAML/JSON 文件导入规则集。
+        """从 YAML/JSON 文件导入规则集到全局规则列表。
 
         导入即将该文件加入规则文件列表（等价于 :meth:`loadFileFromPath`），
         但带有版本兼容性校验（不兼容版本会在加载阶段抛 ``RuleParseError``）。
@@ -335,10 +711,17 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
     # ----------------------------- 内部方法 -----------------------------
 
     def _reload_ruleset(self) -> None:
-        """重新加载规则集（按 use_builtin + rules_paths 合并）。"""
+        """重新加载全局规则集（按 use_builtin + 启用的 rules_paths 合并）。
+
+        已过滤 ``disabled_rules_paths`` 中的禁用文件。
+        临时规则不在此处合并——由 :meth:`ScanController._compute_effective_ruleset`
+        在扫描时叠加。
+        """
         from fuscan.rules import load_with_builtin
 
-        paths = [Path(p) for p in self._config.rules_paths if Path(p).exists()]
+        paths = [
+            Path(p) for p in self._config.rules_paths if Path(p).exists() and p not in self._config.disabled_rules_paths
+        ]
         use_builtin = self._config.use_builtin
 
         try:

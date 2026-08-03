@@ -69,6 +69,24 @@ class TestConfig:
         config = Config()
         assert config.perf_log_enabled is False
 
+    def test_default_disabled_rules_paths_empty(self) -> None:
+        """iter-138：默认 disabled_rules_paths 为空列表。"""
+        config = Config()
+        assert config.disabled_rules_paths == []
+
+    def test_disabled_rules_paths_roundtrip(self, tmp_path: Path) -> None:
+        """iter-138：disabled_rules_paths 可持久化与加载。"""
+        config_file = tmp_path / "config.yaml"
+        original = Config(
+            rules_paths=["/rules/r1.yaml", "/rules/r2.yaml"],
+            disabled_rules_paths=["/rules/r1.yaml"],
+            use_builtin=True,
+        )
+        save_config(original, config_file)
+        loaded = load_config(config_file)
+        assert loaded.disabled_rules_paths == ["/rules/r1.yaml"]
+        assert loaded.rules_paths == ["/rules/r1.yaml", "/rules/r2.yaml"]
+
     def test_default_disabled_extractors(self) -> None:
         """默认禁用 SourceCodeExtractor/SevenZArchiveExtractor。"""
         config = Config()

@@ -658,7 +658,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return
         # 类型校验
         expected_type = TASK_OVERRIDE_KEYS[key]
-        if key in ("ignore_dirs", "rules_paths"):
+        if key in ("ignore_dirs", "rules_paths", "temp_rules_paths"):
             # JSON 反序列化为 list，校验后转 tuple
             if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
                 logger.warning("%s 应为 list[str]", key)

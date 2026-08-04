@@ -33,6 +33,7 @@ from fuscan.gui.controllers.about_controller import AboutController
 from fuscan.gui.controllers.config_controller import ConfigController
 from fuscan.gui.controllers.rules_controller import RulesController
 from fuscan.gui.controllers.scan_controller import ScanController
+from fuscan.gui.controllers.splash_controller import SplashController
 from fuscan.gui.controllers.whitelist_controller import WhitelistController
 from fuscan.gui.controllers.workspace_controller import WorkspaceController
 from fuscan.gui.models import (
@@ -73,6 +74,7 @@ def register_qml_types() -> None:
     qmlRegisterType(ConfigController, "fuscan.controllers", 1, 0, "ConfigControllerType")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(RulesController, "fuscan.controllers", 1, 0, "RulesControllerType")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(ScanController, "fuscan.controllers", 1, 0, "ScanControllerType")  # pyrefly: ignore [bad-argument-type]
+    qmlRegisterType(SplashController, "fuscan.controllers", 1, 0, "SplashControllerType")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(WorkspaceController, "fuscan.controllers", 1, 0, "WorkspaceControllerType")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(WhitelistController, "fuscan.controllers", 1, 0, "WhitelistControllerType")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(AboutController, "fuscan.controllers", 1, 0, "AboutControllerType")  # pyrefly: ignore [bad-argument-type]

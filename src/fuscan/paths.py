@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-__all__ = ["ASSETS_DIR", "BUILTIN_RULES_PATH", "MANUAL_PDF_PATH"]
+__all__ = ["ASSETS_DIR", "BUILTIN_RULES_PATH", "MANUAL_PDF_PATH", "SPLASH_QML_URL"]
 
 # 包内静态资源根目录：``src/fuscan/assets/``
 ASSETS_DIR: Path = Path(__file__).parent / "assets"
@@ -29,3 +29,5 @@ MANUAL_PDF_PATH: Path = ASSETS_DIR / "docs" / "fuscan-用户手册.pdf"
 # QML
 QML_IMPORT_PATH = "qrc:/qml"
 MAIN_QML_URL = "qrc:/qml/Main.qml"
+# 启动画面 QML：在 QGuiApplication 构造后立即加载，主窗口 QML 加载完成后关闭
+SPLASH_QML_URL = "qrc:/qml/Splash.qml"

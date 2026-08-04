@@ -8,7 +8,7 @@ import sys
 import warnings
 from collections.abc import Sequence
 
-from fuscan.paths import MAIN_QML_URL, QML_IMPORT_PATH
+from fuscan.paths import MAIN_QML_URL, QML_IMPORT_PATH, SPLASH_QML_URL
 from fuscan.perf import PerfReport, render_startup_summary, timed
 
 try:
@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover
 
 from fuscan.config import migrate_config_to_rules
 from fuscan.gui import resources_rc  # noqa: F401  注册 qrc 资源
-from fuscan.gui.controllers import AppController, register_qml_types
+from fuscan.gui.controllers import AppController, SplashController, register_qml_types
 from fuscan.gui.theme import detect_font_families
 
 __all__ = ["main"]
@@ -64,8 +64,36 @@ def _apply_global_font(app: QGuiApplication) -> None:
     app.setFont(font)
 
 
+def _load_splash(app: QGuiApplication, splash_controller: SplashController) -> QQmlApplicationEngine:
+    """构造独立 QML 引擎加载 Splash.qml，让用户尽早看到启动反馈。
+
+    Splash 用独立 :class:`QQmlApplicationEngine` 加载，仅注册 ``SplashController``
+    一个 context property，避免依赖 :class:`AppController`（尚未构造）。加载后
+    调用 :meth:`processEvents` 强制渲染一帧，确保 Splash 立即可见。
+
+    :param app: 已构造的 QGuiApplication（用于 processEvents）
+    :param splash_controller: Splash 阶段文本控制器
+    :return: 加载完毕的 Splash QML 引擎（由调用者在主窗口显示后释放）
+    """
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("SplashController", splash_controller)  # pyrefly: ignore [missing-argument]
+    engine.load(QUrl(SPLASH_QML_URL))  # pyrefly: ignore [missing-argument]
+    if not engine.rootObjects():
+        logger.warning("Splash 加载失败：%s（继续无 Splash 启动）", SPLASH_QML_URL)
+    # 强制处理一次事件循环，让 Splash 立即渲染
+    app.processEvents()
+    return engine
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """启动 QML GUI 应用。
+
+    启动流程采用**渐进式 Splash 反馈**：在 QGuiApplication 构造后立即加载独立
+    的 :file:`Splash.qml`（无边框圆角窗口 + logo + 阶段文本 + 进度条），让用户
+    在数百毫秒内看到反馈；后续各阶段（迁移配置 / 构造主控制器 / 加载主 QML）
+    通过 :meth:`SplashController.setStage` 更新文本，并调用
+    :meth:`QGuiApplication.processEvents` 让 Splash 重绘，缓解"应用启动卡顿"的观感。
+    主窗口 QML 加载完成后关闭 Splash 并进入事件循环。
 
     各启动阶段通过 :class:`~fuscan.perf.timed` 分段计时并登记到 :class:`~fuscan.perf.PerfReport`；
     外层 ``timed("启动流程")`` 汇总总用时。启用性能测量时（``FUSCAN_PERF=1`` 环境变量或
@@ -97,14 +125,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         with timed("注册 QML 类型", level=logging.DEBUG, report=report):
             register_qml_types()
 
+        # 构造 Splash：在 QGuiApplication 与 QML 类型注册后立即加载，让用户尽早看到反馈。
+        # Splash 用独立 engine + 仅 SplashController context property，不依赖 AppController。
+        with timed("构造 Splash 启动画面", level=logging.DEBUG, report=report):
+            splash_controller = SplashController()
+            splash_engine = _load_splash(app, splash_controller)
+
         with timed("迁移旧配置字段到规则集", level=logging.DEBUG, report=report):
             # 在 ConfigController 构造前执行迁移：将旧版 config.yaml 中的
             # scan_archives/max_workers/ignore_dirs/disabled_extractors 等字段
             # 搬到 ~/.fuscan/rules/user-scan.yaml，并从 config.yaml 中清除。
             # 幂等：无迁移字段时 no-op。
+            splash_controller.setStage("迁移配置...")
+            app.processEvents()  # 让 Splash 立即刷新阶段文本
             migrate_config_to_rules()
 
         with timed("构造主控制器", level=logging.DEBUG, report=report):
+            splash_controller.setStage("加载规则与工作区...")
+            app.processEvents()
             controller = AppController()
 
         with timed("构造 QML 引擎并注册上下文", level=logging.DEBUG, report=report):
@@ -114,6 +152,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             engine.addImportPath(QML_IMPORT_PATH)
 
         with timed("加载主 QML", level=logging.DEBUG, report=report):
+            splash_controller.setStage("加载主界面...")
+            app.processEvents()
             logger.info("加载主 QML：%s", MAIN_QML_URL)
             engine.load(QUrl(MAIN_QML_URL))  # pyrefly: ignore [missing-argument]
 
@@ -123,6 +163,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         # 窗口关闭时清理 controller 资源
         app.aboutToQuit.connect(controller.cleanup)
+
+        # 主窗口已加载显示，关闭并释放 Splash 资源
+        splash_controller.setStage("就绪")
+        app.processEvents()
+        splash_engine.deleteLater()
 
     # 启动成功后渲染单张 rich 汇总表（perf 未启用时内部即刻 return，零开销）
     render_startup_summary(report)

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -706,13 +707,12 @@ class _FakeWorkspaceController:
         return item.name if item is not None else ""
 
     def setTaskOverride(self, ws_id: str, key: str, value_json: str) -> None:
-        import json
 
         item = self._workspaces.get(ws_id)
         if item is None:
             return
         value = json.loads(value_json)
-        if key in ("temp_rules_paths", "disabled_temp_rules_paths"):
+        if key in ("ignore_dirs", "rules_paths", "temp_rules_paths", "disabled_temp_rules_paths"):
             value = tuple(value)
         item.task_overrides[key] = value
 
@@ -1619,3 +1619,170 @@ class TestAppendWhitelistEntry:
         entry = next(e for e in controller.ruleset.whitelist if e.path_glob == "/a")
         assert entry.rule_name == "*"
         assert entry.source == "runtime"
+
+
+# ============================= previewRuleset =============================
+
+
+class TestPreviewRuleset:
+    """``previewRuleset`` Slot 测试。"""
+
+    def test_empty_ws_id_returns_empty_object(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+    ) -> None:
+        """空 wsId 返回 ``"{}"``。"""
+        controller, _ = controller_with_workspace
+        assert controller.previewRuleset("") == "{}"
+
+    def test_nonexistent_ws_id_returns_empty_object(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+    ) -> None:
+        """不存在的 wsId 返回 ``"{}"``。"""
+        controller, _ = controller_with_workspace
+        assert controller.previewRuleset("not-exist") == "{}"
+
+    def test_default_workspace_preview_has_ruleset(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+    ) -> None:
+        """默认工作区（启用内置规则）预览 hasRuleset=True，含规则与规则文件。"""
+        controller, _ = controller_with_workspace
+
+        data = json.loads(controller.previewRuleset("ws1"))
+        assert data["hasRuleset"] is True
+        # 内置规则集规则数 > 0
+        assert len(data["rules"]) > 0
+        # 规则文件列表包含内置项
+        assert len(data["ruleFiles"]) >= 1
+        assert data["ruleFiles"][0]["isBuiltin"] is True
+        # 必需字段齐全
+        for key in (
+            "scanArchives",
+            "maxWorkers",
+            "maxDepth",
+            "maxFileSizeMB",
+            "cacheEnabled",
+            "perfLogEnabled",
+            "ignoreDirs",
+            "whitelistEntries",
+            "rules",
+            "ruleFiles",
+            "hasRuleset",
+        ):
+            assert key in data, f"缺少字段 {key}"
+
+    def test_preview_reflects_task_override(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+    ) -> None:
+        """任务级 max_workers 覆盖反映在预览中。"""
+        controller, wc = controller_with_workspace
+
+        # 设置任务级 max_workers 覆盖
+        wc.setTaskOverride("ws1", "max_workers", "8")
+        data = json.loads(controller.previewRuleset("ws1"))
+        assert data["maxWorkers"] == 8
+
+    def test_preview_reflects_temp_rules(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """加载临时规则后预览包含合并后的规则与临时规则文件项。"""
+        controller, _ = controller_with_workspace
+
+        # 加载临时规则文件
+        assert controller.loadFileToTemp(str(rules_file)) is True
+        data = json.loads(controller.previewRuleset("ws1"))
+
+        # 规则文件列表应包含临时项
+        temp_items = [r for r in data["ruleFiles"] if r["scope"] == "temp"]
+        assert len(temp_items) == 1
+        assert temp_items[0]["path"] == str(rules_file)
+        assert temp_items[0]["enabled"] is True
+
+        # 规则列表应包含临时规则文件中的「敏感内容」规则
+        rule_names = [r["name"] for r in data["rules"]]
+        assert "敏感内容" in rule_names
+
+    def test_preview_disabled_temp_rule_excluded_from_rules(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """禁用临时规则后预览的 rules 不包含该规则的条目，ruleFiles 仍列出但 enabled=False。"""
+        controller, _ = controller_with_workspace
+
+        controller.loadFileToTemp(str(rules_file))
+        # 禁用临时规则
+        controller.setRuleEnabled(str(rules_file), False)
+        data = json.loads(controller.previewRuleset("ws1"))
+
+        # ruleFiles 中临时规则仍存在但 enabled=False
+        temp_items = [r for r in data["ruleFiles"] if r["scope"] == "temp"]
+        assert len(temp_items) == 1
+        assert temp_items[0]["enabled"] is False
+
+        # rules 中不包含「敏感内容」（来自被禁用的临时规则文件）
+        rule_names = [r["name"] for r in data["rules"]]
+        assert "敏感内容" not in rule_names
+
+    def test_preview_no_ruleset_when_builtin_disabled(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """禁用内置规则且无用户规则文件时 hasRuleset=False。"""
+        config_controller.config.use_builtin = False
+        controller = RulesController(config_controller)
+        # 注入伪工作区
+        wc = _FakeWorkspaceController()
+        wc.add_workspace("ws1", "工作区A")
+        wc.set_current("ws1")
+        controller.set_workspace_controller(wc)
+
+        data = json.loads(controller.previewRuleset("ws1"))
+        assert data["hasRuleset"] is False
+        assert data["rules"] == []
+        assert data["whitelistEntries"] == []
+
+    def test_preview_rule_files_field_consistency(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+    ) -> None:
+        """预览的 ruleFiles 字段与 rulesFileModel 一致（含 fileName/path/exists/scope/isBuiltin/enabled/canRemove）。"""
+        controller, _ = controller_with_workspace
+
+        data = json.loads(controller.previewRuleset("ws1"))
+        model = controller.rulesFileModel
+        assert len(data["ruleFiles"]) == len(model)
+        for preview_item, model_item in zip(data["ruleFiles"], model, strict=True):
+            for key in ("fileName", "path", "exists", "scope", "isBuiltin", "enabled", "canRemove"):
+                assert preview_item[key] == model_item[key], f"字段 {key} 不一致"
+
+    def test_preview_reflects_task_ignore_dirs_override(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+    ) -> None:
+        """任务级 ignore_dirs 覆盖反映在预览中。"""
+        controller, wc = controller_with_workspace
+
+        wc.setTaskOverride("ws1", "ignore_dirs", json.dumps(["custom_dir"]))
+        data = json.loads(controller.previewRuleset("ws1"))
+        assert "custom_dir" in data["ignoreDirs"]
+
+    def test_preview_reflects_whitelist_entries(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+    ) -> None:
+        """追加白名单条目后预览包含该条目。"""
+        controller, _ = controller_with_workspace
+
+        controller.appendWhitelistEntry("/a/b.txt", "r1", "备注")
+        data = json.loads(controller.previewRuleset("ws1"))
+        assert len(data["whitelistEntries"]) >= 1
+        entry = next(e for e in data["whitelistEntries"] if e["pathGlob"] == "/a/b.txt")
+        assert entry["ruleName"] == "r1"
+        assert entry["note"] == "备注"
+        assert entry["source"] == "runtime"

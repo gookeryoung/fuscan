@@ -365,6 +365,9 @@ Item {
                                         ? "将该临时规则提升为全局规则（所有工作区共享）"
                                         : "将该全局规则降级为当前工作区临时规则（" + rulesController.currentWorkspaceName + "）"
                                     accent: "ghost"
+                                    // 与 delegate 行高(40) 内的其他元素（Label~16/Rectangle 18/CheckBox~24）对齐，
+                                    // 默认 btnSize=40 会撑满整行导致按钮顶部/底部超出同行元素
+                                    btnSize: 24
                                     // 临时规则可提升（需有当前工作区，临时规则本身就来自当前工作区所以一定有）
                                     // 全局非内置规则可降级（需有当前工作区）
                                     // hover 或选中态才显示，避免每行常驻按钮挤压横向空间
@@ -389,6 +392,8 @@ Item {
                                     iconSource: "qrc:/icons/close.svg"
                                     tooltip: "移除该规则文件"
                                     accent: "ghost"
+                                    // 同上：btnSize=24 与同行元素垂直对齐
+                                    btnSize: 24
                                     visible: modelData.canRemove
                                     Layout.alignment: Qt.AlignVCenter
                                     Layout.rightMargin: 4

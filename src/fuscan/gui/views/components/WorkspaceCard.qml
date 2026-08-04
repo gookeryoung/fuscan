@@ -42,6 +42,9 @@ Rectangle {
     signal exportPdfRequested(string workspaceId)
     // 跳转到设置页规则 Tab 配置全局规则集（不依赖工作区状态，始终可用）
     signal configureRulesRequested(string workspaceId)
+    // 打开预览规则对话框，只读查看当前任务 effective 规则集
+    // （含扫描参数/忽略目录/白名单/匹配规则/规则文件）
+    signal previewRulesRequested(string workspaceId)
 
     implicitHeight: contentColumn.implicitHeight + 24
     color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
@@ -266,6 +269,16 @@ Rectangle {
                 tooltip: "为本任务配置规则集（勾选内置 + 加载用户规则文件）"
                 accent: "secondary"
                 onClicked: card.configureRulesRequested(card.workspaceId)
+            }
+
+            // 预览规则：只读查看当前任务 effective 规则集
+            // （生效配置/忽略目录/白名单/匹配规则/规则文件）
+            IconButton {
+                iconSource: "qrc:/icons/info.svg"
+                text: "预览规则"
+                tooltip: "查看当前任务生效的规则集（忽略目录、白名单、匹配规则等）"
+                accent: "ghost"
+                onClicked: card.previewRulesRequested(card.workspaceId)
             }
 
             Item { Layout.fillWidth: true }

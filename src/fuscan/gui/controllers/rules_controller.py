@@ -47,10 +47,23 @@ except ImportError:  # pragma: no cover
     from PySide6.QtWidgets import QFileDialog  # pyrefly: ignore [missing-import]
 
 from fuscan.config import DEFAULT_MAX_FILE_SIZE, Config
+from fuscan.gui.controllers._task_overrides import (
+    effective_disabled_temp_rules_paths,
+    effective_ignore_dirs,
+    effective_max_depth,
+    effective_max_file_size,
+    effective_max_workers,
+    effective_rules_paths,
+    effective_scan_archives,
+    effective_temp_rules_paths,
+    effective_use_builtin,
+)
 from fuscan.gui.models.rule_model import RuleListModel
+from fuscan.gui.severity_utils import severity_color_hex, severity_text
 from fuscan.rules import (
     RuleError,
     load_ruleset,
+    load_with_builtin,
     merge_multiple_rulesets,
     save_ruleset,
 )
@@ -941,6 +954,198 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.rulesIoCompleted.emit(True, msg)  # pyrefly: ignore [missing-attribute]
         return True
 
+    # ------------------- 任务级规则预览 -------------------
+
+    @Slot(str, result=str)  # pyrefly: ignore [not-callable]
+    def previewRuleset(self, ws_id: str) -> str:
+        """返回指定工作区 effective ruleset 预览的 JSON 字符串。
+
+        合并任务级覆盖（``rules_paths``/``use_builtin``）与临时规则
+        （``temp_rules_paths``，跳过 ``disabled_temp_rules_paths``），
+        与 :meth:`ScanController._compute_effective_ruleset` 算法一致。
+        供 QML「预览规则」对话框只读展示。
+
+        :param ws_id: 工作区 ID（不存在或为空返回空对象 ``{}``）
+        :return: JSON 字符串，字段：
+
+            - ``scanArchives``/``maxWorkers``/``maxDepth``/``maxFileSizeMB``/
+              ``cacheEnabled``/``perfLogEnabled``：生效扫描参数
+            - ``ignoreDirs``：生效忽略目录名列表
+            - ``whitelistEntries``：白名单条目数组（``pathGlob``/``ruleName``/
+              ``createdAt``/``note``/``source``）
+            - ``rules``：匹配规则数组（``name``/``severityText``/
+              ``severityColor``/``description``/``replace``/``replaceWith``）
+            - ``ruleFiles``：规则文件数组（与 :attr:`rulesFileModel` 字段一致，
+              含 ``fileName``/``path``/``exists``/``scope``/``isBuiltin``/
+              ``enabled``/``canRemove``，仅展示当前 ``ws_id`` 的临时规则）
+            - ``hasRuleset``：是否成功加载 effective ruleset
+        """
+        import json as _json
+
+        if not ws_id or self._workspace_controller is None:
+            return "{}"
+        item = self._workspace_controller.get_workspace(ws_id)  # pyrefly: ignore [missing-attribute]
+        if item is None:
+            return "{}"
+        overrides = item.task_overrides
+
+        # 计算 effective ruleset（与 ScanController._compute_effective_ruleset 一致）
+        ruleset = self._compute_effective_ruleset_for(overrides)
+
+        # 规则文件列表（与 rulesFileModel 一致，但仅展示当前 wsId 的临时规则）
+        rule_files = self._rule_files_for_preview(overrides)
+
+        # 扫描参数（任务级覆盖优先，回退 ruleset.scan_params，再回退内置默认）
+        if ruleset is None:
+            preview: dict[str, object] = {
+                "scanArchives": effective_scan_archives(overrides, None),
+                "maxWorkers": effective_max_workers(overrides, None),
+                "maxDepth": effective_max_depth(overrides, None) or 0,
+                "maxFileSizeMB": effective_max_file_size(overrides, None) // (1024 * 1024),
+                "cacheEnabled": True,
+                "perfLogEnabled": False,
+                "ignoreDirs": list(effective_ignore_dirs(overrides, None)),
+                "whitelistEntries": list[dict[str, object]](),
+                "rules": list[dict[str, object]](),
+                "ruleFiles": rule_files,
+                "hasRuleset": False,
+            }
+        else:
+            sp = ruleset.scan_params
+            preview = {
+                "scanArchives": effective_scan_archives(overrides, ruleset),
+                "maxWorkers": effective_max_workers(overrides, ruleset),
+                "maxDepth": effective_max_depth(overrides, ruleset) or 0,
+                "maxFileSizeMB": effective_max_file_size(overrides, ruleset) // (1024 * 1024),
+                "cacheEnabled": sp.cache_enabled if sp is not None and sp.cache_enabled is not None else True,
+                "perfLogEnabled": sp.perf_log_enabled if sp is not None and sp.perf_log_enabled is not None else False,
+                "ignoreDirs": list(effective_ignore_dirs(overrides, ruleset)),
+                "whitelistEntries": [
+                    {
+                        "pathGlob": e.path_glob,
+                        "ruleName": e.rule_name,
+                        "createdAt": e.created_at,
+                        "note": e.note,
+                        "source": e.source,
+                    }
+                    for e in ruleset.whitelist
+                ],
+                "rules": [
+                    {
+                        "name": r.name,
+                        "severityText": severity_text(r.severity),
+                        "severityColor": severity_color_hex(r.severity),
+                        "description": r.description,
+                        "replace": r.replace,
+                        "replaceWith": r.replace_with,
+                    }
+                    for r in ruleset.rules
+                ],
+                "ruleFiles": rule_files,
+                "hasRuleset": True,
+            }
+        try:
+            return _json.dumps(preview, ensure_ascii=False)
+        except (TypeError, ValueError):
+            logger.warning("工作区 %s 规则预览序列化失败", ws_id, exc_info=True)
+            return "{}"
+
+    def _compute_effective_ruleset_for(self, overrides: dict[str, object]) -> RuleSet | None:
+        """计算指定任务级覆盖的 effective ruleset。
+
+        与 :meth:`ScanController._compute_effective_ruleset` 算法一致：
+        任务级 ``rules_paths``/``use_builtin`` 覆盖优先，临时规则最后叠加
+        （跳过 ``disabled_temp_rules_paths`` 中禁用的路径）。
+
+        :param overrides: 任务级覆盖字典
+        :return: :class:`RuleSet`；无可用规则或加载失败返回 ``None``
+        """
+        has_override = "rules_paths" in overrides or "use_builtin" in overrides
+        disabled_temp = effective_disabled_temp_rules_paths(overrides)
+        temp_paths = [
+            Path(p) for p in effective_temp_rules_paths(overrides) if Path(p).exists() and p not in disabled_temp
+        ]
+
+        if not has_override and not temp_paths:
+            return self._ruleset
+
+        if has_override:
+            paths = [Path(p) for p in effective_rules_paths(overrides, self._config) if Path(p).exists()]
+            use_builtin = effective_use_builtin(overrides, self._config)
+            try:
+                if use_builtin:
+                    base: RuleSet | None = load_with_builtin(paths)
+                elif paths:
+                    rulesets = [load_ruleset(p) for p in paths]
+                    base = merge_multiple_rulesets(*rulesets)
+                else:
+                    base = None
+            except RuleError as exc:
+                logger.warning("预览：任务级规则集加载失败: %s", exc)
+                return None
+        else:
+            base = self._ruleset
+
+        if not temp_paths:
+            return base
+
+        try:
+            temp_rulesets = [load_ruleset(p) for p in temp_paths]
+            if base is not None:
+                return merge_multiple_rulesets(base, *temp_rulesets)
+            return merge_multiple_rulesets(*temp_rulesets)
+        except RuleError as exc:
+            logger.warning("预览：临时规则集加载失败: %s", exc)
+            return base
+
+    def _rule_files_for_preview(self, overrides: dict[str, object]) -> list[dict[str, object]]:
+        """构造预览用的规则文件列表（内置 + 全局 + 当前工作区临时规则）。
+
+        与 :attr:`rulesFileModel` 字段一致，但 ``enabled`` 字段对临时规则
+        反映 ``disabled_temp_rules_paths`` 的禁用状态。
+
+        :param overrides: 任务级覆盖字典
+        :return: 规则文件描述字典列表
+        """
+        items: list[dict[str, object]] = []
+        items.append(
+            {
+                "fileName": "内置通用规则",
+                "path": BUILTIN_PATH_MARKER,
+                "exists": True,
+                "scope": "global",
+                "isBuiltin": True,
+                "enabled": effective_use_builtin(overrides, self._config),
+                "canRemove": False,
+            }
+        )
+        for p in self._config.rules_paths:
+            items.append(
+                {
+                    "fileName": Path(p).name,
+                    "path": p,
+                    "exists": Path(p).exists(),
+                    "scope": "global",
+                    "isBuiltin": False,
+                    "enabled": p not in self._config.disabled_rules_paths,
+                    "canRemove": True,
+                }
+            )
+        disabled_temp = effective_disabled_temp_rules_paths(overrides)
+        for p in effective_temp_rules_paths(overrides):
+            items.append(
+                {
+                    "fileName": Path(p).name,
+                    "path": p,
+                    "exists": Path(p).exists(),
+                    "scope": "temp",
+                    "isBuiltin": False,
+                    "enabled": p not in disabled_temp,
+                    "canRemove": True,
+                }
+            )
+        return items
+
     # ----------------------------- 内部方法 -----------------------------
 
     def _reload_ruleset(self) -> None:
@@ -950,8 +1155,6 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         临时规则不在此处合并——由 :meth:`ScanController._compute_effective_ruleset`
         在扫描时叠加。
         """
-        from fuscan.rules import load_with_builtin
-
         paths = [
             Path(p) for p in self._config.rules_paths if Path(p).exists() and p not in self._config.disabled_rules_paths
         ]

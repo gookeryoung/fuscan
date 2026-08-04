@@ -24,6 +24,7 @@ Item {
     property string _pendingTaskSettingsWsId: ""
     property string _pendingHistoryWsId: ""
     property string _pendingConfigureRulesWsId: ""
+    property string _pendingPreviewRulesWsId: ""
 
     // ========== 导出文件保存对话框 ==========
     FileDialog {
@@ -736,6 +737,9 @@ Item {
                                     iconSource: "qrc:/icons/close.svg"
                                     tooltip: "移除该规则文件"
                                     accent: "ghost"
+                                    // 与 delegate 行高(40) 内的其他元素（Label~16/Rectangle 18/CheckBox~24）对齐，
+                                    // 默认 btnSize=40 会撑满整行导致按钮顶部/底部超出同行元素
+                                    btnSize: 24
                                     visible: modelData.canRemove
                                     Layout.alignment: Qt.AlignVCenter
                                     Layout.rightMargin: 4
@@ -806,6 +810,402 @@ Item {
             }
         }
         // 所有规则操作立即生效，关闭对话框无需额外应用动作（standardButtons: Dialog.Close）
+    }
+
+    // ========== 预览规则对话框（共享单例，只读展示当前任务 effective 规则集） ==========
+    // 由 WorkspaceCard.onPreviewRulesRequested 触发，调用
+    // rulesController.previewRuleset(wsId) 取 JSON 后填充各分区只读展示：
+    // 生效配置 / 忽略目录 / 白名单 / 规则文件 / 匹配规则。
+    Dialog {
+        id: previewRulesDialog
+        title: "预览规则 — " + workspaceController.workspaceName(homePage._pendingPreviewRulesWsId)
+        modal: true
+        anchors.centerIn: parent
+        width: 720
+        height: 640
+        standardButtons: Dialog.Close
+
+        // 解析后的预览数据（由 onPreviewRulesRequested 调用 Slot 后赋值）
+        property var previewData: ({})
+
+        contentItem: Rectangle {
+            color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
+            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+            border.width: 1
+            radius: theme.radiusMd
+
+            ScrollView {
+                anchors.fill: parent
+                anchors.margins: 16
+                clip: true
+                contentWidth: availableWidth
+
+                ColumnLayout {
+                    width: previewRulesDialog.width - 32
+                    spacing: 14
+
+                    // ---------- 生效扫描参数 ----------
+                    Label {
+                        text: "生效扫描参数"
+                        font.pixelSize: theme.fontSizeHeading
+                        font.bold: true
+                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    }
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: 2
+                        columnSpacing: 16
+                        rowSpacing: 4
+
+                        Label {
+                            text: "扫描压缩包"
+                            font.pixelSize: 11
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+                        Label {
+                            text: previewRulesDialog.previewData.scanArchives === true ? "是" : "否"
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        }
+                        Label {
+                            text: "最大工作线程"
+                            font.pixelSize: 11
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+                        Label {
+                            text: (previewRulesDialog.previewData.maxWorkers !== undefined
+                                  ? previewRulesDialog.previewData.maxWorkers : "—")
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        }
+                        Label {
+                            text: "最大文件大小（MB）"
+                            font.pixelSize: 11
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+                        Label {
+                            text: (previewRulesDialog.previewData.maxFileSizeMB !== undefined
+                                  ? previewRulesDialog.previewData.maxFileSizeMB : "—")
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        }
+                        Label {
+                            text: "最大扫描深度（0=无限）"
+                            font.pixelSize: 11
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+                        Label {
+                            text: (previewRulesDialog.previewData.maxDepth !== undefined
+                                  ? previewRulesDialog.previewData.maxDepth : "—")
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        }
+                        Label {
+                            text: "启用扫描结果缓存"
+                            font.pixelSize: 11
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+                        Label {
+                            text: previewRulesDialog.previewData.cacheEnabled === true ? "是" : "否"
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        }
+                        Label {
+                            text: "启用性能详细日志"
+                            font.pixelSize: 11
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+                        Label {
+                            text: previewRulesDialog.previewData.perfLogEnabled === true ? "是" : "否"
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        }
+                    }
+
+                    // ---------- 忽略目录 ----------
+                    Label {
+                        text: "忽略目录（" + (previewRulesDialog.previewData.ignoreDirs
+                                          ? previewRulesDialog.previewData.ignoreDirs.length : 0) + " 项）"
+                        font.pixelSize: theme.fontSizeHeading
+                        font.bold: true
+                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    }
+                    TextArea {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 80
+                        readOnly: true
+                        wrapMode: TextArea.Wrap
+                        text: previewRulesDialog.previewData.ignoreDirs
+                              ? previewRulesDialog.previewData.ignoreDirs.join(", ")
+                              : ""
+                        font.pixelSize: 11
+                        font.family: "Consolas, Monaco, monospace"
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        background: Rectangle {
+                            color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                            border.width: 1
+                            radius: theme.radiusSm
+                        }
+                    }
+
+                    // ---------- 白名单 ----------
+                    Label {
+                        text: "白名单（" + (previewRulesDialog.previewData.whitelistEntries
+                                          ? previewRulesDialog.previewData.whitelistEntries.length : 0) + " 项）"
+                        font.pixelSize: theme.fontSizeHeading
+                        font.bold: true
+                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: previewRulesDialog.previewData.whitelistEntries
+                                 && previewRulesDialog.previewData.whitelistEntries.length === 0
+                        text: "（暂无白名单条目）"
+                        font.pixelSize: 11
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    }
+                    Repeater {
+                        model: previewRulesDialog.previewData.whitelistEntries || []
+                        delegate: Rectangle {
+                            Layout.fillWidth: true
+                            height: 36
+                            color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                            border.width: 1
+                            radius: theme.radiusSm
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                spacing: 8
+                                Label {
+                                    text: modelData.pathGlob
+                                    font.pixelSize: 12
+                                    font.family: "Consolas, Monaco, monospace"
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideMiddle
+                                }
+                                Rectangle {
+                                    radius: theme.radiusSm
+                                    color: modelData.ruleName === "*" ? theme.colorPrimary : theme.colorWarning
+                                    width: prWlRuleTag.implicitWidth + 12
+                                    height: prWlRuleTag.implicitHeight + 4
+                                    Label {
+                                        id: prWlRuleTag
+                                        anchors.centerIn: parent
+                                        text: modelData.ruleName === "*" ? "全部规则" : modelData.ruleName
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        color: theme.colorTextOnPrimary
+                                    }
+                                }
+                                Rectangle {
+                                    visible: modelData.source !== undefined && modelData.source !== ""
+                                    radius: theme.radiusSm
+                                    color: modelData.source === "rules" ? theme.colorSuccess : theme.colorWarning
+                                    width: prWlSrcTag.implicitWidth + 10
+                                    height: prWlSrcTag.implicitHeight + 4
+                                    Label {
+                                        id: prWlSrcTag
+                                        anchors.centerIn: parent
+                                        text: modelData.source === "rules" ? "规则" : "运行时"
+                                        font.pixelSize: 9
+                                        font.bold: true
+                                        color: theme.colorTextOnPrimary
+                                    }
+                                }
+                                Label {
+                                    text: modelData.note || ""
+                                    font.pixelSize: 10
+                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    visible: text.length > 0
+                                    elide: Text.ElideRight
+                                    Layout.maximumWidth: 160
+                                }
+                            }
+                        }
+                    }
+
+                    // ---------- 规则文件 ----------
+                    Label {
+                        text: "规则文件（" + (previewRulesDialog.previewData.ruleFiles
+                                          ? previewRulesDialog.previewData.ruleFiles.length : 0) + " 项）"
+                        font.pixelSize: theme.fontSizeHeading
+                        font.bold: true
+                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: "作用域：内置=蓝 / 全局=蓝 / 临时=绿；灰色文字表示文件缺失"
+                        font.pixelSize: 10
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        font.italic: true
+                        wrapMode: Text.WordWrap
+                    }
+                    Repeater {
+                        model: previewRulesDialog.previewData.ruleFiles || []
+                        delegate: Rectangle {
+                            Layout.fillWidth: true
+                            height: 32
+                            color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                            border.width: 1
+                            radius: theme.radiusSm
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                spacing: 8
+                                // 启用状态指示灯：启用=绿，禁用=灰
+                                Rectangle {
+                                    width: 8
+                                    height: 8
+                                    radius: 4
+                                    color: modelData.enabled ? theme.colorSuccess
+                                        : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
+                                    Layout.alignment: Qt.AlignVCenter
+                                }
+                                Label {
+                                    text: modelData.fileName
+                                    font.pixelSize: 12
+                                    color: modelData.exists
+                                        ? (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
+                                        : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideMiddle
+                                }
+                                Rectangle {
+                                    radius: 4
+                                    height: 18
+                                    width: prScopeTag.implicitWidth + 12
+                                    color: modelData.isBuiltin
+                                        ? theme.colorPrimary
+                                        : (modelData.scope === "temp" ? theme.colorSuccess : theme.colorPrimary)
+                                    Label {
+                                        id: prScopeTag
+                                        anchors.centerIn: parent
+                                        text: modelData.isBuiltin
+                                            ? "内置"
+                                            : (modelData.scope === "temp" ? "临时" : "全局")
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        color: "#FFFFFF"
+                                    }
+                                }
+                                Rectangle {
+                                    visible: !modelData.exists
+                                    radius: 4
+                                    height: 18
+                                    width: prMissingTag.implicitWidth + 12
+                                    color: theme.colorDanger
+                                    Label {
+                                        id: prMissingTag
+                                        anchors.centerIn: parent
+                                        text: "缺失"
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        color: "#FFFFFF"
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ---------- 匹配规则 ----------
+                    Label {
+                        text: "匹配规则（" + (previewRulesDialog.previewData.rules
+                                          ? previewRulesDialog.previewData.rules.length : 0) + " 条）"
+                        font.pixelSize: theme.fontSizeHeading
+                        font.bold: true
+                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        visible: previewRulesDialog.previewData.rules
+                                 && previewRulesDialog.previewData.rules.length === 0
+                        text: "（暂无匹配规则，请检查规则文件是否启用或加载）"
+                        font.pixelSize: 11
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    }
+                    Repeater {
+                        model: previewRulesDialog.previewData.rules || []
+                        delegate: Rectangle {
+                            Layout.fillWidth: true
+                            height: prRuleCol.implicitHeight + 16
+                            color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                            border.width: 1
+                            radius: theme.radiusSm
+                            ColumnLayout {
+                                id: prRuleCol
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                anchors.topMargin: 8
+                                anchors.bottomMargin: 8
+                                spacing: 2
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label {
+                                        text: modelData.name
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                        Layout.fillWidth: true
+                                        elide: Text.ElideRight
+                                    }
+                                    Rectangle {
+                                        radius: 8
+                                        height: 18
+                                        width: prSevTag.implicitWidth + 12
+                                        color: modelData.severityColor
+                                        Label {
+                                            id: prSevTag
+                                            anchors.centerIn: parent
+                                            text: modelData.severityText
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                            color: "#FFFFFF"
+                                        }
+                                    }
+                                    Rectangle {
+                                        visible: modelData.replace === true
+                                        radius: 8
+                                        height: 18
+                                        width: prReplaceTag.implicitWidth + 12
+                                        color: theme.colorPrimary
+                                        Label {
+                                            id: prReplaceTag
+                                            anchors.centerIn: parent
+                                            text: "可替换"
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                            color: "#FFFFFF"
+                                        }
+                                    }
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: modelData.description || ""
+                                    font.pixelSize: 11
+                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    wrapMode: Text.WordWrap
+                                    visible: text.length > 0
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // 全局规则文件选择器（加载到全局，立即生效）
@@ -1354,6 +1754,15 @@ Item {
                         // 切换 RulesController 的当前工作区上下文，使临时规则列表刷新
                         workspaceController.setCurrentWorkspaceId(wsId)
                         configureRulesDialog.open()
+                    }
+                    // 预览规则：调用 Slot 取 effective ruleset JSON，解析后打开只读对话框
+                    onPreviewRulesRequested: function(wsId) {
+                        homePage._pendingPreviewRulesWsId = wsId
+                        var jsonStr = rulesController.previewRuleset(wsId)
+                        var data = {}
+                        try { data = JSON.parse(jsonStr) } catch(e) { data = {} }
+                        previewRulesDialog.previewData = data
+                        previewRulesDialog.open()
                     }
                 }
             }

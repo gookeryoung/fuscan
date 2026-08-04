@@ -823,6 +823,57 @@ class TestAddWorkspace:
             rules_controller.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
             mock_persist.assert_not_called()
 
+    def test_set_rule_enabled_propagates_to_all_workspaces_tags(
+        self,
+        controller: WorkspaceController,
+        rules_controller: RulesController,
+        tmp_path: Path,
+    ) -> None:
+        """禁用全局规则文件后所有工作区 rules_tags 应同步刷新。
+
+        回归用例：``RulesController.setRuleEnabled`` 走全局分支后
+        emit ``rulesetChanged``，``WorkspaceController._sync_all_workspaces_rules``
+        应将过滤后的全局规则路径同步到每个工作区的 ``rules_paths`` 字段，
+        使 ``WorkspaceItem.rules_tags`` 不再展示被禁用的规则文件。
+        """
+        # 准备两个全局规则文件
+        rules_file_a = tmp_path / "a.yaml"
+        rules_file_b = tmp_path / "b.yaml"
+        rules_file_a.write_text("rules: []", encoding="utf-8")
+        rules_file_b.write_text("rules: []", encoding="utf-8")
+        rules_controller._config.rules_paths = [str(rules_file_a), str(rules_file_b)]
+        rules_controller._reload_ruleset()
+        rules_controller.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+        # 新建两个工作区（无任务级覆盖，跟随全局）
+        ws_id_1 = controller.addWorkspace("t1", "folder", "/tmp1", "[]", True)
+        ws_id_2 = controller.addWorkspace("t2", "folder", "/tmp2", "[]", True)
+
+        # 初始标签应包含内置 + a + b
+        for ws_id in (ws_id_1, ws_id_2):
+            item = controller.workspaceModel.get_workspace(ws_id)
+            assert item is not None
+            names = [t["name"] for t in item.rules_tags]
+            assert names == ["内置", "a.yaml", "b.yaml"]
+
+        # 通过 RulesController.setRuleEnabled 禁用 a.yaml
+        rules_controller.setRuleEnabled(str(rules_file_a), False)
+
+        # 两个工作区的 rules_tags 应同步移除 a.yaml
+        for ws_id in (ws_id_1, ws_id_2):
+            item = controller.workspaceModel.get_workspace(ws_id)
+            assert item is not None
+            names = [t["name"] for t in item.rules_tags]
+            assert names == ["内置", "b.yaml"], f"工作区 {ws_id} 标签未同步：{names}"
+
+        # 重新启用 a.yaml，标签恢复
+        rules_controller.setRuleEnabled(str(rules_file_a), True)
+        for ws_id in (ws_id_1, ws_id_2):
+            item = controller.workspaceModel.get_workspace(ws_id)
+            assert item is not None
+            names = [t["name"] for t in item.rules_tags]
+            assert names == ["内置", "a.yaml", "b.yaml"]
+
     def test_creates_independent_scan_controller(self, controller: WorkspaceController) -> None:
         """每个工作区应有独立的 ScanController。"""
         ws_id1 = controller.addWorkspace("t1", "folder", "/tmp", "[]", True)

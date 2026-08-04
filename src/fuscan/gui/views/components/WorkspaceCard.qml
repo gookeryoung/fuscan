@@ -157,7 +157,8 @@ Rectangle {
                 font.pixelSize: 11
                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
             }
-            // 规则 TAG 标签列表：内置=灰色，全局用户=绿色，临时=主色蓝，从左到右排列
+            // 规则 TAG 标签列表：内置=灰色，全局用户=主色蓝，临时=绿色，从左到右排列
+            // 配色与 RulesPanel.qml 作用域标签一致（全局域=蓝 / 临时=绿）
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 4
@@ -167,10 +168,10 @@ Rectangle {
                         radius: 4
                         height: 18
                         width: tagLabel.width + 12
-                        // 内置=灰色，全局用户规则=绿色，临时规则=主色蓝
+                        // 内置=灰色，全局用户规则=主色蓝，临时规则=绿色
                         color: modelData.is_builtin
                             ? (theme.isDark ? theme.colorBorderDark : theme.colorBorder)
-                            : (modelData.is_temp ? theme.colorPrimary : theme.colorSuccess)
+                            : (modelData.is_temp ? theme.colorSuccess : theme.colorPrimary)
                         Label {
                             id: tagLabel
                             anchors.centerIn: parent

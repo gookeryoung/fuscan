@@ -868,7 +868,7 @@ Item {
                             width: previewStack.width - 40
                             spacing: 16
 
-                            // ----- 分区：扫描参数 -----
+                            // ----- 分区：扫描参数（瀑布标签） -----
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 6
@@ -878,84 +878,114 @@ Item {
                                     font.bold: true
                                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                 }
-                                GridLayout {
+                                // 瀑布标签：每项一个圆角矩形，Flow 自动换行，比 GridLayout 两列更紧凑
+                                Flow {
                                     Layout.fillWidth: true
-                                    columns: 2
-                                    columnSpacing: 24
-                                    rowSpacing: 6
-                                    Label {
-                                        text: "扫描压缩包"
-                                        font.pixelSize: 11
-                                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    spacing: 6
+
+                                    Rectangle {
+                                        radius: 4
+                                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                        border.width: 1
+                                        width: spScanArchives.implicitWidth + 16
+                                        height: spScanArchives.implicitHeight + 8
+                                        Label {
+                                            id: spScanArchives
+                                            anchors.centerIn: parent
+                                            text: "扫描压缩包: <b>" + (previewRulesDialog.previewData.scanArchives === true ? "是" : "否") + "</b>"
+                                            textFormat: Text.RichText
+                                            font.pixelSize: 11
+                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                        }
                                     }
-                                    Label {
-                                        text: previewRulesDialog.previewData.scanArchives === true ? "是" : "否"
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                    Rectangle {
+                                        radius: 4
+                                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                        border.width: 1
+                                        width: spMaxWorkers.implicitWidth + 16
+                                        height: spMaxWorkers.implicitHeight + 8
+                                        Label {
+                                            id: spMaxWorkers
+                                            anchors.centerIn: parent
+                                            text: "最大工作线程: <b>" + (previewRulesDialog.previewData.maxWorkers !== undefined
+                                                  ? previewRulesDialog.previewData.maxWorkers : "—") + "</b>"
+                                            textFormat: Text.RichText
+                                            font.pixelSize: 11
+                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                        }
                                     }
-                                    Label {
-                                        text: "最大工作线程"
-                                        font.pixelSize: 11
-                                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    Rectangle {
+                                        radius: 4
+                                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                        border.width: 1
+                                        width: spMaxFileSize.implicitWidth + 16
+                                        height: spMaxFileSize.implicitHeight + 8
+                                        Label {
+                                            id: spMaxFileSize
+                                            anchors.centerIn: parent
+                                            text: "最大文件大小（MB）: <b>" + (previewRulesDialog.previewData.maxFileSizeMB !== undefined
+                                                  ? previewRulesDialog.previewData.maxFileSizeMB : "—") + "</b>"
+                                            textFormat: Text.RichText
+                                            font.pixelSize: 11
+                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                        }
                                     }
-                                    Label {
-                                        text: (previewRulesDialog.previewData.maxWorkers !== undefined
-                                              ? previewRulesDialog.previewData.maxWorkers : "—")
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                    Rectangle {
+                                        radius: 4
+                                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                        border.width: 1
+                                        width: spMaxDepth.implicitWidth + 16
+                                        height: spMaxDepth.implicitHeight + 8
+                                        Label {
+                                            id: spMaxDepth
+                                            anchors.centerIn: parent
+                                            text: "最大扫描深度（0=无限）: <b>" + (previewRulesDialog.previewData.maxDepth !== undefined
+                                                  ? previewRulesDialog.previewData.maxDepth : "—") + "</b>"
+                                            textFormat: Text.RichText
+                                            font.pixelSize: 11
+                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                        }
                                     }
-                                    Label {
-                                        text: "最大文件大小（MB）"
-                                        font.pixelSize: 11
-                                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    Rectangle {
+                                        radius: 4
+                                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                        border.width: 1
+                                        width: spCacheEnabled.implicitWidth + 16
+                                        height: spCacheEnabled.implicitHeight + 8
+                                        Label {
+                                            id: spCacheEnabled
+                                            anchors.centerIn: parent
+                                            text: "启用扫描结果缓存: <b>" + (previewRulesDialog.previewData.cacheEnabled === true ? "是" : "否") + "</b>"
+                                            textFormat: Text.RichText
+                                            font.pixelSize: 11
+                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                        }
                                     }
-                                    Label {
-                                        text: (previewRulesDialog.previewData.maxFileSizeMB !== undefined
-                                              ? previewRulesDialog.previewData.maxFileSizeMB : "—")
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                    }
-                                    Label {
-                                        text: "最大扫描深度（0=无限）"
-                                        font.pixelSize: 11
-                                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                    }
-                                    Label {
-                                        text: (previewRulesDialog.previewData.maxDepth !== undefined
-                                              ? previewRulesDialog.previewData.maxDepth : "—")
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                    }
-                                    Label {
-                                        text: "启用扫描结果缓存"
-                                        font.pixelSize: 11
-                                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                    }
-                                    Label {
-                                        text: previewRulesDialog.previewData.cacheEnabled === true ? "是" : "否"
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                    }
-                                    Label {
-                                        text: "启用性能详细日志"
-                                        font.pixelSize: 11
-                                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                    }
-                                    Label {
-                                        text: previewRulesDialog.previewData.perfLogEnabled === true ? "是" : "否"
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                        color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                    Rectangle {
+                                        radius: 4
+                                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                        border.width: 1
+                                        width: spPerfLog.implicitWidth + 16
+                                        height: spPerfLog.implicitHeight + 8
+                                        Label {
+                                            id: spPerfLog
+                                            anchors.centerIn: parent
+                                            text: "启用性能详细日志: <b>" + (previewRulesDialog.previewData.perfLogEnabled === true ? "是" : "否") + "</b>"
+                                            textFormat: Text.RichText
+                                            font.pixelSize: 11
+                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                        }
                                     }
                                 }
                             }
 
-                            // ----- 分区：忽略目录 -----
+                            // ----- 分区：忽略目录（瀑布标签） -----
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 spacing: 6
@@ -966,25 +996,38 @@ Item {
                                     font.bold: true
                                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                 }
-                                Rectangle {
+                                Label {
                                     Layout.fillWidth: true
-                                    // 高度跟随文本内容自适应：避免固定高度截断长列表
-                                    implicitHeight: ignoreDirsText.implicitHeight + 12
-                                    color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
-                                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                                    border.width: 1
-                                    radius: theme.radiusSm
-                                    Text {
-                                        id: ignoreDirsText
-                                        anchors.fill: parent
-                                        anchors.margins: 6
-                                        wrapMode: Text.Wrap
-                                        text: previewRulesDialog.previewData.ignoreDirs
-                                              ? previewRulesDialog.previewData.ignoreDirs.join(", ")
-                                              : ""
-                                        font.pixelSize: 11
-                                        font.family: "Consolas, Monaco, monospace"
-                                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    visible: !previewRulesDialog.previewData.ignoreDirs
+                                             || previewRulesDialog.previewData.ignoreDirs.length === 0
+                                    text: "（暂无忽略目录）"
+                                    font.pixelSize: 11
+                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                }
+                                // 每个目录一个圆角标签，Flow 自动换行
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    visible: previewRulesDialog.previewData.ignoreDirs
+                                             && previewRulesDialog.previewData.ignoreDirs.length > 0
+                                    Repeater {
+                                        model: previewRulesDialog.previewData.ignoreDirs || []
+                                        delegate: Rectangle {
+                                            radius: 4
+                                            color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                            border.width: 1
+                                            width: ignoreDirTag.implicitWidth + 16
+                                            height: ignoreDirTag.implicitHeight + 8
+                                            Label {
+                                                id: ignoreDirTag
+                                                anchors.centerIn: parent
+                                                text: modelData
+                                                font.pixelSize: 11
+                                                font.family: "Consolas, Monaco, monospace"
+                                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1012,7 +1055,8 @@ Item {
                                     model: previewRulesDialog.previewData.whitelistEntries || []
                                     delegate: Rectangle {
                                         Layout.fillWidth: true
-                                        height: 36
+                                        // 高度与规则文件列表项保持一致（28）
+                                        height: 28
                                         color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
                                         border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                                         border.width: 1

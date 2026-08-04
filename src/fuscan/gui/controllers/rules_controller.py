@@ -971,6 +971,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
             - ``scanArchives``/``maxWorkers``/``maxDepth``/``maxFileSizeMB``/
               ``cacheEnabled``/``perfLogEnabled``：生效扫描参数
             - ``ignoreDirs``：生效忽略目录名列表
+            - ``scanExtensions``：文件扩展名白名单（空列表表示全选默认）
             - ``whitelistEntries``：白名单条目数组（``pathGlob``/``ruleName``/
               ``createdAt``/``note``/``source``）
             - ``rules``：匹配规则数组（``name``/``severityText``/
@@ -1005,6 +1006,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 "cacheEnabled": True,
                 "perfLogEnabled": False,
                 "ignoreDirs": list(effective_ignore_dirs(overrides, None)),
+                "scanExtensions": list[str](),
                 "whitelistEntries": list[dict[str, object]](),
                 "rules": list[dict[str, object]](),
                 "ruleFiles": rule_files,
@@ -1020,6 +1022,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 "cacheEnabled": sp.cache_enabled if sp is not None and sp.cache_enabled is not None else True,
                 "perfLogEnabled": sp.perf_log_enabled if sp is not None and sp.perf_log_enabled is not None else False,
                 "ignoreDirs": list(effective_ignore_dirs(overrides, ruleset)),
+                "scanExtensions": list(ruleset.scan_extensions) if ruleset.scan_extensions is not None else [],
                 "whitelistEntries": [
                     {
                         "pathGlob": e.path_glob,

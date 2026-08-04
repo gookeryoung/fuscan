@@ -1666,12 +1666,15 @@ class TestPreviewRuleset:
             "cacheEnabled",
             "perfLogEnabled",
             "ignoreDirs",
+            "scanExtensions",
             "whitelistEntries",
             "rules",
             "ruleFiles",
             "hasRuleset",
         ):
             assert key in data, f"缺少字段 {key}"
+        # scanExtensions 为列表（空列表表示未限制后缀）
+        assert isinstance(data["scanExtensions"], list)
 
     def test_preview_reflects_task_override(
         self,

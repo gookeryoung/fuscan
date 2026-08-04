@@ -901,7 +901,7 @@ Item {
                                             text: "<b>扫描压缩包: <span style=\"color:" + (previewRulesDialog.previewData.scanArchives === true ? _rgb(theme.colorSuccess) : _rgb(theme.colorDanger)) + "\">" + (previewRulesDialog.previewData.scanArchives === true ? "是" : "否") + "</span></b>"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
-                                            color: theme.colorPrimary
+                                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                         }
                                     }
                                     Rectangle {
@@ -918,7 +918,7 @@ Item {
                                                   ? previewRulesDialog.previewData.maxWorkers : "—") + "</b>"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
-                                            color: theme.colorPrimary
+                                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                         }
                                     }
                                     Rectangle {
@@ -935,7 +935,7 @@ Item {
                                                   ? previewRulesDialog.previewData.maxFileSizeMB : "—") + "</b>"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
-                                            color: theme.colorPrimary
+                                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                         }
                                     }
                                     Rectangle {
@@ -952,7 +952,7 @@ Item {
                                                   ? previewRulesDialog.previewData.maxDepth : "—") + "</b>"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
-                                            color: theme.colorPrimary
+                                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                         }
                                     }
                                     Rectangle {
@@ -968,7 +968,7 @@ Item {
                                             text: "<b>启用扫描结果缓存: <span style=\"color:" + (previewRulesDialog.previewData.cacheEnabled === true ? _rgb(theme.colorSuccess) : _rgb(theme.colorDanger)) + "\">" + (previewRulesDialog.previewData.cacheEnabled === true ? "是" : "否") + "</span></b>"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
-                                            color: theme.colorPrimary
+                                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                         }
                                     }
                                     Rectangle {
@@ -984,7 +984,55 @@ Item {
                                             text: "<b>启用性能详细日志: <span style=\"color:" + (previewRulesDialog.previewData.perfLogEnabled === true ? _rgb(theme.colorSuccess) : _rgb(theme.colorDanger)) + "\">" + (previewRulesDialog.previewData.perfLogEnabled === true ? "是" : "否") + "</span></b>"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
-                                            color: theme.colorPrimary
+                                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                        }
+                                    }
+                                }
+                            }
+
+                            // ----- 分区：文件类型（瀑布标签） -----
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+                                Label {
+                                    text: "文件类型（" + (previewRulesDialog.previewData.scanExtensions
+                                                      ? previewRulesDialog.previewData.scanExtensions.length : 0) + " 项）"
+                                    font.pixelSize: theme.fontSizeHeading
+                                    font.bold: true
+                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                }
+                                // 空列表表示未限制后缀（全选默认）
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: !previewRulesDialog.previewData.scanExtensions
+                                             || previewRulesDialog.previewData.scanExtensions.length === 0
+                                    text: "全部（未限制后缀）"
+                                    font.pixelSize: 11
+                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                }
+                                // 每个后缀一个圆角标签，Flow 自动换行
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    visible: previewRulesDialog.previewData.scanExtensions
+                                             && previewRulesDialog.previewData.scanExtensions.length > 0
+                                    Repeater {
+                                        model: previewRulesDialog.previewData.scanExtensions || []
+                                        delegate: Rectangle {
+                                            radius: 4
+                                            color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                            border.width: 1
+                                            width: extTag.implicitWidth + 16
+                                            height: extTag.implicitHeight + 8
+                                            Label {
+                                                id: extTag
+                                                anchors.centerIn: parent
+                                                text: "." + modelData
+                                                font.pixelSize: 11
+                                                font.family: "Consolas, Monaco, monospace"
+                                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                            }
                                         }
                                     }
                                 }

@@ -212,7 +212,7 @@ class TestExportWorker:
         """run() 成功时 emit finished_ok 携带路径。"""
         saved: list[tuple[ScanReport, Path]] = []
         monkeypatch.setattr(
-            "fuscan.gui.workers.export_worker.save_report",
+            "fuscan.gui.workers.export_worker.export_report",
             lambda report, path: saved.append((report, path)),
         )
         report = _make_scan_report(tmp_path)
@@ -237,7 +237,7 @@ class TestExportWorker:
     ) -> None:
         """run() 抛 OSError 时 emit failed 携带错误信息。"""
         monkeypatch.setattr(
-            "fuscan.gui.workers.export_worker.save_report",
+            "fuscan.gui.workers.export_worker.export_report",
             lambda report, path: (_ for _ in ()).throw(OSError("磁盘已满")),
         )
         report = _make_scan_report(tmp_path)

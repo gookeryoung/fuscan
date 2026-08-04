@@ -18,7 +18,6 @@ emit ``themeChanged``，所有绑定表达式重新求值，实现暗色模式�
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 try:
     from PySide2.QtCore import Property, QObject, Signal, Slot
@@ -343,16 +342,6 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def sidebarWidth(self) -> int:
         """侧栏宽度（200px）。"""
         return 200
-
-    @Property(str, notify=themeChanged)  # pyrefly: ignore [not-callable]
-    def iconsDir(self) -> str:
-        """图标目录绝对路径（供 QML ``Image { source: "file:///" + theme.iconsDir + "/xxx.svg" }``）。
-
-        .. deprecated::
-            仅供旧代码兼容，新代码改用 :attr:`iconsPrefix` 走 qrc 资源访问，
-            避免 Win7 等老系统磁盘 I/O 阻塞。
-        """
-        return str(Path(__file__).parent.parent / "assets" / "icons")
 
     @Property(str, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def iconsPrefix(self) -> str:

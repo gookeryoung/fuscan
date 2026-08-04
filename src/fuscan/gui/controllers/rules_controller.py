@@ -41,10 +41,8 @@ from pathlib import Path
 
 try:
     from PySide2.QtCore import Property, QObject, Signal, Slot
-    from PySide2.QtWidgets import QFileDialog
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
-    from PySide6.QtWidgets import QFileDialog  # pyrefly: ignore [missing-import]
 
 from fuscan.config import DEFAULT_MAX_FILE_SIZE, Config
 from fuscan.gui.controllers._task_overrides import (
@@ -401,26 +399,6 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         return bool(item["canRemove"])
 
     # ----------------------------- QML 调用槽 -----------------------------
-
-    @Slot()  # pyrefly: ignore [not-callable]
-    def loadFile(self) -> None:
-        """弹出 QFileDialog 选择规则文件并加载（QWidget 版，QGuiApplication 下不可用）。
-
-        .. deprecated::
-            QML 应使用 :meth:`loadFileFromPath`，由 QML ``FileDialog`` 选定路径后传入。
-            本方法保留供 CLI/测试场景，GUI 中调用会因 ``QGuiApplication`` 不支持
-            ``QWidget`` 而无反应。
-        """
-        last_dir = str(Path(self._config.rules_paths[-1]).parent) if self._config.rules_paths else str(Path.home())
-        path_str, _ = QFileDialog.getOpenFileName(
-            None,
-            "选择规则文件",
-            last_dir,
-            "YAML 文件 (*.yaml *.yml);;所有文件 (*.*)",
-        )
-        if not path_str:
-            return
-        self.loadFileFromPath(path_str)
 
     @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
     def loadFileFromPath(self, path_str: str) -> bool:

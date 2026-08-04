@@ -402,13 +402,7 @@ class TestFontConfigGetters:
 
 
 class TestIconPathGetters:
-    """图标路径 getter（``iconsDir`` 绝对路径与 ``iconsPrefix`` qrc 前缀）。"""
-
-    def test_icons_dir_ends_with_icons(self, theme: ThemeController) -> None:
-        """iconsDir 应返回以 icons 结尾的绝对路径字符串。"""
-        icons_dir = theme.iconsDir
-        assert isinstance(icons_dir, str)
-        assert icons_dir.replace("\\", "/").endswith("assets/icons")
+    """图标路径 getter（``iconsPrefix`` qrc 前缀）。"""
 
     def test_icons_prefix_is_qrc(self, theme: ThemeController) -> None:
         """iconsPrefix 应返回 qrc 资源前缀。"""

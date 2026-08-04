@@ -1,6 +1,6 @@
 """后台导出工作线程：避免阻塞 UI。
 
-``ExportWorker`` 在独立 QThread 中运行 :func:`fuscan.scanner.export.save_report`，
+``ExportWorker`` 在独立 QThread 中运行 :func:`fuscan.export.report.export_report`，
 通过信号通知 UI 完成或失败。PDF/Excel 渲染可能耗时数秒，主线程同步执行会
 导致界面完全无响应（菜单/按钮/进度条均无法刷新），故将其移至后台。
 
@@ -22,7 +22,7 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import QObject, QThread, Signal  # pyrefly: ignore [missing-import]
 
-from fuscan.export.report import save_report
+from fuscan.export.report import export_report
 from fuscan.perf import PerfTimer
 from fuscan.scanner import ScanReport
 
@@ -49,10 +49,10 @@ class ExportWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         self._path = path
 
     def run(self) -> None:
-        """线程入口：调用 save_report 并通过信号通知 UI 结果。"""
+        """线程入口：调用 export_report 并通过信号通知 UI 结果。"""
         try:
-            with PerfTimer("ExportWorker.save_report"):
-                save_report(self._report, self._path)
+            with PerfTimer("ExportWorker.export_report"):
+                export_report(self._report, self._path)
             logger.info("导出成功: %s", self._path)
             self.finished_ok.emit(self._path)  # pyrefly: ignore [missing-attribute]
         except OSError as exc:

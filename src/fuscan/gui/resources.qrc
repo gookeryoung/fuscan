@@ -15,6 +15,7 @@
     <file alias="qml/pages/SettingsPage.qml">views/pages/SettingsPage.qml</file>
     <file alias="qml/pages/StatsPage.qml">views/pages/StatsPage.qml</file>
     <file alias="qml/Sidebar.qml">views/Sidebar.qml</file>
+    <file alias="qml/Splash.qml">views/Splash.qml</file>
     <file alias="icons/about.svg">../assets/icons/about.svg</file>
     <file alias="icons/add.svg">../assets/icons/add.svg</file>
     <file alias="icons/add_scan.svg">../assets/icons/add_scan.svg</file>

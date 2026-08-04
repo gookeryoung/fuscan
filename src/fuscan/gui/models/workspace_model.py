@@ -109,7 +109,9 @@ _FIELD_TO_ROLES: dict[str, list[int]] = {
     "error_count": [Qt.UserRole + 10],
     "last_summary": [Qt.UserRole + 11],
     "collected_count": [Qt.UserRole + 14],
-    # task_overrides 不通过 role 暴露给 QML，无需 emit
+    # task_overrides 含 temp_rules_paths/disabled_temp_rules_paths，
+    # rules_tags 派生属性依赖这两个键，变化时需 emit rules_tags role 刷新 QML
+    "task_overrides": [Qt.UserRole + 13],
 }
 
 
@@ -188,17 +190,27 @@ class WorkspaceItem:
     def rules_tags(self) -> list[dict[str, object]]:
         """规则标签列表（供 QML TAG 标签展示）。
 
-        每项：``{"name": 规则名, "is_builtin": bool}``
+        每项：``{"name": 规则名, "is_builtin": bool, "is_temp": bool}``
 
         - 内置规则：``is_builtin=True``，name 为 ``"内置"``
-        - 用户规则文件：``is_builtin=False``，name 为文件名（含扩展名）
+        - 全局用户规则文件：``is_builtin=False, is_temp=False``，name 为文件名
+        - 临时规则文件（已启用）：``is_builtin=False, is_temp=True``，name 为文件名；
+          禁用的临时规则（在 ``disabled_temp_rules_paths`` 中）不展示
         - 未配置任何规则时返回空列表
         """
         tags: list[dict[str, object]] = []
         if self.use_builtin:
-            tags.append({"name": "内置", "is_builtin": True})
+            tags.append({"name": "内置", "is_builtin": True, "is_temp": False})
         for path in self.rules_paths:
-            tags.append({"name": Path(path).name, "is_builtin": False})
+            tags.append({"name": Path(path).name, "is_builtin": False, "is_temp": False})
+        # 临时规则（仅已启用的，禁用的不展示）
+        disabled_temp = self.task_overrides.get("disabled_temp_rules_paths", ())
+        disabled_set: set[str] = set(disabled_temp) if isinstance(disabled_temp, tuple) else set()
+        temp_paths = self.task_overrides.get("temp_rules_paths", ())
+        if isinstance(temp_paths, tuple):
+            for path in temp_paths:
+                if path not in disabled_set:
+                    tags.append({"name": Path(path).name, "is_builtin": False, "is_temp": True})
         return tags
 
 

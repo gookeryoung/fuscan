@@ -182,7 +182,7 @@ class TestWorkspaceItem:
         item = WorkspaceItem(workspace_id="ws-1", name="t", use_builtin=True)
         tags = item.rules_tags
         assert len(tags) == 1
-        assert tags[0] == {"name": "内置", "is_builtin": True}
+        assert tags[0] == {"name": "内置", "is_builtin": True, "is_temp": False}
 
     def test_rules_tags_builtin_with_files(self) -> None:
         """内置 + 规则文件混合：内置在前，用户文件在后。"""
@@ -194,9 +194,9 @@ class TestWorkspaceItem:
         )
         tags = item.rules_tags
         assert len(tags) == 3
-        assert tags[0] == {"name": "内置", "is_builtin": True}
-        assert tags[1] == {"name": "a.yaml", "is_builtin": False}
-        assert tags[2] == {"name": "b.json", "is_builtin": False}
+        assert tags[0] == {"name": "内置", "is_builtin": True, "is_temp": False}
+        assert tags[1] == {"name": "a.yaml", "is_builtin": False, "is_temp": False}
+        assert tags[2] == {"name": "b.json", "is_builtin": False, "is_temp": False}
 
     def test_rules_tags_files_only(self) -> None:
         """仅规则文件（无内置）：返回用户文件 TAG 列表。"""
@@ -208,12 +208,43 @@ class TestWorkspaceItem:
         )
         tags = item.rules_tags
         assert len(tags) == 1
-        assert tags[0] == {"name": "rules.yaml", "is_builtin": False}
+        assert tags[0] == {"name": "rules.yaml", "is_builtin": False, "is_temp": False}
 
     def test_rules_tags_no_rules(self) -> None:
         """无规则：返回空列表。"""
         item = WorkspaceItem(workspace_id="ws-1", name="t", use_builtin=False)
         assert item.rules_tags == []
+
+    def test_rules_tags_with_temp_rules(self) -> None:
+        """临时规则（已启用）应作为 is_temp=True 的 TAG 展示。"""
+        item = WorkspaceItem(
+            workspace_id="ws-1",
+            name="t",
+            rules_paths=("global.yaml",),
+            use_builtin=True,
+            task_overrides={"temp_rules_paths": ("temp1.yaml", "temp2.yaml")},
+        )
+        tags = item.rules_tags
+        assert len(tags) == 4
+        assert tags[0] == {"name": "内置", "is_builtin": True, "is_temp": False}
+        assert tags[1] == {"name": "global.yaml", "is_builtin": False, "is_temp": False}
+        assert tags[2] == {"name": "temp1.yaml", "is_builtin": False, "is_temp": True}
+        assert tags[3] == {"name": "temp2.yaml", "is_builtin": False, "is_temp": True}
+
+    def test_rules_tags_temp_rules_filtered_by_disabled(self) -> None:
+        """禁用的临时规则（在 disabled_temp_rules_paths 中）不应展示。"""
+        item = WorkspaceItem(
+            workspace_id="ws-1",
+            name="t",
+            use_builtin=False,
+            task_overrides={
+                "temp_rules_paths": ("enabled.yaml", "disabled.yaml"),
+                "disabled_temp_rules_paths": ("disabled.yaml",),
+            },
+        )
+        tags = item.rules_tags
+        assert len(tags) == 1
+        assert tags[0] == {"name": "enabled.yaml", "is_builtin": False, "is_temp": True}
 
     def test_frozen_immutable(self) -> None:
         """frozen dataclass 应禁止字段赋值。"""
@@ -488,7 +519,14 @@ class TestWorkspaceListModel:
         assert mock.call_count == 0
 
     def test_update_workspace_no_signal_for_task_overrides_only(self) -> None:
-        """iter-105 P1：仅更新 task_overrides（不通过 role 暴露）时不 emit。"""
+        """task_overrides 变化时 emit rulesTags role（rules_tags 派生属性依赖临时规则）。
+
+        task_overrides 含 temp_rules_paths/disabled_temp_rules_paths，二者变化会
+        影响 rules_tags 派生属性（临时规则 TAG 列表），故 task_overrides 变化时
+        需 emit rulesTags role 刷新 QML。其他非规则相关 task_overrides key 变化
+        也会触发 emit（因 _FIELD_TO_ROLES 按 field 整体对比，无法区分 key 级别），
+        开销可接受（task_overrides 变化频率低，仅用户操作触发）。
+        """
         from unittest.mock import MagicMock
 
         model = WorkspaceListModel()
@@ -498,8 +536,12 @@ class TestWorkspaceListModel:
 
         model.update_workspace("ws-1", task_overrides={"max_workers": 8})
 
-        # task_overrides 不通过 role 暴露，不应 emit
-        assert mock.call_count == 0
+        # task_overrides 变化 → emit rulesTags role（Qt.UserRole + 13）
+        assert mock.call_count == 1
+        call_args = mock.call_args
+        # dataChanged(topLeft, bottomRight, roles) 第三参数为 roles 列表
+        emitted_roles: list[int] = list(call_args.args[2]) if len(call_args.args) >= 3 else []
+        assert Qt.UserRole + 13 in emitted_roles
         item = model.get_workspace("ws-1")
         assert item is not None
         assert item.task_overrides == {"max_workers": 8}
@@ -625,8 +667,8 @@ class TestAddWorkspace:
         # rules_tags 应包含内置 + 自定义规则文件
         tags = item.rules_tags
         assert len(tags) == 2
-        assert tags[0] == {"name": "内置", "is_builtin": True}
-        assert tags[1] == {"name": "custom.yaml", "is_builtin": False}
+        assert tags[0] == {"name": "内置", "is_builtin": True, "is_temp": False}
+        assert tags[1] == {"name": "custom.yaml", "is_builtin": False, "is_temp": False}
 
     def test_add_workspace_ignores_rules_paths_json(
         self,
@@ -764,8 +806,8 @@ class TestAddWorkspace:
         # rules_tags 应包含内置 + 自定义规则文件
         tags = item.rules_tags
         assert len(tags) == 2
-        assert tags[0] == {"name": "内置", "is_builtin": True}
-        assert tags[1] == {"name": "custom.yaml", "is_builtin": False}
+        assert tags[0] == {"name": "内置", "is_builtin": True, "is_temp": False}
+        assert tags[1] == {"name": "custom.yaml", "is_builtin": False, "is_temp": False}
 
     def test_sync_all_workspaces_rules_no_change_skip_persist(
         self,

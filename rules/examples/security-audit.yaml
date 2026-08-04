@@ -97,5 +97,5 @@ rules:
           child:
             type: path
             mode: regex
-            pattern: '(test|tests|__tests__|spec)/'
+            pattern: '(test|tests|__tests__|spec)[\\/]'
             case_sensitive: false

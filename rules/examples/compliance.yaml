@@ -86,7 +86,7 @@ rules:
           child:
             type: path
             mode: regex
-            pattern: '(test|example|sample|demo)/'
+            pattern: '(test|example|sample|demo)[\\/]'
             case_sensitive: false
 
   # 敏感文件名（疑似凭证文件）

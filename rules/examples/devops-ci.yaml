@@ -80,7 +80,7 @@ rules:
       children:
         - type: path
           mode: regex
-          pattern: '\.github/workflows/.*\.ya?ml$'
+          pattern: '\.github[\\/]workflows[\\/].*\.ya?ml$'
           case_sensitive: false
         - type: content
           mode: contains

@@ -49,8 +49,16 @@ class ArchiveEntry:
 
     @property
     def extension(self) -> str:
-        """条目扩展名（不含点，小写）。"""
-        return Path(self.entry_name).suffix.lower().lstrip(".")
+        """条目扩展名（不含点，小写），正确处理 dotfile 如 ``.env``。"""
+        p = Path(self.entry_name)
+        suffix = p.suffix
+        if suffix:
+            return suffix.lower().lstrip(".")
+        # dotfile（如 .env）：suffix 为空但文件名以 . 开头，取点后部分作为扩展名
+        name = p.name
+        if name.startswith(".") and len(name) > 1:
+            return name[1:].lower()
+        return ""
 
     @property
     def display_path(self) -> str:

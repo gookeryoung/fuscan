@@ -100,7 +100,7 @@ rules:
           case_sensitive: false
         - type: path
           mode: regex
-          pattern: '(Desktop|Downloads|Documents|桌面|下载|文档)/'
+          pattern: '(Desktop|Downloads|Documents|桌面|下载|文档)[\\/]'
           case_sensitive: false
 
   # 第三方代码未标注来源
@@ -112,7 +112,7 @@ rules:
       children:
         - type: path
           mode: regex
-          pattern: '(vendor|third_party|3rdparty)/'
+          pattern: '(vendor|third_party|3rdparty)[\\/]'
           case_sensitive: false
         - type: not
           child:

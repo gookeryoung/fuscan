@@ -11,6 +11,28 @@ from pathlib import Path
 __all__ = ["FileEntry", "HashingContentProvider", "MatchContext", "default_content_provider"]
 
 
+def _extract_extension(path: Path) -> str:
+    """从路径提取文件扩展名（小写、去前导点），正确处理 dotfile。
+
+    Python ``pathlib.Path.suffix`` 对 dotfile（如 ``.env``）返回空字符串——
+    因为它把整个文件名视为 stem（隐藏文件约定）。但 ``.env`` 在
+    ``scan_extensions`` 中应匹配 ``"env"``，否则会被错误跳过。
+
+    规则：
+    - 普通文件（``app.py``）→ ``path.suffix`` 正常返回 ``".py"`` → ``"py"``
+    - dotfile（``.env``）→ ``suffix`` 为空但文件名以 ``.`` 开头且非仅 ``.``/``..`` →
+      取点后部分作为扩展名 → ``"env"``
+    - 无扩展名文件（``Makefile``）→ ``suffix`` 为空且非 dotfile → ``""``
+    """
+    suffix = path.suffix
+    if suffix:
+        return suffix.lower().lstrip(".")
+    name = path.name
+    if name.startswith(".") and len(name) > 1:
+        return name[1:].lower()
+    return ""
+
+
 @dataclass(frozen=True)
 class FileEntry:
     """文件元信息。"""
@@ -32,7 +54,7 @@ class FileEntry:
                 name=path.name,
                 size=st.st_size,
                 mtime=st.st_mtime,
-                extension=path.suffix.lower().lstrip("."),
+                extension=_extract_extension(path),
                 # 复用 stat 结果判断目录，避免再调用 path.is_dir() 产生第二次系统调用
                 is_dir=stat_mod.S_ISDIR(st.st_mode),
             )
@@ -43,7 +65,7 @@ class FileEntry:
                 name=path.name,
                 size=0,
                 mtime=0.0,
-                extension=path.suffix.lower().lstrip("."),
+                extension=_extract_extension(path),
                 is_dir=False,
             )
 
@@ -62,7 +84,7 @@ class FileEntry:
                 name=entry.name,
                 size=st.st_size,
                 mtime=st.st_mtime,
-                extension=path.suffix.lower().lstrip("."),
+                extension=_extract_extension(path),
                 is_dir=stat_mod.S_ISDIR(st.st_mode),
             )
         except OSError:
@@ -72,7 +94,7 @@ class FileEntry:
                 name=entry.name,
                 size=0,
                 mtime=0.0,
-                extension=path.suffix.lower().lstrip("."),
+                extension=_extract_extension(path),
                 is_dir=False,
             )
 

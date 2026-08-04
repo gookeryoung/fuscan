@@ -32,6 +32,20 @@ class TestFileEntry:
         entry = FileEntry.from_path(path)
         assert entry.extension == "pdf"
 
+    def test_from_path_dotfile_env(self, tmp_path: Path) -> None:
+        """dotfile 如 .env 应解析出扩展名 'env'，而非空字符串。"""
+        path = tmp_path / ".env"
+        path.write_text("KEY=value", encoding="utf-8")
+        entry = FileEntry.from_path(path)
+        assert entry.extension == "env"
+
+    def test_from_path_no_extension(self, tmp_path: Path) -> None:
+        """无扩展名文件（如 Makefile）extension 应为空字符串。"""
+        path = tmp_path / "Makefile"
+        path.write_text("all:", encoding="utf-8")
+        entry = FileEntry.from_path(path)
+        assert entry.extension == ""
+
     def test_from_path_inaccessible(self, tmp_path: Path) -> None:
         """不存在的路径返回空元信息而不抛异常。"""
         entry = FileEntry.from_path(tmp_path / "missing")

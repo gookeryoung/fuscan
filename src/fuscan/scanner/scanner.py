@@ -824,8 +824,10 @@ class Scanner:
         """基于 entry.extension 返回当前文件真正需要执行的 CONTENT 桶
         和 remaining 规则对（global + ext 专属）。
 
-        - 无扩展名的文件（如 .env、Makefile、Dockerfile）：entry.extension == ""，
+        - 无扩展名的文件（如 Makefile、Dockerfile）：entry.extension == ""，
           仅执行 global_content_buckets / global_remaining_rules。
+          （注：dotfile 如 ``.env`` 经 :func:`FileEntry._extract_extension` 解析为
+          ``"env"``，会被视为有扩展名的文件。）
         - 有扩展名的文件：global + 对应 ext 的专属 buckets/rules。
         - ``_ext_*`` dict 中未找到 ext 时视为空 list，不抛异常。
 

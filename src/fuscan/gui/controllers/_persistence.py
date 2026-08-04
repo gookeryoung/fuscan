@@ -132,6 +132,9 @@ PERSIST_VERSION = 1
 # 未覆盖时回退全局 RulesController（与 scan_archives/max_workers 等同语义）
 # temp_rules_paths：任务级临时规则文件路径，叠加在全局规则之上（不覆盖），
 # 仅对当前工作区生效，扫描时与全局启用的规则合并
+# disabled_temp_rules_paths：任务级禁用的临时规则文件路径（不参与扫描合并），
+# 与全局 disabled_rules_paths 同语义，仅持久化到 task_overrides（非全局 Config），
+# 配合 temp_rules_paths 实现"保留但禁用"——临时规则从列表移除前可单独禁用
 TASK_OVERRIDE_KEYS: dict[str, type] = {
     "scan_archives": bool,
     "max_workers": int,
@@ -141,6 +144,7 @@ TASK_OVERRIDE_KEYS: dict[str, type] = {
     "rules_paths": tuple,
     "use_builtin": bool,
     "temp_rules_paths": tuple,
+    "disabled_temp_rules_paths": tuple,
 }
 
 # 任务级覆盖 int 字段范围（与 ConfigController 全局钳制一致）
@@ -180,7 +184,9 @@ def serialize_task_overrides(overrides: dict[str, object]) -> dict[str, object]:
     for key, value in overrides.items():
         if key not in TASK_OVERRIDE_KEYS:
             continue
-        if key in ("ignore_dirs", "rules_paths", "temp_rules_paths") and isinstance(value, tuple):
+        if key in ("ignore_dirs", "rules_paths", "temp_rules_paths", "disabled_temp_rules_paths") and isinstance(
+            value, tuple
+        ):
             out[key] = list(value)
         else:
             out[key] = value
@@ -202,7 +208,7 @@ def deserialize_task_overrides(raw: object) -> dict[str, object]:
         if key not in TASK_OVERRIDE_KEYS:
             logger.warning("反序列化 task_overrides：跳过未知字段 %s", key)
             continue
-        if key in ("ignore_dirs", "rules_paths", "temp_rules_paths"):
+        if key in ("ignore_dirs", "rules_paths", "temp_rules_paths", "disabled_temp_rules_paths"):
             if isinstance(value, list) and all(isinstance(x, str) for x in value):
                 out[key] = tuple(value)
             else:

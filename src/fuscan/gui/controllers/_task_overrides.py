@@ -17,6 +17,7 @@
 - :func:`effective_rules_paths`：任务级覆盖优先的 rules_paths
 - :func:`effective_use_builtin`：任务级覆盖优先的 use_builtin
 - :func:`effective_temp_rules_paths`：任务级临时规则文件路径（叠加在全局规则之上）
+- :func:`effective_disabled_temp_rules_paths`：任务级禁用的临时规则文件路径
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from fuscan.config import Config
 
 __all__ = [
+    "effective_disabled_temp_rules_paths",
     "effective_ignore_dirs",
     "effective_max_depth",
     "effective_max_file_size",
@@ -117,6 +119,22 @@ def effective_temp_rules_paths(overrides: dict[str, object]) -> tuple[str, ...]:
         过滤逻辑由 :meth:`ScanController._compute_effective_ruleset` 处理。
     """
     value = overrides.get("temp_rules_paths")
+    if isinstance(value, tuple):
+        return value
+    return ()
+
+
+def effective_disabled_temp_rules_paths(overrides: dict[str, object]) -> tuple[str, ...]:
+    """任务级禁用的临时规则文件路径（不参与扫描合并）。
+
+    与全局 :attr:`Config.disabled_rules_paths` 同语义，仅作用于当前工作区
+    的临时规则——禁用后 :meth:`ScanController._compute_effective_ruleset`
+    在合并临时规则时跳过此列表中的路径。临时规则文件仍保留在
+    ``temp_rules_paths`` 中以便重新启用。
+
+    :return: ``tuple[str, ...]``，禁用的临时规则文件路径元组。未设置时返回空元组。
+    """
+    value = overrides.get("disabled_temp_rules_paths")
     if isinstance(value, tuple):
         return value
     return ()

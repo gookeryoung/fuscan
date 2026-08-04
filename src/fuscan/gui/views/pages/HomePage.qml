@@ -581,221 +581,36 @@ Item {
         }
     }
 
-    // ========== 配置规则对话框（共享单例，全局规则 + 任务级覆盖） ==========
-    // 上半区「全局规则」：复用 rulesController 的全局规则管理（立即生效），
-    //   供用户在任务上下文中直接加载/禁用/移除全局规则文件，无需跳转设置页。
-    // 下半区「任务规则覆盖」：临时编辑状态 + onAccepted 与全局对比，
-    //   相同则 clearTaskOverride（回退全局），不同则 setTaskOverride（任务级覆盖）。
-    //   仅覆盖 rules_paths（list[str]）与 use_builtin（bool）两个键。
+    // ========== 配置规则对话框（共享单例，单一列表：内置→全局→临时） ==========
+    // 单一 ListView 直接绑定 rulesController.rulesFileModel，所有操作立即生效：
+    // - 勾选启用/禁用：内置/全局规则操作 Config，临时规则操作 task_overrides.disabled_temp_rules_paths
+    // - 加载到全局：loadFileFromPath 立即生效，所有任务共享
+    // - 加载到临时：loadFileToTemp 立即生效，仅当前工作区生效
+    // - 上移/下移/移除：均立即生效
+    // 作用域标签：内置=蓝 / 全局=蓝 / 临时=绿（colorPrimary / colorSuccess）
     Dialog {
         id: configureRulesDialog
         title: "配置规则 — " + workspaceController.workspaceName(homePage._pendingConfigureRulesWsId)
         modal: true
         anchors.centerIn: parent
-        width: 540
-        height: 600
-        standardButtons: Dialog.Cancel | Dialog.Ok
-
-        // 临时编辑状态（由 delegate onConfigureRulesRequested 从 taskOverridesJson 初始化）
-        property bool editUseBuiltin: true
-        // editRulesPaths 为 list[str]，与全局 rules_paths 对比决定是否覆盖
-        property var editRulesPaths: []
-        // 选中规则文件行号（-1 表示未选中）
-        property int selectedFileIndex: -1
-
-        // 全局规则过滤列表（仅 scope === "global"，含内置规则）
-        // 绑定 rulesFileModel，rulesFileListChanged 信号触发时自动刷新
-        property var globalRules: {
-            var all = rulesController.rulesFileModel
-            var result = []
-            for (var i = 0; i < all.length; i++) {
-                if (all[i].scope === "global") {
-                    result.push(all[i])
-                }
-            }
-            return result
-        }
+        width: 600
+        height: 620
+        // 所有操作立即生效，确定按钮仅用于关闭对话框
+        standardButtons: Dialog.Close
 
         contentItem: ColumnLayout {
             spacing: 10
 
-            // ===== 全局规则区（立即生效，所有任务共享） =====
+            // 顶部说明
             Label {
-                text: "全局规则（所有任务共享，立即生效）"
-                font.bold: true
-                font.pixelSize: theme.fontSizeBody
-                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                Layout.fillWidth: true
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 180
-                color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
-                border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                border.width: 1
-                radius: 8
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 8
-                    spacing: 6
-
-                    ListView {
-                        id: globalRulesList
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        clip: true
-                        cacheBuffer: 200
-                        model: configureRulesDialog.globalRules
-                        delegate: ItemDelegate {
-                            width: globalRulesList.width
-                            height: 32
-                            onClicked: {}
-                            background: Rectangle {
-                                color: parent.hovered
-                                    ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                                    : "transparent"
-                                Behavior on color { ColorAnimation { duration: 120 } }
-                            }
-                            contentItem: RowLayout {
-                                spacing: 8
-                                // 启用/禁用勾选框
-                                CheckBox {
-                                    checked: modelData.enabled
-                                    enabled: modelData.scope === "global"
-                                    onClicked: {
-                                        rulesController.setRuleEnabled(
-                                            modelData.path, checked)
-                                    }
-                                    Layout.alignment: Qt.AlignVCenter
-                                }
-                                // 文件名
-                                Label {
-                                    text: modelData.fileName
-                                    font.pixelSize: 12
-                                    color: modelData.exists
-                                        ? (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
-                                        : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
-                                    elide: Text.ElideMiddle
-                                    Layout.fillWidth: true
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                // 内置标签
-                                Rectangle {
-                                    visible: modelData.isBuiltin
-                                    radius: 4
-                                    height: 18
-                                    width: builtinTag.implicitWidth + 12
-                                    color: theme.colorPrimary
-                                    Layout.alignment: Qt.AlignVCenter
-                                    Label {
-                                        id: builtinTag
-                                        anchors.centerIn: parent
-                                        text: "内置"
-                                        font.pixelSize: 10
-                                        font.bold: true
-                                        color: "#FFFFFF"
-                                    }
-                                }
-                                // 缺失标签
-                                Rectangle {
-                                    visible: !modelData.exists
-                                    radius: 4
-                                    height: 18
-                                    width: missingTag.implicitWidth + 12
-                                    color: theme.colorDanger
-                                    Layout.alignment: Qt.AlignVCenter
-                                    Label {
-                                        id: missingTag
-                                        anchors.centerIn: parent
-                                        text: "缺失"
-                                        font.pixelSize: 10
-                                        font.bold: true
-                                        color: "#FFFFFF"
-                                    }
-                                }
-                                // 移除按钮（内置规则不可移除）
-                                IconButton {
-                                    iconSource: "qrc:/icons/close.svg"
-                                    tooltip: "移除该全局规则文件"
-                                    accent: "ghost"
-                                    iconSize: 12
-                                    btnSize: 24
-                                    visible: modelData.canRemove
-                                    Layout.alignment: Qt.AlignVCenter
-                                    onClicked: rulesController.removeGlobalPath(modelData.path)
-                                }
-                            }
-                        }
-                    }
-
-                    // 空态提示（仅有内置规则时也显示提示）
-                    Label {
-                        Layout.fillWidth: true
-                        visible: configureRulesDialog.globalRules.length <= 1
-                        text: "点击下方「加载」添加全局规则文件"
-                        font.pixelSize: 11
-                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                        horizontalAlignment: Text.AlignHCenter
-                    }
-
-                    // 加载全局规则按钮
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 4
-                        IconButton {
-                            iconSource: "qrc:/icons/load_list.svg"
-                            text: "加载到全局"
-                            tooltip: "从文件选择规则文件加载到全局规则（所有任务共享）"
-                            accent: "secondary"
-                            onClicked: loadGlobalRulesFileDialog.open()
-                        }
-                        Item { Layout.fillWidth: true }
-                        Label {
-                            text: "共 " + (configureRulesDialog.globalRules.length - 1) + " 个用户规则文件"
-                            font.pixelSize: 10
-                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                        }
-                    }
-                }
-            }
-
-            // 分隔线
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 1
-                color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-            }
-
-            // ===== 任务规则覆盖区（仅对该任务生效，确定后应用） =====
-            Label {
-                text: "任务规则覆盖（仅对该任务生效，点击确定后应用）"
-                font.bold: true
-                font.pixelSize: theme.fontSizeBody
-                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                Layout.fillWidth: true
-            }
-
-            Label {
-                text: "与全局一致时使用全局配置，不一致时覆盖全局。"
+                text: "同规则条件覆盖上方，不同规则采取并集。"
                 font.pixelSize: 11
                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
             }
 
-            // 内置规则勾选
-            RowLayout {
-                Layout.fillWidth: true
-                CheckBox {
-                    text: "内置通用规则"
-                    checked: configureRulesDialog.editUseBuiltin
-                    onCheckedChanged: configureRulesDialog.editUseBuiltin = checked
-                }
-                Item { Layout.fillWidth: true }
-            }
-
+            // 规则文件列表（内置 + 全局 + 临时合并）
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -815,26 +630,17 @@ Item {
                         Layout.fillHeight: true
                         clip: true
                         cacheBuffer: 200
-                        // editRulesPaths 为 list[str]，delegate 用 modelData 访问路径
-                        model: configureRulesDialog.editRulesPaths
-                        currentIndex: configureRulesDialog.selectedFileIndex
-                        onCurrentIndexChanged: configureRulesDialog.selectedFileIndex = currentIndex
+                        model: rulesController.rulesFileModel
+                        currentIndex: rulesController.selectedFileIndex
+                        onCurrentIndexChanged: rulesController.setSelectedFileIndex(currentIndex)
                         delegate: ItemDelegate {
+                            id: ruleFileDelegate
                             width: configureRulesFileList.width
-                            height: 32
-                            text: {
-                                // 取路径最后一段作为文件名显示
-                                var p = String(modelData)
-                                var idx = p.lastIndexOf("/")
-                                if (idx >= 0) return p.substring(idx + 1)
-                                // Windows 路径分隔符
-                                idx = p.lastIndexOf("\\")
-                                if (idx >= 0) return p.substring(idx + 1)
-                                return p
-                            }
-                            font.pixelSize: 12
-                            font.bold: ListView.isCurrentItem
+                            height: 40
+                            // QVariantList of dict 通过 modelData 访问字段
                             highlighted: ListView.isCurrentItem
+                            // 文件缺失时禁用（内置规则恒存在）
+                            enabled: modelData.exists
                             onClicked: configureRulesFileList.currentIndex = index
                             background: Rectangle {
                                 color: ListView.isCurrentItem
@@ -846,6 +652,7 @@ Item {
                                         ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
                                         : "transparent")
                                 Behavior on color { ColorAnimation { duration: 120 } }
+                                // 左侧 3px 色条强调选中态
                                 Rectangle {
                                     visible: ListView.isCurrentItem
                                     anchors.left: parent.left
@@ -855,127 +662,150 @@ Item {
                                     color: theme.colorPrimary
                                 }
                             }
-                            contentItem: Label {
-                                text: parent.text
-                                font: parent.font
-                                color: parent.highlighted
-                                    ? theme.colorPrimary
-                                    : (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
-                                elide: Text.ElideMiddle
-                                verticalAlignment: Text.AlignVCenter
-                                leftPadding: 10
+                            contentItem: RowLayout {
+                                spacing: 8
+
+                                // 启用/禁用勾选框（所有规则均可勾选，含临时规则）
+                                CheckBox {
+                                    checked: modelData.enabled
+                                    onClicked: {
+                                        rulesController.setRuleEnabled(
+                                            modelData.path, checked)
+                                    }
+                                    Layout.alignment: Qt.AlignVCenter
+                                }
+
+                                // 文件名
+                                Label {
+                                    text: modelData.fileName
+                                    font.pixelSize: 12
+                                    font.bold: ListView.isCurrentItem
+                                    color: ListView.isCurrentItem
+                                        ? theme.colorPrimary
+                                        : (modelData.exists
+                                            ? (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
+                                            : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary))
+                                    elide: Text.ElideMiddle
+                                    Layout.fillWidth: true
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+
+                                // 作用域标签：内置=蓝 / 全局=蓝 / 临时=绿
+                                Rectangle {
+                                    radius: 4
+                                    height: 18
+                                    width: scopeLabel.implicitWidth + 12
+                                    color: modelData.isBuiltin
+                                        ? theme.colorPrimary
+                                        : (modelData.scope === "temp"
+                                            ? theme.colorSuccess
+                                            : theme.colorPrimary)
+                                    Layout.alignment: Qt.AlignVCenter
+                                    Label {
+                                        id: scopeLabel
+                                        anchors.centerIn: parent
+                                        text: modelData.isBuiltin
+                                            ? "内置"
+                                            : (modelData.scope === "temp" ? "临时" : "全局")
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        color: "#FFFFFF"
+                                    }
+                                }
+
+                                // 缺失文件显示"缺失"标记
+                                Rectangle {
+                                    visible: !modelData.exists
+                                    radius: 4
+                                    height: 18
+                                    width: missingLabel.implicitWidth + 12
+                                    color: theme.colorDanger
+                                    Layout.alignment: Qt.AlignVCenter
+                                    Label {
+                                        id: missingLabel
+                                        anchors.centerIn: parent
+                                        text: "缺失"
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        color: "#FFFFFF"
+                                    }
+                                }
+
+                                // 移除按钮（内置规则不显示）
+                                IconButton {
+                                    iconSource: "qrc:/icons/close.svg"
+                                    tooltip: "移除该规则文件"
+                                    accent: "ghost"
+                                    visible: modelData.canRemove
+                                    Layout.alignment: Qt.AlignVCenter
+                                    Layout.rightMargin: 4
+                                    onClicked: {
+                                        configureRulesFileList.currentIndex = index
+                                        rulesController.removeSelected()
+                                    }
+                                }
                             }
                         }
                     }
 
-                    // 空态提示
-                    Label {
-                        Layout.fillWidth: true
-                        visible: configureRulesDialog.editRulesPaths.length === 0
-                        text: "未加载用户规则文件（使用全局规则）"
-                        font.pixelSize: 11
-                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                        horizontalAlignment: Text.AlignHCenter
-                    }
-
-                    // 操作按钮：上移/下移/移除/加载
+                    // 操作行：加载到全局 / 加载到临时 / 上移 / 下移 / 移除
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 4
                         IconButton {
-                            iconSource: "qrc:/icons/up_arrow.svg"
-                            tooltip: "上移"
+                            iconSource: "qrc:/icons/load_list.svg"
+                            text: "加载到全局"
+                            tooltip: "从文件选择规则文件加载到全局规则（所有任务共享，立即生效）"
+                            accent: "secondary"
+                            onClicked: loadGlobalRulesFileDialog.open()
+                        }
+                        IconButton {
+                            iconSource: "qrc:/icons/load_list.svg"
+                            text: "加载到临时"
+                            tooltip: "从文件选择规则文件加载到当前工作区临时规则（仅对该任务生效，立即生效）"
                             accent: "ghost"
-                            enabled: configureRulesDialog.selectedFileIndex > 0
-                            onClicked: {
-                                var idx = configureRulesDialog.selectedFileIndex
-                                var paths = configureRulesDialog.editRulesPaths.slice()
-                                var tmp = paths[idx - 1]
-                                paths[idx - 1] = paths[idx]
-                                paths[idx] = tmp
-                                configureRulesDialog.editRulesPaths = paths
-                                configureRulesDialog.selectedFileIndex = idx - 1
-                            }
+                            enabled: rulesController.hasCurrentWorkspace
+                            onClicked: loadTempRulesFileDialog.open()
+                        }
+                        Item { Layout.fillWidth: true }
+                        IconButton {
+                            iconSource: "qrc:/icons/up_arrow.svg"
+                            tooltip: "上移选中全局规则文件"
+                            accent: "ghost"
+                            enabled: rulesController.canMoveUp
+                            onClicked: rulesController.moveUp()
                         }
                         IconButton {
                             iconSource: "qrc:/icons/down_arrow.svg"
-                            tooltip: "下移"
+                            tooltip: "下移选中全局规则文件"
                             accent: "ghost"
-                            enabled: configureRulesDialog.selectedFileIndex >= 0
-                                && configureRulesDialog.selectedFileIndex < configureRulesDialog.editRulesPaths.length - 1
-                            onClicked: {
-                                var idx = configureRulesDialog.selectedFileIndex
-                                var paths = configureRulesDialog.editRulesPaths.slice()
-                                var tmp = paths[idx + 1]
-                                paths[idx + 1] = paths[idx]
-                                paths[idx] = tmp
-                                configureRulesDialog.editRulesPaths = paths
-                                configureRulesDialog.selectedFileIndex = idx + 1
-                            }
+                            enabled: rulesController.canMoveDown
+                            onClicked: rulesController.moveDown()
                         }
                         IconButton {
                             iconSource: "qrc:/icons/minus.svg"
                             tooltip: "移除选中规则文件"
                             accent: "ghost"
-                            enabled: configureRulesDialog.selectedFileIndex >= 0
-                                && configureRulesDialog.selectedFileIndex < configureRulesDialog.editRulesPaths.length
-                            onClicked: {
-                                var idx = configureRulesDialog.selectedFileIndex
-                                var paths = configureRulesDialog.editRulesPaths.slice()
-                                paths.splice(idx, 1)
-                                configureRulesDialog.editRulesPaths = paths
-                                configureRulesDialog.selectedFileIndex = -1
-                            }
-                        }
-                        Item { Layout.fillWidth: true }
-                        IconButton {
-                            iconSource: "qrc:/icons/load_list.svg"
-                            text: "加载"
-                            tooltip: "加载规则文件到任务覆盖"
-                            accent: "ghost"
-                            onClicked: configureRulesFileDialog.open()
+                            enabled: rulesController.canRemove
+                            onClicked: rulesController.removeSelected()
                         }
                     }
-                }
-            }
-        }
 
-        onAccepted: {
-            // 与全局值相同的字段清除覆盖，不同的字段才下发 setTaskOverride
-            var wsId = homePage._pendingConfigureRulesWsId
-            // use_builtin
-            var useBuiltinValue = configureRulesDialog.editUseBuiltin
-            var globalUseBuiltin = rulesController.useBuiltin
-            if (useBuiltinValue === globalUseBuiltin) {
-                workspaceController.clearTaskOverride(wsId, "use_builtin")
-            } else {
-                workspaceController.setTaskOverride(wsId, "use_builtin", JSON.stringify(useBuiltinValue))
-            }
-            // rules_paths：将全局 rulesFileModel 转为 path 字符串数组对比
-            var globalFileModel = rulesController.rulesFileModel
-            var globalPaths = []
-            for (var i = 0; i < globalFileModel.length; i++) {
-                if (globalFileModel[i].scope === "global" && !globalFileModel[i].isBuiltin) {
-                    globalPaths.push(String(globalFileModel[i].path))
-                }
-            }
-            var editPaths = configureRulesDialog.editRulesPaths
-            // 深比较（顺序敏感）
-            var same = editPaths.length === globalPaths.length
-            if (same) {
-                for (var j = 0; j < editPaths.length; j++) {
-                    if (String(editPaths[j]) !== globalPaths[j]) {
-                        same = false
-                        break
+                    // 提示文字
+                    Label {
+                        Layout.fillWidth: true
+                        text: rulesController.hasCurrentWorkspace
+                            ? "勾选启用/禁用所有规则（含临时规则）；上移/下移仅作用于全局规则文件排序"
+                            : "未选择工作区：加载到临时、临时规则启用/禁用需先在首页选择工作区"
+                        font.pixelSize: 10
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        font.italic: true
+                        wrapMode: Text.WordWrap
                     }
                 }
             }
-            if (same) {
-                workspaceController.clearTaskOverride(wsId, "rules_paths")
-            } else {
-                workspaceController.setTaskOverride(wsId, "rules_paths", JSON.stringify(editPaths))
-            }
         }
+        // 所有规则操作立即生效，关闭对话框无需额外应用动作（standardButtons: Dialog.Close）
     }
 
     // 全局规则文件选择器（加载到全局，立即生效）
@@ -992,24 +822,17 @@ Item {
         }
     }
 
-    // 任务覆盖规则文件选择器
+    // 临时规则文件选择器（加载到当前工作区，立即生效）
     Dialogs.FileDialog {
-        id: configureRulesFileDialog
-        title: "选择规则文件"
+        id: loadTempRulesFileDialog
+        title: "选择规则文件（加载到临时）"
         nameFilters: ["YAML 文件 (*.yaml *.yml)", "所有文件 (*.*)"]
         onAccepted: {
-            var pathStr = configureRulesFileDialog.fileUrl.toString()
+            var pathStr = loadTempRulesFileDialog.fileUrl.toString()
             if (pathStr.startsWith("file:///")) {
                 pathStr = decodeURIComponent(pathStr.substring(8))
             }
-            // 避免重复加载
-            var existing = configureRulesDialog.editRulesPaths
-            for (var i = 0; i < existing.length; i++) {
-                if (String(existing[i]) === pathStr) return
-            }
-            var paths = configureRulesDialog.editRulesPaths.slice()
-            paths.push(pathStr)
-            configureRulesDialog.editRulesPaths = paths
+            rulesController.loadFileToTemp(pathStr)
         }
     }
 
@@ -1525,19 +1348,11 @@ Item {
                         try { historyDialog.comparison = JSON.parse(cmpJson) } catch(e) { historyDialog.comparison = {} }
                         historyDialog.open()
                     }
-                    // 配置规则：打开共享对话框，按工作区初始化任务级规则覆盖
+                    // 配置规则：打开共享对话框（单一列表，所有操作立即生效，无需初始化本地编辑状态）
                     onConfigureRulesRequested: function(wsId) {
                         homePage._pendingConfigureRulesWsId = wsId
-                        var jsonStr = workspaceController.taskOverridesJson(wsId)
-                        var overrides = {}
-                        try { overrides = JSON.parse(jsonStr) } catch(e) { overrides = {} }
-                        var globalPaths = rulesController.rulesFileModel
-                        var ovPaths = overrides.rules_paths !== undefined ? overrides.rules_paths : null
-                        var ovUseBuiltin = overrides.use_builtin !== undefined
-                            ? overrides.use_builtin : rulesController.useBuiltin
-                        configureRulesDialog.editUseBuiltin = ovUseBuiltin
-                        // 任务级覆盖的文件路径列表（tuple 序列化为 list）
-                        configureRulesDialog.editRulesPaths = Array.isArray(ovPaths) ? ovPaths.slice() : []
+                        // 切换 RulesController 的当前工作区上下文，使临时规则列表刷新
+                        workspaceController.setCurrentWorkspaceId(wsId)
                         configureRulesDialog.open()
                     }
                 }

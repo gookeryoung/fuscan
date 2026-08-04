@@ -52,6 +52,7 @@ from fuscan.gui.controllers._result_detail import (
 )
 from fuscan.gui.controllers._scan_roots import build_scan_roots, can_build_roots
 from fuscan.gui.controllers._task_overrides import (
+    effective_disabled_temp_rules_paths,
     effective_ignore_dirs,
     effective_max_depth,
     effective_max_file_size,
@@ -535,7 +536,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         :param key: Config 字段名（``scan_archives``/``max_workers``/
             ``max_file_size``/``max_depth``/``ignore_dirs``/``rules_paths``/
-            ``use_builtin``）
+            ``use_builtin``/``temp_rules_paths``/``disabled_temp_rules_paths``）
         :param value: 覆盖值（类型须与 Config 字段一致）
 
         覆盖值在 :meth:`_effective_scan_archives`/`_effective_max_workers` 等
@@ -546,14 +547,15 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         ``effectiveMaxWorkers``/``effectiveMaxFileSizeMB``/``effectiveMaxDepth``
         绑定重算。
 
-        ``rules_paths``/``use_builtin`` 变更时重算 effective ruleset 缓存并
+        ``rules_paths``/``use_builtin``/``temp_rules_paths``/
+        ``disabled_temp_rules_paths`` 变更时重算 effective ruleset 缓存并
         emit ``canStartScanChanged``/``rulesCountChanged``，让 QML 侧
         ``canStartScan``/``rulesCount`` 绑定反映任务级规则集。
         """
         self._task_overrides[key] = value
         if key in ("max_workers", "max_file_size", "max_depth"):
             self.effectiveConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
-        elif key in ("rules_paths", "use_builtin", "temp_rules_paths"):
+        elif key in ("rules_paths", "use_builtin", "temp_rules_paths", "disabled_temp_rules_paths"):
             self._ruleset = self._compute_effective_ruleset()
             self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
             self.rulesCountChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -618,17 +620,24 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         规则集来源（按优先级合并）：
         1. 全局规则集（:attr:`_rules_controller.ruleset`，已过滤禁用的全局规则文件）
         2. 任务级 ``rules_paths``/``use_builtin`` 覆盖（覆盖全局规则配置时重新加载）
-        3. 任务级 ``temp_rules_paths`` 临时规则（叠加在上述规则集之上）
+        3. 任务级 ``temp_rules_paths`` 临时规则（叠加在上述规则集之上，
+           跳过 ``disabled_temp_rules_paths`` 中禁用的路径）
 
         无任务级覆盖且无临时规则时直接取全局 :attr:`_rules_controller.ruleset`。
         有 ``rules_paths``/``use_builtin`` 覆盖时按 effective 配置重新加载
-        （内置 + 用户规则合并）。临时规则始终在最后叠加合并。
+        （内置 + 用户规则合并）。临时规则始终在最后叠加合并（禁用的临时规则
+        不参与合并但仍保留在 ``temp_rules_paths`` 中以便重新启用）。
 
         :return: :class:`RuleSet` 实例；无可用规则（未勾选内置且无用户规则文件，
             或加载失败）时返回 ``None``
         """
         has_override = "rules_paths" in self._task_overrides or "use_builtin" in self._task_overrides
-        temp_paths = [Path(p) for p in effective_temp_rules_paths(self._task_overrides) if Path(p).exists()]
+        disabled_temp = effective_disabled_temp_rules_paths(self._task_overrides)
+        temp_paths = [
+            Path(p)
+            for p in effective_temp_rules_paths(self._task_overrides)
+            if Path(p).exists() and p not in disabled_temp
+        ]
 
         # 无任务级覆盖且无临时规则：直接取全局 ruleset
         if not has_override and not temp_paths:

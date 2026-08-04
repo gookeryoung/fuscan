@@ -712,7 +712,7 @@ class _FakeWorkspaceController:
         if item is None:
             return
         value = json.loads(value_json)
-        if key == "temp_rules_paths":
+        if key in ("temp_rules_paths", "disabled_temp_rules_paths"):
             value = tuple(value)
         item.task_overrides[key] = value
 
@@ -1282,3 +1282,208 @@ class TestDisabledRulesPathsPersistence:
 
         reloaded = load_config()
         assert path_str in reloaded.disabled_rules_paths
+
+
+# ============================= iter-140 临时规则禁用 =============================
+
+
+class TestSetRuleEnabledTemp:
+    """``setRuleEnabled`` 对临时规则的禁用/启用支持（iter-140）。
+
+    临时规则禁用持久化到 ``task_overrides.disabled_temp_rules_paths``，
+    与全局 ``disabled_rules_paths`` 同语义但仅作用于当前工作区。
+    """
+
+    def test_disable_temp_rule_updates_task_overrides(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """禁用临时规则应写入 disabled_temp_rules_paths。"""
+        controller, wc = controller_with_workspace
+        controller.loadFileToTemp(str(rules_file))
+        path_str = str(rules_file)
+
+        # 禁用临时规则
+        controller.setRuleEnabled(path_str, False)
+
+        item = wc.get_workspace("ws1")
+        assert item is not None
+        disabled_temp: tuple[str, ...] = item.task_overrides.get("disabled_temp_rules_paths", ())  # type: ignore[assignment]
+        assert path_str in disabled_temp
+        # rulesFileModel 中该项 enabled 应为 False
+        temp_item = next(m for m in controller.rulesFileModel if m["scope"] == "temp")
+        assert temp_item["enabled"] is False
+
+    def test_enable_temp_rule_removes_from_disabled(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """启用已禁用的临时规则应从 disabled_temp_rules_paths 移除。"""
+        controller, wc = controller_with_workspace
+        controller.loadFileToTemp(str(rules_file))
+        path_str = str(rules_file)
+
+        # 禁用后启用
+        controller.setRuleEnabled(path_str, False)
+        controller.setRuleEnabled(path_str, True)
+
+        item = wc.get_workspace("ws1")
+        assert item is not None
+        disabled_temp: tuple[str, ...] = item.task_overrides.get("disabled_temp_rules_paths", ())  # type: ignore[assignment]
+        assert path_str not in disabled_temp
+        temp_item = next(m for m in controller.rulesFileModel if m["scope"] == "temp")
+        assert temp_item["enabled"] is True
+
+    def test_disable_temp_rule_noop_when_already_disabled(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """重复禁用同一临时规则应 noop（disabled_temp_rules_paths 不重复追加）。"""
+        controller, wc = controller_with_workspace
+        controller.loadFileToTemp(str(rules_file))
+        path_str = str(rules_file)
+
+        controller.setRuleEnabled(path_str, False)
+        controller.setRuleEnabled(path_str, False)  # 重复禁用
+
+        item = wc.get_workspace("ws1")
+        assert item is not None
+        disabled = item.task_overrides.get("disabled_temp_rules_paths", ())
+        assert disabled.count(path_str) == 1  # pyrefly: ignore [missing-attribute]
+
+    def test_enable_temp_rule_noop_when_already_enabled(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """启用已启用的临时规则应 noop。"""
+        controller, wc = controller_with_workspace
+        controller.loadFileToTemp(str(rules_file))
+        path_str = str(rules_file)
+
+        # 默认启用，再次启用应 noop（disabled_temp_rules_paths 仍为空）
+        controller.setRuleEnabled(path_str, True)
+
+        item = wc.get_workspace("ws1")
+        assert item is not None
+        assert item.task_overrides.get("disabled_temp_rules_paths", ()) == ()
+
+    def test_disable_temp_rule_without_workspace_noop(
+        self,
+        config_controller: ConfigController,
+        rules_file: Path,
+    ) -> None:
+        """无当前工作区时禁用临时规则应 noop（不抛异常）。"""
+        controller = RulesController(config_controller)
+        # 未注入 workspace_controller，path 不在 _current_temp_paths（空）
+        # 应走全局规则禁用分支，但因 path 不在 rules_paths 也 noop
+        controller.setRuleEnabled(str(rules_file), False)
+        assert str(rules_file) not in config_controller.config.disabled_rules_paths
+
+    def test_disable_temp_rule_isolated_per_workspace(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """禁用状态随工作区切换刷新——ws1 禁用不影响 ws2 视图。"""
+        controller, wc = controller_with_workspace
+        controller.loadFileToTemp(str(rules_file))
+        path_str = str(rules_file)
+
+        # ws1 禁用
+        controller.setRuleEnabled(path_str, False)
+        # 切换到 ws2（无临时规则）
+        wc.add_workspace("ws2", "工作区B")
+        wc.set_current("ws2")
+        # ws2 列表仅内置项，无临时规则
+        model = controller.rulesFileModel
+        assert all(m["scope"] != "temp" for m in model)
+        # 切回 ws1，临时规则仍存在且 enabled 为 False
+        wc.set_current("ws1")
+        temp_item = next(m for m in controller.rulesFileModel if m["scope"] == "temp")
+        assert temp_item["enabled"] is False
+
+
+class TestRemoveTempRuleClearsDisabled:
+    """移除临时规则时同步清理 disabled_temp_rules_paths（iter-140）。"""
+
+    def test_remove_temp_rule_clears_disabled_entry(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """移除已禁用的临时规则应同步从 disabled_temp_rules_paths 删除。"""
+        controller, wc = controller_with_workspace
+        controller.loadFileToTemp(str(rules_file))
+        path_str = str(rules_file)
+
+        # 禁用后移除
+        controller.setRuleEnabled(path_str, False)
+        controller.setSelectedFileIndex(1)  # 临时规则索引
+        controller.removeSelected()
+
+        item = wc.get_workspace("ws1")
+        assert item is not None
+        temp_paths: tuple[str, ...] = item.task_overrides.get("temp_rules_paths", ())  # type: ignore[assignment]
+        disabled_temp: tuple[str, ...] = item.task_overrides.get("disabled_temp_rules_paths", ())  # type: ignore[assignment]
+        assert path_str not in temp_paths
+        assert path_str not in disabled_temp
+
+
+class TestPromoteToGlobalClearsDisabledTemp:
+    """提升临时规则到全局时同步清理 disabled_temp_rules_paths（iter-140）。"""
+
+    def test_promote_clears_disabled_temp_entry(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """提升已禁用的临时规则到全局应清理 disabled_temp_rules_paths。"""
+        controller, wc = controller_with_workspace
+        controller.loadFileToTemp(str(rules_file))
+        path_str = str(rules_file)
+
+        # 禁用临时规则后提升
+        controller.setRuleEnabled(path_str, False)
+        assert controller.promoteToGlobal(path_str) is True
+
+        item = wc.get_workspace("ws1")
+        assert item is not None
+        # temp_rules_paths 已清空
+        assert item.task_overrides.get("temp_rules_paths", ()) == ()
+        # disabled_temp_rules_paths 也已清空（无悬空记录）
+        assert item.task_overrides.get("disabled_temp_rules_paths", ()) == ()
+        # 全局侧启用（默认启用，未被加入 disabled_rules_paths）
+        assert path_str not in controller._config.disabled_rules_paths
+
+
+class TestRulesFileModelTempEnabledField:
+    """``rulesFileModel`` 临时规则 enabled 字段反映禁用状态（iter-140）。"""
+
+    def test_temp_rule_default_enabled(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """加载临时规则后默认 enabled=True。"""
+        controller, _ = controller_with_workspace
+        controller.loadFileToTemp(str(rules_file))
+
+        temp_item = next(m for m in controller.rulesFileModel if m["scope"] == "temp")
+        assert temp_item["enabled"] is True
+
+    def test_temp_rule_disabled_reflected_in_model(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+        rules_file: Path,
+    ) -> None:
+        """禁用临时规则后 rulesFileModel 该项 enabled=False。"""
+        controller, _ = controller_with_workspace
+        controller.loadFileToTemp(str(rules_file))
+        controller.setRuleEnabled(str(rules_file), False)
+
+        temp_item = next(m for m in controller.rulesFileModel if m["scope"] == "temp")
+        assert temp_item["enabled"] is False

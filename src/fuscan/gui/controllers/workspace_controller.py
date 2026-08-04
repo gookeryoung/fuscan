@@ -634,11 +634,12 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         :param key: Config 字段名（如 ``"scan_archives"``/``"max_workers"``）
         :param value_json: 值的 JSON 字符串（如 ``"false"``/``"8"``/``"["a","b"]"``）
 
-        支持 7 个字段：``scan_archives``/``max_workers``/``max_file_size``/
-        ``max_depth``/``ignore_dirs``/``rules_paths``/``use_builtin``。
-        其他字段忽略。``ignore_dirs``/``rules_paths`` 接受 ``list[str]``，
-        内部转 ``tuple[str, ...]``。int 字段做范围钳制（与全局
-        :class:`ConfigController` 一致），越界值拒绝并 warning。
+        支持 9 个字段：``scan_archives``/``max_workers``/``max_file_size``/
+        ``max_depth``/``ignore_dirs``/``rules_paths``/``use_builtin``/
+        ``temp_rules_paths``/``disabled_temp_rules_paths``。
+        其他字段忽略。``ignore_dirs``/``rules_paths``/``temp_rules_paths``/
+        ``disabled_temp_rules_paths`` 接受 ``list[str]``，内部转 ``tuple[str, ...]``。
+        int 字段做范围钳制（与全局 :class:`ConfigController` 一致），越界值拒绝并 warning。
         ``rules_paths``/``use_builtin`` 覆盖时同步刷新 :attr:`WorkspaceItem`
         对应字段，使 :attr:`WorkspaceItem.rules_tags` 标签反映 effective 规则集。
         修改后持久化并同步到对应 ScanController。
@@ -658,7 +659,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return
         # 类型校验
         expected_type = TASK_OVERRIDE_KEYS[key]
-        if key in ("ignore_dirs", "rules_paths", "temp_rules_paths"):
+        if key in ("ignore_dirs", "rules_paths", "temp_rules_paths", "disabled_temp_rules_paths"):
             # JSON 反序列化为 list，校验后转 tuple
             if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
                 logger.warning("%s 应为 list[str]", key)

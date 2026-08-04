@@ -6,7 +6,9 @@
   内置规则归入全局规则列表（默认启用、不可移除、可禁用）；
   用户加载的全局规则文件可勾选启用/禁用、可移除。
 - **临时规则**：任务级覆盖，仅对当前选中工作区生效，叠加在全局规则之上。
-  通过 ``task_overrides["temp_rules_paths"]`` 持久化到工作区配置。
+  通过 ``task_overrides["temp_rules_paths"]`` 持久化到工作区配置；
+  临时规则文件可勾选启用/禁用（禁用列表持久化到
+  ``task_overrides["disabled_temp_rules_paths"]``），可移除。
 
 规则列表通过 :class:`RuleListModel` 暴露给 QML ``ListView`` 绑定，
 规则文件列表（全局 + 临时合并）通过 ``@Property`` 暴露 ``QVariantList``。
@@ -18,7 +20,7 @@
 - :meth:`RulesController.loadFileToTemp`：加载规则文件到当前工作区临时规则
 - :meth:`RulesController.moveUp` / :meth:`moveDown`：全局规则文件顺序管理
 - :meth:`RulesController.removeSelected`：移除选中规则文件（按作用域分派）
-- :meth:`RulesController.setRuleEnabled`：勾选启用/禁用全局规则
+- :meth:`RulesController.setRuleEnabled`：勾选启用/禁用规则文件（内置/全局/临时）
 - :meth:`RulesController.setUseBuiltin`：勾选内置规则（等价于 setRuleEnabled("__builtin__"))
 - :meth:`RulesController.promoteToGlobal`：把当前工作区临时规则提升为全局规则
 - :meth:`RulesController.demoteToTemp`：把全局规则降级为当前工作区临时规则
@@ -147,6 +149,24 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return value
         return ()
 
+    def _current_disabled_temp_paths(self) -> tuple[str, ...]:
+        """当前工作区禁用的临时规则文件路径元组。
+
+        与全局 ``Config.disabled_rules_paths`` 同语义，仅作用于当前工作区
+        临时规则——禁用后不参与规则集合并，但仍保留在 ``temp_rules_paths``
+        中以便重新启用。
+        """
+        ws_id = self._current_ws_id()
+        if not ws_id or self._workspace_controller is None:
+            return ()
+        item = self._workspace_controller.get_workspace(ws_id)  # pyrefly: ignore [missing-attribute]
+        if item is None:
+            return ()
+        value = item.task_overrides.get("disabled_temp_rules_paths")
+        if isinstance(value, tuple):
+            return value
+        return ()
+
     # ----------------------------- QML 属性 -----------------------------
 
     @Property(QObject, notify=rulesetChanged)  # pyrefly: ignore [not-callable]
@@ -205,7 +225,9 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         - ``exists``：文件是否存在（内置规则恒为 True）
         - ``scope``：作用域，``"global"`` 或 ``"temp"``
         - ``isBuiltin``：是否内置规则
-        - ``enabled``：是否启用（临时规则恒为 True，仅全局规则可禁用）
+        - ``enabled``：是否启用。全局规则文件由 ``Config.disabled_rules_paths``
+          控制；临时规则文件由当前工作区 ``task_overrides.disabled_temp_rules_paths``
+          控制；内置规则由 ``Config.use_builtin`` 控制
         - ``canRemove``：是否可移除（内置规则为 False，其余为 True）
         """
         items: list[dict[str, object]] = []
@@ -234,7 +256,8 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     "canRemove": True,
                 }
             )
-        # 临时规则文件（当前工作区）
+        # 临时规则文件（当前工作区）—— enabled 由 task_overrides.disabled_temp_rules_paths 控制
+        disabled_temp = self._current_disabled_temp_paths()
         for p in self._current_temp_paths():
             items.append(
                 {
@@ -243,7 +266,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     "exists": Path(p).exists(),
                     "scope": "temp",
                     "isBuiltin": False,
-                    "enabled": True,
+                    "enabled": p not in disabled_temp,
                     "canRemove": True,
                 }
             )
@@ -391,7 +414,12 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str, bool)  # pyrefly: ignore [not-callable]
     def setRuleEnabled(self, path: str, enabled: bool) -> None:
-        """勾选启用/禁用全局规则文件。
+        """勾选启用/禁用规则文件（按作用域分派）。
+
+        - 内置规则（``"__builtin__"``）：等价于 :meth:`setUseBuiltin`
+        - 全局规则文件：操作 ``Config.disabled_rules_paths``，立即生效并持久化
+        - 临时规则文件：操作当前工作区 ``task_overrides.disabled_temp_rules_paths``
+          （通过 :meth:`WorkspaceController.setTaskOverride`），立即生效并持久化
 
         :param path: 规则文件路径（``"__builtin__"`` 表示内置规则）
         :param enabled: 是否启用
@@ -399,6 +427,12 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if path == BUILTIN_PATH_MARKER:
             self.setUseBuiltin(enabled)
             return
+
+        # 临时规则文件：操作 task_overrides.disabled_temp_rules_paths
+        if path in self._current_temp_paths():
+            self._set_temp_rule_enabled(path, enabled)
+            return
+
         # 全局规则文件：加入/移出 disabled_rules_paths
         disabled = self._config.disabled_rules_paths
         if enabled:
@@ -418,6 +452,36 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._rule_model.set_ruleset(self._ruleset)
         self.rulesFileListChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    def _set_temp_rule_enabled(self, path: str, enabled: bool) -> None:
+        """启用/禁用当前工作区的临时规则文件（操作 disabled_temp_rules_paths）。
+
+        :param path: 临时规则文件路径（必须在当前工作区 ``temp_rules_paths`` 中）
+        :param enabled: 是否启用
+        """
+        ws_id = self._current_ws_id()
+        if not ws_id or self._workspace_controller is None:
+            logger.warning("无当前工作区，无法修改临时规则启用状态")
+            return
+
+        disabled = list(self._current_disabled_temp_paths())
+        if enabled:
+            if path in disabled:
+                disabled.remove(path)
+            else:
+                return  # 无变化
+        else:
+            if path in disabled:
+                return  # 无变化
+            disabled.append(path)
+
+        # 通过 WorkspaceController.setTaskOverride 持久化并同步到 ScanController
+        self._workspace_controller.setTaskOverride(  # pyrefly: ignore [missing-attribute]
+            ws_id, "disabled_temp_rules_paths", json.dumps(disabled)
+        )
+        # setTaskOverride 内部已 emit currentWorkspaceChanged（经 WorkspaceItem 更新），
+        # 但 RulesController 的 rulesFileListChanged 不会自动触发，需显式 emit
+        self.rulesFileListChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     @Slot()  # pyrefly: ignore [not-callable]
     def moveUp(self) -> None:
@@ -480,6 +544,13 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._workspace_controller.setTaskOverride(  # pyrefly: ignore [missing-attribute]
                 ws_id, "temp_rules_paths", json.dumps(current)
             )
+            # 同步清理 disabled_temp_rules_paths 中的悬空记录
+            disabled = list(self._current_disabled_temp_paths())
+            if path in disabled:
+                disabled.remove(path)
+                self._workspace_controller.setTaskOverride(  # pyrefly: ignore [missing-attribute]
+                    ws_id, "disabled_temp_rules_paths", json.dumps(disabled)
+                )
 
         self._selected_file_index = -1
         self.rulesFileListChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -559,6 +630,13 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._workspace_controller.setTaskOverride(  # pyrefly: ignore [missing-attribute]
             ws_id, "temp_rules_paths", json.dumps(current_temp)
         )
+        # 同步清理 disabled_temp_rules_paths 中的悬空记录
+        disabled_temp = list(self._current_disabled_temp_paths())
+        if path_str in disabled_temp:
+            disabled_temp.remove(path_str)
+            self._workspace_controller.setTaskOverride(  # pyrefly: ignore [missing-attribute]
+                ws_id, "disabled_temp_rules_paths", json.dumps(disabled_temp)
+            )
 
         # 加入全局规则（去重：已在全局列表则不重复加入）
         added_to_global = False

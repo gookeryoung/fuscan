@@ -142,6 +142,9 @@ class WorkspaceItem:
         - ``"ignore_dirs"``: tuple[str, ...]
         - ``"rules_paths"``: tuple[str, ...]（任务级规则文件覆盖）
         - ``"use_builtin"``: bool（任务级内置规则开关覆盖）
+        - ``"temp_rules_paths"``: tuple[str, ...]（任务级临时规则文件路径，叠加在全局规则之上）
+        - ``"disabled_temp_rules_paths"``: tuple[str, ...]（任务级禁用的临时规则文件路径，
+          不参与扫描合并，与全局 ``disabled_rules_paths`` 同语义）
 
         未在 dict 中的字段使用全局 :class:`Config` 默认值。
     :param last_activity_time: 最近活动时间戳（``time.time()``），用于列表排序。

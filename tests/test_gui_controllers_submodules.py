@@ -57,6 +57,7 @@ try:
     )
     from fuscan.gui.controllers._scan_roots import build_scan_roots, can_build_roots
     from fuscan.gui.controllers._task_overrides import (
+        effective_disabled_temp_rules_paths,
         effective_ignore_dirs,
         effective_max_depth,
         effective_max_file_size,
@@ -302,6 +303,26 @@ class TestTaskOverrides:
         """temp_rules_paths 显式空元组返回空元组。"""
         overrides: dict[str, object] = {"temp_rules_paths": ()}
         assert effective_temp_rules_paths(overrides) == ()
+
+    def test_effective_disabled_temp_rules_paths_tuple_override(self) -> None:
+        """disabled_temp_rules_paths tuple 覆盖值原样返回。"""
+        custom = ("/tmp/a.yaml", "/tmp/b.yaml")
+        overrides: dict[str, object] = {"disabled_temp_rules_paths": custom}
+        assert effective_disabled_temp_rules_paths(overrides) == custom
+
+    def test_effective_disabled_temp_rules_paths_default_empty(self) -> None:
+        """disabled_temp_rules_paths 无覆盖时返回空元组。"""
+        assert effective_disabled_temp_rules_paths({}) == ()
+
+    def test_effective_disabled_temp_rules_paths_wrong_type_falls_back(self) -> None:
+        """disabled_temp_rules_paths 非 tuple 类型回退到空元组。"""
+        overrides: dict[str, object] = {"disabled_temp_rules_paths": ["/tmp/x.yaml"]}
+        assert effective_disabled_temp_rules_paths(overrides) == ()
+
+    def test_effective_disabled_temp_rules_paths_empty_tuple(self) -> None:
+        """disabled_temp_rules_paths 显式空元组返回空元组。"""
+        overrides: dict[str, object] = {"disabled_temp_rules_paths": ()}
+        assert effective_disabled_temp_rules_paths(overrides) == ()
 
 
 # ----------------------------- _result_detail -----------------------------
@@ -1052,6 +1073,21 @@ class TestSerializeTaskOverridesRoundtrip:
         serialized = serialize_task_overrides(original)
         assert "unknown_field" not in serialized
         assert serialized == {"max_workers": 3}
+
+    def test_roundtrip_temp_rules_paths_and_disabled(self) -> None:
+        """temp_rules_paths 与 disabled_temp_rules_paths tuple <-> list 往返一致。"""
+        original: dict[str, object] = {
+            "temp_rules_paths": ("/tmp/a.yaml", "/tmp/b.yaml"),
+            "disabled_temp_rules_paths": ("/tmp/c.yaml",),
+        }
+        serialized = serialize_task_overrides(original)
+        # tuple 应转为 list
+        assert serialized["temp_rules_paths"] == ["/tmp/a.yaml", "/tmp/b.yaml"]
+        assert serialized["disabled_temp_rules_paths"] == ["/tmp/c.yaml"]
+        # 反序列化后回到 tuple
+        restored = deserialize_task_overrides(serialized)
+        assert restored["temp_rules_paths"] == ("/tmp/a.yaml", "/tmp/b.yaml")
+        assert restored["disabled_temp_rules_paths"] == ("/tmp/c.yaml",)
 
 
 class TestDeserializeTaskOverridesFaultTolerance:

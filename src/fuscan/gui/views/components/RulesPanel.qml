@@ -227,18 +227,15 @@ Item {
                         color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                     }
 
-                    // 临时规则区标题：显示当前工作区名或提示
+                    // 无工作区时提示（有工作区时此行隐藏，临时规则归属由作用域标签颜色区分，
+                    // 工作区名在「加载到临时」按钮 tooltip 与迁移按钮 tooltip 中可见）
                     Label {
                         Layout.fillWidth: true
-                        text: rulesController.hasCurrentWorkspace
-                            ? "临时规则 · " + rulesController.currentWorkspaceName
-                            : "临时规则（请先在首页选择工作区）"
+                        visible: !rulesController.hasCurrentWorkspace && !rulesPanel.collapsed
+                        text: "未选择工作区：临时规则需先在首页选择工作区"
                         font.pixelSize: 11
-                        color: rulesController.hasCurrentWorkspace
-                            ? (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
-                            : theme.colorDanger
-                        font.italic: !rulesController.hasCurrentWorkspace
-                        visible: !rulesPanel.collapsed
+                        color: theme.colorDanger
+                        font.italic: true
                     }
 
                     // 规则文件列表（合并内置 + 全局 + 临时）
@@ -253,6 +250,7 @@ Item {
                         currentIndex: rulesController.selectedFileIndex
                         onCurrentIndexChanged: rulesController.setSelectedFileIndex(currentIndex)
                         delegate: ItemDelegate {
+                            id: ruleFileDelegate
                             width: rulesFileList.width
                             height: 40
                             // QVariantList of dict 通过 modelData 访问字段
@@ -316,7 +314,7 @@ Item {
                                     verticalAlignment: Text.AlignVCenter
                                 }
 
-                                // 作用域标签（内置/全局/临时）
+                                // 作用域标签：全局域(含内置)=蓝 / 临时=绿
                                 Rectangle {
                                     radius: 4
                                     height: 18
@@ -324,8 +322,8 @@ Item {
                                     color: modelData.isBuiltin
                                         ? theme.colorPrimary
                                         : (modelData.scope === "temp"
-                                            ? (theme.isDark ? theme.colorBgHoverDark : theme.colorBgHover)
-                                            : (theme.isDark ? theme.colorBorderDark : theme.colorBorder))
+                                            ? theme.colorSuccess
+                                            : theme.colorPrimary)
                                     Layout.alignment: Qt.AlignVCenter
                                     Label {
                                         id: scopeLabel
@@ -335,9 +333,7 @@ Item {
                                             : (modelData.scope === "temp" ? "临时" : "全局")
                                         font.pixelSize: 10
                                         font.bold: true
-                                        color: modelData.isBuiltin
-                                            ? "#FFFFFF"
-                                            : (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
+                                        color: "#FFFFFF"
                                     }
                                 }
 
@@ -371,10 +367,11 @@ Item {
                                     accent: "ghost"
                                     // 临时规则可提升（需有当前工作区，临时规则本身就来自当前工作区所以一定有）
                                     // 全局非内置规则可降级（需有当前工作区）
+                                    // hover 或选中态才显示，避免每行常驻按钮挤压横向空间
                                     visible: !modelData.isBuiltin && (
                                         modelData.scope === "temp"
                                         || (modelData.scope === "global" && rulesController.hasCurrentWorkspace)
-                                    )
+                                    ) && (ruleFileDelegate.hovered || ListView.isCurrentItem)
                                     enabled: modelData.exists
                                     Layout.alignment: Qt.AlignVCenter
                                     onClicked: {

@@ -550,6 +550,73 @@ class TestComputeEffectiveRulesetTempRules:
         # 检查规则数 = 1（覆盖）+ 1（临时）= 2
         assert len(controller._ruleset.rules) == 2
 
+    def test_disabled_temp_rule_filtered_from_ruleset(
+        self,
+        config_controller: ConfigController,
+        rules_controller: RulesController,
+        tmp_path: Path,
+    ) -> None:
+        """禁用的临时规则应被过滤，不参与 ruleset 合并（iter-140）。"""
+        temp_file = tmp_path / "temp.yaml"
+        temp_file.write_text(
+            'version: "1.0"\n'
+            "rules:\n"
+            '  - name: "临时规则-应被过滤"\n'
+            "    severity: warning\n"
+            "    match:\n"
+            "      type: content\n"
+            "      target: content\n"
+            "      mode: contains\n"
+            '      pattern: "filtered_marker"\n',
+            encoding="utf-8",
+        )
+        controller = ScanController(config_controller, rules_controller)
+        initial_count = controller.rulesCount
+        # 加载临时规则
+        controller.setTaskOverride("temp_rules_paths", (str(temp_file),))
+        count_with_temp = controller.rulesCount
+        assert count_with_temp > initial_count
+        # 禁用该临时规则
+        controller.setTaskOverride("disabled_temp_rules_paths", (str(temp_file),))
+        # 规则数应回退到初始值（临时规则被过滤）
+        assert controller.rulesCount == initial_count
+        # ruleset 中不应包含被禁用的临时规则
+        assert controller._ruleset is not None
+        rule_names = [r.name for r in controller._ruleset.rules]
+        assert "临时规则-应被过滤" not in rule_names
+
+    def test_re_enable_temp_rule_restores_ruleset(
+        self,
+        config_controller: ConfigController,
+        rules_controller: RulesController,
+        tmp_path: Path,
+    ) -> None:
+        """启用已禁用的临时规则后 ruleset 应重新包含该规则（iter-140）。"""
+        temp_file = tmp_path / "temp.yaml"
+        temp_file.write_text(
+            'version: "1.0"\n'
+            "rules:\n"
+            '  - name: "临时规则-可恢复"\n'
+            "    severity: warning\n"
+            "    match:\n"
+            "      type: content\n"
+            "      target: content\n"
+            "      mode: contains\n"
+            '      pattern: "restorable_marker"\n',
+            encoding="utf-8",
+        )
+        controller = ScanController(config_controller, rules_controller)
+        controller.setTaskOverride("temp_rules_paths", (str(temp_file),))
+        count_with_temp = controller.rulesCount
+        # 禁用后再启用
+        controller.setTaskOverride("disabled_temp_rules_paths", (str(temp_file),))
+        controller.setTaskOverride("disabled_temp_rules_paths", ())
+        # 规则数应恢复
+        assert controller.rulesCount == count_with_temp
+        assert controller._ruleset is not None
+        rule_names = [r.name for r in controller._ruleset.rules]
+        assert "临时规则-可恢复" in rule_names
+
 
 class TestOpenLocation:
     def test_open_location_invalid_index_noop(self, controller: ScanController) -> None:

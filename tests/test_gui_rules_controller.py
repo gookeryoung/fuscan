@@ -1487,3 +1487,135 @@ class TestRulesFileModelTempEnabledField:
 
         temp_item = next(m for m in controller.rulesFileModel if m["scope"] == "temp")
         assert temp_item["enabled"] is False
+
+
+# ============================= effectiveConfigPreview =============================
+
+
+class TestEffectiveConfigPreview:
+    """``effectiveConfigPreview`` 属性测试。"""
+
+    def test_preview_with_none_ruleset(self, config_controller: ConfigController) -> None:
+        """ruleset 为 None 时返回内置默认值，hasRuleset=False。"""
+        config_controller.config.use_builtin = False
+        controller = RulesController(config_controller)
+        assert controller.ruleset is None
+
+        preview = controller.effectiveConfigPreview
+        assert preview["hasRuleset"] is False
+        assert preview["scanArchives"] is True
+        assert preview["maxWorkers"] == 5
+        assert preview["maxDepth"] == 0
+        assert preview["cacheEnabled"] is True
+        assert preview["perfLogEnabled"] is False
+        assert preview["ignoreDirs"] == []
+        assert preview["scanExtensions"] == []
+        assert preview["whitelistCount"] == 0
+
+    def test_preview_with_builtin_ruleset(self, config_controller: ConfigController) -> None:
+        """内置规则集加载后 hasRuleset=True，字段反映内置默认。"""
+        controller = RulesController(config_controller)
+        assert controller.ruleset is not None
+
+        preview = controller.effectiveConfigPreview
+        assert preview["hasRuleset"] is True
+        # 内置规则集的 scan_params 各字段为 None，应回退到默认值
+        assert preview["scanArchives"] is True
+        assert preview["maxWorkers"] == 5
+        assert preview["maxDepth"] == 0
+        assert preview["cacheEnabled"] is True
+        assert preview["perfLogEnabled"] is False
+        assert isinstance(preview["ignoreDirs"], list)
+        assert isinstance(preview["scanExtensions"], list)
+
+
+# ============================= appendWhitelistEntry =============================
+
+
+class TestAppendWhitelistEntry:
+    """``appendWhitelistEntry`` Slot 测试（追加白名单到 user-scan.yaml）。"""
+
+    def test_empty_path_returns_error(self, config_controller: ConfigController) -> None:
+        """空路径返回错误消息。"""
+        controller = RulesController(config_controller)
+        msg = controller.appendWhitelistEntry("   ", "*", "")
+        assert "不能为空" in msg
+
+    def test_empty_rule_normalized_to_wildcard(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """空规则名归一化为 *。"""
+        controller = RulesController(config_controller)
+        msg = controller.appendWhitelistEntry("/a/b.txt", "   ", "")
+        assert "*" in msg
+
+    def test_append_creates_user_scan_yaml(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """user-scan.yaml 不存在时创建并写入白名单条目。"""
+        controller = RulesController(config_controller)
+        msg = controller.appendWhitelistEntry("/a/b.txt", "r1", "备注")
+        assert "已添加" in msg
+
+        user_scan = controller.userScanPath
+        assert user_scan.exists()
+        # user-scan.yaml 应被加入 rules_paths
+        assert str(user_scan) in controller._config.rules_paths
+
+    def test_append_to_existing_user_scan_yaml(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """user-scan.yaml 已存在时追加条目。"""
+        controller = RulesController(config_controller)
+        # 第一次追加
+        controller.appendWhitelistEntry("/a", "r1", "")
+        # 第二次追加不同条目
+        msg = controller.appendWhitelistEntry("/b", "r2", "")
+        assert "已添加" in msg
+
+        # 验证两条都在 effective ruleset 白名单中
+        assert controller.ruleset is not None
+        paths = {(e.path_glob, e.rule_name) for e in controller.ruleset.whitelist}
+        assert ("/a", "r1") in paths
+        assert ("/b", "r2") in paths
+
+    def test_append_duplicate_returns_exists_message(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """重复追加相同 (path_glob, rule_name) 返回已存在消息。"""
+        controller = RulesController(config_controller)
+        controller.appendWhitelistEntry("/a", "r1", "")
+        msg = controller.appendWhitelistEntry("/a", "r1", "")
+        assert "已存在" in msg
+
+    def test_append_emits_ruleset_changed(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """追加成功后发射 rulesetChanged 信号。"""
+        controller = RulesController(config_controller)
+        emitted: list[None] = []
+
+        def _on_changed() -> None:
+            emitted.append(None)
+
+        controller.rulesetChanged.connect(_on_changed)  # type: ignore[arg-type]
+        msg = controller.appendWhitelistEntry("/a", "r1", "")
+        assert "已添加" in msg, f"追加失败: {msg}"
+        assert len(emitted) == 1
+
+    def test_append_rule_name_defaults_to_wildcard(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """空规则名归一化为 * 并持久化。"""
+        controller = RulesController(config_controller)
+        controller.appendWhitelistEntry("/a", "", "")
+        assert controller.ruleset is not None
+        entry = next(e for e in controller.ruleset.whitelist if e.path_glob == "/a")
+        assert entry.rule_name == "*"
+        assert entry.source == "runtime"

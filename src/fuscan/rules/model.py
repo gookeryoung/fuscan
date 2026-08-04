@@ -18,6 +18,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from fuscan.rules.whitelist import WhitelistEntry
 
 __all__ = [
     "AndMatch",
@@ -29,6 +33,7 @@ __all__ = [
     "OrMatch",
     "Rule",
     "RuleSet",
+    "ScanParams",
     "Severity",
 ]
 
@@ -142,15 +147,54 @@ class Rule:
 
 
 @dataclass(frozen=True)
-class RuleSet:
-    """规则集合：版本、忽略路径、规则列表。
+class ScanParams:
+    """扫描参数：线程数/深度/大文件阈值/压缩包/缓存/性能日志开关。
 
-    ``ignore_paths`` 按相对路径 glob 通配符匹配（如 ``*/vendor/*``），
-    可跳过目录及其子目录。``ignore_dirs`` 已迁移至全局
-    :class:`~fuscan.config.Config`，``ignore_extensions`` 已由全局文件类型
-    白名单（``Config.scan_extensions``）替代，规则文件中这两个字段被静默忽略。
+    所有字段为 ``None`` 表示「未设置」——合并时由后者非 ``None`` 字段覆盖前者，
+    最终生效值在 :class:`ScanController` 中按优先级（任务级覆盖 > RuleSet.scan_params >
+    内置规则默认值）解析。``None`` 与默认值的区别见各字段说明。
+
+    - ``max_workers``：``None`` 时由 :class:`Scanner` 回退到内置默认 5
+    - ``max_depth``：``None`` 表示无限深度（与 ``0`` 等价，walker 层归一化）
+    - ``max_file_size``：``None`` 或 ``0`` 表示不限制
+    - ``scan_archives``/``cache_enabled``/``perf_log_enabled``：``None`` 表示
+      未设置，回退到内置默认（True/True/False）
+    """
+
+    max_workers: int | None = None
+    max_depth: int | None = None
+    max_file_size: int | None = None
+    scan_archives: bool | None = None
+    cache_enabled: bool | None = None
+    perf_log_enabled: bool | None = None
+
+
+@dataclass(frozen=True)
+class RuleSet:
+    """规则集合：版本、忽略路径、规则列表，以及顶层扫描配置。
+
+    顶层扫描配置（取代旧 :class:`~fuscan.config.Config` 中的对应字段）：
+
+    - ``ignore_paths``：路径级 glob 过滤（如 ``*/vendor/*``），跳过目录及其子目录
+    - ``ignore_dirs``：目录名级忽略（任意层级、大小写不敏感），与
+      :class:`~fuscan.config.Config.ignore_dirs` 同语义，合并时取并集
+    - ``scan_extensions``：文件后缀白名单。
+
+      - ``None``：全选默认（所有注册提取器支持的后缀）
+      - 空 tuple：都不扫描
+      - 非空 tuple：仅扫描指定后缀（小写、无前导点）
+
+      合并时后者非 ``None`` 覆盖前者（``None`` 表未设置，由内置规则集提供默认）。
+    - ``scan_params``：扫描参数（线程/深度/大文件阈值/压缩包/缓存/性能日志），
+      合并时字段级覆盖（后者非 ``None`` 字段覆盖前者）
+    - ``whitelist``：误报白名单条目（路径 glob + 规则名 + 备注），合并时取并集
     """
 
     version: str
     rules: tuple[Rule, ...] = field(default_factory=tuple)
     ignore_paths: tuple[str, ...] = field(default_factory=tuple)
+    # 顶层扫描配置：默认空，由 builtin.yaml + 用户规则文件合并填充
+    ignore_dirs: tuple[str, ...] = field(default_factory=tuple)
+    scan_extensions: tuple[str, ...] | None = None
+    scan_params: ScanParams | None = None
+    whitelist: tuple[WhitelistEntry, ...] = field(default_factory=tuple)

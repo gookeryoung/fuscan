@@ -27,12 +27,16 @@
 - :meth:`RulesController.exportRuleset`：导出当前规则集到 YAML/JSON
 - :meth:`RulesController.importRuleset`：从 YAML/JSON 文件导入规则
 - :meth:`RulesController.set_workspace_controller`：延迟注入工作区控制器
+- :meth:`RulesController.effectiveConfigPreview`：生效配置预览（QML 只读展示）
+- :meth:`RulesController.appendWhitelistEntry`：追加白名单条目到 user-scan.yaml
 """
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 try:
@@ -42,7 +46,7 @@ except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
     from PySide6.QtWidgets import QFileDialog  # pyrefly: ignore [missing-import]
 
-from fuscan.config import Config
+from fuscan.config import DEFAULT_MAX_FILE_SIZE, Config
 from fuscan.gui.models.rule_model import RuleListModel
 from fuscan.rules import (
     RuleError,
@@ -51,6 +55,7 @@ from fuscan.rules import (
     save_ruleset,
 )
 from fuscan.rules.model import RuleSet
+from fuscan.rules.whitelist import WhitelistEntry
 
 __all__ = ["RulesController"]
 
@@ -724,6 +729,136 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         logger.info(msg)
         self.rulesIoCompleted.emit(True, msg)  # pyrefly: ignore [missing-attribute]
         return True
+
+    # ------------------- 生效配置预览与白名单 -------------------
+
+    @property
+    def userScanPath(self) -> Path:
+        """用户扫描规则文件路径（``~/.fuscan/rules/user-scan.yaml``）。
+
+        动态读取 :data:`fuscan.config.CONFIG_DIR`，支持测试 monkeypatch。
+        供 :meth:`appendWhitelistEntry` 与外部测试读取/创建该文件。
+        """
+        # 动态读取 fuscan.config.CONFIG_DIR，避免模块级导入的固定引用
+        # 无法响应测试 monkeypatch（参见 _USER_SCAN_PATH 修复记录）
+        from fuscan.config import CONFIG_DIR as _config_dir
+
+        return _config_dir / "rules" / "user-scan.yaml"
+
+    @Property("QVariantMap", notify=rulesetChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
+    def effectiveConfigPreview(self) -> dict[str, object]:
+        """当前规则集的生效配置预览（供 QML 设置页只读展示）。
+
+        从 :attr:`_ruleset` 读取 ``scan_params``/``ignore_dirs``/``scan_extensions``
+        等字段，``None`` 字段回退到内置默认值。ruleset 为 None 时全部返回默认值
+        并标记 ``hasRuleset=False``。
+
+        返回字段：
+
+        - ``scanArchives``/``maxWorkers``/``maxDepth``/``maxFileSizeMB``/
+          ``cacheEnabled``/``perfLogEnabled``：扫描参数（回退内置默认）
+        - ``ignoreDirs``：忽略目录名列表
+        - ``scanExtensions``：文件扩展名白名单（空列表表示全选默认）
+        - ``whitelistCount``：白名单条目数
+        - ``hasRuleset``：是否已加载规则集
+        """
+        if self._ruleset is None:
+            return {
+                "scanArchives": True,
+                "maxWorkers": 5,
+                "maxDepth": 0,
+                "maxFileSizeMB": DEFAULT_MAX_FILE_SIZE // (1024 * 1024),
+                "cacheEnabled": True,
+                "perfLogEnabled": False,
+                "ignoreDirs": [],
+                "scanExtensions": [],
+                "whitelistCount": 0,
+                "hasRuleset": False,
+            }
+        sp = self._ruleset.scan_params
+        return {
+            "scanArchives": sp.scan_archives if sp is not None and sp.scan_archives is not None else True,
+            "maxWorkers": sp.max_workers if sp is not None and sp.max_workers is not None else 5,
+            "maxDepth": sp.max_depth if sp is not None and sp.max_depth is not None else 0,
+            "maxFileSizeMB": (
+                sp.max_file_size if sp is not None and sp.max_file_size is not None else DEFAULT_MAX_FILE_SIZE
+            )
+            // (1024 * 1024),
+            "cacheEnabled": sp.cache_enabled if sp is not None and sp.cache_enabled is not None else True,
+            "perfLogEnabled": sp.perf_log_enabled if sp is not None and sp.perf_log_enabled is not None else False,
+            "ignoreDirs": list(self._ruleset.ignore_dirs),
+            "scanExtensions": list(self._ruleset.scan_extensions) if self._ruleset.scan_extensions is not None else [],
+            "whitelistCount": len(self._ruleset.whitelist),
+            "hasRuleset": True,
+        }
+
+    @Slot(str, str, str, result=str)  # pyrefly: ignore [not-callable]
+    def appendWhitelistEntry(self, path_glob: str, rule_name: str, note: str) -> str:
+        """追加白名单条目到 ``~/.fuscan/rules/user-scan.yaml``。
+
+        将 (path_glob, rule_name, note) 作为 ``WhitelistEntry``（source="runtime"）
+        追加到 user-scan.yaml 的 ``whitelist`` 段。文件不存在时创建；存在时加载
+        现有 RuleSet 并 append。保存后重新加载规则集并 emit ``rulesetChanged``，
+        使 QML 设置页与扫描控制器立即生效。
+
+        :param path_glob: 路径 glob 模式（空字符串返回错误消息）
+        :param rule_name: 规则名；空字符串归一化为 ``*``（匹配任意规则）
+        :param note: 用户备注（可空）
+        :return: 操作消息（成功/失败原因），供 QML 显示
+        """
+        path_glob = path_glob.strip()
+        if not path_glob:
+            return "路径模式不能为空"
+        rule_name = rule_name.strip() or "*"
+        note = note.strip()
+
+        user_scan_path = self.userScanPath
+        try:
+            if user_scan_path.exists():
+                existing = load_ruleset(user_scan_path)
+                new_entry = WhitelistEntry(
+                    path_glob=path_glob,
+                    rule_name=rule_name,
+                    created_at=datetime.datetime.now().isoformat(timespec="seconds"),
+                    note=note,
+                    source="runtime",
+                )
+                # 去重：已存在相同 (path_glob, rule_name) 则提示无变化
+                if any(e.path_glob == path_glob and e.rule_name == rule_name for e in existing.whitelist):
+                    return f"已存在: {path_glob} ({rule_name})"
+                updated = replace(existing, whitelist=(*existing.whitelist, new_entry))
+            else:
+                new_entry = WhitelistEntry(
+                    path_glob=path_glob,
+                    rule_name=rule_name,
+                    created_at=datetime.datetime.now().isoformat(timespec="seconds"),
+                    note=note,
+                    source="runtime",
+                )
+                updated = RuleSet(
+                    version="1.0",
+                    whitelist=(new_entry,),
+                )
+            user_scan_path.parent.mkdir(parents=True, exist_ok=True)
+            save_ruleset(updated, user_scan_path)
+        except (RuleError, OSError) as exc:
+            logger.warning("追加白名单条目失败: %s", exc)
+            return f"添加失败: {exc}"
+
+        # 将 user-scan.yaml 加入 rules_paths（若未存在），使新条目进入 effective ruleset
+        user_scan_str = str(user_scan_path)
+        if user_scan_str not in self._config.rules_paths:
+            self._config.rules_paths.append(user_scan_str)
+            self._config_controller.save()  # pyrefly: ignore [missing-attribute]
+
+        # 重新加载规则集，emit 信号让 QML 与 ScanController 同步
+        self._reload_ruleset()
+        self._rule_model.set_ruleset(self._ruleset)
+        self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+        msg = f"已添加: {path_glob} ({rule_name})"
+        logger.info(msg)
+        return msg
 
     # ------------------- 导入/导出 -------------------
 

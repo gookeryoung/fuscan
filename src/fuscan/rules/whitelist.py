@@ -85,12 +85,17 @@ class WhitelistEntry:
         空字符串视为 ``*``（兼容旧数据）。
     :param created_at: 创建时间 ISO 字符串（如 ``2026-07-29T10:30:00``），便于审计。
     :param note: 用户备注（可空）。
+    :param source: 条目来源。``"rules"`` 表示来自规则文件预定义（YAML whitelist 段），
+        ``"runtime"`` 表示用户在结果详情区点击「标记为误报」运行时写入。
+        缺省为 ``"rules"``。``WhitelistStore`` 加载的旧 JSON 数据未带该字段时按
+        ``"runtime"`` 处理（兼容历史数据），由 :meth:`from_dict` 处理。
     """
 
     path_glob: str
     rule_name: str
     created_at: str = ""
     note: str = ""
+    source: str = "rules"
 
     def __post_init__(self) -> None:
         if not self.path_glob:
@@ -98,6 +103,8 @@ class WhitelistEntry:
         if not self.rule_name:
             # 空规则名视为通配（兼容用户输入）
             object.__setattr__(self, "rule_name", "*")
+        if self.source not in ("rules", "runtime"):
+            object.__setattr__(self, "source", "rules")
 
     def matches(self, path_str: str, rule_name: str) -> bool:
         """判断给定 (路径, 规则名) 是否命中本条白名单。
@@ -124,22 +131,34 @@ class WhitelistEntry:
         return self.rule_name == rule_name
 
     def to_dict(self) -> dict[str, str]:
-        """序列化为字典（JSON 持久化用）。"""
+        """序列化为字典（JSON 持久化用）。
+
+        ``source`` 字段始终写出，确保 YAML/JSON 导出可往返。
+        """
         return {
             "path_glob": self.path_glob,
             "rule_name": self.rule_name,
             "created_at": self.created_at,
             "note": self.note,
+            "source": self.source,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> WhitelistEntry:
-        """从字典反序列化（容忍缺失字段，向后兼容）。"""
+        """从字典反序列化（容忍缺失字段，向后兼容）。
+
+        旧 JSON 数据未带 ``source`` 字段时按 ``"runtime"`` 处理
+        （历史数据均由 :class:`WhitelistStore` 运行时写入）。
+        """
+        source = str(data.get("source", ""))
+        if not source:
+            source = "runtime"
         return cls(
             path_glob=str(data.get("path_glob", "")),
             rule_name=str(data.get("rule_name", "*") or "*"),
             created_at=str(data.get("created_at", "")),
             note=str(data.get("note", "")),
+            source=source,
         )
 
 

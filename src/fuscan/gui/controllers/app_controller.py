@@ -99,6 +99,9 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._config = ConfigController(self)
         self._rules = RulesController(self._config, self)
         self._whitelist = WhitelistController(self)
+        # 延迟注入 RulesController：WhitelistController.addEntry 委托
+        # RulesController.appendWhitelistEntry 写入 user-scan.yaml 的 whitelist 段
+        self._whitelist.set_rules_controller(self._rules)
         self._workspace = WorkspaceController(self._config, self._rules, self, whitelist_controller=self._whitelist)
         # 延迟注入 WorkspaceController：RulesController 在 WorkspaceController 之前构造，
         # 通过 set_workspace_controller 注入后即可访问当前工作区以管理临时规则

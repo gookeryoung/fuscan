@@ -31,6 +31,7 @@ from fuscan.rules.model import (
     OrMatch,
     Rule,
     RuleSet,
+    ScanParams,
 )
 
 __all__ = ["save_ruleset", "serialize_match", "serialize_rule", "serialize_ruleset"]
@@ -104,6 +105,28 @@ def serialize_rule(rule: Rule) -> dict[str, Any]:
     return result
 
 
+def serialize_scan_params(params: ScanParams) -> dict[str, Any]:
+    """将 :class:`ScanParams` 转换为字典（仅包含已设置字段）。
+
+    :param params: :class:`ScanParams` 实例
+    :return: 可序列化为 YAML/JSON 的字典
+    """
+    result: dict[str, Any] = {}
+    if params.max_workers is not None:
+        result["max_workers"] = params.max_workers
+    if params.max_depth is not None:
+        result["max_depth"] = params.max_depth
+    if params.max_file_size is not None:
+        result["max_file_size"] = params.max_file_size
+    if params.scan_archives is not None:
+        result["scan_archives"] = params.scan_archives
+    if params.cache_enabled is not None:
+        result["cache_enabled"] = params.cache_enabled
+    if params.perf_log_enabled is not None:
+        result["perf_log_enabled"] = params.perf_log_enabled
+    return result
+
+
 def serialize_ruleset(ruleset: RuleSet) -> dict[str, Any]:
     """将规则集转换为字典。
 
@@ -116,6 +139,16 @@ def serialize_ruleset(ruleset: RuleSet) -> dict[str, Any]:
     }
     if ruleset.ignore_paths:
         result["ignore_paths"] = list(ruleset.ignore_paths)
+    if ruleset.ignore_dirs:
+        result["ignore_dirs"] = list(ruleset.ignore_dirs)
+    if ruleset.scan_extensions is not None:
+        result["scan_extensions"] = list(ruleset.scan_extensions)
+    if ruleset.scan_params is not None:
+        sp = serialize_scan_params(ruleset.scan_params)
+        if sp:
+            result["scan_params"] = sp
+    if ruleset.whitelist:
+        result["whitelist"] = [entry.to_dict() for entry in ruleset.whitelist]
     return result
 
 

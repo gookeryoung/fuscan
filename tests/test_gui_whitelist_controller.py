@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -290,3 +291,155 @@ class TestWhitelistControllerSnapshot:
         # 验证 Scanner 持有了白名单（间接验证 snapshot 类型正确）
         assert scanner._whitelist is not None
         assert len(scanner._whitelist.entries) == 1
+
+
+# --------------------------------------------------------------------------- #
+# rules_controller 集成（_combined_entries / set_rules_controller）
+# --------------------------------------------------------------------------- #
+
+
+class _FakeRulesController:
+    """模拟 RulesController，仅实现 WhitelistController 依赖的接口。"""
+
+    def __init__(self, ruleset: object | None = None) -> None:
+        self._ruleset = ruleset
+        self._handlers: list[Callable[[], None]] = []
+
+    @property
+    def ruleset(self) -> object | None:
+        return self._ruleset
+
+    @property
+    def rulesetChanged(self) -> object:
+        class _Sig:
+            def __init__(self, owners: list[Callable[[], None]]) -> None:
+                self._owners = owners
+
+            def connect(self, handler: Callable[[], None]) -> None:
+                self._owners.append(handler)
+
+            def emit(self) -> None:
+                for h in self._owners:
+                    h()
+
+        return _Sig(self._handlers)
+
+    def emit_ruleset_changed(self) -> None:
+        for h in self._handlers:
+            h()
+
+    def appendWhitelistEntry(self, path_glob: str, rule_name: str, note: str) -> str:
+        """模拟追加白名单条目（不真正写入文件）。"""
+        if not path_glob.strip():
+            return "路径模式不能为空"
+        return f"已添加: {path_glob} ({rule_name or '*'})"
+
+
+class TestWhitelistControllerRulesControllerIntegration:
+    """``set_rules_controller`` 注入后的合并与委托行为测试。"""
+
+    def test_set_rules_controller_connects_signal(
+        self,
+        controller: WhitelistController,
+    ) -> None:
+        """注入 rules_controller 后 rulesetChanged 信号被连接。"""
+        from fuscan.rules.model import RuleSet
+        from fuscan.rules.whitelist import WhitelistEntry
+
+        ruleset = RuleSet(
+            version="1.0",
+            whitelist=(WhitelistEntry(path_glob="/x", rule_name="rx", created_at="", note="", source="rules"),),
+        )
+        rc = _FakeRulesController(ruleset=ruleset)
+        controller.set_rules_controller(rc)
+
+        # rulesetChanged 发射后 whitelistChanged 应被触发
+        emitted: list[None] = []
+        controller.whitelistChanged.connect(lambda: emitted.append(None))  # type: ignore[arg-type]
+        rc.emit_ruleset_changed()
+        assert len(emitted) == 1
+
+    def test_combined_entries_merges_store_and_ruleset(
+        self,
+        controller: WhitelistController,
+    ) -> None:
+        """_combined_entries 合并 JSON store 与 ruleset 白名单（去重）。"""
+        from fuscan.rules.model import RuleSet
+        from fuscan.rules.whitelist import WhitelistEntry
+
+        # JSON store 中已有条目
+        controller.addEntry("/a", "r1", "")
+
+        ruleset = RuleSet(
+            version="1.0",
+            whitelist=(
+                WhitelistEntry(path_glob="/b", rule_name="r2", created_at="", note="", source="rules"),
+                # 与 store 重复的条目（应被去重，store 优先）
+                WhitelistEntry(path_glob="/a", rule_name="r1", created_at="rs", note="rs", source="rules"),
+            ),
+        )
+        rc = _FakeRulesController(ruleset=ruleset)
+        controller.set_rules_controller(rc)
+
+        entries = controller.whitelistEntries
+        # 去重后应只有 2 条
+        assert len(entries) == 2
+        keys = {(e["pathGlob"], e["ruleName"]) for e in entries}
+        assert keys == {("/a", "r1"), ("/b", "r2")}
+
+    def test_combined_entries_ruleset_none_returns_store_only(
+        self,
+        controller: WhitelistController,
+    ) -> None:
+        """ruleset 为 None 时仅返回 JSON store 条目。"""
+        controller.addEntry("/a", "r1", "")
+        rc = _FakeRulesController(ruleset=None)
+        controller.set_rules_controller(rc)
+
+        assert len(controller.whitelistEntries) == 1
+        assert controller.whitelistEntries[0]["pathGlob"] == "/a"
+
+    def test_add_entry_delegates_to_rules_controller(
+        self,
+        controller: WhitelistController,
+    ) -> None:
+        """注入 rules_controller 后 addEntry 委托 appendWhitelistEntry。"""
+        from fuscan.rules.model import RuleSet
+
+        rc = _FakeRulesController(ruleset=RuleSet(version="1.0"))
+        controller.set_rules_controller(rc)
+
+        msg = controller.addEntry("/a/b.txt", "r1", "备注")
+        assert "已添加" in msg
+        assert "/a/b.txt" in msg
+
+    def test_add_entry_delegates_empty_path_error(
+        self,
+        controller: WhitelistController,
+    ) -> None:
+        """委托路径下空路径返回错误消息。"""
+        from fuscan.rules.model import RuleSet
+
+        rc = _FakeRulesController(ruleset=RuleSet(version="1.0"))
+        controller.set_rules_controller(rc)
+
+        msg = controller.addEntry("   ", "r1", "")
+        assert "不能为空" in msg
+
+    def test_whitelist_count_reflects_combined(
+        self,
+        controller: WhitelistController,
+    ) -> None:
+        """whitelistCount 反映合并去重后的总数。"""
+        from fuscan.rules.model import RuleSet
+        from fuscan.rules.whitelist import WhitelistEntry
+
+        controller.addEntry("/a", "r1", "")
+        ruleset = RuleSet(
+            version="1.0",
+            whitelist=(WhitelistEntry(path_glob="/b", rule_name="r2", created_at="", note="", source="rules"),),
+        )
+        rc = _FakeRulesController(ruleset=ruleset)
+        controller.set_rules_controller(rc)
+
+        assert controller.whitelistCount == 2

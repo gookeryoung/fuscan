@@ -1,15 +1,19 @@
 """配置控制器：QML ↔ Config 持久化桥接。
 
 暴露 :class:`Config` 字段为 ``@Property``，QML 控件 ``onCheckedChanged``/
-``onValueChanged`` 直接调用 setter 保存配置。同时管理盘符列表、扫描路径
-历史与提取器勾选模型。
+``onValueChanged`` 直接调用 setter 保存配置。同时管理盘符列表与扫描路径历史。
+
+扫描参数（scan_archives/max_workers/max_depth/max_file_size/cache_enabled/
+perf_log_enabled/ignore_dirs/disabled_extractors）已迁移到 RuleSet 顶层，
+由 :class:`RulesController.effectiveConfigPreview` 暴露给 QML 只读展示，
+设置页「生效配置预览」区呈现。本控制器仅保留扫描模式、路径历史、字体等
+"应用级"配置。
 
 公共 API：
 
 - :class:`ConfigController`：``QObject`` 子类
 - :meth:`ConfigController.save`：保存配置到 YAML
 - :meth:`ConfigController.add_scan_path`：添加扫描路径历史
-- :meth:`ConfigController.enabled_extensions`：返回勾选提取器的扩展名集合
 """
 
 from __future__ import annotations
@@ -21,9 +25,7 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
-from fuscan.config import DEFAULT_MAX_FILE_SIZE, IGNORE_DIR_CATEGORIES, Config, load_config, save_config
-from fuscan.gui.models.extractor_model import ExtractorListModel
-from fuscan.perf import set_perf_enabled
+from fuscan.config import Config, load_config, save_config
 
 __all__ = ["ConfigController"]
 
@@ -39,19 +41,12 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
     configChanged = Signal()
     scanPathsChanged = Signal()
     drivesChanged = Signal()
-    extractorCountChanged = Signal()
     # 字体配置变更信号：AppController 监听此信号同步到 ThemeController
     fontConfigChanged = Signal()
-    # 忽略目录变更信号：分类视图与自定义列表变更时发射，QML 刷新 ListView
-    ignoreDirsChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._config: Config = load_config()
-        self._extractor_model: ExtractorListModel = ExtractorListModel(self)
-        self._extractor_model.load_from_registry(self._config.disabled_extractors)
-        # 性能日志开关同步
-        set_perf_enabled(self._config.perf_log_enabled)
 
     @property
     def config(self) -> Config:
@@ -62,301 +57,18 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """按 task_override 字段名读取全局配置值。
 
         供 :meth:`WorkspaceController.clearTaskOverride` 在清除任务级覆盖后
-        回填全局值到 ScanController。``max_file_size`` 返回字节（与
-        ``task_overrides`` 单位一致），``ignore_dirs``/``rules_paths`` 返回 tuple。
+        回填全局值到 ScanController。``rules_paths`` 返回 tuple；
+        扫描参数字段（scan_archives/max_workers 等）已迁移到 RuleSet，
+        此处返回 ``None``，由调用方从 ruleset 重新读取。
 
         :param key: ``TASK_OVERRIDE_KEYS`` 中的字段名
-        :return: 全局配置值；未知字段返回 ``None``
+        :return: 全局配置值；未知字段或已迁移字段返回 ``None``
         """
-        if key == "scan_archives":
-            return self._config.scan_archives
-        if key == "max_workers":
-            return self._config.max_workers
-        if key == "max_file_size":
-            return self._config.max_file_size  # 字节
-        if key == "max_depth":
-            return self._config.max_depth or 0
-        if key == "ignore_dirs":
-            return tuple(self._config.ignore_dirs)
         if key == "rules_paths":
             return tuple(self._config.rules_paths)
         if key == "use_builtin":
             return self._config.use_builtin
         return None
-
-    # ----------------------------- 扫描设置 -----------------------------
-
-    @Property(bool, notify=configChanged)  # pyrefly: ignore [not-callable]
-    def scanArchives(self) -> bool:
-        """是否扫描压缩包。"""
-        return self._config.scan_archives
-
-    @Slot(bool)  # pyrefly: ignore [not-callable]
-    def setScanArchives(self, value: bool) -> None:
-        """设置是否扫描压缩包。"""
-        if value != self._config.scan_archives:
-            self._config.scan_archives = value
-            self.save()
-
-    @Property(int, notify=configChanged)  # pyrefly: ignore [not-callable]
-    def maxWorkers(self) -> int:
-        """最大工作线程数。"""
-        return self._config.max_workers
-
-    @Property(int, notify=configChanged)  # pyrefly: ignore [not-callable]
-    def cpuCount(self) -> int:
-        """当前机器 CPU 逻辑核心数（供 QML 显示「当前机器最大线程=…」备注）。"""
-        import os
-
-        return os.cpu_count() or 1
-
-    @Slot(int)  # pyrefly: ignore [not-callable]
-    def setMaxWorkers(self, value: int) -> None:
-        """设置最大工作线程数。"""
-        if value != self._config.max_workers and 1 <= value <= 16:
-            self._config.max_workers = value
-            self.save()
-
-    @Property(int, notify=configChanged)  # pyrefly: ignore [not-callable]
-    def maxFileSizeMB(self) -> int:
-        """最大文件大小（MB）。"""
-        return self._config.max_file_size // (1024 * 1024)
-
-    @Slot(int)  # pyrefly: ignore [not-callable]
-    def setMaxFileSizeMB(self, value: int) -> None:
-        """设置最大文件大小（MB）。"""
-        new_size = value * 1024 * 1024
-        if new_size != self._config.max_file_size and 1 <= value <= 500:
-            self._config.max_file_size = new_size
-            self.save()
-
-    @Property(int, notify=configChanged)  # pyrefly: ignore [not-callable]
-    def maxDepth(self) -> int:
-        """最大扫描深度（0=无限）。"""
-        return self._config.max_depth or 0
-
-    @Slot(int)  # pyrefly: ignore [not-callable]
-    def setMaxDepth(self, value: int) -> None:
-        """设置最大扫描深度（0=无限）。"""
-        new_depth = value if value > 0 else None
-        if new_depth != self._config.max_depth:
-            self._config.max_depth = new_depth
-            self.save()
-
-    @Property(bool, notify=configChanged)  # pyrefly: ignore [not-callable]
-    def cacheEnabled(self) -> bool:
-        """是否启用扫描结果缓存。"""
-        return self._config.cache_enabled
-
-    @Slot(bool)  # pyrefly: ignore [not-callable]
-    def setCacheEnabled(self, value: bool) -> None:
-        """设置是否启用扫描结果缓存。"""
-        if value != self._config.cache_enabled:
-            self._config.cache_enabled = value
-            self.save()
-
-    @Property(bool, notify=configChanged)  # pyrefly: ignore [not-callable]
-    def perfLogEnabled(self) -> bool:
-        """是否启用性能详细日志。"""
-        return self._config.perf_log_enabled
-
-    @Slot(bool)  # pyrefly: ignore [not-callable]
-    def setPerfLogEnabled(self, value: bool) -> None:
-        """设置是否启用性能详细日志。"""
-        if value != self._config.perf_log_enabled:
-            self._config.perf_log_enabled = value
-            set_perf_enabled(value)
-            self.save()
-
-    # ----------------------------- 忽略目录（分类管理） -----------------------------
-
-    @Property("QVariantList", notify=ignoreDirsChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
-    def ignoreDirCategories(self) -> list[dict[str, object]]:
-        """忽略目录分类视图（QML ListView 展示）。
-
-        每项格式：``{"category": str, "dirs": [{"name": str, "enabled": bool}, ...], "allEnabled": bool}``。
-        ``enabled`` 表示该目录是否在当前 ``Config.ignore_dirs`` 中（用户可取消勾选预设目录）。
-        """
-        # 当前启用的目录集合（小写），用于快速查询
-        enabled_lower = {d.lower() for d in self._config.ignore_dirs}
-        result: list[dict[str, object]] = []
-        for category, dirs in IGNORE_DIR_CATEGORIES:
-            dir_items = [{"name": d, "enabled": d.lower() in enabled_lower} for d in dirs]
-            all_enabled = all(item["enabled"] for item in dir_items)
-            result.append(
-                {
-                    "category": category,
-                    "dirs": dir_items,
-                    "allEnabled": all_enabled,
-                }
-            )
-        return result
-
-    @Property("QVariantList", notify=ignoreDirsChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
-    def customIgnoreDirs(self) -> list[str]:
-        """用户自定义忽略目录（不在预设分类中的目录名列表）。"""
-        preset_lower = {d.lower() for _, dirs in IGNORE_DIR_CATEGORIES for d in dirs}
-        return [d for d in self._config.ignore_dirs if d.lower() not in preset_lower]
-
-    @Slot(str, bool)  # pyrefly: ignore [not-callable]
-    def toggleIgnoreDir(self, dir_name: str, enabled: bool) -> None:
-        """勾选或取消勾选一个忽略目录。
-
-        :param dir_name: 目录名（精确匹配，大小写敏感）
-        :param enabled: True 表示加入忽略列表，False 表示移除
-        """
-        current_lower = {d.lower() for d in self._config.ignore_dirs}
-        if enabled:
-            if dir_name.lower() not in current_lower:
-                self._config.ignore_dirs.append(dir_name)
-        else:
-            # 按大小写不敏感移除（保留用户可能修改的大小写变体）
-            self._config.ignore_dirs = [d for d in self._config.ignore_dirs if d.lower() != dir_name.lower()]
-        self.save()
-        self.ignoreDirsChanged.emit()  # pyrefly: ignore [missing-attribute]
-
-    @Slot(str, bool)  # pyrefly: ignore [not-callable]
-    def setIgnoreDirCategoryEnabled(self, category: str, enabled: bool) -> None:
-        """批量勾选或取消整个分类的目录。
-
-        :param category: 分类名
-        :param enabled: True 表示全选，False 表示全不选
-        """
-        target_dirs = dict(IGNORE_DIR_CATEGORIES).get(category, ())
-        if not target_dirs:
-            return
-        target_lower = {d.lower() for d in target_dirs}
-        if enabled:
-            # 添加分类下所有未启用的目录
-            existing_lower = {d.lower() for d in self._config.ignore_dirs}
-            for d in target_dirs:
-                if d.lower() not in existing_lower:
-                    self._config.ignore_dirs.append(d)
-        else:
-            # 移除分类下所有目录
-            self._config.ignore_dirs = [d for d in self._config.ignore_dirs if d.lower() not in target_lower]
-        self.save()
-        self.ignoreDirsChanged.emit()  # pyrefly: ignore [missing-attribute]
-
-    @Slot()  # pyrefly: ignore [not-callable]
-    def selectAllIgnoreDirs(self) -> None:
-        """全选所有预设分类下的忽略目录（自定义目录不动）。"""
-        existing_lower = {d.lower() for d in self._config.ignore_dirs}
-        changed = False
-        for _, dirs in IGNORE_DIR_CATEGORIES:
-            for d in dirs:
-                if d.lower() not in existing_lower:
-                    self._config.ignore_dirs.append(d)
-                    existing_lower.add(d.lower())
-                    changed = True
-        if changed:
-            self.save()
-            self.ignoreDirsChanged.emit()  # pyrefly: ignore [missing-attribute]
-
-    @Slot()  # pyrefly: ignore [not-callable]
-    def unselectAllIgnoreDirs(self) -> None:
-        """全不选所有预设分类下的忽略目录（自定义目录不动）。"""
-        preset_lower = {d.lower() for _, dirs in IGNORE_DIR_CATEGORIES for d in dirs}
-        before = len(self._config.ignore_dirs)
-        # 仅移除预设目录，保留自定义目录
-        self._config.ignore_dirs = [d for d in self._config.ignore_dirs if d.lower() not in preset_lower]
-        if len(self._config.ignore_dirs) != before:
-            self.save()
-            self.ignoreDirsChanged.emit()  # pyrefly: ignore [missing-attribute]
-
-    @Slot(str)  # pyrefly: ignore [not-callable]
-    def addCustomIgnoreDir(self, dir_name: str) -> None:
-        """添加自定义忽略目录名。
-
-        :param dir_name: 目录名（前后空白会被去除）
-        """
-        name = dir_name.strip()
-        if not name:
-            return
-        # 大小写不敏感去重
-        existing_lower = {d.lower() for d in self._config.ignore_dirs}
-        if name.lower() in existing_lower:
-            return
-        self._config.ignore_dirs.append(name)
-        self.save()
-        self.ignoreDirsChanged.emit()  # pyrefly: ignore [missing-attribute]
-
-    @Slot(str)  # pyrefly: ignore [not-callable]
-    def removeCustomIgnoreDir(self, dir_name: str) -> None:
-        """移除自定义忽略目录名（大小写不敏感）。
-
-        :param dir_name: 要移除的目录名
-        """
-        before = len(self._config.ignore_dirs)
-        self._config.ignore_dirs = [d for d in self._config.ignore_dirs if d.lower() != dir_name.lower()]
-        if len(self._config.ignore_dirs) != before:
-            self.save()
-            self.ignoreDirsChanged.emit()  # pyrefly: ignore [missing-attribute]
-
-    # ----------------------------- 文件类型（提取器勾选） -----------------------------
-
-    @Property(QObject, notify=configChanged)  # pyrefly: ignore [not-callable]
-    def extractorModel(self) -> ExtractorListModel:
-        """提取器勾选列表模型。
-
-        用 ``QObject`` 作为 Property 类型，避免 PySide2 元类型系统对
-        ``QAbstractListModel*`` 未注册导致的 ``QMetaObjectBuilder`` 警告。
-        """
-        return self._extractor_model
-
-    @Property(str, notify=extractorCountChanged)  # pyrefly: ignore [not-callable]
-    def extractorCountText(self) -> str:
-        """提取器勾选数文本（如 ``已勾选 12/15``）。"""
-        return f"已勾选 {self._extractor_model.enabled_count}/{self._extractor_model.total_count}"
-
-    @Slot(str, bool)  # pyrefly: ignore [not-callable]
-    def setExtractorEnabled(self, class_name: str, enabled: bool) -> None:
-        """QML 勾选回调：更新提取器勾选状态并保存。"""
-        self._extractor_model.set_extractor_enabled(class_name, enabled)
-        self._config.disabled_extractors = self._extractor_model.disabled_extractors()
-        self.extractorCountChanged.emit()  # pyrefly: ignore [missing-attribute]
-        self.save()
-
-    @Slot(str, bool)  # pyrefly: ignore [not-callable]
-    def setCategoryEnabled(self, category: str, enabled: bool) -> None:
-        """QML 类别父节点勾选回调：批量设置该类别下所有提取器勾选状态。"""
-        self._extractor_model.set_category_enabled(category, enabled)
-        self._config.disabled_extractors = self._extractor_model.disabled_extractors()
-        self.extractorCountChanged.emit()  # pyrefly: ignore [missing-attribute]
-        self.save()
-
-    @Slot(str, result=int)  # pyrefly: ignore [not-callable]
-    def categoryEnabledState(self, category: str) -> int:
-        """返回类别勾选状态（父节点三态显示）。
-
-        :return: 0=全不选, 1=全选, 2=部分选中
-        """
-        return self._extractor_model.category_enabled_state(category)
-
-    @Slot()  # pyrefly: ignore [not-callable]
-    def selectAllExtractors(self) -> None:
-        """全选提取器。"""
-        self._extractor_model.select_all()
-        self._config.disabled_extractors = []
-        self.extractorCountChanged.emit()  # pyrefly: ignore [missing-attribute]
-        self.save()
-
-    @Slot()  # pyrefly: ignore [not-callable]
-    def unselectAllExtractors(self) -> None:
-        """全不选提取器。"""
-        self._extractor_model.unselect_all()
-        self._config.disabled_extractors = self._extractor_model.disabled_extractors()
-        self.extractorCountChanged.emit()  # pyrefly: ignore [missing-attribute]
-        self.save()
-
-    def enabled_extensions(self) -> tuple[str, ...] | None:
-        """返回勾选提取器的扩展名集合（供 ScanController 使用）。
-
-        :return: ``None`` 表示全部勾选（扫描所有文件）；空 tuple 表示全部取消勾选；
-            非空 tuple 表示按白名单过滤。详见
-            :meth:`ExtractorListModel.enabled_extensions`。
-        """
-        return self._extractor_model.enabled_extensions()
 
     # ----------------------------- 扫描路径历史 -----------------------------
 
@@ -386,6 +98,13 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._config.scan_paths = []
             self.save()
             self.scanPathsChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    @Property(int, notify=configChanged)  # pyrefly: ignore [not-callable]
+    def cpuCount(self) -> int:
+        """当前机器 CPU 逻辑核心数（供 QML 显示「当前机器最大线程=…」备注）。"""
+        import os
+
+        return os.cpu_count() or 1
 
     # ----------------------------- 通用设置（字体） -----------------------------
 
@@ -460,24 +179,14 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot()  # pyrefly: ignore [not-callable]
     def resetToDefaults(self) -> None:
-        """重置扫描相关配置为默认值（不影响扫描路径历史与禁用提取器列表）。"""
-        self._config.scan_archives = True
-        self._config.max_workers = 5
-        self._config.max_file_size = DEFAULT_MAX_FILE_SIZE
-        self._config.max_depth = None
-        self._config.cache_enabled = True
-        self._config.perf_log_enabled = False
-        self._config.ignore_dirs = list(Config.__dataclass_fields__["ignore_dirs"].default_factory())  # type: ignore[index]
-        # 字体设置也重置为默认（平台默认字体、14px、最小 12px、不加粗）
+        """重置字体设置为默认值。"""
         self._config.font_family = None
         self._config.font_size = 14
         self._config.font_bold = False
         self._config.min_font_size = 12
-        set_perf_enabled(False)
         self.save()
         self.fontConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
-        self.ignoreDirsChanged.emit()  # pyrefly: ignore [missing-attribute]
-        logger.info("配置已重置为默认值")
+        logger.info("字体配置已重置为默认值")
 
     @Slot()  # pyrefly: ignore [not-callable]
     def refresh_drives(self) -> None:

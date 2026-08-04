@@ -311,7 +311,9 @@ class TestWhitelistStoreImportExport:
         store.add(WhitelistEntry(path_glob="/a", rule_name="r1", created_at="2026-07-29"))
         exported = store.export_json()
         data = json.loads(exported)
-        assert data == [{"path_glob": "/a", "rule_name": "r1", "created_at": "2026-07-29", "note": ""}]
+        assert data == [
+            {"path_glob": "/a", "rule_name": "r1", "created_at": "2026-07-29", "note": "", "source": "rules"}
+        ]
 
     def test_import_json_merges_and_dedupes(self, tmp_path: Path) -> None:
         """import_json 合并到现有条目并去重。"""

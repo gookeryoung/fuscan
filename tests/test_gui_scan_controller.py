@@ -30,6 +30,7 @@ try:
         MatchTarget,
         Rule,
         RuleSet,
+        ScanParams,
         Severity,
     )
     from fuscan.scanner import ScanReport, ScanResult, ScanStats
@@ -2040,7 +2041,7 @@ class TestBuildCacheContext:
 
     def test_build_cache_context_disabled(self, controller: ScanController) -> None:
         """cache_enabled=False 时应返回 (None, None)。"""
-        controller._config.cache_enabled = False
+        controller._ruleset = RuleSet(version="1.0", scan_params=ScanParams(cache_enabled=False))
         cache, source_files = controller._build_cache_context()
         assert cache is None
         assert source_files is None
@@ -2063,7 +2064,7 @@ class TestBuildCacheContext:
         cache_path = tmp_path / "cache.db"
         monkeypatch.setattr("fuscan.cache.CacheStore", FakeCacheStore)
         monkeypatch.setattr("fuscan.cache.compute_source_files", lambda paths, use_builtin: {})
-        controller._config.cache_enabled = True
+        controller._ruleset = RuleSet(version="1.0", scan_params=ScanParams(cache_enabled=True))
         controller._config.cache_path = str(cache_path)
         controller._cache = None  # 重置缓存
 
@@ -2087,7 +2088,7 @@ class TestBuildCacheContext:
                 pass
 
         monkeypatch.setattr("fuscan.cache.compute_source_files", lambda paths, use_builtin: {})
-        controller._config.cache_enabled = True
+        controller._ruleset = RuleSet(version="1.0", scan_params=ScanParams(cache_enabled=True))
         existing_cache = FakeCacheStore(tmp_path / "existing.db")
         controller._cache = existing_cache  # type: ignore[bad-assignment]
 
@@ -2257,10 +2258,10 @@ class TestIter143CoverageGaps:
     def test_effective_max_depth_property_with_value(
         self,
         controller: ScanController,
-        config_controller: ConfigController,
     ) -> None:
         """effectiveMaxDepth 设非零值时返回该值（iter-143 覆盖行 592-593 depth or 0 分支）。"""
-        config_controller.setMaxDepth(5)
+        # max_depth 已迁移到 RuleSet.scan_params，通过任务级覆盖设置
+        controller._task_overrides["max_depth"] = 5
         assert controller.effectiveMaxDepth == 5
 
     def test_filter_severities_resets_selected_index_when_out_of_range(

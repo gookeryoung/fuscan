@@ -22,6 +22,7 @@ except ImportError:  # pragma: no cover
     from PySide6.QtQml import QQmlApplicationEngine  # pyrefly: ignore [missing-import]
     from PySide6.QtQuickControls2 import QQuickStyle  # pyrefly: ignore [missing-import]
 
+from fuscan.config import migrate_config_to_rules
 from fuscan.gui import resources_rc  # noqa: F401  注册 qrc 资源
 from fuscan.gui.controllers import AppController, register_qml_types
 from fuscan.gui.theme import detect_font_families
@@ -95,6 +96,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         with timed("注册 QML 类型", level=logging.DEBUG, report=report):
             register_qml_types()
+
+        with timed("迁移旧配置字段到规则集", level=logging.DEBUG, report=report):
+            # 在 ConfigController 构造前执行迁移：将旧版 config.yaml 中的
+            # scan_archives/max_workers/ignore_dirs/disabled_extractors 等字段
+            # 搬到 ~/.fuscan/rules/user-scan.yaml，并从 config.yaml 中清除。
+            # 幂等：无迁移字段时 no-op。
+            migrate_config_to_rules()
 
         with timed("构造主控制器", level=logging.DEBUG, report=report):
             controller = AppController()

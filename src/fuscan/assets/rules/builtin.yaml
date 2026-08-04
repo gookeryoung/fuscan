@@ -1,8 +1,9 @@
 # fuscan 内置通用规则
 #
-# 此文件随软件分发，提供通用的过滤与识别规则。
+# 此文件随软件分发，提供通用的过滤与识别规则以及默认扫描配置。
 # 用户规则文件中同名规则会覆盖此处对应的规则；
-# ignore_paths 取并集。
+# ignore_paths/ignore_dirs 取并集；scan_extensions/scan_params 由后者非空覆盖；
+# whitelist 取并集（按 path_glob + rule_name 去重）。
 version: "1.0"
 
 # 路径级 glob 过滤（相对扫描根目录，大小写不敏感）
@@ -10,6 +11,180 @@ ignore_paths:
   - "*/vendor/*"
   - "*/.cache/*"
   - "*/third_party/*"
+
+# 目录名级忽略（按目录名匹配任意层级，大小写不敏感）。
+# 默认值从历史 IGNORE_DIR_CATEGORIES 扁平化派生，涵盖：
+# 版本控制 / 语言工具链缓存 / 构建输出 / IDE 配置 / 临时日志 /
+# 大型软件安装目录（ANSYS/AutoCAD/SolidWorks/Office/WPS/MATLAB/Adobe 等）/
+# Windows 系统目录 / fuscan 缓存。
+# 用户可在 ``~/.fuscan/rules/user-scan.yaml`` 中追加自定义 ignore_dirs（取并集）。
+ignore_dirs:
+  # 版本控制
+  - ".git"
+  - ".svn"
+  - ".hg"
+  # Python
+  - "__pycache__"
+  - ".mypy_cache"
+  - ".pytest_cache"
+  - ".ruff_cache"
+  - ".venv"
+  - "venv"
+  - "env"
+  - ".tox"
+  - ".eggs"
+  # Node / JavaScript
+  - "node_modules"
+  - ".sass-cache"
+  - ".npm"
+  - ".yarn"
+  - ".pnpm-store"
+  - ".next"
+  - ".nuxt"
+  - ".turbo"
+  - ".parcel-cache"
+  - ".svelte-kit"
+  # Rust / Cargo
+  - "target"
+  - ".cargo"
+  - ".rustup"
+  # Java
+  - ".gradle"
+  - ".m2"
+  - ".ivy"
+  # .NET / Visual Studio
+  - ".vs"
+  - "packages"
+  - ".nuget"
+  # PHP
+  - "vendor"
+  # Apple
+  - "Pods"
+  - "DerivedData"
+  # Flutter / Dart
+  - ".dart_tool"
+  # 构建输出
+  - "dist"
+  - "build"
+  - "out"
+  # IDE
+  - ".idea"
+  - ".vscode"
+  # 缓存 / 临时 / 日志
+  - ".cache"
+  - "tmp"
+  - "temp"
+  - "logs"
+  - "log"
+  - ".Trash"
+  - "Trash"
+  # 大型软件
+  - "ANSYS Inc"
+  - "Autodesk"
+  - "SOLIDWORKS Corp"
+  - "SolidWorks"
+  - "Microsoft Office"
+  - "Office16"
+  - "Office15"
+  - "Office14"
+  - "Kingsoft"
+  - "WPS Office"
+  - "MATLAB"
+  - "MathWorks"
+  - "Adobe"
+  - "Corel"
+  - "TecPlot"
+  - "STK"
+  - "Altium"
+  - "JetBrains"
+  - "IntelliJ IDEA"
+  - "PyCharm"
+  - "WebStorm"
+  - "CLion"
+  - "GoLand"
+  - "Rider"
+  - "PhpStorm"
+  - "DataGrip"
+  - "AppCode"
+  - "Android Studio"
+  - "FreeCAD"
+  - "PTC"
+  - "Creo"
+  - "Siemens"
+  - "Dassault Systemes"
+  - "Bentley"
+  - "Inventor"
+  - "Revit"
+  - "SketchUp"
+  - "McNeel"
+  - "Rhino"
+  - "Affinity"
+  - "Serif"
+  - "Blackmagic Design"
+  - "National Instruments"
+  - "LabVIEW"
+  - "Maplesoft"
+  - "Wolfram Research"
+  - "Eclipse"
+  - "Microsoft Visual Studio"
+  - "Microsoft SQL Server"
+  # Windows 系统目录
+  - "Program Files"
+  - "Program Files (x86)"
+  - "Windows"
+  - "WinSxS"
+  - "ProgramData"
+  - "System Volume Information"
+  - "$Recycle.Bin"
+  # fuscan
+  - ".fuscan-cache"
+
+# 文件后缀白名单（小写、无前导点）。
+#   - null（未指定）= 全选默认（所有注册提取器支持的后缀）
+#   - 空 list = 都不扫描
+#   - 非空 list = 仅扫描指定后缀
+# 默认值 = 所有注册提取器扩展名 - 默认禁用项（SourceCodeExtractor + SevenZArchiveExtractor）
+# 即：仅扫描纯文本/PDF/Office（DOCX/PPTX/XLSX/ODS/ODT/WPS/EML/XLS/DOC/PPT）+ ZIP/RAR 压缩包。
+# 用户可在 user-scan.yaml 中提供完整列表覆盖此默认（后者非 null 覆盖前者）。
+scan_extensions:
+  - "txt"
+  - "log"
+  - "pdf"
+  - "docx"
+  - "pptx"
+  - "xlsx"
+  - "xlsm"
+  - "ods"
+  - "odt"
+  - "wps"
+  - "et"
+  - "dps"
+  - "eml"
+  - "xls"
+  - "doc"
+  - "ppt"
+  - "zip"
+  - "rar"
+
+# 扫描参数默认值（用户可在 user-scan.yaml 中按字段覆盖）。
+#   - max_workers: 默认 5（PyO3 提取器释放 GIL，5 线程改善 I/O 并行度）
+#   - max_depth: null = 无限深度
+#   - max_file_size: 50MB（超过此值的文件不读取内容，避免独占 GIL 冻结界面；0=不限制）
+#   - scan_archives: true（启用压缩包扫描）
+#   - cache_enabled: true（启用内容哈希缓存，二次扫描加速）
+#   - perf_log_enabled: false（性能日志默认关闭）
+scan_params:
+  max_workers: 5
+  max_depth: null
+  max_file_size: 52428800  # 50 * 1024 * 1024
+  scan_archives: true
+  cache_enabled: true
+  perf_log_enabled: false
+
+# 误报白名单（路径 glob + 规则名 + 备注）。
+# 内置规则不预定义任何误报条目；用户运行时标记的误报通过 WhitelistController
+# 追加到 user-scan.yaml 的 whitelist 段（source: "runtime"）。
+whitelist: []
 
 rules:
   # ---------- 敏感个人信息(PRIVATE INFO) ----------

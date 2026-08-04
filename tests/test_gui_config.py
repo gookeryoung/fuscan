@@ -1,8 +1,10 @@
 """``ConfigController`` 单元测试。
 
-验证 ``@Property``/``@Slot`` 桥接的配置读写、提取器勾选管理、扫描路径历史
-与持久化行为。使用 ``tmp_path`` + ``monkeypatch`` 隔离配置文件，避免污染
-用户主目录。
+验证 ``@Property``/``@Slot`` 桥接的配置读写、扫描路径历史与持久化行为。
+扫描参数（scan_archives/max_workers/ignore_dirs/disabled_extractors 等）已
+迁移到 RuleSet 顶层，由 ``RulesController.effectiveConfigPreview`` 暴露，
+本测试仅覆盖 ConfigController 保留的"应用级"配置（字体、扫描路径、盘符）。
+使用 ``tmp_path`` + ``monkeypatch`` 隔离配置文件，避免污染用户主目录。
 """
 
 from __future__ import annotations
@@ -20,7 +22,6 @@ pytestmark = pytest.mark.gui
 try:
     from fuscan.config import MAX_HISTORY, Config
     from fuscan.gui.controllers.config_controller import ConfigController
-    from fuscan.gui.models.extractor_model import ExtractorListModel
 
     PYSIDE_AVAILABLE = True
 except ImportError:
@@ -51,236 +52,13 @@ class TestConstruction:
     def test_construct_loads_default_config(self, controller: ConfigController) -> None:
         assert isinstance(controller.config, Config)
 
-    def test_extractor_model_loaded(self, controller: ConfigController) -> None:
-        """构造时应加载提取器列表到 model。"""
-        model = controller.extractorModel
-        assert isinstance(model, ExtractorListModel)
-        assert model.total_count > 0
-
-
-class TestScanSettings:
-    def test_scan_archives_default_true(self, controller: ConfigController) -> None:
-        assert controller.scanArchives is True
-
-    def test_set_scan_archives_persists(self, controller: ConfigController) -> None:
-        controller.setScanArchives(False)
-        assert controller.scanArchives is False
-        assert controller.config.scan_archives is False
-
-    def test_set_scan_archives_noop_when_same(self, controller: ConfigController) -> None:
-        controller.setScanArchives(True)
-        assert controller.scanArchives is True
-
-    def test_max_workers_default_5(self, controller: ConfigController) -> None:
-        assert controller.maxWorkers == 5
-
-    def test_set_max_workers_valid_range(self, controller: ConfigController) -> None:
-        controller.setMaxWorkers(8)
-        assert controller.maxWorkers == 8
-
-    def test_set_max_workers_rejects_invalid(self, controller: ConfigController) -> None:
-        original = controller.maxWorkers
-        controller.setMaxWorkers(0)
-        assert controller.maxWorkers == original
-        controller.setMaxWorkers(100)
-        assert controller.maxWorkers == original
-
-    def test_max_file_size_mb_default_50(self, controller: ConfigController) -> None:
-        assert controller.maxFileSizeMB == 50
-
-    def test_set_max_file_size_mb(self, controller: ConfigController) -> None:
-        controller.setMaxFileSizeMB(100)
-        assert controller.maxFileSizeMB == 100
-        assert controller.config.max_file_size == 100 * 1024 * 1024
-
-    def test_max_depth_default_0_means_unlimited(self, controller: ConfigController) -> None:
-        assert controller.maxDepth == 0
-        assert controller.config.max_depth is None
-
-    def test_set_max_depth_positive(self, controller: ConfigController) -> None:
-        controller.setMaxDepth(5)
-        assert controller.maxDepth == 5
-        assert controller.config.max_depth == 5
-
-    def test_set_max_depth_zero_means_unlimited(self, controller: ConfigController) -> None:
-        controller.setMaxDepth(10)
-        controller.setMaxDepth(0)
-        assert controller.config.max_depth is None
-
-
-class TestCacheAndPerf:
-    def test_cache_enabled_default_true(self, controller: ConfigController) -> None:
-        assert controller.cacheEnabled is True
-
-    def test_set_cache_enabled(self, controller: ConfigController) -> None:
-        controller.setCacheEnabled(False)
-        assert controller.cacheEnabled is False
-
-    def test_perf_log_enabled_default_false(self, controller: ConfigController) -> None:
-        assert controller.perfLogEnabled is False
-
-    def test_set_perf_log_enabled(self, controller: ConfigController) -> None:
-        controller.setPerfLogEnabled(True)
-        assert controller.perfLogEnabled is True
-
-    def test_cpu_count_positive(self, controller: ConfigController) -> None:
-        """cpuCount 应返回正整数（≥1）。"""
-        assert controller.cpuCount >= 1
-
-
-class TestIgnoreDirs:
-    def test_ignore_dir_categories_default_non_empty(self, controller: ConfigController) -> None:
-        """默认 ignoreDirCategories 含多个分类，每个分类含目录项。"""
-        cats = controller.ignoreDirCategories
-        assert len(cats) > 0
-        # 版本控制分类应存在且含 .git
-        vc_cats = [c for c in cats if c["category"] == "版本控制"]
-        assert len(vc_cats) == 1
-        vc_dirs = vc_cats[0]["dirs"]
-        assert any(d["name"] == ".git" and d["enabled"] for d in vc_dirs)
-
-    def test_toggle_ignore_dir_disable_and_enable(self, controller: ConfigController) -> None:
-        """toggleIgnoreDir 可取消勾选预设目录并重新勾选。"""
-        # 初始 .git 在忽略列表中
-        assert ".git" in controller.config.ignore_dirs
-        # 取消勾选
-        controller.toggleIgnoreDir(".git", False)
-        assert ".git" not in controller.config.ignore_dirs
-        # 重新勾选
-        controller.toggleIgnoreDir(".git", True)
-        assert ".git" in controller.config.ignore_dirs
-
-    def test_toggle_ignore_dir_case_insensitive_removal(self, controller: ConfigController) -> None:
-        """取消勾选时按大小写不敏感移除。"""
-        controller.toggleIgnoreDir(".GIT", False)
-        assert ".git" not in controller.config.ignore_dirs
-
-    def test_set_ignore_dir_category_enabled_batch(self, controller: ConfigController) -> None:
-        """setIgnoreDirCategoryEnabled 批量取消/勾选整个分类。"""
-        # 取消整个 Python 分类
-        controller.setIgnoreDirCategoryEnabled("Python", False)
-        assert "__pycache__" not in controller.config.ignore_dirs
-        assert ".venv" not in controller.config.ignore_dirs
-        # 重新勾选
-        controller.setIgnoreDirCategoryEnabled("Python", True)
-        assert "__pycache__" in controller.config.ignore_dirs
-        assert ".venv" in controller.config.ignore_dirs
-
-    def test_add_custom_ignore_dir(self, controller: ConfigController) -> None:
-        """addCustomIgnoreDir 添加自定义目录到忽略列表。"""
-        controller.addCustomIgnoreDir("my_special_cache")
-        assert "my_special_cache" in controller.config.ignore_dirs
-        assert "my_special_cache" in controller.customIgnoreDirs
-
-    def test_add_custom_ignore_dir_dedup_case_insensitive(self, controller: ConfigController) -> None:
-        """addCustomIgnoreDir 大小写不敏感去重。"""
-        controller.addCustomIgnoreDir(".git")
-        # 已存在 .git（小写），不应重复添加
-        count = controller.config.ignore_dirs.count(".git")
-        assert count == 1
-
-    def test_add_custom_ignore_dir_ignores_empty(self, controller: ConfigController) -> None:
-        """addCustomIgnoreDir 忽略空字符串。"""
-        before = len(controller.config.ignore_dirs)
-        controller.addCustomIgnoreDir("   ")
-        assert len(controller.config.ignore_dirs) == before
-
-    def test_remove_custom_ignore_dir(self, controller: ConfigController) -> None:
-        """removeCustomIgnoreDir 移除自定义目录。"""
-        controller.addCustomIgnoreDir("temp_cache")
-        assert "temp_cache" in controller.config.ignore_dirs
-        controller.removeCustomIgnoreDir("temp_cache")
-        assert "temp_cache" not in controller.config.ignore_dirs
-
-    def test_custom_ignore_dirs_excludes_preset(self, controller: ConfigController) -> None:
-        """customIgnoreDirs 不含预设分类中的目录。"""
-        controller.addCustomIgnoreDir("custom_only")
-        custom = controller.customIgnoreDirs
-        assert "custom_only" in custom
-        # 预设目录不出现在自定义列表中
-        assert ".git" not in custom
-        assert "node_modules" not in custom
-
-    def test_large_software_category_exists(self, controller: ConfigController) -> None:
-        """大型软件分类应存在并含 ANSYS/Autodesk/SolidWorks 等目录。"""
-        cats = controller.ignoreDirCategories
-        ls_cats = [c for c in cats if c["category"] == "大型软件"]
-        assert len(ls_cats) == 1
-        dir_names = [d["name"] for d in ls_cats[0]["dirs"]]
-        assert "ANSYS Inc" in dir_names
-        assert "Autodesk" in dir_names
-        assert "SOLIDWORKS Corp" in dir_names
-        assert "Kingsoft" in dir_names
-
-    def test_select_all_ignore_dirs_adds_all_preset(self, controller: ConfigController) -> None:
-        """selectAllIgnoreDirs 应将所有预设分类下的目录加入忽略列表。"""
-        # 先清空所有预设目录
-        controller.unselectAllIgnoreDirs()
-        assert ".git" not in controller.config.ignore_dirs
-        assert "node_modules" not in controller.config.ignore_dirs
-        # 全选
-        controller.selectAllIgnoreDirs()
-        # 各分类代表目录应存在
-        assert ".git" in controller.config.ignore_dirs
-        assert "node_modules" in controller.config.ignore_dirs
-        assert "__pycache__" in controller.config.ignore_dirs
-
-    def test_select_all_ignore_dirs_preserves_custom(self, controller: ConfigController) -> None:
-        """selectAllIgnoreDirs 不影响已存在的自定义目录。"""
-        controller.addCustomIgnoreDir("my_custom_dir")
-        controller.selectAllIgnoreDirs()
-        assert "my_custom_dir" in controller.config.ignore_dirs
-
-    def test_select_all_ignore_dirs_idempotent(self, controller: ConfigController) -> None:
-        """selectAllIgnoreDirs 幂等：重复调用不产生重复条目。"""
-        controller.selectAllIgnoreDirs()
-        before = len(controller.config.ignore_dirs)
-        controller.selectAllIgnoreDirs()
-        after = len(controller.config.ignore_dirs)
-        assert before == after
-
-    def test_select_all_ignore_dirs_case_insensitive_dedup(self, controller: ConfigController) -> None:
-        """selectAllIgnoreDirs 大小写不敏感去重（.GIT 不与 .git 重复）。"""
-        controller.unselectAllIgnoreDirs()
-        # 手动加入大写版本
-        controller.config.ignore_dirs.append(".GIT")
-        controller.selectAllIgnoreDirs()
-        # 应只保留一个 .git（小写版本），大写版本被去重
-        git_entries = [d for d in controller.config.ignore_dirs if d.lower() == ".git"]
-        assert len(git_entries) == 1
-
-    def test_unselect_all_ignore_dirs_removes_all_preset(self, controller: ConfigController) -> None:
-        """unselectAllIgnoreDirs 应移除所有预设分类下的目录。"""
-        # 确保默认有预设目录
-        assert ".git" in controller.config.ignore_dirs
-        controller.unselectAllIgnoreDirs()
-        assert ".git" not in controller.config.ignore_dirs
-        assert "node_modules" not in controller.config.ignore_dirs
-        assert "__pycache__" not in controller.config.ignore_dirs
-
-    def test_unselect_all_ignore_dirs_preserves_custom(self, controller: ConfigController) -> None:
-        """unselectAllIgnoreDirs 保留自定义目录。"""
-        controller.addCustomIgnoreDir("my_custom_dir")
-        controller.unselectAllIgnoreDirs()
-        assert "my_custom_dir" in controller.config.ignore_dirs
-        # 预设目录被移除
-        assert ".git" not in controller.config.ignore_dirs
-
-    def test_unselect_all_ignore_dirs_idempotent(self, controller: ConfigController) -> None:
-        """unselectAllIgnoreDirs 幂等：无预设目录时调用不抛异常。"""
-        controller.unselectAllIgnoreDirs()
-        # 再次调用应无副作用
-        controller.unselectAllIgnoreDirs()
-        assert ".git" not in controller.config.ignore_dirs
-
-    def test_unselect_all_ignore_dirs_case_insensitive(self, controller: ConfigController) -> None:
-        """unselectAllIgnoreDirs 大小写不敏感移除预设目录。"""
-        # 手动加入大写版本
-        controller.config.ignore_dirs.append(".GIT")
-        controller.unselectAllIgnoreDirs()
-        # 大写版本也应被移除
-        git_entries = [d for d in controller.config.ignore_dirs if d.lower() == ".git"]
-        assert len(git_entries) == 0
+    def test_migrated_fields_not_in_config(self, controller: ConfigController) -> None:
+        """迁移字段不应存在于 Config 数据类。"""
+        assert not hasattr(controller.config, "ignore_dirs")
+        assert not hasattr(controller.config, "cache_enabled")
+        assert not hasattr(controller.config, "scan_archives")
+        assert not hasattr(controller.config, "max_workers")
+        assert not hasattr(controller.config, "disabled_extractors")
 
 
 class TestFontSettings:
@@ -373,38 +151,6 @@ class TestFontSettings:
         assert controller.minFontSize == 12
 
 
-class TestExtractorSelection:
-    def test_extractor_count_text_format(self, controller: ConfigController) -> None:
-        text = controller.extractorCountText
-        assert text.startswith("已勾选 ")
-        assert "/" in text
-
-    def test_select_all_extractors(self, controller: ConfigController) -> None:
-        controller.unselectAllExtractors()
-        assert controller.config.disabled_extractors
-        controller.selectAllExtractors()
-        assert controller.config.disabled_extractors == []
-
-    def test_unselect_all_extractors(self, controller: ConfigController) -> None:
-        controller.unselectAllExtractors()
-        assert len(controller.config.disabled_extractors) > 0
-
-    def test_set_extractor_enabled_persists(self, controller: ConfigController) -> None:
-        first_class = controller.extractorModel.data(
-            controller.extractorModel.index(0),
-            0x0100 + 1,  # Qt.UserRole + 1
-        )
-        controller.setExtractorEnabled(first_class, False)
-        assert first_class in controller.config.disabled_extractors
-        controller.setExtractorEnabled(first_class, True)
-        assert first_class not in controller.config.disabled_extractors
-
-    def test_enabled_extensions_all_selected_returns_none(self, controller: ConfigController) -> None:
-        """全部勾选时返回 None（扫描所有文件，与 Scanner scan_extensions 语义一致）。"""
-        controller.selectAllExtractors()
-        assert controller.enabled_extensions() is None
-
-
 class TestScanPaths:
     def test_scan_paths_default_empty(self, controller: ConfigController) -> None:
         assert controller.scanPaths == []
@@ -460,48 +206,19 @@ class TestDrives:
 
 
 class TestResetToDefaults:
-    """``resetToDefaults`` Slot。"""
+    """``resetToDefaults`` Slot（仅重置字体配置）。"""
 
-    def test_resets_scan_archives(self, controller: ConfigController) -> None:
-        controller.setScanArchives(False)
-        assert controller.scanArchives is False
+    def test_resets_font_settings(self, controller: ConfigController) -> None:
+        """resetToDefaults 应重置字体设置为默认值。"""
+        controller.setFontFamily("Arial")
+        controller.setFontSize(20)
+        controller.setFontBold(True)
+        controller.setMinFontSize(16)
         controller.resetToDefaults()
-        assert controller.scanArchives is True
-
-    def test_resets_max_workers(self, controller: ConfigController) -> None:
-        controller.setMaxWorkers(8)
-        assert controller.maxWorkers == 8
-        controller.resetToDefaults()
-        assert controller.maxWorkers == 5
-
-    def test_resets_max_file_size_mb(self, controller: ConfigController) -> None:
-        controller.setMaxFileSizeMB(100)
-        controller.resetToDefaults()
-        assert controller.maxFileSizeMB == 50
-
-    def test_resets_max_depth(self, controller: ConfigController) -> None:
-        controller.setMaxDepth(10)
-        controller.resetToDefaults()
-        assert controller.maxDepth == 0  # 0 表示无限
-
-    def test_resets_cache_enabled(self, controller: ConfigController) -> None:
-        controller.setCacheEnabled(False)
-        controller.resetToDefaults()
-        assert controller.cacheEnabled is True
-
-    def test_resets_perf_log_enabled(self, controller: ConfigController) -> None:
-        controller.setPerfLogEnabled(True)
-        controller.resetToDefaults()
-        assert controller.perfLogEnabled is False
-
-    def test_resets_ignore_dirs(self, controller: ConfigController) -> None:
-        controller.addCustomIgnoreDir("custom_dir")
-        controller.addCustomIgnoreDir("another")
-        assert "custom_dir" in controller.config.ignore_dirs
-        controller.resetToDefaults()
-        # 默认 ignore_dirs 非空（含 system volume information 等）
-        assert "custom_dir" not in controller.config.ignore_dirs
-        assert "another" not in controller.config.ignore_dirs
+        assert controller.fontFamily == ""
+        assert controller.fontSize == 14
+        assert controller.fontBold is False
+        assert controller.minFontSize == 12
 
     def test_emits_config_changed(self, controller: ConfigController) -> None:
         emitted: list[None] = []
@@ -511,86 +228,53 @@ class TestResetToDefaults:
 
     def test_persists_to_disk(self, controller: ConfigController, config_dir: Path) -> None:
         """重置后应保存到磁盘。"""
-        controller.setMaxWorkers(8)
+        controller.setFontSize(20)
         controller.resetToDefaults()
         # 重新加载配置应得到默认值
         from fuscan.config import load_config
 
         reloaded = load_config()
-        assert reloaded.max_workers == 5
+        assert reloaded.font_size == 14
 
 
 class TestGetConfigValue:
-    """``get_config_value`` 按 task_override 字段名读取全局配置值（iter-127）。
+    """``get_config_value`` 按 task_override 字段名读取全局配置值。
 
-    覆盖所有分支：scan_archives / max_workers / max_file_size / max_depth /
-    ignore_dirs / 未知字段。
+    扫描参数字段已迁移到 RuleSet，此处返回 None；仅 rules_paths/use_builtin
+    返回实际值。
     """
 
-    def test_scan_archives(self, controller: ConfigController) -> None:
-        assert controller.get_config_value("scan_archives") == controller.config.scan_archives
-
-    def test_max_workers(self, controller: ConfigController) -> None:
-        assert controller.get_config_value("max_workers") == controller.config.max_workers
-
-    def test_max_file_size(self, controller: ConfigController) -> None:
-        assert controller.get_config_value("max_file_size") == controller.config.max_file_size
-
-    def test_max_depth_default_zero(self, controller: ConfigController) -> None:
-        """max_depth 默认 None 时应返回 0。"""
-        assert controller.get_config_value("max_depth") == 0
-
-    def test_max_depth_set_returns_value(self, controller: ConfigController) -> None:
-        """max_depth 设置后应返回设置值。"""
-        controller.config.max_depth = 5
-        assert controller.get_config_value("max_depth") == 5
-
-    def test_ignore_dirs_returns_tuple(self, controller: ConfigController) -> None:
-        """ignore_dirs 应返回 tuple 类型。"""
-        result = controller.get_config_value("ignore_dirs")
+    def test_rules_paths_returns_tuple(self, controller: ConfigController) -> None:
+        """rules_paths 应返回 tuple 类型。"""
+        controller.config.rules_paths = ["/rules/r1.yaml", "/rules/r2.yaml"]
+        result = controller.get_config_value("rules_paths")
         assert isinstance(result, tuple)
-        assert result == tuple(controller.config.ignore_dirs)
+        assert result == ("/rules/r1.yaml", "/rules/r2.yaml")
+
+    def test_use_builtin_returns_bool(self, controller: ConfigController) -> None:
+        """use_builtin 应返回布尔值。"""
+        result = controller.get_config_value("use_builtin")
+        assert result is True
+
+    def test_migrated_field_returns_none(self, controller: ConfigController) -> None:
+        """已迁移字段应返回 None（由调用方从 ruleset 读取）。"""
+        assert controller.get_config_value("scan_archives") is None
+        assert controller.get_config_value("max_workers") is None
+        assert controller.get_config_value("max_file_size") is None
+        assert controller.get_config_value("max_depth") is None
+        assert controller.get_config_value("ignore_dirs") is None
+        assert controller.get_config_value("cache_enabled") is None
+        assert controller.get_config_value("perf_log_enabled") is None
+        assert controller.get_config_value("disabled_extractors") is None
 
     def test_unknown_key_returns_none(self, controller: ConfigController) -> None:
         """未知字段应返回 None。"""
         assert controller.get_config_value("nonexistent_field") is None
 
 
-class TestCategoryEnabled:
-    """``setCategoryEnabled``/``categoryEnabledState`` 类别勾选测试。"""
+class TestCpuCount:
+    """``cpuCount`` 属性。"""
 
-    def test_set_category_enabled_updates_config(self, controller: ConfigController) -> None:
-        """setCategoryEnabled 应更新提取器勾选状态并持久化到 config。"""
-        model = controller.extractorModel
-        # 取第一个提取器所在的类别
-        first_category = model._rows[0].category  # type: ignore[attr-defined]
-        # 获取该类别下的所有提取器类名
-        category_class_names = {
-            row.class_name
-            for row in model._rows
-            if row.category == first_category  # type: ignore[attr-defined]
-        }
-        # 先禁用该类别
-        controller.setCategoryEnabled(first_category, False)
-        # disabled_extractors 应包含该类别下的提取器
-        disabled_set = set(controller.config.disabled_extractors)
-        assert category_class_names.issubset(disabled_set)
-
-        # 再启用
-        controller.setCategoryEnabled(first_category, True)
-        # disabled_extractors 应不再包含该类别下的提取器
-        disabled_set = set(controller.config.disabled_extractors)
-        assert not category_class_names.intersection(disabled_set)
-
-    def test_category_enabled_state_all_selected(self, controller: ConfigController) -> None:
-        """全部启用时 categoryEnabledState 返回 1（全选）。"""
-        model = controller.extractorModel
-        first_category = model._rows[0].category  # type: ignore[attr-defined]
-        assert controller.categoryEnabledState(first_category) == 1
-
-    def test_category_enabled_state_none_selected(self, controller: ConfigController) -> None:
-        """全部禁用时 categoryEnabledState 返回 0（全不选）。"""
-        model = controller.extractorModel
-        first_category = model._rows[0].category  # type: ignore[attr-defined]
-        controller.setCategoryEnabled(first_category, False)
-        assert controller.categoryEnabledState(first_category) == 0
+    def test_cpu_count_positive(self, controller: ConfigController) -> None:
+        """cpuCount 应返回正整数（≥1）。"""
+        assert controller.cpuCount >= 1

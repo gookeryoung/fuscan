@@ -25,8 +25,10 @@ from fuscan.rules.model import (
     OrMatch,
     Rule,
     RuleSet,
+    ScanParams,
     Severity,
 )
+from fuscan.rules.whitelist import WhitelistEntry
 
 __all__ = ["load_ruleset", "parse_match", "parse_rule", "parse_ruleset"]
 
@@ -224,17 +226,33 @@ def parse_ruleset(data: Any) -> RuleSet:
         supported = ", ".join(sorted(SUPPORTED_VERSIONS))
         raise RuleParseError(f"不支持的规则集版本 {version!r}，当前支持: {supported}。请升级 fuscan 或降级规则集格式。")
 
-    # ignore_dirs 已迁移至全局 Config.ignore_dirs；ignore_extensions 已由全局
-    # 文件类型白名单（Config.scan_extensions）替代。规则文件中这两个字段被静默忽略。
-    ignore_dirs_raw = data.get("ignore_dirs", [])
-    if ignore_dirs_raw:
-        logger.debug("规则文件中 ignore_dirs 已弃用，请改用全局配置")
+    # 兼容旧规则文件：ignore_extensions 字段已弃用，由顶层 scan_extensions 取代。
+    # 旧字段被静默忽略（仅 debug 日志），不再影响实际行为。
     ignore_ext_raw = data.get("ignore_extensions", [])
     if ignore_ext_raw:
-        logger.debug("规则文件中 ignore_extensions 已弃用，请改用全局文件类型勾选")
+        logger.debug("规则文件中 ignore_extensions 已弃用，请改用 scan_extensions")
 
     ignore_paths_raw = data.get("ignore_paths", [])
     ignore_paths = _as_str_tuple(ignore_paths_raw, field="ignore_paths")
+
+    # 顶层 ignore_dirs：目录名级忽略（任意层级、大小写不敏感），与 Config.ignore_dirs 同语义。
+    # 保留原值（不强制小写），由 Scanner/FileWalker 在匹配时统一大小写处理。
+    ignore_dirs_raw = data.get("ignore_dirs", [])
+    ignore_dirs = _as_str_tuple(ignore_dirs_raw, field="ignore_dirs")
+
+    # 顶层 scan_extensions：文件后缀白名单。
+    # None（字段未出现）= 全选默认；空列表 = 都不扫描；非空 = 仅扫描指定后缀。
+    scan_extensions_raw = data.get("scan_extensions")
+    if scan_extensions_raw is None:
+        scan_extensions: tuple[str, ...] | None = None
+    else:
+        scan_extensions = _as_str_tuple(scan_extensions_raw, field="scan_extensions", strip_dot=True)
+
+    # 顶层 scan_params：扫描参数（线程/深度/大文件阈值/压缩包/缓存/性能日志）
+    scan_params = _parse_scan_params(data.get("scan_params"))
+
+    # 顶层 whitelist：误报白名单条目列表
+    whitelist = _parse_whitelist(data.get("whitelist"))
 
     rules_raw = data.get("rules", [])
     if not isinstance(rules_raw, Sequence) or isinstance(rules_raw, (str, bytes)):
@@ -247,7 +265,99 @@ def parse_ruleset(data: Any) -> RuleSet:
         version=version,
         rules=rules,
         ignore_paths=ignore_paths,
+        ignore_dirs=ignore_dirs,
+        scan_extensions=scan_extensions,
+        scan_params=scan_params,
+        whitelist=whitelist,
     )
+
+
+def _parse_scan_params(data: Any) -> ScanParams | None:
+    """解析顶层 ``scan_params`` 段为 :class:`ScanParams`。
+
+    :param data: ``scan_params`` 字段值（字典或 None）
+    :return: :class:`ScanParams` 实例；``data`` 为 None 时返回 None（未设置）
+    :raises RuleParseError: 字段类型不合法
+    """
+    if data is None:
+        return None
+    if not isinstance(data, Mapping):
+        raise RuleParseError(f"scan_params 必须是字典，得到 {type(data).__name__}")
+
+    def _as_int(name: str) -> int | None:
+        value = data.get(name)
+        if value is None:
+            return None
+        if isinstance(value, bool):  # bool 是 int 的子类，先排除
+            raise RuleParseError(f"scan_params.{name} 必须是整数，得到 bool")
+        if not isinstance(value, int):
+            raise RuleParseError(f"scan_params.{name} 必须是整数，得到 {type(value).__name__}")
+        return value
+
+    def _as_bool(name: str) -> bool | None:
+        value = data.get(name)
+        if value is None:
+            return None
+        if not isinstance(value, bool):
+            raise RuleParseError(f"scan_params.{name} 必须是布尔，得到 {type(value).__name__}")
+        return value
+
+    return ScanParams(
+        max_workers=_as_int("max_workers"),
+        max_depth=_as_int("max_depth"),
+        max_file_size=_as_int("max_file_size"),
+        scan_archives=_as_bool("scan_archives"),
+        cache_enabled=_as_bool("cache_enabled"),
+        perf_log_enabled=_as_bool("perf_log_enabled"),
+    )
+
+
+def _parse_whitelist(data: Any) -> tuple[WhitelistEntry, ...]:
+    """解析顶层 ``whitelist`` 段为 :class:`WhitelistEntry` 元组。
+
+    每项为字典，含 ``path_glob`` / ``rule_name`` / ``created_at`` / ``note``
+    / ``source`` 字段。``source`` 缺省为 ``"rules"``（来自规则文件预定义）。
+
+    :param data: ``whitelist`` 字段值（列表或 None）
+    :return: :class:`WhitelistEntry` 元组；空或 None 返回空元组
+    :raises RuleParseError: 数据结构不合法或条目缺少必填字段
+    """
+    if data is None:
+        return ()
+    if not isinstance(data, Sequence) or isinstance(data, (str, bytes)):
+        raise RuleParseError("whitelist 必须是列表")
+    entries: list[WhitelistEntry] = []
+    for idx, item in enumerate(data):
+        if not isinstance(item, Mapping):
+            raise RuleParseError(f"whitelist[{idx}] 必须是字典，得到 {type(item).__name__}")
+        path_glob = item.get("path_glob")
+        if not path_glob or not isinstance(path_glob, str):
+            raise RuleParseError(f"whitelist[{idx}] 缺少 path_glob 字段或类型不合法")
+        rule_name = item.get("rule_name", "*")
+        if not isinstance(rule_name, str):
+            raise RuleParseError(f"whitelist[{idx}].rule_name 必须是字符串")
+        created_at = item.get("created_at", "")
+        if not isinstance(created_at, str):
+            raise RuleParseError(f"whitelist[{idx}].created_at 必须是字符串")
+        note = item.get("note", "")
+        if not isinstance(note, str):
+            raise RuleParseError(f"whitelist[{idx}].note 必须是字符串")
+        source = item.get("source", "rules")
+        if not isinstance(source, str) or source not in ("rules", "runtime"):
+            raise RuleParseError(f"whitelist[{idx}].source 必须是 'rules' 或 'runtime'")
+        try:
+            entries.append(
+                WhitelistEntry(
+                    path_glob=path_glob,
+                    rule_name=rule_name,
+                    created_at=created_at,
+                    note=note,
+                    source=source,
+                )
+            )
+        except ValueError as exc:
+            raise RuleParseError(f"whitelist[{idx}] 无效: {exc}") from exc
+    return tuple(entries)
 
 
 def _as_str_tuple(value: Any, *, field: str, strip_dot: bool = False) -> tuple[str, ...]:

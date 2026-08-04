@@ -721,12 +721,16 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             if global_value is not None:
                 extra_fields[key] = global_value
         self._model.update_workspace(ws_id, task_overrides=new_overrides, **extra_fields)
-        # 同步到 ScanController：用 ConfigController 全局值回填
+        # 同步到 ScanController：全局值非 None 时回填，否则清除覆盖使其回退到规则集
         controller = self._ensure_scan_controller(ws_id)
         if controller is not None:
             global_value = self._config_controller.get_config_value(key)
             if global_value is not None:
                 controller.setTaskOverride(key, global_value)
+            else:
+                # 已迁移字段（scan_archives/max_workers 等）无全局回填值，
+                # 清除 ScanController 覆盖使其回退到规则集
+                controller.clearTaskOverride(key)
         self._persist()
 
     @Slot(str, result=bool)  # pyrefly: ignore [not-callable]

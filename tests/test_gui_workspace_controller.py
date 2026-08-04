@@ -1928,9 +1928,9 @@ class TestScanControllerTaskOverrides:
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
 
-        # 默认无覆盖，应等于全局值
-        assert sc._effective_scan_archives() == controller._config_controller.scanArchives  # type: ignore[attr-defined]
-        assert sc._effective_max_workers() == controller._config_controller.maxWorkers  # type: ignore[attr-defined]
+        # 默认无覆盖，应等于规则集值（builtin 默认 scan_archives=True, max_workers=5）
+        assert sc._effective_scan_archives() is True
+        assert sc._effective_max_workers() == 5
 
     def test_effective_uses_override_when_set(
         self,
@@ -2092,7 +2092,8 @@ class TestTaskOverridesGlobalValueBehavior:
         这样全局值后续变化时，任务级保持用户当时的选择。
         """
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        global_value = controller._config_controller.scanArchives  # type: ignore[attr-defined]
+        # scan_archives 已迁移到 RuleSet，builtin 默认值为 True
+        global_value = True
 
         controller.setTaskOverride(ws_id, "scan_archives", str(global_value).lower())
 
@@ -2146,10 +2147,10 @@ class TestClearTaskOverride:
         overrides = json.loads(controller.taskOverridesJson(ws_id))
         assert "scan_archives" not in overrides
 
-        # ScanController 应被回填为全局值
+        # ScanController 覆盖已清除，effective 值回退到规则集（builtin 默认 True）
         sc = controller._ensure_scan_controller(ws_id)  # type: ignore[attr-defined]
-        global_value = controller._config_controller.scanArchives  # type: ignore[attr-defined]
-        assert sc._task_overrides.get("scan_archives") == global_value  # type: ignore[attr-defined]
+        assert "scan_archives" not in sc._task_overrides  # type: ignore[attr-defined]
+        assert sc._effective_scan_archives() is True  # type: ignore[attr-defined]
 
     def test_clear_persisted_after_restart(
         self,

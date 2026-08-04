@@ -553,7 +553,26 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         ``canStartScan``/``rulesCount`` 绑定反映任务级规则集。
         """
         self._task_overrides[key] = value
-        if key in ("max_workers", "max_file_size", "max_depth"):
+        if key in ("max_workers", "max_file_size", "max_depth", "scan_archives", "ignore_dirs"):
+            self.effectiveConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
+        elif key in ("rules_paths", "use_builtin", "temp_rules_paths", "disabled_temp_rules_paths"):
+            self._ruleset = self._compute_effective_ruleset()
+            self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
+            self.rulesCountChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    def clearTaskOverride(self, key: str) -> None:
+        """清除任务级配置覆盖的指定字段（回退到规则集/全局值）。
+
+        :param key: Config 字段名（如 ``scan_archives``/``max_workers``）
+
+        已迁移字段（scan_archives/max_workers 等）清除后由 ``_effective_*``
+        方法回退到 :attr:`_ruleset` 读取；``rules_paths``/``use_builtin`` 等
+        保留字段清除后回退到 :attr:`_config`。
+        """
+        if key not in self._task_overrides:
+            return
+        self._task_overrides.pop(key, None)
+        if key in ("max_workers", "max_file_size", "max_depth", "scan_archives", "ignore_dirs"):
             self.effectiveConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
         elif key in ("rules_paths", "use_builtin", "temp_rules_paths", "disabled_temp_rules_paths"):
             self._ruleset = self._compute_effective_ruleset()
@@ -583,28 +602,37 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     def _effective_scan_archives(self) -> bool:
         """任务级覆盖优先的 scan_archives。"""
-        return effective_scan_archives(self._task_overrides, self._config)
+        return effective_scan_archives(self._task_overrides, self._ruleset)
 
     def _effective_max_workers(self) -> int:
         """任务级覆盖优先的 max_workers。"""
-        return effective_max_workers(self._task_overrides, self._config)
+        return effective_max_workers(self._task_overrides, self._ruleset)
 
     def _effective_max_file_size(self) -> int:
         """任务级覆盖优先的 max_file_size。"""
-        return effective_max_file_size(self._task_overrides, self._config)
+        return effective_max_file_size(self._task_overrides, self._ruleset)
 
     def _effective_max_depth(self) -> int | None:
         """任务级覆盖优先的 max_depth（None 表示不限深度）。
 
-        与 :meth:`fuscan.gui.controllers.config_controller.ConfigController.setMaxDepth`
-        保持语义一致：``0`` 归一化为 ``None``（无限深度），避免 walker 把 ``0``
-        误解为「仅根目录直接子项」。
+        ``0`` 归一化为 ``None``（无限深度），避免 walker 把 ``0`` 误解为
+        「仅根目录直接子项」。
         """
-        return effective_max_depth(self._task_overrides, self._config)
+        return effective_max_depth(self._task_overrides, self._ruleset)
 
     def _effective_ignore_dirs(self) -> tuple[str, ...]:
         """任务级覆盖优先的 ignore_dirs。"""
-        return effective_ignore_dirs(self._task_overrides, self._config)
+        return effective_ignore_dirs(self._task_overrides, self._ruleset)
+
+    def _effective_scan_extensions(self) -> tuple[str, ...] | None:
+        """effective ruleset 的 scan_extensions（None=全选默认）。
+
+        :return: ruleset.scan_extensions；ruleset 为 None 时返回 None
+            （由 ScanWorker/Scanner 回退到全部注册提取器扩展名）。
+        """
+        if self._ruleset is None:
+            return None
+        return self._ruleset.scan_extensions
 
     def _effective_rules_paths(self) -> tuple[str, ...]:
         """任务级覆盖优先的 rules_paths（不过滤不存在文件）。"""
@@ -1099,6 +1127,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             logger.warning("未加载规则集，无法开始扫描")
             return
 
+        # 同步性能日志开关（ruleset.scan_params.perf_log_enabled）
+        self._sync_perf_enabled()
+
         roots = self._build_scan_roots()
         if not roots:
             logger.warning("未选择有效扫描目标")
@@ -1147,7 +1178,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             scan_archives=self._effective_scan_archives(),
             max_depth=self._effective_max_depth(),
             ignore_dirs=self._effective_ignore_dirs(),
-            scan_extensions=self._config_controller.enabled_extensions(),
+            scan_extensions=self._effective_scan_extensions(),
             skip_paths=self._skip_store.paths(),
         )
         self._stats_worker.progress_info.connect(self._on_scan_progress)  # pyrefly: ignore [missing-attribute]
@@ -1193,6 +1224,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             logger.warning("未加载规则集，无法开始增量扫描")
             return
 
+        # 同步性能日志开关（ruleset.scan_params.perf_log_enabled）
+        self._sync_perf_enabled()
+
         roots = self._build_scan_roots()
         if not roots:
             logger.warning("未选择有效扫描目标")
@@ -1236,7 +1270,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             scan_archives=self._effective_scan_archives(),
             max_depth=self._effective_max_depth(),
             ignore_dirs=self._effective_ignore_dirs(),
-            scan_extensions=self._config_controller.enabled_extensions(),
+            scan_extensions=self._effective_scan_extensions(),
             skip_paths=self._skip_store.paths(),
             incremental_manifest=manifest,
         )
@@ -1407,7 +1441,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             ignore_dirs=self._effective_ignore_dirs(),
             cache=cache,
             source_files=source_files,
-            scan_extensions=self._config_controller.enabled_extensions(),
+            scan_extensions=self._effective_scan_extensions(),
             skip_paths=self._skip_store.paths(),
             precollected=results,
             # 传入上次报告供 Scanner 合并未变更文件命中结果
@@ -1538,8 +1572,16 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         )
 
     def _build_cache_context(self) -> tuple[CacheStore | None, dict[Path, str] | None]:
-        """构造扫描缓存上下文（使用 effective 规则路径与内置开关）。"""
-        if not self._config.cache_enabled:
+        """构造扫描缓存上下文（使用 effective 规则路径与内置开关）。
+
+        缓存开关读 :attr:`_ruleset.scan_params.cache_enabled`：仅当显式为
+        ``False`` 时禁用缓存；``None``（未设置）或 ``True`` 时启用（默认 True）。
+        ruleset 为 None 时禁用缓存。
+        """
+        if self._ruleset is None:
+            return None, None
+        sp = self._ruleset.scan_params
+        if sp is not None and sp.cache_enabled is False:
             return None, None
         if self._cache is None:
             from fuscan.cache import CacheStore, default_cache_path
@@ -1555,6 +1597,22 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             use_builtin=self._effective_use_builtin(),
         )
         return self._cache, source_files
+
+    def _sync_perf_enabled(self) -> None:
+        """同步性能日志开关到 :mod:`fuscan.perf`。
+
+        读 :attr:`_ruleset.scan_params.perf_log_enabled`：仅当显式为 ``True``
+        时启用性能日志；``None``（未设置）或 ``False`` 时关闭（默认关闭）。
+        ruleset 为 None 时关闭。
+        """
+        from fuscan.perf import set_perf_enabled
+
+        perf_enabled = (
+            self._ruleset is not None
+            and self._ruleset.scan_params is not None
+            and self._ruleset.scan_params.perf_log_enabled is True
+        )
+        set_perf_enabled(perf_enabled)
 
     # ----------------------------- 增量扫描清单持久化 -----------------------------
 

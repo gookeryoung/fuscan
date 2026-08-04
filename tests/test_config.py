@@ -5,8 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
-from fuscan.config import Config, load_config, save_config
+from fuscan.config import (
+    DEFAULT_DISABLED_EXTRACTORS,
+    Config,
+    load_config,
+    migrate_config_to_rules,
+    save_config,
+)
 from fuscan.processing.storage import detect_default_staging_dir
 
 
@@ -20,54 +27,10 @@ class TestConfig:
         assert config.scan_mode == "folder"
         assert config.last_drive is None
 
-    def test_default_ignore_dirs(self) -> None:
-        """默认 ignore_dirs 应包含常见开发/构建目录及系统/缓存目录（iter-76 扩充）。"""
-        config = Config()
-        # 版本控制 / Python / Node
-        assert ".git" in config.ignore_dirs
-        assert "node_modules" in config.ignore_dirs
-        assert "__pycache__" in config.ignore_dirs
-        # Rust / Cargo 缓存
-        assert ".cargo" in config.ignore_dirs
-        assert ".rustup" in config.ignore_dirs
-        assert "target" in config.ignore_dirs
-        # .NET / Visual Studio
-        assert ".vs" in config.ignore_dirs
-        assert "packages" in config.ignore_dirs
-        assert ".nuget" in config.ignore_dirs
-        # 其他语言生态
-        assert "vendor" in config.ignore_dirs
-        assert "Pods" in config.ignore_dirs
-        assert ".m2" in config.ignore_dirs
-        # Windows 系统目录（含大量二进制/系统文件，扫描无意义）
-        assert "Program Files" in config.ignore_dirs
-        assert "Program Files (x86)" in config.ignore_dirs
-        assert "Windows" in config.ignore_dirs
-        assert "WinSxS" in config.ignore_dirs
-        assert "$Recycle.Bin" in config.ignore_dirs
-        # 默认列表应足够全面（iter-76 由 21 项扩充至 50+ 项）
-        assert len(config.ignore_dirs) >= 50
-
-    def test_default_cache_fields(self) -> None:
-        """默认启用缓存，路径为 None 表示使用默认路径。"""
-        config = Config()
-        assert config.cache_enabled is True
-        assert config.cache_path is None
-
     def test_default_staging_dir(self) -> None:
         """默认 staging_dir 为 None，由调用方按需探测（iter-77）。"""
         config = Config()
         assert config.staging_dir is None
-
-    def test_fuscan_cache_in_ignore_dirs(self) -> None:
-        """``.fuscan-cache`` 应在默认忽略列表中，避免扫描被移动到暂存区的文件（iter-77）。"""
-        config = Config()
-        assert ".fuscan-cache" in config.ignore_dirs
-
-    def test_default_perf_log_enabled(self) -> None:
-        """默认不启用性能详细日志（iter-69）。"""
-        config = Config()
-        assert config.perf_log_enabled is False
 
     def test_default_disabled_rules_paths_empty(self) -> None:
         """iter-138：默认 disabled_rules_paths 为空列表。"""
@@ -87,14 +50,23 @@ class TestConfig:
         assert loaded.disabled_rules_paths == ["/rules/r1.yaml"]
         assert loaded.rules_paths == ["/rules/r1.yaml", "/rules/r2.yaml"]
 
-    def test_default_disabled_extractors(self) -> None:
-        """默认禁用 SourceCodeExtractor/SevenZArchiveExtractor。"""
+    def test_migrated_fields_not_in_config(self) -> None:
+        """迁移字段不应存在于 Config 数据类。"""
         config = Config()
-        from fuscan.config import DEFAULT_DISABLED_EXTRACTORS
+        # 这些字段已迁移到 RuleSet 顶层
+        assert not hasattr(config, "ignore_dirs")
+        assert not hasattr(config, "cache_enabled")
+        assert not hasattr(config, "perf_log_enabled")
+        assert not hasattr(config, "disabled_extractors")
+        assert not hasattr(config, "scan_archives")
+        assert not hasattr(config, "max_workers")
+        assert not hasattr(config, "max_depth")
+        assert not hasattr(config, "max_file_size")
 
-        assert config.disabled_extractors == list(DEFAULT_DISABLED_EXTRACTORS)
-        assert "SourceCodeExtractor" in config.disabled_extractors
-        assert "SevenZArchiveExtractor" in config.disabled_extractors
+    def test_default_disabled_extractors_constant_exists(self) -> None:
+        """DEFAULT_DISABLED_EXTRACTORS 常量仍保留（迁移逻辑引用）。"""
+        assert "SourceCodeExtractor" in DEFAULT_DISABLED_EXTRACTORS
+        assert "SevenZArchiveExtractor" in DEFAULT_DISABLED_EXTRACTORS
 
 
 class TestLoadConfig:
@@ -139,10 +111,13 @@ class TestLoadConfig:
         assert config.use_builtin is True
 
     def test_load_ignores_unknown_keys(self, tmp_path: Path) -> None:
-        """未知字段被忽略，不报错。"""
+        """未知字段被忽略，不报错（含已迁移字段）。"""
         config_file = tmp_path / "config.yaml"
         config_file.write_text(
-            "use_builtin: false\nunknown_field: hello\nanother: 123\n",
+            "use_builtin: false\n"
+            "unknown_field: hello\n"
+            "ignore_dirs: ['.git']\n"  # 已迁移字段视为未知键被忽略
+            "max_workers: 8\n",
             encoding="utf-8",
         )
         config = load_config(config_file)
@@ -170,17 +145,6 @@ class TestLoadConfig:
         assert config.scan_paths == []
         assert config.rules_paths == []
 
-    def test_load_cache_fields(self, tmp_path: Path) -> None:
-        """从 YAML 加载缓存字段。"""
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(
-            "cache_enabled: false\ncache_path: /tmp/custom_cache.db\n",
-            encoding="utf-8",
-        )
-        config = load_config(config_file)
-        assert config.cache_enabled is False
-        assert config.cache_path == "/tmp/custom_cache.db"
-
 
 class TestSaveConfig:
     def test_save_and_load_roundtrip(self, tmp_path: Path) -> None:
@@ -191,7 +155,6 @@ class TestSaveConfig:
             scan_paths=["/a", "/b", "/c"],
             rules_paths=["/rules/r1.yaml", "/rules/r2.yaml"],
             use_builtin=False,
-            ignore_dirs=["custom_dir", ".git"],
         )
         save_config(original, config_file)
         assert config_file.exists()
@@ -201,7 +164,6 @@ class TestSaveConfig:
         assert loaded.scan_paths == ["/a", "/b", "/c"]
         assert loaded.rules_paths == ["/rules/r1.yaml", "/rules/r2.yaml"]
         assert loaded.use_builtin is False
-        assert loaded.ignore_dirs == ["custom_dir", ".git"]
 
     def test_save_creates_parent_dir(self, tmp_path: Path) -> None:
         """保存时自动创建父目录。"""
@@ -225,18 +187,6 @@ class TestSaveConfig:
         loaded = load_config(config_file)
         assert loaded.scan_paths == ["/用户/文档/扫描目录"]
 
-    def test_save_and_load_cache_fields(self, tmp_path: Path) -> None:
-        """缓存字段保存后重新加载应一致。"""
-        config_file = tmp_path / "config.yaml"
-        original = Config(
-            cache_enabled=False,
-            cache_path="/tmp/test_cache.db",
-        )
-        save_config(original, config_file)
-        loaded = load_config(config_file)
-        assert loaded.cache_enabled is False
-        assert loaded.cache_path == "/tmp/test_cache.db"
-
     def test_save_and_load_staging_dir(self, tmp_path: Path) -> None:
         """暂存区目录持久化（iter-77）。"""
         config_file = tmp_path / "config.yaml"
@@ -244,22 +194,6 @@ class TestSaveConfig:
         save_config(original, config_file)
         loaded = load_config(config_file)
         assert loaded.staging_dir == "D:/custom-staging"
-
-    def test_save_and_load_perf_log_enabled(self, tmp_path: Path) -> None:
-        """性能日志开关持久化（iter-69）。"""
-        config_file = tmp_path / "config.yaml"
-        original = Config(perf_log_enabled=True)
-        save_config(original, config_file)
-        loaded = load_config(config_file)
-        assert loaded.perf_log_enabled is True
-
-    def test_save_and_load_disabled_extractors(self, tmp_path: Path) -> None:
-        """已禁用提取器列表持久化（iter-72）。"""
-        config_file = tmp_path / "config.yaml"
-        original = Config(disabled_extractors=["PdfExtractor", "DocxExtractor"])
-        save_config(original, config_file)
-        loaded = load_config(config_file)
-        assert loaded.disabled_extractors == ["PdfExtractor", "DocxExtractor"]
 
     def test_load_config_os_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """文件打开失败时返回默认配置。"""
@@ -290,6 +224,229 @@ class TestSaveConfig:
 
         monkeypatch.setattr(Path, "open", mock_open)
         save_config(Config(), config_file)  # 不应抛异常
+
+
+class TestMigrateConfigToRules:
+    """``migrate_config_to_rules`` 迁移函数测试。"""
+
+    def test_no_config_file_is_noop(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """config.yaml 不存在时 no-op。"""
+        monkeypatch.setattr("fuscan.config.CONFIG_PATH", tmp_path / "missing.yaml")
+        monkeypatch.setattr("fuscan.config.CONFIG_DIR", tmp_path)
+        # 不应抛异常
+        migrate_config_to_rules()
+
+    def test_no_migrated_fields_is_noop(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """config.yaml 中无迁移字段时 no-op。"""
+        config_dir = tmp_path / ".fuscan"
+        config_dir.mkdir()
+        config_path = config_dir / "config.yaml"
+        config_path.write_text("use_builtin: true\nscan_mode: folder\n", encoding="utf-8")
+        monkeypatch.setattr("fuscan.config.CONFIG_PATH", config_path)
+        monkeypatch.setattr("fuscan.config.CONFIG_DIR", config_dir)
+
+        migrate_config_to_rules()
+
+        # config.yaml 内容应未变
+        loaded = load_config(config_path)
+        assert loaded.use_builtin is True
+        assert loaded.scan_mode == "folder"
+        # user-scan.yaml 不应被创建
+        assert not (config_dir / "rules" / "user-scan.yaml").exists()
+
+    def test_migrates_scan_params_to_user_scan_yaml(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """迁移 scan_archives/max_workers 等字段到 user-scan.yaml。"""
+        config_dir = tmp_path / ".fuscan"
+        config_dir.mkdir()
+        config_path = config_dir / "config.yaml"
+        config_path.write_text(
+            "use_builtin: true\n"
+            "scan_archives: false\n"
+            "max_workers: 8\n"
+            "max_depth: 10\n"
+            "max_file_size: 104857600\n"
+            "cache_enabled: false\n"
+            "perf_log_enabled: true\n"
+            "ignore_dirs:\n  - .git\n  - node_modules\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("fuscan.config.CONFIG_PATH", config_path)
+        monkeypatch.setattr("fuscan.config.CONFIG_DIR", config_dir)
+
+        migrate_config_to_rules()
+
+        # config.yaml 中迁移字段应被清除
+        with config_path.open("r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+        assert "scan_archives" not in data
+        assert "max_workers" not in data
+        assert "max_depth" not in data
+        assert "max_file_size" not in data
+        assert "cache_enabled" not in data
+        assert "perf_log_enabled" not in data
+        assert "ignore_dirs" not in data
+        # 非迁移字段应保留
+        assert data["use_builtin"] is True
+
+        # user-scan.yaml 应被创建并含迁移字段
+        user_scan_path = config_dir / "rules" / "user-scan.yaml"
+        assert user_scan_path.exists()
+        with user_scan_path.open("r", encoding="utf-8") as fh:
+            user_data = yaml.safe_load(fh)
+        assert user_data["version"] == "1.0"
+        assert user_data["ignore_dirs"] == [".git", "node_modules"]
+        assert user_data["scan_params"]["scan_archives"] is False
+        assert user_data["scan_params"]["max_workers"] == 8
+        assert user_data["scan_params"]["max_depth"] == 10
+        assert user_data["scan_params"]["max_file_size"] == 104857600
+        assert user_data["scan_params"]["cache_enabled"] is False
+        assert user_data["scan_params"]["perf_log_enabled"] is True
+        assert user_data["whitelist"] == []
+
+        # user-scan.yaml 应被追加到 rules_paths
+        assert str(user_scan_path) in data["rules_paths"]
+
+    def test_disabled_extractors_migrated_to_scan_extensions(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """disabled_extractors 反推为 scan_extensions 白名单。"""
+        config_dir = tmp_path / ".fuscan"
+        config_dir.mkdir()
+        config_path = config_dir / "config.yaml"
+        config_path.write_text(
+            "use_builtin: true\ndisabled_extractors:\n  - PdfExtractor\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("fuscan.config.CONFIG_PATH", config_path)
+        monkeypatch.setattr("fuscan.config.CONFIG_DIR", config_dir)
+
+        migrate_config_to_rules()
+
+        user_scan_path = config_dir / "rules" / "user-scan.yaml"
+        with user_scan_path.open("r", encoding="utf-8") as fh:
+            user_data = yaml.safe_load(fh)
+        # scan_extensions 应为排除 PdfExtractor 后的扩展名集合
+        assert "scan_extensions" in user_data
+        exts = user_data["scan_extensions"]
+        assert isinstance(exts, list)
+        assert "pdf" not in exts  # PdfExtractor 被禁用，扩展名被排除
+        # 其他提取器扩展名应存在
+        assert "docx" in exts or "doc" in exts
+
+    def test_empty_disabled_extractors_means_none_scan_extensions(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """disabled_extractors 为空列表时 scan_extensions=None（全选默认）。"""
+        config_dir = tmp_path / ".fuscan"
+        config_dir.mkdir()
+        config_path = config_dir / "config.yaml"
+        config_path.write_text(
+            "use_builtin: true\ndisabled_extractors: []\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("fuscan.config.CONFIG_PATH", config_path)
+        monkeypatch.setattr("fuscan.config.CONFIG_DIR", config_dir)
+
+        migrate_config_to_rules()
+
+        user_scan_path = config_dir / "rules" / "user-scan.yaml"
+        with user_scan_path.open("r", encoding="utf-8") as fh:
+            user_data = yaml.safe_load(fh)
+        # 空 disabled_extractors → scan_extensions 不写入（None 全选默认）
+        assert "scan_extensions" not in user_data
+
+    def test_existing_user_scan_yaml_not_overwritten(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """user-scan.yaml 已存在时不覆盖（保留用户手工编辑版本）。"""
+        config_dir = tmp_path / ".fuscan"
+        rules_dir = config_dir / "rules"
+        rules_dir.mkdir(parents=True)
+        config_path = config_dir / "config.yaml"
+        config_path.write_text(
+            "use_builtin: true\nscan_archives: false\n",
+            encoding="utf-8",
+        )
+        user_scan_path = rules_dir / "user-scan.yaml"
+        # 用户手工编辑的 user-scan.yaml
+        user_scan_path.write_text(
+            "version: '1.0'\nignore_dirs: [custom_dir]\nwhitelist: []\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("fuscan.config.CONFIG_PATH", config_path)
+        monkeypatch.setattr("fuscan.config.CONFIG_DIR", config_dir)
+
+        migrate_config_to_rules()
+
+        # user-scan.yaml 内容应未被覆盖
+        with user_scan_path.open("r", encoding="utf-8") as fh:
+            user_data = yaml.safe_load(fh)
+        assert user_data["ignore_dirs"] == ["custom_dir"]
+        # 不应含迁移字段写入的 scan_params
+        assert "scan_params" not in user_data
+
+        # 但 config.yaml 仍应清除迁移字段
+        with config_path.open("r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+        assert "scan_archives" not in data
+        # user-scan.yaml 仍应被追加到 rules_paths
+        assert str(user_scan_path) in data["rules_paths"]
+
+    def test_idempotent(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """迁移幂等：二次调用无迁移字段时 no-op。"""
+        config_dir = tmp_path / ".fuscan"
+        config_dir.mkdir()
+        config_path = config_dir / "config.yaml"
+        config_path.write_text(
+            "use_builtin: true\nscan_archives: false\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("fuscan.config.CONFIG_PATH", config_path)
+        monkeypatch.setattr("fuscan.config.CONFIG_DIR", config_dir)
+
+        migrate_config_to_rules()
+        # 二次调用：迁移字段已清除，应 no-op
+        user_scan_path = config_dir / "rules" / "user-scan.yaml"
+        mtime_before = user_scan_path.stat().st_mtime_ns
+        migrate_config_to_rules()
+        mtime_after = user_scan_path.stat().st_mtime_ns
+        # user-scan.yaml 未被重写
+        assert mtime_before == mtime_after
+
+    def test_invalid_yaml_skipped(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """config.yaml 解析失败时跳过迁移（不抛异常）。"""
+        config_dir = tmp_path / ".fuscan"
+        config_dir.mkdir()
+        config_path = config_dir / "config.yaml"
+        config_path.write_text(":::not valid yaml:::\n  - broken", encoding="utf-8")
+        monkeypatch.setattr("fuscan.config.CONFIG_PATH", config_path)
+        monkeypatch.setattr("fuscan.config.CONFIG_DIR", config_dir)
+
+        # 不应抛异常
+        migrate_config_to_rules()
+        assert not (config_dir / "rules" / "user-scan.yaml").exists()
+
+    def test_non_dict_yaml_skipped(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """config.yaml 顶层非 dict 时跳过迁移。"""
+        config_dir = tmp_path / ".fuscan"
+        config_dir.mkdir()
+        config_path = config_dir / "config.yaml"
+        config_path.write_text("- just\n- a\n- list\n", encoding="utf-8")
+        monkeypatch.setattr("fuscan.config.CONFIG_PATH", config_path)
+        monkeypatch.setattr("fuscan.config.CONFIG_DIR", config_dir)
+
+        migrate_config_to_rules()
+        assert not (config_dir / "rules" / "user-scan.yaml").exists()
 
 
 class TestDetectDefaultStagingDir:

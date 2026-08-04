@@ -9,8 +9,10 @@ from fuscan.rules.model import (
     MatchTarget,
     Rule,
     RuleSet,
+    ScanParams,
     Severity,
 )
+from fuscan.rules.whitelist import WhitelistEntry
 
 
 def _make_rule(name: str, pattern: str = "x", severity: Severity = Severity.INFO) -> Rule:
@@ -215,3 +217,163 @@ class TestMergeMultipleRulesets:
         assert rule_a.match.pattern == "a3"  # pyrefly: ignore [missing-attribute]
         assert rule_b.match.pattern == "b2"  # pyrefly: ignore [missing-attribute]
         assert rule_c.match.pattern == "c2"  # pyrefly: ignore [missing-attribute]
+
+
+# ---------------------------------------------------------------------------
+# scan_params / scan_extensions / whitelist 合并
+# ---------------------------------------------------------------------------
+
+
+class TestMergeScanParams:
+    """``scan_params`` 字段级合并测试。"""
+
+    def test_both_none_returns_none(self) -> None:
+        """两者都 None 时返回 None。"""
+        base = RuleSet(version="1.0")
+        override = RuleSet(version="1.0")
+        merged = merge_rulesets(base, override)
+        assert merged.scan_params is None
+
+    def test_override_none_keeps_base(self) -> None:
+        """override 为 None 时保留 base 的 scan_params。"""
+        base = RuleSet(version="1.0", scan_params=ScanParams(max_workers=4))
+        override = RuleSet(version="1.0")
+        merged = merge_rulesets(base, override)
+        assert merged.scan_params is not None
+        assert merged.scan_params.max_workers == 4
+
+    def test_base_none_uses_override(self) -> None:
+        """base 为 None 时使用 override 的 scan_params。"""
+        base = RuleSet(version="1.0")
+        override = RuleSet(version="1.0", scan_params=ScanParams(max_workers=8))
+        merged = merge_rulesets(base, override)
+        assert merged.scan_params is not None
+        assert merged.scan_params.max_workers == 8
+
+    def test_field_level_override(self) -> None:
+        """override 非 None 字段覆盖 base，None 字段保留 base。"""
+        base = RuleSet(
+            version="1.0",
+            scan_params=ScanParams(max_workers=4, max_depth=10, scan_archives=True),
+        )
+        override = RuleSet(
+            version="1.0",
+            scan_params=ScanParams(max_workers=8, scan_archives=False),
+        )
+        merged = merge_rulesets(base, override)
+        assert merged.scan_params is not None
+        # override 非 None 字段覆盖
+        assert merged.scan_params.max_workers == 8
+        assert merged.scan_params.scan_archives is False
+        # override None 字段保留 base
+        assert merged.scan_params.max_depth == 10
+
+
+class TestMergeScanExtensions:
+    """``scan_extensions`` 合并测试。"""
+
+    def test_both_none_returns_none(self) -> None:
+        """两者都 None 时返回 None。"""
+        base = RuleSet(version="1.0")
+        override = RuleSet(version="1.0")
+        merged = merge_rulesets(base, override)
+        assert merged.scan_extensions is None
+
+    def test_override_none_keeps_base(self) -> None:
+        """override 为 None 时保留 base 的 scan_extensions。"""
+        base = RuleSet(version="1.0", scan_extensions=("py", "js"))
+        override = RuleSet(version="1.0")
+        merged = merge_rulesets(base, override)
+        assert merged.scan_extensions == ("py", "js")
+
+    def test_override_overrides_base(self) -> None:
+        """override 非 None 时覆盖 base（含空 tuple）。"""
+        base = RuleSet(version="1.0", scan_extensions=("py", "js"))
+        override = RuleSet(version="1.0", scan_extensions=("txt",))
+        merged = merge_rulesets(base, override)
+        assert merged.scan_extensions == ("txt",)
+
+    def test_override_empty_tuple_overrides(self) -> None:
+        """override 空 tuple 覆盖 base（空表都不扫描语义）。"""
+        base = RuleSet(version="1.0", scan_extensions=("py", "js"))
+        override = RuleSet(version="1.0", scan_extensions=())
+        merged = merge_rulesets(base, override)
+        assert merged.scan_extensions == ()
+
+
+class TestMergeWhitelist:
+    """``whitelist`` 并集合并测试。"""
+
+    def test_both_empty_returns_empty(self) -> None:
+        """两者都为空时返回空元组。"""
+        base = RuleSet(version="1.0")
+        override = RuleSet(version="1.0")
+        merged = merge_rulesets(base, override)
+        assert merged.whitelist == ()
+
+    def test_disjoint_entries_union(self) -> None:
+        """不同条目取并集。"""
+        base = RuleSet(
+            version="1.0",
+            whitelist=(WhitelistEntry(path_glob="/a", rule_name="r1", created_at="", note="", source="rules"),),
+        )
+        override = RuleSet(
+            version="1.0",
+            whitelist=(WhitelistEntry(path_glob="/b", rule_name="r2", created_at="", note="", source="rules"),),
+        )
+        merged = merge_rulesets(base, override)
+        assert len(merged.whitelist) == 2
+        keys = {(e.path_glob, e.rule_name) for e in merged.whitelist}
+        assert keys == {("/a", "r1"), ("/b", "r2")}
+
+    def test_same_key_override_wins(self) -> None:
+        """相同 (path_glob, rule_name) 时 override 覆盖 base。"""
+        base = RuleSet(
+            version="1.0",
+            whitelist=(WhitelistEntry(path_glob="/a", rule_name="r1", created_at="old", note="base", source="rules"),),
+        )
+        override = RuleSet(
+            version="1.0",
+            whitelist=(
+                WhitelistEntry(path_glob="/a", rule_name="r1", created_at="new", note="override", source="runtime"),
+            ),
+        )
+        merged = merge_rulesets(base, override)
+        assert len(merged.whitelist) == 1
+        entry = merged.whitelist[0]
+        assert entry.created_at == "new"
+        assert entry.note == "override"
+        assert entry.source == "runtime"
+
+    def test_base_only_kept(self) -> None:
+        """override 为空时保留 base 全部条目。"""
+        base = RuleSet(
+            version="1.0",
+            whitelist=(
+                WhitelistEntry(path_glob="/a", rule_name="r1", created_at="", note="", source="rules"),
+                WhitelistEntry(path_glob="/b", rule_name="r2", created_at="", note="", source="rules"),
+            ),
+        )
+        override = RuleSet(version="1.0")
+        merged = merge_rulesets(base, override)
+        assert len(merged.whitelist) == 2
+
+
+class TestMergeIgnoreDirs:
+    """``ignore_dirs`` 并集合并测试。"""
+
+    def test_both_empty_returns_empty(self) -> None:
+        base = RuleSet(version="1.0")
+        override = RuleSet(version="1.0")
+        merged = merge_rulesets(base, override)
+        assert merged.ignore_dirs == ()
+
+    def test_union_dedup(self) -> None:
+        """ignore_dirs 取并集去重保序。"""
+        base = RuleSet(version="1.0", ignore_dirs=(".git", "node_modules"))
+        override = RuleSet(version="1.0", ignore_dirs=("node_modules", ".cache"))
+        merged = merge_rulesets(base, override)
+        assert ".git" in merged.ignore_dirs
+        assert "node_modules" in merged.ignore_dirs
+        assert ".cache" in merged.ignore_dirs
+        assert len(merged.ignore_dirs) == 3

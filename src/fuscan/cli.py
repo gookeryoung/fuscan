@@ -244,13 +244,16 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         set_perf_enabled(True)
 
     config = load_config()
-    ignore_dirs = _merge_ignore_dirs(config.ignore_dirs, args.ignore_dir)
+    # 扫描参数已迁移到 RuleSet 顶层（scan_params/ignore_dirs）
+    sp = ruleset.scan_params
+    ignore_dirs = _merge_ignore_dirs(ruleset.ignore_dirs, args.ignore_dir)
 
-    use_cache = config.cache_enabled and not args.no_cache
+    cache_enabled = sp.cache_enabled if sp is not None and sp.cache_enabled is not None else True
+    use_cache = cache_enabled and not args.no_cache
     cache_path = _resolve_cache_path(args.cache_path, config.cache_path)
 
-    # 大文件跳过阈值：CLI 参数优先（MB 转 byte），其次走配置，None 让 Scanner 用默认值
-    max_file_size = _resolve_max_file_size(args.max_file_size, config.max_file_size)
+    # 大文件跳过阈值：CLI 参数优先（MB 转 byte），其次走规则集，None 让 Scanner 用默认值
+    max_file_size = _resolve_max_file_size(args.max_file_size, sp.max_file_size if sp is not None else None)
 
     if use_cache and cache_path is not None:
         # 仅在启用缓存时加载 SQLite 依赖
@@ -339,10 +342,13 @@ def _cmd_benchmark(args: argparse.Namespace) -> int:
             return 1
 
     config = load_config()
-    ignore_dirs = _merge_ignore_dirs(config.ignore_dirs, args.ignore_dir)
-    use_cache = config.cache_enabled and not args.no_cache
+    # 扫描参数已迁移到 RuleSet 顶层（scan_params/ignore_dirs）
+    sp = ruleset.scan_params
+    ignore_dirs = _merge_ignore_dirs(ruleset.ignore_dirs, args.ignore_dir)
+    cache_enabled = sp.cache_enabled if sp is not None and sp.cache_enabled is not None else True
+    use_cache = cache_enabled and not args.no_cache
     cache_path = _resolve_cache_path(args.cache_path, config.cache_path)
-    max_file_size = _resolve_max_file_size(args.max_file_size, config.max_file_size)
+    max_file_size = _resolve_max_file_size(args.max_file_size, sp.max_file_size if sp is not None else None)
 
     def on_round(idx: int, total: int, label: str) -> None:
         logger.info("基准 %s 第 %d/%d 轮", label, idx, total)
@@ -494,7 +500,7 @@ def _cmd_gui(_args: argparse.Namespace) -> int:
     return gui_main()
 
 
-def _merge_ignore_dirs(base_dirs: list[str], extra_dirs: list[str]) -> tuple[str, ...]:
+def _merge_ignore_dirs(base_dirs: Sequence[str], extra_dirs: Sequence[str]) -> tuple[str, ...]:
     """合并全局忽略目录与命令行额外忽略目录（去重保序）。"""
     return tuple(dict.fromkeys((*base_dirs, *extra_dirs)))
 
@@ -511,21 +517,21 @@ def _resolve_cache_path(arg_path: Path | None, config_path: str | None) -> Path 
     return default_cache_path()
 
 
-def _resolve_max_file_size(arg_mb: int | None, config_bytes: int) -> int | None:
-    """解析大文件跳过阈值：CLI 参数（MB）优先 > 配置（字节）> None（走 Scanner 默认）。
+def _resolve_max_file_size(arg_mb: int | None, ruleset_bytes: int | None) -> int | None:
+    """解析大文件跳过阈值：CLI 参数（MB）优先 > 规则集（字节）> None（走 Scanner 默认）。
 
     :param arg_mb: ``--max-file-size`` 参数值（MB 单位），None 表示未指定
-    :param config_bytes: ``Config.max_file_size`` 字节值
+    :param ruleset_bytes: ``RuleSet.scan_params.max_file_size`` 字节值；None 表示未设置
     :return: 字节值；None 表示让 Scanner 走 ``_DEFAULT_MAX_FILE_SIZE``
     """
     if arg_mb is not None:
         return arg_mb * 1024 * 1024
-    if config_bytes > 0:
-        return config_bytes
-    # config 显式设为 0 表示不限制，传给 Scanner 让其判断 0 不限制
-    if config_bytes == 0:
-        return 0
-    return None
+    if ruleset_bytes is None:
+        return None
+    if ruleset_bytes > 0:
+        return ruleset_bytes
+    # 显式设为 0 表示不限制，传给 Scanner 让其判断 0 不限制
+    return 0
 
 
 def _cmd_cache(args: argparse.Namespace) -> int:

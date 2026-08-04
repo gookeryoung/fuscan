@@ -75,6 +75,7 @@ try:
         MatchTarget,
         Rule,
         RuleSet,
+        ScanParams,
         Severity,
     )
     from fuscan.scanner import ScanReport, ScanStats
@@ -95,6 +96,24 @@ if not PYSIDE_AVAILABLE:
 def _make_config() -> Config:
     """构造默认配置实例。"""
     return Config()
+
+
+def _make_ruleset_with_scan_params(
+    *,
+    scan_archives: bool | None = None,
+    max_workers: int | None = None,
+    max_depth: int | None = None,
+    max_file_size: int | None = None,
+    ignore_dirs: tuple[str, ...] = (),
+) -> RuleSet:
+    """构造带 scan_params 的 RuleSet（用于 effective_* 函数回退测试）。"""
+    sp = ScanParams(
+        max_workers=max_workers,
+        max_depth=max_depth,
+        max_file_size=max_file_size,
+        scan_archives=scan_archives,
+    )
+    return RuleSet(version="1.0", scan_params=sp, ignore_dirs=ignore_dirs)
 
 
 def _make_ruleset_with_replace() -> RuleSet:
@@ -192,61 +211,69 @@ class TestTaskOverrides:
     def test_effective_scan_archives_uses_override(self) -> None:
         """覆盖值类型正确时优先使用覆盖值。"""
         overrides: dict[str, object] = {"scan_archives": False}
-        assert effective_scan_archives(overrides, _make_config()) is False
+        assert effective_scan_archives(overrides, None) is False
 
-    def test_effective_scan_archives_falls_back_to_config(self) -> None:
-        """无覆盖或类型不符时回退到全局配置。"""
-        config = _make_config()
-        config.scan_archives = True
-        assert effective_scan_archives({}, config) is True
+    def test_effective_scan_archives_falls_back_to_ruleset(self) -> None:
+        """无覆盖或类型不符时回退到规则集 scan_params。"""
+        ruleset = _make_ruleset_with_scan_params(scan_archives=True)
+        assert effective_scan_archives({}, ruleset) is True
         # 类型不符（int 而非 bool）也应回退
-        assert effective_scan_archives({"scan_archives": 1}, config) is True
+        assert effective_scan_archives({"scan_archives": 1}, ruleset) is True
+
+    def test_effective_scan_archives_defaults_true(self) -> None:
+        """ruleset 为 None 时回退到内置默认 True。"""
+        assert effective_scan_archives({}, None) is True
 
     def test_effective_max_workers_uses_override(self) -> None:
         """max_workers 覆盖值优先。"""
         overrides: dict[str, object] = {"max_workers": 16}
-        assert effective_max_workers(overrides, _make_config()) == 16
+        assert effective_max_workers(overrides, None) == 16
 
     def test_effective_max_workers_falls_back(self) -> None:
-        """max_workers 无覆盖回退到全局配置。"""
-        config = _make_config()
-        config.max_workers = 5
-        assert effective_max_workers({}, config) == 5
+        """max_workers 无覆盖回退到规则集 scan_params。"""
+        ruleset = _make_ruleset_with_scan_params(max_workers=5)
+        assert effective_max_workers({}, ruleset) == 5
+
+    def test_effective_max_workers_defaults_5(self) -> None:
+        """ruleset 为 None 时回退到内置默认 5。"""
+        assert effective_max_workers({}, None) == 5
 
     def test_effective_max_file_size_uses_override(self) -> None:
         """max_file_size 覆盖值优先。"""
         overrides: dict[str, object] = {"max_file_size": 1024}
-        assert effective_max_file_size(overrides, _make_config()) == 1024
+        assert effective_max_file_size(overrides, None) == 1024
 
     def test_effective_max_depth_positive_override(self) -> None:
         """正数 max_depth 覆盖值原样返回。"""
         overrides: dict[str, object] = {"max_depth": 10}
-        assert effective_max_depth(overrides, _make_config()) == 10
+        assert effective_max_depth(overrides, None) == 10
 
     def test_effective_max_depth_zero_normalized_to_none(self) -> None:
         """max_depth=0 归一化为 None（无限深度）。"""
         overrides: dict[str, object] = {"max_depth": 0}
-        assert effective_max_depth(overrides, _make_config()) is None
+        assert effective_max_depth(overrides, None) is None
 
     def test_effective_max_depth_falls_back(self) -> None:
-        """max_depth 无覆盖回退到全局配置。"""
-        config = _make_config()
-        config.max_depth = 20
-        assert effective_max_depth({}, config) == 20
+        """max_depth 无覆盖回退到规则集 scan_params。"""
+        ruleset = _make_ruleset_with_scan_params(max_depth=20)
+        assert effective_max_depth({}, ruleset) == 20
 
     def test_effective_ignore_dirs_tuple_override(self) -> None:
         """ignore_dirs tuple 覆盖值优先。"""
         custom = (".git", "node_modules")
         overrides: dict[str, object] = {"ignore_dirs": custom}
-        assert effective_ignore_dirs(overrides, _make_config()) == custom
+        assert effective_ignore_dirs(overrides, None) == custom
 
     def test_effective_ignore_dirs_falls_back(self) -> None:
-        """ignore_dirs 无覆盖回退到全局配置（list 转 tuple）。"""
-        config = _make_config()
-        config.ignore_dirs = [".git", "node_modules"]
-        result = effective_ignore_dirs({}, config)
+        """ignore_dirs 无覆盖回退到规则集 ignore_dirs。"""
+        ruleset = _make_ruleset_with_scan_params(ignore_dirs=(".git", "node_modules"))
+        result = effective_ignore_dirs({}, ruleset)
         assert result == (".git", "node_modules")
         assert isinstance(result, tuple)
+
+    def test_effective_ignore_dirs_defaults_empty(self) -> None:
+        """ruleset 为 None 时返回空 tuple。"""
+        assert effective_ignore_dirs({}, None) == ()
 
     def test_effective_rules_paths_tuple_override(self) -> None:
         """rules_paths tuple 覆盖值优先（不过滤不存在文件）。"""

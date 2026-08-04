@@ -282,18 +282,27 @@ class TestParseRuleset:
         assert rs.version == "1.0"
         assert rs.rules == ()
 
-    def test_parse_ruleset_with_deprecated_ignores(self) -> None:
-        """ignore_dirs/ignore_extensions 已弃用，解析时静默忽略不存入 RuleSet。"""
+    def test_parse_ruleset_with_ignore_dirs_top_level(self) -> None:
+        """ignore_dirs 为顶层字段，解析为 tuple 存入 RuleSet。"""
         rs = parse_ruleset(
             {
                 "version": "1.0",
                 "ignore_dirs": [".git", "node_modules"],
-                "ignore_extensions": ["pyc", ".pyo"],
                 "rules": [],
             }
         )
         assert rs.ignore_paths == ()
-        assert not hasattr(rs, "ignore_dirs")
+        assert rs.ignore_dirs == (".git", "node_modules")
+
+    def test_parse_ruleset_with_deprecated_ignore_extensions(self) -> None:
+        """ignore_extensions 已弃用，解析时静默忽略不存入 RuleSet。"""
+        rs = parse_ruleset(
+            {
+                "version": "1.0",
+                "ignore_extensions": ["pyc", ".pyo"],
+                "rules": [],
+            }
+        )
         assert not hasattr(rs, "ignore_extensions")
 
     def test_parse_ruleset_with_ignore_paths(self) -> None:
@@ -566,3 +575,241 @@ class TestIter162AstDedup:
         unique_ids = {id(r.match) for r in rs.rules}
         # 100 规则，10 种模式，去重后应恰好 10 个唯一对象（1/10 比例）
         assert len(unique_ids) <= 15, f"去重后唯一对象数 {len(unique_ids)} 超过阈值 15（应 ≈10）"
+
+
+# ---------------------------------------------------------------------------
+# scan_params / whitelist 顶层字段解析
+# ---------------------------------------------------------------------------
+
+
+class TestParseScanParams:
+    """顶层 ``scan_params`` 段解析测试。"""
+
+    def test_scan_params_none_returns_none(self) -> None:
+        """scan_params 字段缺失时返回 None。"""
+        rs = parse_ruleset({"version": "1.0", "rules": []})
+        assert rs.scan_params is None
+
+    def test_scan_params_full_fields(self) -> None:
+        """完整字段的 scan_params 正确解析。"""
+        rs = parse_ruleset(
+            {
+                "version": "1.0",
+                "scan_params": {
+                    "max_workers": 8,
+                    "max_depth": 10,
+                    "max_file_size": 104857600,
+                    "scan_archives": False,
+                    "cache_enabled": True,
+                    "perf_log_enabled": False,
+                },
+                "rules": [],
+            }
+        )
+        assert rs.scan_params is not None
+        assert rs.scan_params.max_workers == 8
+        assert rs.scan_params.max_depth == 10
+        assert rs.scan_params.max_file_size == 104857600
+        assert rs.scan_params.scan_archives is False
+        assert rs.scan_params.cache_enabled is True
+        assert rs.scan_params.perf_log_enabled is False
+
+    def test_scan_params_partial_fields(self) -> None:
+        """部分字段的 scan_params 仅解析提供的字段，其余为 None。"""
+        rs = parse_ruleset(
+            {
+                "version": "1.0",
+                "scan_params": {"max_workers": 4, "scan_archives": True},
+                "rules": [],
+            }
+        )
+        assert rs.scan_params is not None
+        assert rs.scan_params.max_workers == 4
+        assert rs.scan_params.scan_archives is True
+        assert rs.scan_params.max_depth is None
+        assert rs.scan_params.max_file_size is None
+        assert rs.scan_params.cache_enabled is None
+        assert rs.scan_params.perf_log_enabled is None
+
+    def test_scan_params_not_dict_raises(self) -> None:
+        """scan_params 不是字典时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match="scan_params 必须是字典"):
+            parse_ruleset({"version": "1.0", "scan_params": "invalid", "rules": []})
+
+    def test_scan_params_int_field_bool_raises(self) -> None:
+        """int 字段传 bool 时抛 RuleParseError（bool 是 int 子类需排除）。"""
+        with pytest.raises(RuleParseError, match="max_workers 必须是整数，得到 bool"):
+            parse_ruleset({"version": "1.0", "scan_params": {"max_workers": True}, "rules": []})
+
+    def test_scan_params_int_field_wrong_type_raises(self) -> None:
+        """int 字段传字符串时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match="max_depth 必须是整数"):
+            parse_ruleset({"version": "1.0", "scan_params": {"max_depth": "10"}, "rules": []})
+
+    def test_scan_params_bool_field_wrong_type_raises(self) -> None:
+        """bool 字段传字符串时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match="scan_archives 必须是布尔"):
+            parse_ruleset({"version": "1.0", "scan_params": {"scan_archives": "yes"}, "rules": []})
+
+    def test_scan_params_cache_enabled_wrong_type_raises(self) -> None:
+        """cache_enabled 传非 bool 时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match="cache_enabled 必须是布尔"):
+            parse_ruleset({"version": "1.0", "scan_params": {"cache_enabled": 1}, "rules": []})
+
+
+class TestParseWhitelist:
+    """顶层 ``whitelist`` 段解析测试。"""
+
+    def test_whitelist_none_returns_empty(self) -> None:
+        """whitelist 字段缺失时返回空元组。"""
+        rs = parse_ruleset({"version": "1.0", "rules": []})
+        assert rs.whitelist == ()
+
+    def test_whitelist_empty_list_returns_empty(self) -> None:
+        """whitelist 为空列表时返回空元组。"""
+        rs = parse_ruleset({"version": "1.0", "whitelist": [], "rules": []})
+        assert rs.whitelist == ()
+
+    def test_whitelist_full_entry(self) -> None:
+        """完整白名单条目正确解析。"""
+        rs = parse_ruleset(
+            {
+                "version": "1.0",
+                "whitelist": [
+                    {
+                        "path_glob": "/a/*.txt",
+                        "rule_name": "r1",
+                        "created_at": "2026-01-01",
+                        "note": "备注",
+                        "source": "runtime",
+                    },
+                ],
+                "rules": [],
+            }
+        )
+        assert len(rs.whitelist) == 1
+        entry = rs.whitelist[0]
+        assert entry.path_glob == "/a/*.txt"
+        assert entry.rule_name == "r1"
+        assert entry.created_at == "2026-01-01"
+        assert entry.note == "备注"
+        assert entry.source == "runtime"
+
+    def test_whitelist_default_rule_name_wildcard(self) -> None:
+        """rule_name 缺省为 *。"""
+        rs = parse_ruleset({"version": "1.0", "whitelist": [{"path_glob": "/a"}], "rules": []})
+        assert rs.whitelist[0].rule_name == "*"
+
+    def test_whitelist_default_source_rules(self) -> None:
+        """source 缺省为 rules。"""
+        rs = parse_ruleset({"version": "1.0", "whitelist": [{"path_glob": "/a"}], "rules": []})
+        assert rs.whitelist[0].source == "rules"
+
+    def test_whitelist_not_list_raises(self) -> None:
+        """whitelist 不是列表时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match="whitelist 必须是列表"):
+            parse_ruleset({"version": "1.0", "whitelist": "invalid", "rules": []})
+
+    def test_whitelist_item_not_dict_raises(self) -> None:
+        """whitelist 条目不是字典时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match=r"whitelist\[0\] 必须是字典"):
+            parse_ruleset({"version": "1.0", "whitelist": ["not-a-dict"], "rules": []})
+
+    def test_whitelist_missing_path_glob_raises(self) -> None:
+        """whitelist 条目缺少 path_glob 时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match=r"whitelist\[0\] 缺少 path_glob"):
+            parse_ruleset({"version": "1.0", "whitelist": [{"rule_name": "r1"}], "rules": []})
+
+    def test_whitelist_path_glob_not_str_raises(self) -> None:
+        """path_glob 不是字符串时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match=r"whitelist\[0\] 缺少 path_glob"):
+            parse_ruleset({"version": "1.0", "whitelist": [{"path_glob": 123}], "rules": []})
+
+    def test_whitelist_rule_name_not_str_raises(self) -> None:
+        """rule_name 不是字符串时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match="rule_name 必须是字符串"):
+            parse_ruleset(
+                {
+                    "version": "1.0",
+                    "whitelist": [{"path_glob": "/a", "rule_name": 123}],
+                    "rules": [],
+                }
+            )
+
+    def test_whitelist_created_at_not_str_raises(self) -> None:
+        """created_at 不是字符串时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match="created_at 必须是字符串"):
+            parse_ruleset(
+                {
+                    "version": "1.0",
+                    "whitelist": [{"path_glob": "/a", "created_at": 123}],
+                    "rules": [],
+                }
+            )
+
+    def test_whitelist_note_not_str_raises(self) -> None:
+        """note 不是字符串时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match="note 必须是字符串"):
+            parse_ruleset(
+                {
+                    "version": "1.0",
+                    "whitelist": [{"path_glob": "/a", "note": 123}],
+                    "rules": [],
+                }
+            )
+
+    def test_whitelist_invalid_source_raises(self) -> None:
+        """source 不是 rules/runtime 时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match="source 必须是 'rules' 或 'runtime'"):
+            parse_ruleset(
+                {
+                    "version": "1.0",
+                    "whitelist": [{"path_glob": "/a", "source": "invalid"}],
+                    "rules": [],
+                }
+            )
+
+
+class TestScanExtensionsParsing:
+    """顶层 ``scan_extensions`` 字段解析测试。"""
+
+    def test_scan_extensions_none_default(self) -> None:
+        """scan_extensions 缺失时为 None（全选默认）。"""
+        rs = parse_ruleset({"version": "1.0", "rules": []})
+        assert rs.scan_extensions is None
+
+    def test_scan_extensions_list(self) -> None:
+        """scan_extensions 列表解析为 tuple，去除前导点。"""
+        rs = parse_ruleset(
+            {
+                "version": "1.0",
+                "scan_extensions": [".py", ".js", "txt"],
+                "rules": [],
+            }
+        )
+        assert rs.scan_extensions == ("py", "js", "txt")
+
+    def test_scan_extensions_empty_list(self) -> None:
+        """scan_extensions 空列表解析为空 tuple。"""
+        rs = parse_ruleset({"version": "1.0", "scan_extensions": [], "rules": []})
+        assert rs.scan_extensions == ()
+
+    def test_scan_extensions_wrong_type_raises(self) -> None:
+        """scan_extensions 不是列表时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match="scan_extensions 必须是列表"):
+            parse_ruleset({"version": "1.0", "scan_extensions": "py,js", "rules": []})
+
+    def test_scan_extensions_element_not_str_raises(self) -> None:
+        """scan_extensions 元素不是字符串时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match="scan_extensions 中的元素必须是字符串"):
+            parse_ruleset({"version": "1.0", "scan_extensions": [123], "rules": []})
+
+    def test_ignore_dirs_wrong_type_raises(self) -> None:
+        """ignore_dirs 不是列表时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match="ignore_dirs 必须是列表"):
+            parse_ruleset({"version": "1.0", "ignore_dirs": ".git", "rules": []})
+
+    def test_ignore_dirs_element_not_str_raises(self) -> None:
+        """ignore_dirs 元素不是字符串时抛 RuleParseError。"""
+        with pytest.raises(RuleParseError, match="ignore_dirs 中的元素必须是字符串"):
+            parse_ruleset({"version": "1.0", "ignore_dirs": [123], "rules": []})

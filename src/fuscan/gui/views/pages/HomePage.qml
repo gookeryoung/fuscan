@@ -966,22 +966,25 @@ Item {
                                     font.bold: true
                                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                 }
-                                TextArea {
+                                Rectangle {
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: 100
-                                    readOnly: true
-                                    wrapMode: TextArea.Wrap
-                                    text: previewRulesDialog.previewData.ignoreDirs
-                                          ? previewRulesDialog.previewData.ignoreDirs.join(", ")
-                                          : ""
-                                    font.pixelSize: 11
-                                    font.family: "Consolas, Monaco, monospace"
-                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                    background: Rectangle {
-                                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
-                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                                        border.width: 1
-                                        radius: theme.radiusSm
+                                    // 高度跟随文本内容自适应：避免固定高度截断长列表
+                                    implicitHeight: ignoreDirsText.implicitHeight + 12
+                                    color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                    border.width: 1
+                                    radius: theme.radiusSm
+                                    Text {
+                                        id: ignoreDirsText
+                                        anchors.fill: parent
+                                        anchors.margins: 6
+                                        wrapMode: Text.Wrap
+                                        text: previewRulesDialog.previewData.ignoreDirs
+                                              ? previewRulesDialog.previewData.ignoreDirs.join(", ")
+                                              : ""
+                                        font.pixelSize: 11
+                                        font.family: "Consolas, Monaco, monospace"
+                                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                     }
                                 }
                             }
@@ -1108,7 +1111,8 @@ Item {
                                     model: previewRulesDialog.previewData.ruleFiles || []
                                     delegate: Rectangle {
                                         Layout.fillWidth: true
-                                        height: 32
+                                        // 紧凑高度：与匹配规则项保持一致
+                                        height: 28
                                         color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
                                         border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                                         border.width: 1
@@ -1197,7 +1201,8 @@ Item {
                                     model: previewRulesDialog.previewData.rules || []
                                     delegate: Rectangle {
                                         Layout.fillWidth: true
-                                        height: prRuleCol.implicitHeight + 12
+                                        // 紧凑高度：implicitHeight + 6px 上下边距，避免项间留白浪费
+                                        height: prRuleCol.implicitHeight + 6
                                         color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
                                         border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                                         border.width: 1
@@ -1207,8 +1212,8 @@ Item {
                                             anchors.fill: parent
                                             anchors.leftMargin: 8
                                             anchors.rightMargin: 8
-                                            anchors.topMargin: 6
-                                            anchors.bottomMargin: 6
+                                            anchors.topMargin: 3
+                                            anchors.bottomMargin: 3
                                             spacing: 2
                                             RowLayout {
                                                 Layout.fillWidth: true

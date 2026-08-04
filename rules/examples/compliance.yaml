@@ -1,6 +1,11 @@
 # 合规审计规则集
 # 场景：检测违反合规策略的文件（如明文存储敏感字段、未脱敏日志等）
 # 适用：GDPR、等保、PCI-DSS 等合规要求的自检
+#
+# 注：配置文件明文密码已由内置 builtin.yaml P0102 覆盖，日志未脱敏身份证已由
+# templates.privacy_data 覆盖。
+# 本文件聚焦：日志未脱敏卡号（内置未覆盖）+ AND+NOT+FILENAME 组合的教学演示
+# （生产配置明文密码 / 疑似凭证文件 / 数据库导出文件 / 编辑器临时文件）。
 version: "1.0"
 
 # 路径级 glob 过滤：排除测试、示例与文档目录（合规扫描聚焦生产数据）。
@@ -45,22 +50,13 @@ scan_params:
 # 误报白名单：文档示例中的明显假阳性。
 whitelist:
   - path_glob: "*/docs/examples/*.env"
-    rule_name: "配置文件明文密码"
+    rule_name: "生产配置明文密码"
     note: "文档示例 .env 文件中的占位密码"
     source: "rules"
 
 rules:
-  # 配置文件中明文存储密码字段
-  - name: 配置文件明文密码
-    description: 检测 .conf/.ini/.env/.yaml 中的明文密码字段
-    severity: critical
-    match:
-      type: content
-      mode: regex
-      pattern: '(password|passwd|pwd|secret|api_key|token)\s*[=:]\s*\S+'
-      case_sensitive: false
-
   # 日志中未脱敏的卡号
+  # 注：内置 templates.privacy_data 未覆盖银行卡号，本规则填补该空白。
   - name: 日志未脱敏卡号
     description: 检测日志中出现未脱敏的银行卡号（连续 13+ 位数字）
     severity: critical
@@ -70,17 +66,9 @@ rules:
       pattern: '(?<!\d)\d{13,19}(?!\d)'
       case_sensitive: false
 
-  # 日志中未脱敏的身份证号
-  - name: 日志未脱敏身份证
-    description: 检测日志中的身份证号
-    severity: critical
-    match:
-      type: content
-      mode: regex
-      pattern: '[1-9]\d{5}(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]'
-      case_sensitive: false
-
   # 排除测试/示例目录的明文密码
+  # 教学演示：AND + FILENAME + NOT path 组合——FILENAME 限定配置文件后缀，
+  # CONTENT 匹配密码赋值，NOT path 排除测试/示例/样例/演示目录。
   - name: 生产配置明文密码
     description: 检测非测试目录中的配置文件明文密码
     severity: critical
@@ -102,6 +90,7 @@ rules:
             case_sensitive: false
 
   # 敏感文件名（疑似凭证文件）
+  # 教学演示：FILENAME 目标 + regex 模式——仅凭文件名判定，不读取文件内容。
   - name: 疑似凭证文件
     description: 检测文件名疑似包含凭证信息
     severity: warning
@@ -112,6 +101,7 @@ rules:
       case_sensitive: false
 
   # 数据库导出文件
+  # 教学演示：FILENAME 目标——检测可能包含敏感数据的数据库导出文件。
   - name: 数据库导出文件
     description: 检测可能包含敏感数据的数据库导出文件
     severity: info
@@ -122,6 +112,7 @@ rules:
       case_sensitive: false
 
   # 临时文件/交换文件（可能包含未保存的敏感数据）
+  # 教学演示：FILENAME 目标——检测 vim/emacs 等编辑器的临时/交换文件。
   - name: 编辑器临时文件
     description: 检测 vim/emacs 等编辑器的临时/交换文件
     severity: info

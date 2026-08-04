@@ -990,53 +990,9 @@ Item {
                                 }
                             }
 
-                            // ----- 分区：文件类型（瀑布标签） -----
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 6
-                                Label {
-                                    text: "文件类型（" + (previewRulesDialog.previewData.scanExtensions
-                                                      ? previewRulesDialog.previewData.scanExtensions.length : 0) + " 项）"
-                                    font.pixelSize: theme.fontSizeHeading
-                                    font.bold: true
-                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                }
-                                // 空列表表示未限制后缀（全选默认）
-                                Label {
-                                    Layout.fillWidth: true
-                                    visible: !previewRulesDialog.previewData.scanExtensions
-                                             || previewRulesDialog.previewData.scanExtensions.length === 0
-                                    text: "全部（未限制后缀）"
-                                    font.pixelSize: 11
-                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                }
-                                // 每个后缀一个圆角标签，Flow 自动换行
-                                Flow {
-                                    Layout.fillWidth: true
-                                    spacing: 6
-                                    visible: previewRulesDialog.previewData.scanExtensions
-                                             && previewRulesDialog.previewData.scanExtensions.length > 0
-                                    Repeater {
-                                        model: previewRulesDialog.previewData.scanExtensions || []
-                                        delegate: Rectangle {
-                                            radius: 4
-                                            color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
-                                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                                            border.width: 1
-                                            width: extTag.implicitWidth + 16
-                                            height: extTag.implicitHeight + 8
-                                            Label {
-                                                id: extTag
-                                                anchors.centerIn: parent
-                                                text: "." + modelData
-                                                font.pixelSize: 11
-                                                font.family: "Consolas, Monaco, monospace"
-                                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            // 文件类型分区已下沉到下方「规则文件」列表条目上展示，
+                            // 让用户直观看到每个规则文件贡献/覆盖的 scan_extensions，
+                            // 避免与规则文件列表割裂。
 
                             // ----- 分区：忽略目录（瀑布标签） -----
                             ColumnLayout {
@@ -1186,10 +1142,15 @@ Item {
                             spacing: 16
 
                             // ----- 分区：规则文件 -----
-                            ColumnLayout {
+                            // 用 Column（Positioner）而非 ColumnLayout：
+                            // Positioner 严格尊重子项的 height 属性，不做启发式布局；
+                            // ColumnLayout 对 Rectangle 的 height 管理基于 Layout.preferredHeight
+                            // （Rectangle.implicitHeight 默认 0），可能与显式 height 脱节导致留白
+                            Column {
                                 Layout.fillWidth: true
                                 spacing: 4
                                 Label {
+                                    width: parent.width
                                     text: "规则文件（" + (previewRulesDialog.previewData.ruleFiles
                                                       ? previewRulesDialog.previewData.ruleFiles.length : 0) + " 项）"
                                     font.pixelSize: theme.fontSizeHeading
@@ -1197,8 +1158,8 @@ Item {
                                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                 }
                                 Label {
-                                    Layout.fillWidth: true
-                                    text: "作用域：内置=蓝 / 全局=蓝 / 临时=绿；灰色文字表示文件缺失"
+                                    width: parent.width
+                                    text: "作用域：内置=蓝 / 全局=蓝 / 临时=绿；灰色文字表示文件缺失；「类型」行显示该规则文件自身的扫描后缀（未设置=继承前序，都不扫描=空覆盖，标签=具体后缀）"
                                     font.pixelSize: 10
                                     color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                     font.italic: true
@@ -1207,67 +1168,118 @@ Item {
                                 Repeater {
                                     model: previewRulesDialog.previewData.ruleFiles || []
                                     delegate: Rectangle {
-                                        Layout.fillWidth: true
-                                        // 紧凑高度：与匹配规则项保持一致
-                                        height: 28
+                                        width: parent.width
+                                        // 用 Column + col.height 紧贴实际内容高度。
+                                        // 必须用 col.height 而非 childrenRect.height：
+                                        // Column（Positioner）只定位 visible:true 的子项，
+                                        // col.height 自动反映可见子项排列后的总高度；
+                                        // 而 childrenRect 包含所有子项（含 visible:false 的 Label/Flow），
+                                        // visible:false 的 Label 仍有 implicitHeight，导致多算不可见子项高度
+                                        height: col.height + 8
                                         color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
                                         border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                                         border.width: 1
                                         radius: theme.radiusSm
-                                        RowLayout {
-                                            anchors.fill: parent
-                                            anchors.leftMargin: 8
-                                            anchors.rightMargin: 8
-                                            spacing: 8
-                                            // 启用状态指示灯：启用=绿，禁用=灰
-                                            Rectangle {
-                                                width: 8
-                                                height: 8
-                                                radius: 4
-                                                color: modelData.enabled ? theme.colorSuccess
-                                                    : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
-                                                Layout.alignment: Qt.AlignVCenter
-                                            }
-                                            Label {
-                                                text: modelData.fileName
-                                                font.pixelSize: 12
-                                                color: modelData.exists
-                                                    ? (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
-                                                    : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
-                                                Layout.fillWidth: true
-                                                elide: Text.ElideMiddle
-                                            }
-                                            Rectangle {
-                                                radius: 4
-                                                height: 18
-                                                width: prScopeTag.implicitWidth + 12
-                                                color: modelData.isBuiltin
-                                                    ? theme.colorPrimary
-                                                    : (modelData.scope === "temp" ? theme.colorSuccess : theme.colorPrimary)
+                                        Column {
+                                            id: col
+                                            x: 8
+                                            y: 4
+                                            width: parent.width - 16
+                                            spacing: 2
+                                            // 第一行：启用灯 + 文件名 + 作用域 + 缺失标签
+                                            RowLayout {
+                                                id: infoRow
+                                                width: parent.width
+                                                spacing: 8
+                                                // 启用状态指示灯：启用=绿，禁用=灰
+                                                Rectangle {
+                                                    width: 8
+                                                    height: 8
+                                                    radius: 4
+                                                    color: modelData.enabled ? theme.colorSuccess
+                                                        : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
+                                                    Layout.alignment: Qt.AlignVCenter
+                                                }
                                                 Label {
-                                                    id: prScopeTag
-                                                    anchors.centerIn: parent
-                                                    text: modelData.isBuiltin
-                                                        ? "内置"
-                                                        : (modelData.scope === "temp" ? "临时" : "全局")
-                                                    font.pixelSize: 10
-                                                    font.bold: true
-                                                    color: "#FFFFFF"
+                                                    text: modelData.fileName
+                                                    font.pixelSize: 12
+                                                    color: modelData.exists
+                                                        ? (theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary)
+                                                        : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
+                                                    Layout.fillWidth: true
+                                                    elide: Text.ElideMiddle
+                                                }
+                                                Rectangle {
+                                                    radius: 4
+                                                    height: 18
+                                                    width: prScopeTag.implicitWidth + 12
+                                                    color: modelData.isBuiltin
+                                                        ? theme.colorPrimary
+                                                        : (modelData.scope === "temp" ? theme.colorSuccess : theme.colorPrimary)
+                                                    Label {
+                                                        id: prScopeTag
+                                                        anchors.centerIn: parent
+                                                        text: modelData.isBuiltin
+                                                            ? "内置"
+                                                            : (modelData.scope === "temp" ? "临时" : "全局")
+                                                        font.pixelSize: 10
+                                                        font.bold: true
+                                                        color: "#FFFFFF"
+                                                    }
+                                                }
+                                                Rectangle {
+                                                    visible: !modelData.exists
+                                                    radius: 4
+                                                    height: 18
+                                                    width: prMissingTag.implicitWidth + 12
+                                                    color: theme.colorDanger
+                                                    Label {
+                                                        id: prMissingTag
+                                                        anchors.centerIn: parent
+                                                        text: "缺失"
+                                                        font.pixelSize: 10
+                                                        font.bold: true
+                                                        color: "#FFFFFF"
+                                                    }
                                                 }
                                             }
-                                            Rectangle {
-                                                visible: !modelData.exists
-                                                radius: 4
-                                                height: 18
-                                                width: prMissingTag.implicitWidth + 12
+                                            // 第二行：文件类型标签（来自该规则文件自身的 scan_extensions）
+                                            // state="unset" → 未设置（继承前序，不显示该行）
+                                            // state="none"  → 都不扫描
+                                            // state="list"  → 后缀标签 Flow
+                                            // state="none"：显示"都不扫描"提示（红色）
+                                            Label {
+                                                width: parent.width
+                                                visible: modelData.scanExtensionsState === "none"
+                                                text: "都不扫描"
+                                                font.pixelSize: 10
+                                                font.italic: true
                                                 color: theme.colorDanger
-                                                Label {
-                                                    id: prMissingTag
-                                                    anchors.centerIn: parent
-                                                    text: "缺失"
-                                                    font.pixelSize: 10
-                                                    font.bold: true
-                                                    color: "#FFFFFF"
+                                                wrapMode: Text.WordWrap
+                                            }
+                                            // state="list"：后缀标签 Flow，自动换行
+                                            Flow {
+                                                width: parent.width
+                                                visible: modelData.scanExtensionsState === "list"
+                                                spacing: 3
+                                                Repeater {
+                                                    model: modelData.scanExtensions || []
+                                                    delegate: Rectangle {
+                                                        radius: 3
+                                                        color: Qt.rgba(theme.colorPrimary.r, theme.colorPrimary.g, theme.colorPrimary.b, 0.08)
+                                                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                                                        border.width: 1
+                                                        width: prExtTag.implicitWidth + 8
+                                                        height: prExtTag.implicitHeight + 2
+                                                        Label {
+                                                            id: prExtTag
+                                                            anchors.centerIn: parent
+                                                            text: "." + modelData
+                                                            font.pixelSize: 10
+                                                            font.family: "Consolas, Monaco, monospace"
+                                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }

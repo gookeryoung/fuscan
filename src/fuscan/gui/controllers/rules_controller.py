@@ -62,6 +62,7 @@ from fuscan.gui.models.rule_model import RuleListModel
 from fuscan.gui.severity_utils import severity_color_hex, severity_text
 from fuscan.rules import (
     RuleError,
+    load_builtin_ruleset,
     load_ruleset,
     load_with_builtin,
     merge_multiple_rulesets,
@@ -76,6 +77,55 @@ logger = logging.getLogger(__name__)
 
 # 内置规则在 rulesFileModel 中的虚拟路径标识
 BUILTIN_PATH_MARKER = "__builtin__"
+
+
+def _scan_extensions_state_of(rs: RuleSet | None) -> tuple[list[str], str]:
+    """从 RuleSet 提取 scan_extensions 列表与状态字符串。
+
+    :param rs: 规则集（None 视为未设置）
+    :return: ``(extensions_list, state)``：
+
+        - ``state="unset"``：``scan_extensions is None``（未设置，继承前序），
+          ``extensions_list=[]``
+        - ``state="none"``：``scan_extensions == ()``（空 tuple，都不扫描），
+          ``extensions_list=[]``
+        - ``state="list"``：非空 tuple，``extensions_list=list(scan_extensions)``
+    """
+    if rs is None or rs.scan_extensions is None:
+        return [], "unset"
+    if len(rs.scan_extensions) == 0:
+        return [], "none"
+    return list(rs.scan_extensions), "list"
+
+
+def _builtin_scan_extensions() -> tuple[list[str], str]:
+    """内置规则的 scan_extensions 列表与状态。
+
+    内置规则文件加载失败时回退到 ``"unset"``（避免阻塞 UI 渲染）。
+    """
+    try:
+        rs = load_builtin_ruleset()
+    except RuleError as exc:  # pragma: no cover - 内置规则不应失败
+        logger.warning("内置规则 scan_extensions 加载失败: %s", exc)
+        return [], "unset"
+    return _scan_extensions_state_of(rs)
+
+
+def _scan_extensions_of(path: Path) -> tuple[list[str], str]:
+    """指定规则文件的 scan_extensions 列表与状态。
+
+    文件不存在或解析失败时回退到 ``"unset"``（避免阻塞 UI 渲染）。
+
+    :param path: 规则文件路径
+    """
+    if not path.exists():
+        return [], "unset"
+    try:
+        rs = load_ruleset(path)
+    except RuleError as exc:
+        logger.debug("规则文件 %s scan_extensions 加载失败: %s", path, exc)
+        return [], "unset"
+    return _scan_extensions_state_of(rs)
 
 
 class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -247,9 +297,14 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
           控制；临时规则文件由当前工作区 ``task_overrides.disabled_temp_rules_paths``
           控制；内置规则由 ``Config.use_builtin`` 控制
         - ``canRemove``：是否可移除（内置规则为 False，其余为 True）
+        - ``scanExtensions``：该规则文件自身的 ``scan_extensions`` 列表（list[str]）。
+          未设置（None）或文件不存在/解析失败时为空列表
+        - ``scanExtensionsState``：``"unset"``（未设置，继承前序）/
+          ``"none"``（空 tuple，都不扫描）/``"list"``（非空列表）
         """
         items: list[dict[str, object]] = []
         # 内置规则（固定第一项）
+        builtin_ext, builtin_state = _builtin_scan_extensions()
         items.append(
             {
                 "fileName": "内置通用规则",
@@ -259,10 +314,13 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 "isBuiltin": True,
                 "enabled": self._config.use_builtin,
                 "canRemove": False,
+                "scanExtensions": builtin_ext,
+                "scanExtensionsState": builtin_state,
             }
         )
         # 全局规则文件
         for p in self._config.rules_paths:
+            exts, state = _scan_extensions_of(Path(p))
             items.append(
                 {
                     "fileName": Path(p).name,
@@ -272,11 +330,14 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     "isBuiltin": False,
                     "enabled": p not in self._config.disabled_rules_paths,
                     "canRemove": True,
+                    "scanExtensions": exts,
+                    "scanExtensionsState": state,
                 }
             )
         # 临时规则文件（当前工作区）—— enabled 由 task_overrides.disabled_temp_rules_paths 控制
         disabled_temp = self._current_disabled_temp_paths()
         for p in self._current_temp_paths():
+            exts, state = _scan_extensions_of(Path(p))
             items.append(
                 {
                     "fileName": Path(p).name,
@@ -286,6 +347,8 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     "isBuiltin": False,
                     "enabled": p not in disabled_temp,
                     "canRemove": True,
+                    "scanExtensions": exts,
+                    "scanExtensionsState": state,
                 }
             )
         return items
@@ -1105,12 +1168,14 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """构造预览用的规则文件列表（内置 + 全局 + 当前工作区临时规则）。
 
         与 :attr:`rulesFileModel` 字段一致，但 ``enabled`` 字段对临时规则
-        反映 ``disabled_temp_rules_paths`` 的禁用状态。
+        反映 ``disabled_temp_rules_paths`` 的禁用状态，``scanExtensions``/
+        ``scanExtensionsState`` 反映该规则文件自身的 ``scan_extensions``。
 
         :param overrides: 任务级覆盖字典
         :return: 规则文件描述字典列表
         """
         items: list[dict[str, object]] = []
+        builtin_ext, builtin_state = _builtin_scan_extensions()
         items.append(
             {
                 "fileName": "内置通用规则",
@@ -1120,9 +1185,12 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 "isBuiltin": True,
                 "enabled": effective_use_builtin(overrides, self._config),
                 "canRemove": False,
+                "scanExtensions": builtin_ext,
+                "scanExtensionsState": builtin_state,
             }
         )
         for p in self._config.rules_paths:
+            exts, state = _scan_extensions_of(Path(p))
             items.append(
                 {
                     "fileName": Path(p).name,
@@ -1132,10 +1200,13 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     "isBuiltin": False,
                     "enabled": p not in self._config.disabled_rules_paths,
                     "canRemove": True,
+                    "scanExtensions": exts,
+                    "scanExtensionsState": state,
                 }
             )
         disabled_temp = effective_disabled_temp_rules_paths(overrides)
         for p in effective_temp_rules_paths(overrides):
+            exts, state = _scan_extensions_of(Path(p))
             items.append(
                 {
                     "fileName": Path(p).name,
@@ -1145,6 +1216,8 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     "isBuiltin": False,
                     "enabled": p not in disabled_temp,
                     "canRemove": True,
+                    "scanExtensions": exts,
+                    "scanExtensionsState": state,
                 }
             )
         return items

@@ -145,6 +145,86 @@ class TestRulesFileList:
         assert len(model) == 2  # 内置 + 缺失用户文件
         assert model[1]["exists"] is False
 
+    def test_rules_file_model_builtin_has_scan_extensions(self, config_controller: ConfigController) -> None:
+        """内置规则项应携带 scanExtensions（来自 builtin.yaml）与 state='list'。"""
+        controller = RulesController(config_controller)
+        model = controller.rulesFileModel
+        assert model[0]["isBuiltin"] is True
+        assert model[0]["scanExtensionsState"] == "list"
+        exts = model[0]["scanExtensions"]
+        assert isinstance(exts, list)
+        # builtin.yaml 至少定义了 txt/log/pdf/docx 等后缀
+        assert "txt" in exts
+        assert "pdf" in exts
+
+    def test_rules_file_model_user_file_without_scan_extensions(self, controller_with_file: RulesController) -> None:
+        """用户规则文件未定义 scan_extensions 时 state='unset'，列表为空。"""
+        model = controller_with_file.rulesFileModel
+        # 索引 1 是用户文件（_write_rules_file 不写 scan_extensions）
+        assert model[1]["scanExtensionsState"] == "unset"
+        assert model[1]["scanExtensions"] == []
+
+    def test_rules_file_model_user_file_with_scan_extensions(
+        self, config_controller: ConfigController, tmp_path: Path
+    ) -> None:
+        """用户规则文件定义 scan_extensions 时 state='list'，列表非空。"""
+        path = tmp_path / "with_ext.yaml"
+        path.write_text(
+            'version: "1.0"\n'
+            "scan_extensions:\n"
+            '  - "py"\n'
+            '  - "js"\n'
+            "rules:\n"
+            '  - name: "r1"\n'
+            "    match:\n"
+            "      type: content\n"
+            "      mode: contains\n"
+            '      pattern: "x"\n',
+            encoding="utf-8",
+        )
+        config_controller.config.rules_paths = [str(path)]
+        config_controller.save()
+        controller = RulesController(config_controller)
+        model = controller.rulesFileModel
+        assert model[1]["scanExtensionsState"] == "list"
+        assert model[1]["scanExtensions"] == ["py", "js"]
+
+    def test_rules_file_model_user_file_with_empty_scan_extensions(
+        self, config_controller: ConfigController, tmp_path: Path
+    ) -> None:
+        """用户规则文件 scan_extensions 为空列表时 state='none'（都不扫描）。"""
+        path = tmp_path / "empty_ext.yaml"
+        path.write_text(
+            'version: "1.0"\n'
+            "scan_extensions: []\n"
+            "rules:\n"
+            '  - name: "r1"\n'
+            "    match:\n"
+            "      type: content\n"
+            "      mode: contains\n"
+            '      pattern: "x"\n',
+            encoding="utf-8",
+        )
+        config_controller.config.rules_paths = [str(path)]
+        config_controller.save()
+        controller = RulesController(config_controller)
+        model = controller.rulesFileModel
+        assert model[1]["scanExtensionsState"] == "none"
+        assert model[1]["scanExtensions"] == []
+
+    def test_rules_file_model_missing_file_state_unset(
+        self, config_controller: ConfigController, tmp_path: Path
+    ) -> None:
+        """不存在的规则文件 state='unset'（避免阻塞 UI 渲染）。"""
+        missing = tmp_path / "missing.yaml"
+        config_controller.config.rules_paths = [str(missing)]
+        config_controller.save()
+        controller = RulesController(config_controller)
+        model = controller.rulesFileModel
+        assert model[1]["exists"] is False
+        assert model[1]["scanExtensionsState"] == "unset"
+        assert model[1]["scanExtensions"] == []
+
     def test_selected_file_index_default_negative(self, config_controller: ConfigController) -> None:
         controller = RulesController(config_controller)
         assert controller.selectedFileIndex == -1
@@ -1709,6 +1789,27 @@ class TestPreviewRuleset:
         # 规则列表应包含临时规则文件中的「敏感内容」规则
         rule_names = [r["name"] for r in data["rules"]]
         assert "敏感内容" in rule_names
+
+    def test_preview_rule_files_carry_scan_extensions(
+        self,
+        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
+    ) -> None:
+        """预览的 ruleFiles 每项应携带 scanExtensions/scanExtensionsState 字段。
+
+        内置规则项 state='list' 且包含 builtin.yaml 中的后缀；
+        缺失文件项 state='unset'。
+        """
+        controller, _ = controller_with_workspace
+        data = json.loads(controller.previewRuleset("ws1"))
+
+        rule_files = data["ruleFiles"]
+        assert len(rule_files) >= 1
+        # 内置项：state='list'，scanExtensions 非空
+        builtin_item = rule_files[0]
+        assert builtin_item["isBuiltin"] is True
+        assert builtin_item["scanExtensionsState"] == "list"
+        assert isinstance(builtin_item["scanExtensions"], list)
+        assert "txt" in builtin_item["scanExtensions"]
 
     def test_preview_disabled_temp_rule_excluded_from_rules(
         self,

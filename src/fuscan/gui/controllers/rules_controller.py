@@ -468,14 +468,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         scope = str(item["scope"])
 
         if scope == "global":
-            # 全局规则文件
-            if path in self._config.rules_paths:
-                self._config.rules_paths.remove(path)
-            if path in self._config.disabled_rules_paths:
-                self._config.disabled_rules_paths.remove(path)
-            self._config_controller.save()  # pyrefly: ignore [missing-attribute]
-            self._reload_ruleset()
-            self._rule_model.set_ruleset(self._ruleset)
+            self._remove_global_path(path)
         elif scope == "temp":
             # 临时规则文件
             ws_id = self._current_ws_id()
@@ -493,6 +486,33 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.selectionChanged.emit()  # pyrefly: ignore [missing-attribute]
         if scope == "global":
             self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    @Slot(str)  # pyrefly: ignore [not-callable]
+    def removeGlobalPath(self, path: str) -> None:
+        """按路径直接移除全局规则文件（无需先选中）。
+
+        供任务级「配置规则」对话框的全局规则区调用——该区 ListView
+        不与 RulesPanel 共享 selectedFileIndex，需要按路径直接操作。
+
+        :param path: 规则文件路径（内置规则标识 ``__builtin__`` 忽略）
+        """
+        if path == BUILTIN_PATH_MARKER:
+            return
+        self._remove_global_path(path)
+        self._selected_file_index = -1
+        self.rulesFileListChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.selectionChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    def _remove_global_path(self, path: str) -> None:
+        """移除全局规则文件并持久化（内部复用）。"""
+        if path in self._config.rules_paths:
+            self._config.rules_paths.remove(path)
+        if path in self._config.disabled_rules_paths:
+            self._config.disabled_rules_paths.remove(path)
+        self._config_controller.save()  # pyrefly: ignore [missing-attribute]
+        self._reload_ruleset()
+        self._rule_model.set_ruleset(self._ruleset)
 
     # ------------------- 作用域迁移 -------------------
 

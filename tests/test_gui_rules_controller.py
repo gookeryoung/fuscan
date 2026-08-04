@@ -285,6 +285,38 @@ class TestRemoveSelected:
         assert len(controller_with_file.rulesFileModel) == 2
 
 
+class TestRemoveGlobalPath:
+    """``removeGlobalPath`` 按路径直接移除全局规则文件（无需先选中）。"""
+
+    def test_remove_by_path_clears_entry(self, controller_with_file: RulesController, rules_file: Path) -> None:
+        """按路径移除用户规则文件后列表仅剩内置规则。"""
+        controller_with_file.removeGlobalPath(str(rules_file))
+        assert len(controller_with_file.rulesFileModel) == 1
+        assert controller_with_file.rulesFileModel[0]["isBuiltin"] is True
+        assert controller_with_file.selectedFileIndex == -1
+
+    def test_remove_by_path_noop_for_builtin(self, controller_with_file: RulesController) -> None:
+        """内置规则标识 ``__builtin__`` 忽略，不移除。"""
+        controller_with_file.removeGlobalPath("__builtin__")
+        assert len(controller_with_file.rulesFileModel) == 2
+
+    def test_remove_by_path_noop_for_nonexistent(self, controller_with_file: RulesController) -> None:
+        """路径不在全局规则列表中时安全忽略。"""
+        controller_with_file.removeGlobalPath("/nonexistent/rule.yaml")
+        assert len(controller_with_file.rulesFileModel) == 2
+
+    def test_remove_by_path_clears_disabled_list(self, config_controller: ConfigController, tmp_path: Path) -> None:
+        """移除时同步清理 disabled_rules_paths。"""
+        rules_file = _write_rules_file(tmp_path, "to_remove.yaml")
+        config_controller.config.rules_paths = [str(rules_file)]
+        config_controller.config.disabled_rules_paths = [str(rules_file)]
+        config_controller.save()
+        controller = RulesController(config_controller)
+        controller.removeGlobalPath(str(rules_file))
+        assert str(rules_file) not in config_controller.config.rules_paths
+        assert str(rules_file) not in config_controller.config.disabled_rules_paths
+
+
 class TestUseBuiltin:
     def test_use_builtin_default_true(self, config_controller: ConfigController) -> None:
         controller = RulesController(config_controller)

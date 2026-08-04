@@ -3,6 +3,52 @@
 # 适用：GDPR、等保、PCI-DSS 等合规要求的自检
 version: "1.0"
 
+# 路径级 glob 过滤：排除测试、示例与文档目录（合规扫描聚焦生产数据）。
+ignore_paths:
+  - "*/tests/*"
+  - "*/examples/*"
+  - "*/docs/*"
+  - "*/mock/*"
+
+# 目录名级忽略：测试数据目录。
+ignore_dirs:
+  - "testdata"
+  - "mock-data"
+  - "samples"
+
+# 文件后缀白名单：配置文件 + 日志 + 文档（合规风险高发区）。
+# 注：conf/ini/env/yaml/json/xml 等由 SourceCodeExtractor 处理，默认禁用，
+#     需在「设置 → 文件类型」启用。
+scan_extensions:
+  # 配置文件
+  - "conf"
+  - "ini"
+  - "env"
+  - "yaml"
+  - "yml"
+  - "properties"
+  - "json"
+  - "xml"
+  # 日志与文档
+  - "log"
+  - "txt"
+  - "csv"
+  - "pdf"
+  - "docx"
+  - "xlsx"
+
+# 扫描参数：合规扫描需稳定可重复，启用缓存加速二次扫描。
+scan_params:
+  max_workers: 6
+  cache_enabled: true
+
+# 误报白名单：文档示例中的明显假阳性。
+whitelist:
+  - path_glob: "*/docs/examples/*.env"
+    rule_name: "配置文件明文密码"
+    note: "文档示例 .env 文件中的占位密码"
+    source: "rules"
+
 rules:
   # 配置文件中明文存储密码字段
   - name: 配置文件明文密码

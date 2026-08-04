@@ -3,6 +3,47 @@
 # 适用：Web 应用上线前检查、前端代码审计、安全扫描 CI 集成
 version: "1.0"
 
+# 路径级 glob 过滤：排除前端构建产物与依赖目录。
+ignore_paths:
+  - "*/node_modules/*"
+  - "*/dist/*"
+  - "*/build/*"
+  - "*/.next/*"
+  - "*/.nuxt/*"
+  - "*/coverage/*"
+
+# 目录名级忽略：前端工具链缓存目录。
+ignore_dirs:
+  - "vendor"
+  - ".turbo"
+  - ".parcel-cache"
+
+# 文件后缀白名单：前端代码 + 配置 + 模板。
+# 注：以下后缀由 SourceCodeExtractor 处理，默认禁用，需在「设置 → 文件类型」启用。
+scan_extensions:
+  - "js"
+  - "ts"
+  - "jsx"
+  - "tsx"
+  - "vue"
+  - "svelte"
+  - "html"
+  - "htm"
+  - "css"
+  - "scss"
+  - "sass"
+  - "less"
+  - "json"
+  - "env"
+
+# 扫描参数：前端项目结构通常较浅，限制递归深度。
+scan_params:
+  max_workers: 6
+  max_depth: 15
+
+# 误报白名单：留空，由运行时标记累积。
+whitelist: []
+
 rules:
   # innerHTML 赋值（XSS 风险）
   - name: innerHTML XSS 风险

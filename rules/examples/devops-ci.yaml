@@ -3,6 +3,39 @@
 # 适用：DevOps 流水线门禁、容器镜像构建前检查、基础设施配置审计
 version: "1.0"
 
+# 路径级 glob 过滤：排除测试、示例与依赖目录。
+ignore_paths:
+  - "*/tests/*"
+  - "*/examples/*"
+  - "*/node_modules/*"
+  - "*/vendor/*"
+
+# 目录名级忽略：测试数据目录。
+ignore_dirs:
+  - "testdata"
+
+# 文件后缀白名单：CI/CD 配置 + 部署脚本。
+# 注：Dockerfile/go.mod 等无扩展名文件不在 SourceCodeExtractor 扩展名列表中，
+#     规则中 filename 匹配 Dockerfile 需在「设置 → 文件类型」扩展支持。
+scan_extensions:
+  - "yaml"
+  - "yml"
+  - "sh"
+  - "bash"
+  - "env"
+  - "json"
+  - "toml"
+  - "gradle"
+
+# 扫描参数：CI 配置文件小且数量少，降低并发与深度。
+scan_params:
+  max_workers: 4
+  max_depth: 10
+  cache_enabled: true
+
+# 误报白名单：留空，由运行时标记累积。
+whitelist: []
+
 rules:
   # Dockerfile 中使用 latest 标签（不可复现构建）
   - name: Dockerfile 使用 latest 标签

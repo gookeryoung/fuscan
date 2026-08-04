@@ -3,6 +3,33 @@
 # 适用：运维巡检、故障排查、安全日志分析
 version: "1.0"
 
+# 路径级 glob 过滤：排除测试与示例目录。
+ignore_paths:
+  - "*/tests/*"
+  - "*/examples/*"
+  - "*/fixtures/*"
+
+# 目录名级忽略：依赖目录（避免扫描 node_modules 内的日志）。
+ignore_dirs:
+  - "testdata"
+  - "node_modules"
+
+# 文件后缀白名单：仅扫描日志与文本文件。
+scan_extensions:
+  - "log"
+  - "txt"
+
+# 扫描参数：日志文件通常较大，调高大文件阈值并降低并发（避免内存峰值）。
+# 日志为追加式写入，缓存命中率低，关闭以节省哈希计算开销。
+scan_params:
+  max_workers: 4
+  max_file_size: 524288000  # 500 * 1024 * 1024
+  max_depth: 10
+  cache_enabled: false
+
+# 误报白名单：留空，由运行时标记累积。
+whitelist: []
+
 rules:
   # ERROR 级别日志
   - name: ERROR 级别日志

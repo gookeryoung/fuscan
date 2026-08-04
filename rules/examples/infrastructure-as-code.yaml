@@ -3,6 +3,38 @@
 # 适用：基础设施部署前检查、云资源安全审计、配置漂移检测
 version: "1.0"
 
+# 路径级 glob 过滤：排除测试、示例与依赖目录。
+ignore_paths:
+  - "*/tests/*"
+  - "*/examples/*"
+  - "*/vendor/*"
+  - "*/.terraform/*"
+
+# 目录名级忽略：Terraform 状态目录与测试数据。
+ignore_dirs:
+  - "testdata"
+  - ".terraform"
+
+# 文件后缀白名单：IaC 配置文件。
+# 注：tf（Terraform）不在 SourceCodeExtractor 扩展名列表中，
+#     需在「设置 → 文件类型」扩展支持；yaml/yml/json 由 SourceCodeExtractor 处理，
+#     默认禁用，需在「设置 → 文件类型」启用。
+scan_extensions:
+  - "yaml"
+  - "yml"
+  - "json"
+  - "tf"
+  - "tfvars"
+
+# 扫描参数：IaC 配置文件小且数量少，降低并发与深度。
+scan_params:
+  max_workers: 4
+  max_depth: 15
+  cache_enabled: true
+
+# 误报白名单：留空，由运行时标记累积。
+whitelist: []
+
 rules:
   # Terraform AWS S3 存储桶公开访问
   - name: S3 存储桶公开访问

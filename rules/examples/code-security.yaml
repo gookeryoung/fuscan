@@ -3,6 +3,45 @@
 # 适用：代码评审前检查、CI 门禁
 version: "1.0"
 
+# 路径级 glob 过滤：排除第三方依赖与构建产物。
+ignore_paths:
+  - "*/vendor/*"
+  - "*/third_party/*"
+  - "*/node_modules/*"
+  - "*/build/*"
+  - "*/dist/*"
+
+# 目录名级忽略：测试数据目录。
+ignore_dirs:
+  - "testdata"
+
+# 文件后缀白名单：仅扫描源代码文件（含 SQL 脚本）。
+# 注：以下后缀由 SourceCodeExtractor 处理，默认禁用，需在「设置 → 文件类型」启用。
+scan_extensions:
+  - "py"
+  - "js"
+  - "ts"
+  - "jsx"
+  - "tsx"
+  - "java"
+  - "go"
+  - "rs"
+  - "c"
+  - "cpp"
+  - "cs"
+  - "php"
+  - "rb"
+  - "sh"
+  - "sql"
+
+# 扫描参数：代码扫描 CPU 轻量，提高并发线程数。
+scan_params:
+  max_workers: 8
+  max_depth: 20  # 限制递归深度，避免扫描 node_modules 等深层目录
+
+# 误报白名单：留空，由运行时标记累积。
+whitelist: []
+
 rules:
   # Python eval/exec 危险函数
   - name: Python 危险函数 eval

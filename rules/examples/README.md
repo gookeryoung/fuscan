@@ -53,8 +53,22 @@ fuscan scan /path/to/project -r rules/examples/sensitive-data.yaml -o json -f re
 
 ```yaml
 version: "1.0"           # 规则版本号
-ignore_paths:            # 可选，路径级 glob 过滤（相对扫描根目录）
+ignore_paths:            # 可选，路径级 glob 过滤（相对扫描根目录，大小写不敏感）
   - "*/vendor/*"
+ignore_dirs:             # 可选，目录名级忽略（任意层级，大小写不敏感）
+  - "testdata"
+scan_extensions:         # 可选，文件后缀白名单（小写、无前导点）
+  - "py"
+  - "log"
+scan_params:             # 可选，扫描参数（线程/深度/大文件阈值等）
+  max_workers: 8
+  max_file_size: 52428800
+  cache_enabled: true
+whitelist:               # 可选，误报白名单（path_glob + rule_name + 备注）
+  - path_glob: "*/tests/**"
+    rule_name: "AWS Access Key 泄露"
+    note: "测试用例中的示例密钥"
+    source: "rules"
 rules:                   # 规则列表
   - name: 规则名称         # 必填，唯一标识
     description: 描述     # 可选，说明规则意图
@@ -62,8 +76,54 @@ rules:                   # 规则列表
     match: {...}         # 必填，匹配条件
 ```
 
-> 注：文件后缀过滤已由全局配置（解析器勾选）统一管理（iter-86 起规则中
-> 不再支持 `file_extensions` 字段，旧规则文件中保留该字段会被静默忽略）。
+> 注：顶层扫描配置字段（`ignore_paths`/`ignore_dirs`/`scan_extensions`/
+> `scan_params`/`whitelist`）可与内置 `builtin.yaml` 合并使用，合并语义见下文
+> 「全局扫描设置」章节。规则中不再支持 `file_extensions` 字段（旧规则文件中
+> 保留该字段会被静默忽略）。
+
+### 全局扫描设置
+
+规则文件顶层支持以下全局设置字段，加载时与内置 `builtin.yaml` 按下表语义合并：
+
+| 字段 | 类型 | 合并语义 | 默认值 |
+|------|------|---------|--------|
+| `ignore_paths` | `list[str]` | 取并集（用户 + 内置） | 内置 `builtin.yaml` 中预定义 |
+| `ignore_dirs` | `list[str]` | 取并集（用户 + 内置） | 内置 `builtin.yaml` 中预定义（含版本控制/构建输出/IDE 缓存等） |
+| `scan_extensions` | `list[str]` 或 `null` | 后者非 `null` 覆盖前者 | `null`（全选默认，所有已启用提取器支持的后缀） |
+| `scan_params` | `dict` | 字段级覆盖（后者非 `null` 字段覆盖前者） | 内置 `builtin.yaml` 中预定义（max_workers=5 等） |
+| `whitelist` | `list[dict]` | 取并集（按 path_glob + rule_name 去重） | `[]`（空列表） |
+
+`scan_extensions` 取值规则：
+
+- `null`（字段未出现）：全选默认（所有已注册且未禁用的提取器支持的后缀）
+- 空 `list`（`[]`）：都不扫描
+- 非空 `list`：仅扫描指定后缀（小写、无前导点）
+
+`scan_params` 支持的字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `max_workers` | `int` | 扫描线程数（默认 5，PyO3 提取器释放 GIL） |
+| `max_depth` | `int` 或 `null` | 递归深度限制（`null` = 无限深度） |
+| `max_file_size` | `int` | 大文件跳过阈值（字节，`0` = 不限制） |
+| `scan_archives` | `bool` | 是否扫描压缩包（ZIP/RAR） |
+| `cache_enabled` | `bool` | 是否启用内容哈希缓存（二次扫描加速） |
+| `perf_log_enabled` | `bool` | 是否启用性能日志 |
+
+`whitelist` 条目字段：
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `path_glob` | 是 | 路径 glob（如 `*/tests/**`） |
+| `rule_name` | 否 | 规则名（`*` 匹配所有规则，默认 `*`） |
+| `note` | 否 | 备注说明 |
+| `source` | 否 | 来源（`rules` = 规则文件预定义，`runtime` = 运行时标记；默认 `rules`） |
+| `created_at` | 否 | 创建时间（ISO 8601 字符串，运行时标记自动填充） |
+
+> 注：`scan_extensions` 中列出的后缀必须由已注册且未禁用的提取器支持。
+> 默认禁用的提取器：`SourceCodeExtractor`（py/js/yaml/json 等源代码与配置文件）、
+> `SevenZArchiveExtractor`（7z 压缩包）。需在「设置 → 文件类型」中启用对应类别
+> 才能扫描到这些后缀的文件。
 
 ### 匹配条件（match）
 
@@ -201,12 +261,39 @@ match:
   case_sensitive: false  # 同时匹配 Password/PASSWORD
 ```
 
-### 5. 全局忽略项配置
+### 5. 全局扫描设置
 
-忽略目录名（如 `.git`、`node_modules`）和忽略扩展名（如 `pyc`、`exe`）已迁移至全局配置，
-请在 GUI 的「设置 → 扫描设置 → 忽略项」中维护，或通过 CLI `--ignore-dir` 临时追加。
+规则文件顶层可声明 `ignore_paths`/`ignore_dirs`/`scan_extensions`/
+`scan_params`/`whitelist` 五个全局字段，加载时与内置 `builtin.yaml` 合并：
 
-规则文件中仅保留 `ignore_paths`（路径级 glob 过滤，如 `*/vendor/*`）用于项目特定的路径排除。
+- `ignore_paths` / `ignore_dirs` / `whitelist`：取并集，用户规则叠加到内置默认之上
+- `scan_extensions`：后者非 `null` 覆盖前者（用户提供的列表替换内置全选默认）
+- `scan_params`：字段级覆盖（用户规则中非 `null` 字段覆盖内置对应字段）
+
+GUI「设置 → 扫描 → 忽略目录」中维护的目录会同步到 `~/.fuscan/rules/user-scan.yaml`
+的 `ignore_dirs` 字段；「设置 → 文件类型」中勾选的提取器决定 `scan_extensions`
+实际生效范围（未启用提取器支持的后缀即使列出也不会被扫描）。
+
+详见上方「全局扫描设置」章节的字段语义与合并规则表。
+
+### 6. 场景化设置示例
+
+每个示例文件均按场景特点配置了全局设置，可作为编写自定义规则的参考：
+
+| 示例文件 | scan_extensions 范围 | scan_params 特点 |
+|---------|---------------------|-----------------|
+| `sensitive-data.yaml` | 文档 + 表格 + 日志 + 邮件 | 大文件阈值 20MB |
+| `security-audit.yaml` | 源代码 + 配置 + 日志 | max_workers=8 |
+| `code-security.yaml` | 源代码 + SQL | max_workers=8, max_depth=20 |
+| `web-security.yaml` | 前端代码 + 模板 + 样式 | max_workers=6, max_depth=15 |
+| `dependency-audit.yaml` | 依赖清单 + 构建配置 | max_workers=4, max_depth=5 |
+| `compliance.yaml` | 配置 + 日志 + 文档 | max_workers=6 |
+| `privacy-gdpr.yaml` | 文档 + 配置 + 代码 | max_workers=6 |
+| `data-classification.yaml` | 文档 + 源代码 | max_workers=6 |
+| `ip-protection.yaml` | 源代码 + 文档 | max_workers=6 |
+| `log-analysis.yaml` | 日志 + 文本 | max_file_size=500MB, cache_enabled=false |
+| `devops-ci.yaml` | CI/CD 配置 + 脚本 | max_workers=4, max_depth=10 |
+| `infrastructure-as-code.yaml` | IaC 配置（yaml/json/tf） | max_workers=4, max_depth=15 |
 
 ## 更多资源
 

@@ -3,6 +3,50 @@
 # 适用：金融、医疗、政府等行业的合规扫描
 version: "1.0"
 
+# 路径级 glob 过滤（相对扫描根目录，大小写不敏感）。
+# 与内置 builtin.yaml 的 ignore_paths 取并集。
+ignore_paths:
+  - "*/tests/*"
+  - "*/examples/*"
+  - "*/fixtures/*"
+  - "*/mock/*"
+
+# 目录名级忽略（任意层级、大小写不敏感），与内置 ignore_dirs 取并集。
+ignore_dirs:
+  - "testdata"
+  - "mock-data"
+  - "samples"
+
+# 文件后缀白名单（小写、无前导点）。
+# 非空列表覆盖内置全选默认，仅扫描 PII 常见载体（文档/表格/日志/邮件）。
+# 注：csv 由 SourceCodeExtractor 处理，默认禁用，需在「设置 → 文件类型」启用。
+scan_extensions:
+  - "txt"
+  - "log"
+  - "csv"
+  - "pdf"
+  - "docx"
+  - "xlsx"
+  - "pptx"
+  - "doc"
+  - "xls"
+  - "ppt"
+  - "eml"
+
+# 扫描参数（字段级覆盖：非 null 字段覆盖内置默认值）。
+# 大文件阈值降到 20MB，避免大日志/表格拖慢 PII 扫描。
+scan_params:
+  max_file_size: 20971520  # 20 * 1024 * 1024
+  cache_enabled: true
+
+# 误报白名单（path_glob + rule_name + 备注），与内置 whitelist 取并集。
+# 示例：测试夹具中固定假阳性手机号。
+whitelist:
+  - path_glob: "*/tests/fixtures/*.csv"
+    rule_name: "手机号泄露"
+    note: "测试夹具中的假阳性手机号"
+    source: "rules"
+
 rules:
   # 中国大陆身份证号（18 位，最后一位可能是 X）
   - name: 身份证号泄露

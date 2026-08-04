@@ -3,6 +3,39 @@
 # 适用：CI 流水线依赖检查、供应链安全审计、上线前依赖审查
 version: "1.0"
 
+# 路径级 glob 过滤：排除依赖目录本身（避免扫描 node_modules 内的 package.json）。
+ignore_paths:
+  - "*/node_modules/*"
+  - "*/vendor/*"
+  - "*/.venv/*"
+  - "*/venv/*"
+
+# 目录名级忽略：测试数据目录。
+ignore_dirs:
+  - "testdata"
+
+# 文件后缀白名单：依赖清单 + 构建配置文件。
+# 注：Dockerfile/go.mod 等无扩展名或非常见后缀不在列表中，
+#     需在「设置 → 文件类型」中扩展 SourceCodeExtractor 支持范围。
+scan_extensions:
+  - "txt"        # requirements.txt
+  - "py"         # setup.py
+  - "json"       # package.json / package-lock.json
+  - "toml"       # pyproject.toml
+  - "yaml"       # pnpm-lock.yaml / docker-compose.yml
+  - "yml"
+  - "xml"        # pom.xml
+  - "gradle"     # build.gradle
+
+# 扫描参数：依赖清单文件小且数量少，降低并发与深度。
+scan_params:
+  max_workers: 4
+  max_depth: 5
+  max_file_size: 10485760  # 10MB（lock 文件可能较大）
+
+# 误报白名单：留空，由运行时标记累积。
+whitelist: []
+
 rules:
   # Python requirements 中已知风险包
   - name: Python 风险依赖包

@@ -3,6 +3,55 @@
 # 适用：代码外发审查、开源前合规检查、商业机密保护
 version: "1.0"
 
+# 路径级 glob 过滤：排除测试、示例与文档目录（外发审查聚焦业务代码）。
+ignore_paths:
+  - "*/tests/*"
+  - "*/examples/*"
+  - "*/docs/*"
+  - "*/mock/*"
+
+# 目录名级忽略：测试数据目录。
+ignore_dirs:
+  - "testdata"
+  - "mock-data"
+
+# 文件后缀白名单：源代码 + 文档（IP 资产主要形式）。
+# 注：py/js/md 等由 SourceCodeExtractor 处理，默认禁用，需在「设置 → 文件类型」启用。
+scan_extensions:
+  # 源代码
+  - "py"
+  - "java"
+  - "go"
+  - "rs"
+  - "c"
+  - "cpp"
+  - "cs"
+  - "php"
+  - "js"
+  - "ts"
+  - "rb"
+  - "sh"
+  # 文档
+  - "md"
+  - "txt"
+  - "pdf"
+  - "docx"
+  - "xlsx"
+  - "pptx"
+  - "eml"
+
+# 扫描参数：外发审查需遍历全部源码，启用缓存加速二次扫描。
+scan_params:
+  max_workers: 6
+  cache_enabled: true
+
+# 误报白名单：公开竞品对比分析文档。
+whitelist:
+  - path_glob: "*/public/compare/*.md"
+    rule_name: "竞品名称提及"
+    note: "公开竞品对比分析文档"
+    source: "rules"
+
 rules:
   # 源代码文件缺少版权头
   - name: 源码缺少版权头

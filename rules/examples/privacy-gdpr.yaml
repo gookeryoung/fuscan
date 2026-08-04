@@ -3,6 +3,58 @@
 # 适用：面向欧盟/中国市场的应用合规检查、隐私影响评估（PIA）、数据处理审计
 version: "1.0"
 
+# 路径级 glob 过滤：排除测试与示例目录。
+ignore_paths:
+  - "*/tests/*"
+  - "*/examples/*"
+  - "*/fixtures/*"
+  - "*/mock/*"
+
+# 目录名级忽略：测试数据目录。
+ignore_dirs:
+  - "testdata"
+  - "mock-data"
+  - "samples"
+
+# 文件后缀白名单：文档（PII 载体）+ 配置与代码（数据处理逻辑）。
+# 注：py/js/ts/yaml/json/sql 等由 SourceCodeExtractor 处理，默认禁用，
+#     需在「设置 → 文件类型」启用。
+scan_extensions:
+  # 文档
+  - "txt"
+  - "log"
+  - "csv"
+  - "pdf"
+  - "docx"
+  - "xlsx"
+  - "pptx"
+  - "doc"
+  - "xls"
+  - "ppt"
+  - "eml"
+  # 配置与代码
+  - "py"
+  - "js"
+  - "ts"
+  - "java"
+  - "yaml"
+  - "yml"
+  - "json"
+  - "sql"
+
+# 扫描参数：隐私扫描覆盖文件类型多，启用缓存降低重复成本。
+scan_params:
+  max_workers: 6
+  cache_enabled: true
+  perf_log_enabled: false
+
+# 误报白名单：测试夹具中的健康数据样本。
+whitelist:
+  - path_glob: "*/tests/fixtures/health_*.csv"
+    rule_name: "健康数据检测"
+    note: "测试夹具中的健康数据样本"
+    source: "rules"
+
 rules:
   # 个人身份信息（PII）- 姓名 + 联系方式组合
   - name: PII 姓名与联系方式组合

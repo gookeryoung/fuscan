@@ -10,7 +10,7 @@
 - 序列化函数： :func:`save_ruleset`, :func:`serialize_ruleset`,
   :func:`serialize_rule`, :func:`serialize_match`
 - 模板库： :func:`get_template_names`, :func:`get_template_descriptions`,
-  :func:`load_template`
+  :func:`get_template_metadata`, :func:`load_template`
 - 异常： :class:`RuleError`, :class:`RuleParseError`, :class:`RuleLoadError`
 """
 
@@ -33,7 +33,7 @@ from fuscan.rules.model import (
 )
 from fuscan.rules.parser import load_ruleset, parse_match, parse_rule, parse_ruleset
 from fuscan.rules.serializer import save_ruleset, serialize_match, serialize_rule, serialize_ruleset
-from fuscan.rules.templates import get_template_descriptions, get_template_names, load_template
+from fuscan.rules.templates import get_template_descriptions, get_template_metadata, get_template_names, load_template
 
 __all__ = [
     "BUILTIN_RULES_PATH",
@@ -51,6 +51,7 @@ __all__ = [
     "RuleSet",
     "Severity",
     "get_template_descriptions",
+    "get_template_metadata",
     "get_template_names",
     "load_builtin_ruleset",
     "load_ruleset",

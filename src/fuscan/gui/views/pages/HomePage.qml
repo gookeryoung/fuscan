@@ -26,6 +26,11 @@ Item {
     property string _pendingConfigureRulesWsId: ""
     property string _pendingPreviewRulesWsId: ""
 
+    // 将 Theme 的 QColor 转换为 RichText 内联 CSS 用的 rgb() 字符串
+    function _rgb(c) {
+        return "rgb(" + Math.round(c.r * 255) + "," + Math.round(c.g * 255) + "," + Math.round(c.b * 255) + ")"
+    }
+
     // ========== 导出文件保存对话框 ==========
     FileDialog {
         id: exportCsvDialog
@@ -885,7 +890,7 @@ Item {
 
                                     Rectangle {
                                         radius: 4
-                                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                                        color: Qt.rgba(theme.colorPrimary.r, theme.colorPrimary.g, theme.colorPrimary.b, 0.08)
                                         border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                                         border.width: 1
                                         width: spScanArchives.implicitWidth + 16
@@ -893,15 +898,15 @@ Item {
                                         Label {
                                             id: spScanArchives
                                             anchors.centerIn: parent
-                                            text: "扫描压缩包: <b>" + (previewRulesDialog.previewData.scanArchives === true ? "是" : "否") + "</b>"
+                                            text: "<b>扫描压缩包: <span style=\"color:" + (previewRulesDialog.previewData.scanArchives === true ? _rgb(theme.colorSuccess) : _rgb(theme.colorDanger)) + "\">" + (previewRulesDialog.previewData.scanArchives === true ? "是" : "否") + "</span></b>"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
-                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                            color: theme.colorPrimary
                                         }
                                     }
                                     Rectangle {
                                         radius: 4
-                                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                                        color: Qt.rgba(theme.colorPrimary.r, theme.colorPrimary.g, theme.colorPrimary.b, 0.08)
                                         border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                                         border.width: 1
                                         width: spMaxWorkers.implicitWidth + 16
@@ -909,16 +914,16 @@ Item {
                                         Label {
                                             id: spMaxWorkers
                                             anchors.centerIn: parent
-                                            text: "最大工作线程: <b>" + (previewRulesDialog.previewData.maxWorkers !== undefined
+                                            text: "<b>最大工作线程: " + (previewRulesDialog.previewData.maxWorkers !== undefined
                                                   ? previewRulesDialog.previewData.maxWorkers : "—") + "</b>"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
-                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                            color: theme.colorPrimary
                                         }
                                     }
                                     Rectangle {
                                         radius: 4
-                                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                                        color: Qt.rgba(theme.colorPrimary.r, theme.colorPrimary.g, theme.colorPrimary.b, 0.08)
                                         border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                                         border.width: 1
                                         width: spMaxFileSize.implicitWidth + 16
@@ -926,16 +931,16 @@ Item {
                                         Label {
                                             id: spMaxFileSize
                                             anchors.centerIn: parent
-                                            text: "最大文件大小（MB）: <b>" + (previewRulesDialog.previewData.maxFileSizeMB !== undefined
+                                            text: "<b>最大文件大小（MB）: " + (previewRulesDialog.previewData.maxFileSizeMB !== undefined
                                                   ? previewRulesDialog.previewData.maxFileSizeMB : "—") + "</b>"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
-                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                            color: theme.colorPrimary
                                         }
                                     }
                                     Rectangle {
                                         radius: 4
-                                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                                        color: Qt.rgba(theme.colorPrimary.r, theme.colorPrimary.g, theme.colorPrimary.b, 0.08)
                                         border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                                         border.width: 1
                                         width: spMaxDepth.implicitWidth + 16
@@ -943,16 +948,16 @@ Item {
                                         Label {
                                             id: spMaxDepth
                                             anchors.centerIn: parent
-                                            text: "最大扫描深度（0=无限）: <b>" + (previewRulesDialog.previewData.maxDepth !== undefined
+                                            text: "<b>最大扫描深度（0=无限）: " + (previewRulesDialog.previewData.maxDepth !== undefined
                                                   ? previewRulesDialog.previewData.maxDepth : "—") + "</b>"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
-                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                            color: theme.colorPrimary
                                         }
                                     }
                                     Rectangle {
                                         radius: 4
-                                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                                        color: Qt.rgba(theme.colorPrimary.r, theme.colorPrimary.g, theme.colorPrimary.b, 0.08)
                                         border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                                         border.width: 1
                                         width: spCacheEnabled.implicitWidth + 16
@@ -960,15 +965,15 @@ Item {
                                         Label {
                                             id: spCacheEnabled
                                             anchors.centerIn: parent
-                                            text: "启用扫描结果缓存: <b>" + (previewRulesDialog.previewData.cacheEnabled === true ? "是" : "否") + "</b>"
+                                            text: "<b>启用扫描结果缓存: <span style=\"color:" + (previewRulesDialog.previewData.cacheEnabled === true ? _rgb(theme.colorSuccess) : _rgb(theme.colorDanger)) + "\">" + (previewRulesDialog.previewData.cacheEnabled === true ? "是" : "否") + "</span></b>"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
-                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                            color: theme.colorPrimary
                                         }
                                     }
                                     Rectangle {
                                         radius: 4
-                                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                                        color: Qt.rgba(theme.colorPrimary.r, theme.colorPrimary.g, theme.colorPrimary.b, 0.08)
                                         border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                                         border.width: 1
                                         width: spPerfLog.implicitWidth + 16
@@ -976,10 +981,10 @@ Item {
                                         Label {
                                             id: spPerfLog
                                             anchors.centerIn: parent
-                                            text: "启用性能详细日志: <b>" + (previewRulesDialog.previewData.perfLogEnabled === true ? "是" : "否") + "</b>"
+                                            text: "<b>启用性能详细日志: <span style=\"color:" + (previewRulesDialog.previewData.perfLogEnabled === true ? _rgb(theme.colorSuccess) : _rgb(theme.colorDanger)) + "\">" + (previewRulesDialog.previewData.perfLogEnabled === true ? "是" : "否") + "</span></b>"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
-                                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                            color: theme.colorPrimary
                                         }
                                     }
                                 }
@@ -1235,6 +1240,14 @@ Item {
                                 }
                                 Label {
                                     Layout.fillWidth: true
+                                    text: "严重度：红=高危 / 橙=中危 / 黄=低危；「可替换」标签表示命中后可自动脱敏"
+                                    font.pixelSize: 10
+                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    font.italic: true
+                                    wrapMode: Text.WordWrap
+                                }
+                                Label {
+                                    Layout.fillWidth: true
                                     visible: previewRulesDialog.previewData.rules
                                              && previewRulesDialog.previewData.rules.length === 0
                                     text: "（暂无匹配规则，请检查规则文件是否启用或加载）"
@@ -1245,67 +1258,63 @@ Item {
                                     model: previewRulesDialog.previewData.rules || []
                                     delegate: Rectangle {
                                         Layout.fillWidth: true
-                                        // 紧凑高度：implicitHeight + 6px 上下边距，避免项间留白浪费
-                                        height: prRuleCol.implicitHeight + 6
+                                        // 单行布局：与规则文件条目同高 28px，description 紧贴 name 右侧
+                                        height: 28
                                         color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
                                         border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                                         border.width: 1
                                         radius: theme.radiusSm
-                                        ColumnLayout {
-                                            id: prRuleCol
+                                        RowLayout {
                                             anchors.fill: parent
                                             anchors.leftMargin: 8
                                             anchors.rightMargin: 8
-                                            anchors.topMargin: 3
-                                            anchors.bottomMargin: 3
-                                            spacing: 2
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                Label {
-                                                    text: modelData.name
-                                                    font.pixelSize: 12
-                                                    font.bold: true
-                                                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                                                    Layout.fillWidth: true
-                                                    elide: Text.ElideRight
-                                                }
-                                                Rectangle {
-                                                    radius: 8
-                                                    height: 18
-                                                    width: prSevTag.implicitWidth + 12
-                                                    color: modelData.severityColor
-                                                    Label {
-                                                        id: prSevTag
-                                                        anchors.centerIn: parent
-                                                        text: modelData.severityText
-                                                        font.pixelSize: 10
-                                                        font.bold: true
-                                                        color: "#FFFFFF"
-                                                    }
-                                                }
-                                                Rectangle {
-                                                    visible: modelData.replace === true
-                                                    radius: 8
-                                                    height: 18
-                                                    width: prReplaceTag.implicitWidth + 12
-                                                    color: theme.colorPrimary
-                                                    Label {
-                                                        id: prReplaceTag
-                                                        anchors.centerIn: parent
-                                                        text: "可替换"
-                                                        font.pixelSize: 10
-                                                        font.bold: true
-                                                        color: "#FFFFFF"
-                                                    }
-                                                }
+                                            spacing: 8
+                                            Label {
+                                                text: modelData.name
+                                                font.pixelSize: 12
+                                                font.bold: true
+                                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                                elide: Text.ElideRight
+                                                Layout.maximumWidth: 220
                                             }
                                             Label {
-                                                Layout.fillWidth: true
                                                 text: modelData.description || ""
-                                                font.pixelSize: 11
+                                                font.pixelSize: 10
                                                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                                                wrapMode: Text.WordWrap
+                                                Layout.fillWidth: true
+                                                elide: Text.ElideRight
                                                 visible: text.length > 0
+                                            }
+                                            Rectangle {
+                                                radius: 4
+                                                height: 18
+                                                width: prSevTag.implicitWidth + 12
+                                                color: modelData.severityColor
+                                                Layout.alignment: Qt.AlignVCenter
+                                                Label {
+                                                    id: prSevTag
+                                                    anchors.centerIn: parent
+                                                    text: modelData.severityText
+                                                    font.pixelSize: 10
+                                                    font.bold: true
+                                                    color: "#FFFFFF"
+                                                }
+                                            }
+                                            Rectangle {
+                                                visible: modelData.replace === true
+                                                radius: 4
+                                                height: 18
+                                                width: prReplaceTag.implicitWidth + 12
+                                                color: theme.colorPrimary
+                                                Layout.alignment: Qt.AlignVCenter
+                                                Label {
+                                                    id: prReplaceTag
+                                                    anchors.centerIn: parent
+                                                    text: "可替换"
+                                                    font.pixelSize: 10
+                                                    font.bold: true
+                                                    color: "#FFFFFF"
+                                                }
                                             }
                                         }
                                     }

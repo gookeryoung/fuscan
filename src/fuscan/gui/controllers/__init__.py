@@ -4,6 +4,7 @@
 信号槽与 QML 通信。子模块：
 
 - :class:`AppController`：主控制器工厂，聚合所有 controller 并注册到 QML context
+- :class:`SplashController`：启动画面阶段文本状态机（Splash.qml 绑定）
 - :class:`ScanController`：扫描工作流（状态机 + 进度 + 结果模型）
 - :class:`ConfigController`：配置持久化 + 盘符/路径历史/提取器勾选
 - :class:`RulesController`：规则文件管理 + 规则列表模型
@@ -19,6 +20,7 @@ from fuscan.gui.controllers.app_controller import AppController, register_qml_ty
 from fuscan.gui.controllers.config_controller import ConfigController
 from fuscan.gui.controllers.rules_controller import RulesController
 from fuscan.gui.controllers.scan_controller import ScanController
+from fuscan.gui.controllers.splash_controller import SplashController
 from fuscan.gui.controllers.whitelist_controller import WhitelistController
 from fuscan.gui.controllers.workspace_controller import WorkspaceController
 
@@ -28,6 +30,7 @@ __all__ = [
     "ConfigController",
     "RulesController",
     "ScanController",
+    "SplashController",
     "WhitelistController",
     "WorkspaceController",
     "register_qml_types",

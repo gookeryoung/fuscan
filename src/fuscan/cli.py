@@ -4,6 +4,7 @@
 
 - ``scan``：扫描指定路径，输出命中报告
 - ``benchmark``（别名 ``bench``）：多轮扫描测量各阶段性能，支持导出/对比基准线
+- ``bp``：验证并发扫描假卡死修复（构造慢文件场景，检查 in-flight 进度跟踪）
 - ``rules``：校验规则文件格式
 - ``version``：显示版本信息
 - ``gui``：启动图形界面
@@ -16,6 +17,7 @@
     fuscan scan /path/to/scan -r rules/custom.yaml -o json -f report.json
     fuscan benchmark /path/to/scan --rounds 5 --save-baseline baseline.json
     fuscan benchmark /path/to/scan --baseline baseline.json
+    fuscan bp --slow-duration 1.5 --workers 8
     fuscan rules -r rules/custom.yaml
 """
 
@@ -175,6 +177,29 @@ def build_parser() -> argparse.ArgumentParser:
     cache_prune = cache_sub.add_parser("prune", help="清理过期文件缓存", parents=[cache_parent])
     cache_prune.add_argument("--max-age-days", type=int, default=30, help="清理超过指定天数的文件缓存（默认 30）")
 
+    # bp 子命令：验证并发扫描假卡死修复（构造慢文件场景，检查 in-flight 进度跟踪）
+    bp_parser = subparsers.add_parser(
+        "bp",
+        help="验证并发扫描假卡死修复（构造慢文件场景，检查 in-flight 进度跟踪）",
+    )
+    bp_parser.add_argument("--fast-files", type=int, default=20, metavar="N", help="快文件数（默认 20）")
+    bp_parser.add_argument("--slow-files", type=int, default=4, metavar="N", help="慢文件数（默认 4）")
+    bp_parser.add_argument(
+        "--slow-duration",
+        type=float,
+        default=1.5,
+        metavar="S",
+        help="慢文件提取模拟耗时秒数（默认 1.5）",
+    )
+    bp_parser.add_argument("--workers", type=int, default=8, metavar="N", help="并发 worker 数（默认 8）")
+    bp_parser.add_argument(
+        "--progress-interval",
+        type=float,
+        default=0.1,
+        metavar="S",
+        help="进度回调间隔秒（默认 0.1）",
+    )
+
     return parser
 
 
@@ -198,6 +223,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_rules(args)
         if args.command == "gui":
             return _cmd_gui(args)
+        if args.command == "bp":
+            return _cmd_bp(args)
         if args.command == "cache":
             return _cmd_cache(args)
         if args.command == "version":
@@ -567,6 +594,90 @@ def _cmd_gui(_args: argparse.Namespace) -> int:
         print(f"GUI 启动失败（PySide 未安装）: {exc}", file=sys.stderr)
         return 3
     return gui_main()
+
+
+def _cmd_bp(args: argparse.Namespace) -> int:  # noqa: PLR0912
+    """执行 bp 子命令：验证并发扫描假卡死修复。
+
+    在临时目录构造快慢混合文件，通过自定义 content_provider 注入 sleep 模拟
+    大文件提取，验证 ``wait`` 超时分支能切换 ``current_file`` 到真实 in-flight
+    慢文件而非陈旧快文件。退出码 0 表示验证通过，1 表示未通过。
+    """
+    import tempfile
+
+    from fuscan.bench_progress import run_bench_progress
+
+    if args.fast_files < 0 or args.slow_files < 0:
+        print("错误: --fast-files/--slow-files 不能为负", file=sys.stderr)
+        return 1
+    if args.slow_files == 0:
+        print("错误: --slow-files 至少为 1（无慢文件无法触发超时分支）", file=sys.stderr)
+        return 1
+    if args.workers < 1:
+        print(f"错误: --workers 必须 >= 1（收到 {args.workers}）", file=sys.stderr)
+        return 1
+    if args.slow_duration <= 0:
+        print(f"错误: --slow-duration 必须 > 0（收到 {args.slow_duration}）", file=sys.stderr)
+        return 1
+
+    with tempfile.TemporaryDirectory(prefix="bench_progress_") as tmp:
+        result = run_bench_progress(
+            work_dir=Path(tmp),
+            fast_files=args.fast_files,
+            slow_files=args.slow_files,
+            slow_duration_s=args.slow_duration,
+            workers=args.workers,
+            progress_interval=args.progress_interval,
+            on_output=print,
+        )
+
+    total = args.fast_files + args.slow_files
+    print("\n" + "=" * 70)
+    print(f"扫描完成：总耗时 {result.total_elapsed_s:.2f}s")
+    print(f"扫描文件数：{result.scanned_files}，命中：{result.matched_files}")
+    print(f"进度回调总数：{result.progress_emits}")
+    print(f"超时分支触发次数（scanned 未变）：{result.timeout_emits}")
+    print(f"current_file 为慢文件的次数：{result.slow_file_emits}")
+    print(
+        f"单文件最长 elapsed_ms：{result.max_elapsed_ms:.0f}ms @ "
+        f"{Path(result.max_elapsed_file).name if result.max_elapsed_file else '-'}"
+    )
+
+    print("\n[慢文件进度时间线]（验证 elapsed_ms 持续增长）")
+    if not result.slow_seen:
+        print("  （无慢文件出现在 current_file）")
+    for path, elapsed_list in result.slow_seen.items():
+        name = Path(path).name
+        if len(elapsed_list) <= 1:
+            print(f"  {name}: elapsed_ms={elapsed_list}（仅出现一次，未观察到增长）")
+            continue
+        timeline = " -> ".join(f"{e:.0f}" for e in elapsed_list)
+        print(f"  {name}: elapsed_ms 序列 {timeline}")
+
+    print("\n[采样进度时间线]（每 ~0.3s 采样一行）")
+    last_sample = -1.0
+    for info in result.records:
+        if info.elapsed - last_sample >= 0.3 or last_sample < 0:
+            name = Path(info.current_file).name if info.current_file else "-"
+            print(
+                f"  t={info.elapsed:5.2f}s scanned={info.scanned:2d}/{total} "
+                f"current={name:15s} elapsed_ms={info.current_file_elapsed_ms:6.0f}"
+            )
+            last_sample = info.elapsed
+
+    print("\n[结论]")
+    if result.timeout_emits == 0:
+        print("  [FAIL] 超时分支未触发，无法验证假卡死修复")
+    elif result.slow_file_emits == 0:
+        print("  [FAIL] 超时分支触发了但 current_file 未切换到慢文件 → 修复无效")
+    elif not result.passed:
+        print("  [FAIL] 慢文件未出现 >= 2 次或 elapsed_ms 未递增 → 跟踪不稳定")
+    else:
+        print(f"  [PASS] 超时分支触发 {result.timeout_emits} 次，current_file 切换到真实 in-flight 慢文件")
+        print("  [PASS] 慢文件 elapsed_ms 单调递增，证明在跟踪同一慢文件而非刷新陈旧快文件")
+        print("  [PASS] 假卡死修复生效：用户能看到「正在扫描 slow_xx.txt」而非陈旧快文件")
+
+    return 0 if result.passed else 1
 
 
 def _merge_ignore_dirs(base_dirs: Sequence[str], extra_dirs: Sequence[str]) -> tuple[str, ...]:

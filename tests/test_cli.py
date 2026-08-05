@@ -966,3 +966,80 @@ class TestBenchmarkCommand:
         )
         assert rc == 0
         assert cache_path.exists()
+
+
+class TestBpCommand:
+    """bp 子命令测试：验证并发扫描假卡死修复。"""
+
+    def test_parse_bp_command(self) -> None:
+        """bp 子命令参数解析与默认值。"""
+        parser = build_parser()
+        args = parser.parse_args(["bp"])
+        assert args.command == "bp"
+        assert args.fast_files == 20
+        assert args.slow_files == 4
+        assert args.slow_duration == 1.5
+        assert args.workers == 8
+        assert args.progress_interval == 0.1
+
+    def test_parse_bp_custom_args(self) -> None:
+        """bp 子命令自定义参数。"""
+        parser = build_parser()
+        args = parser.parse_args(
+            ["bp", "--fast-files", "5", "--slow-files", "2", "--slow-duration", "0.3", "--workers", "4"]
+        )
+        assert args.fast_files == 5
+        assert args.slow_files == 2
+        assert args.slow_duration == 0.3
+        assert args.workers == 4
+
+    def test_bp_rejects_zero_slow_files(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--slow-files 0 应报错退出 1。"""
+        rc = main(["bp", "--slow-files", "0"])
+        assert rc == 1
+        assert "至少为 1" in capsys.readouterr().err
+
+    def test_bp_rejects_zero_workers(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--workers 0 应报错退出 1。"""
+        rc = main(["bp", "--workers", "0"])
+        assert rc == 1
+        assert ">= 1" in capsys.readouterr().err
+
+    def test_bp_rejects_nonpositive_duration(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--slow-duration 0 应报错退出 1。"""
+        rc = main(["bp", "--slow-duration", "0"])
+        assert rc == 1
+        assert "> 0" in capsys.readouterr().err
+
+    def test_bp_rejects_negative_fast_files(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--fast-files 负数应报错退出 1。"""
+        rc = main(["bp", "--fast-files", "-1"])
+        assert rc == 1
+        assert "不能为负" in capsys.readouterr().err
+
+    def test_bp_passes_with_minimal_scenario(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """最小场景（2 快 + 2 慢 1.2s + 2 worker）应验证通过返回 0。
+
+        slow_duration 需 > 1.0s 以确保 ``wait`` 超时分支（固定 0.5s 阈值）
+        至少触发 2 次，从而验证 elapsed_ms 单调递增。
+        """
+        rc = main(
+            [
+                "bp",
+                "--fast-files",
+                "2",
+                "--slow-files",
+                "2",
+                "--slow-duration",
+                "1.2",
+                "--workers",
+                "2",
+                "--progress-interval",
+                "0.05",
+            ]
+        )
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "[PASS]" in out
+        assert "超时分支触发" in out
+        assert "slow_00.txt" in out

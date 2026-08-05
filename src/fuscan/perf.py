@@ -57,6 +57,10 @@ from types import TracebackType
 
 __all__ = [
     "PERF_ENABLED",
+    "FilePerfDiff",
+    "FilePerfRecord",
+    "FilePerfRecorder",
+    "FilePerfSummary",
     "PerfReport",
     "PerfStats",
     "PerfTimer",
@@ -488,3 +492,311 @@ class PerfStats:
             "meta": meta or {},
         }
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# 单文件性能基线记录
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class FilePerfRecord:
+    """单文件性能记录。
+
+    :ivar path: 文件路径（扫描根的相对路径或绝对路径）
+    :ivar extension: 文件扩展名（小写、去点）
+    :ivar size: 文件大小（字节）
+    :ivar total_ms: 该文件扫描总耗时（毫秒），含提取 + 匹配 + 缓存查找
+    :ivar hit_count: 命中规则数
+    """
+
+    path: str
+    extension: str
+    size: int
+    total_ms: float
+    hit_count: int
+
+
+@dataclass(slots=True)
+class FilePerfSummary:
+    """单文件性能汇总。
+
+    :ivar total_files: 记录的文件总数
+    :ivar total_ms: 所有文件累计耗时（毫秒）
+    :ivar avg_ms: 平均每文件耗时（毫秒）
+    :ivar max_ms: 最慢单文件耗时（毫秒）
+    :ivar max_path: 最慢文件路径
+    :ivar by_extension: 按扩展名分组的统计 ``{ext: {"count", "total_ms", "avg_ms"}}``
+    :ivar slowest: 最慢的 N 个文件记录（按 total_ms 降序）
+    """
+
+    total_files: int
+    total_ms: float
+    avg_ms: float
+    max_ms: float
+    max_path: str
+    by_extension: dict[str, dict[str, float]]
+    slowest: list[FilePerfRecord]
+
+
+@dataclass(slots=True)
+class FilePerfDiff:
+    """单文件性能对比结果。
+
+    :ivar path: 文件路径
+    :ivar baseline_ms: 基线耗时（毫秒）
+    :ivar current_ms: 当前耗时（毫秒）
+    :ivar delta_ms: 变化量（current - baseline，毫秒）
+    :ivar delta_pct: 变化百分比（正=变慢/回归，负=变快/改善）
+    """
+
+    path: str
+    baseline_ms: float
+    current_ms: float
+    delta_ms: float
+    delta_pct: float
+
+
+class FilePerfRecorder:
+    """单文件性能基线记录器。
+
+    记录每个文件的总扫描耗时，用于：
+
+    - **调试**：识别异常慢的文件（如大 PDF 提取、正则回溯）
+    - **优化**：对比优化前后的基线，量化改善幅度
+    - **回归检测**：对比历史基线，发现性能回归
+
+    线程安全：所有写入操作经 ``threading.Lock`` 保护，可在多 worker
+    线程下并发调用 :meth:`record`。
+
+    用法::
+
+        recorder = FilePerfRecorder()
+        scanner = Scanner(ruleset, file_perf=recorder)
+        scanner.scan(root)
+        recorder.save_to_json(Path("baseline.json"))
+
+        # 对比基线
+        baseline = FilePerfRecorder.load_from_json(Path("baseline.json"))
+        diffs = recorder.compare(baseline, threshold_pct=20.0)
+        for d in diffs:
+            print(f"{d.path}: {d.baseline_ms:.1f}ms -> {d.current_ms:.1f}ms ({d.delta_pct:+.1f}%)")
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._records: list[FilePerfRecord] = []
+
+    def record(
+        self,
+        path: str,
+        extension: str,
+        size: int,
+        total_ms: float,
+        hit_count: int,
+    ) -> None:
+        """记录单文件扫描性能。
+
+        :param path: 文件路径
+        :param extension: 扩展名（小写、去点）
+        :param size: 文件大小（字节）
+        :param total_ms: 总耗时（毫秒）
+        :param hit_count: 命中规则数
+        """
+        with self._lock:
+            self._records.append(
+                FilePerfRecord(
+                    path=path,
+                    extension=extension,
+                    size=size,
+                    total_ms=total_ms,
+                    hit_count=hit_count,
+                )
+            )
+
+    @property
+    def records(self) -> list[FilePerfRecord]:
+        """已记录的全部文件性能记录（只读视图）。"""
+        with self._lock:
+            return list(self._records)
+
+    @property
+    def count(self) -> int:
+        """已记录的文件数。"""
+        with self._lock:
+            return len(self._records)
+
+    def summary(self, top: int = 10) -> FilePerfSummary:
+        """生成性能汇总。
+
+        :param top: 返回最慢的 N 个文件，默认 10
+        :return: :class:`FilePerfSummary` 汇总对象
+        """
+        with self._lock:
+            records = list(self._records)
+
+        if not records:
+            return FilePerfSummary(
+                total_files=0,
+                total_ms=0.0,
+                avg_ms=0.0,
+                max_ms=0.0,
+                max_path="",
+                by_extension={},
+                slowest=[],
+            )
+
+        total_ms = sum(r.total_ms for r in records)
+        max_record = max(records, key=lambda r: r.total_ms)
+
+        # 按扩展名分组统计
+        ext_groups: dict[str, list[float]] = {}
+        for r in records:
+            ext_groups.setdefault(r.extension, []).append(r.total_ms)
+
+        by_extension: dict[str, dict[str, float]] = {}
+        for ext, times in ext_groups.items():
+            ext_total = sum(times)
+            by_extension[ext] = {
+                "count": len(times),
+                "total_ms": round(ext_total, 3),
+                "avg_ms": round(ext_total / len(times), 3),
+            }
+
+        slowest = sorted(records, key=lambda r: -r.total_ms)[:top]
+
+        return FilePerfSummary(
+            total_files=len(records),
+            total_ms=round(total_ms, 3),
+            avg_ms=round(total_ms / len(records), 3),
+            max_ms=round(max_record.total_ms, 3),
+            max_path=max_record.path,
+            by_extension=by_extension,
+            slowest=slowest,
+        )
+
+    def compare(
+        self,
+        baseline: FilePerfRecorder,
+        threshold_pct: float = 20.0,
+    ) -> list[FilePerfDiff]:
+        """对比基线，返回超过阈值的性能差异。
+
+        仅对比两次运行中都出现的文件（按路径匹配），按变化百分比降序排列。
+
+        :param baseline: 基线记录器
+        :param threshold_pct: 变化百分比阈值（正=变慢，仅返回超过此阈值的项）
+        :return: :class:`FilePerfDiff` 列表（按 delta_pct 降序）
+        """
+        with self._lock:
+            current_map = {r.path: r.total_ms for r in self._records}
+        baseline_map = {r.path: r.total_ms for r in baseline.records}
+
+        diffs: list[FilePerfDiff] = []
+        for path, current_ms in current_map.items():
+            baseline_ms = baseline_map.get(path)
+            if baseline_ms is None or baseline_ms <= 0:
+                continue
+            delta_ms = current_ms - baseline_ms
+            delta_pct = delta_ms / baseline_ms * 100.0
+            if abs(delta_pct) >= threshold_pct:
+                diffs.append(
+                    FilePerfDiff(
+                        path=path,
+                        baseline_ms=round(baseline_ms, 3),
+                        current_ms=round(current_ms, 3),
+                        delta_ms=round(delta_ms, 3),
+                        delta_pct=round(delta_pct, 1),
+                    )
+                )
+
+        diffs.sort(key=lambda d: -d.delta_pct)
+        return diffs
+
+    def save_to_json(self, path: Path, *, meta: dict[str, object] | None = None) -> None:
+        """持久化记录到 JSON 文件。
+
+        :param path: 目标 JSON 文件路径（父目录自动创建）
+        :param meta: 附加元信息（如扫描根路径、规则文件），写入 ``meta`` 字段
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            records = [
+                {
+                    "path": r.path,
+                    "extension": r.extension,
+                    "size": r.size,
+                    "total_ms": round(r.total_ms, 3),
+                    "hit_count": r.hit_count,
+                }
+                for r in self._records
+            ]
+        payload = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "records": records,
+            "meta": meta or {},
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    @classmethod
+    def load_from_json(cls, path: Path) -> FilePerfRecorder:
+        """从 JSON 文件加载基线记录。
+
+        :param path: JSON 文件路径
+        :return: 加载后的 :class:`FilePerfRecorder` 实例
+        """
+        data = json.loads(path.read_text(encoding="utf-8"))
+        recorder = cls()
+        for item in data.get("records", []):
+            recorder._records.append(
+                FilePerfRecord(
+                    path=item["path"],
+                    extension=item["extension"],
+                    size=item["size"],
+                    total_ms=item["total_ms"],
+                    hit_count=item["hit_count"],
+                )
+            )
+        return recorder
+
+    def print_summary(self, *, top: int = 10, log: logging.Logger | None = None) -> None:
+        """打印性能汇总到日志（INFO 级）。
+
+        :param top: 展示最慢的 N 个文件，默认 10
+        :param log: 目标 logger，默认模块 logger
+        """
+        log = log or logger
+        s = self.summary(top=top)
+        if s.total_files == 0:
+            log.info("[file-perf] 无记录")
+            return
+
+        log.info("[file-perf] === 单文件性能汇总 ===")
+        log.info(
+            "[file-perf] 文件数: %d | 总耗时: %.1fms | 平均: %.2fms | 最慢: %.1fms (%s)",
+            s.total_files,
+            s.total_ms,
+            s.avg_ms,
+            s.max_ms,
+            s.max_path,
+        )
+
+        log.info("[file-perf] --- 按扩展名 ---")
+        for ext, info in sorted(s.by_extension.items(), key=lambda x: -x[1]["total_ms"]):
+            log.info(
+                "[file-perf]   .%-8s  %4d 文件  总计 %8.1fms  平均 %7.2fms",
+                ext,
+                int(info["count"]),
+                info["total_ms"],
+                info["avg_ms"],
+            )
+
+        log.info("[file-perf] --- 最慢 %d 个文件 ---", len(s.slowest))
+        for r in s.slowest:
+            log.info(
+                "[file-perf]   %8.2fms  %6d B  %2d hits  %s",
+                r.total_ms,
+                r.size,
+                r.hit_count,
+                r.path,
+            )

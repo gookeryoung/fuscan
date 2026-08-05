@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fuscan.cache.store import BatchWriteItem
-from fuscan.perf import PerfStats
+from fuscan.perf import FilePerfRecorder, PerfStats
 from fuscan.rules.model import (
     LeafMatch,
     MatchTarget,
@@ -117,9 +117,11 @@ class Scanner:
         incremental_manifest: IncrementalManifest | None = None,
         prev_report: ScanReport | None = None,
         whitelist: Whitelist | None = None,
+        file_perf: FilePerfRecorder | None = None,
     ) -> None:
         self.ruleset = ruleset
         self._content_provider: ContentProvider = content_provider or default_extract_content
+        self._file_perf: FilePerfRecorder | None = file_perf
         # 大文件跳过阈值：None 或 0 表示不限制，否则超过此大小的文件不读取内容
         self._max_file_size: int = normalize_max_file_size(max_file_size)
         self._compiled: list[tuple[Rule, Matcher]] = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
@@ -972,12 +974,32 @@ class Scanner:
 
         缓存模式下委托 :meth:`_scan_entry_cached`，否则走 :meth:`_scan_entry_uncached`。
         取消时立即返回空结果，避免已提交的 future 执行无谓的 I/O。
+
+        若 ``file_perf`` 记录器已启用，在每个文件扫描完成后记录总耗时，
+        用于性能基线对比与瓶颈定位。
         """
         if self._cancel_event.is_set():
             return ScanResult(path=entry.path, size=entry.size, hits=(), errors=0)
+        if self._file_perf is None:
+            # 快速路径：无单文件计时
+            if self._cache is None:
+                return self._scan_entry_uncached(entry)
+            return self._scan_entry_cached(entry)
+        # 计时路径：记录单文件总耗时
+        t0 = time.perf_counter()
         if self._cache is None:
-            return self._scan_entry_uncached(entry)
-        return self._scan_entry_cached(entry)
+            result = self._scan_entry_uncached(entry)
+        else:
+            result = self._scan_entry_cached(entry)
+        total_ms = (time.perf_counter() - t0) * 1000.0
+        self._file_perf.record(
+            path=str(entry.path),
+            extension=entry.extension,
+            size=entry.size,
+            total_ms=total_ms,
+            hit_count=len(result.hits),
+        )
+        return result
 
     def _scan_entry_uncached(self, entry: FileEntry) -> ScanResult:
         """对单个文件应用所有规则（无缓存）。

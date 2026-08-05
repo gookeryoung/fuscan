@@ -27,6 +27,7 @@ import logging
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fuscan import __version__
 from fuscan.benchmark import BaselineComparison, BenchmarkResult
@@ -34,6 +35,9 @@ from fuscan.config import load_config
 from fuscan.export.cli_output import output_report
 from fuscan.rules import RuleError, RuleSet, load_ruleset, load_with_builtin, merge_multiple_rulesets
 from fuscan.scanner import Scanner, ScanReport
+
+if TYPE_CHECKING:
+    from fuscan.perf import FilePerfRecorder
 
 __all__ = ["build_parser", "main"]
 
@@ -94,6 +98,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan_parser.add_argument(
         "--perf-save", type=Path, default=None, metavar="FILE", help="将性能统计保存为 JSON 文件供后续分析"
+    )
+    scan_parser.add_argument(
+        "--file-perf",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="记录单文件扫描耗时到 JSON 基线文件（用于调试与优化对比）",
+    )
+    scan_parser.add_argument(
+        "--file-perf-compare",
+        type=Path,
+        default=None,
+        metavar="BASELINE",
+        help="对比单文件性能基线，输出回归/改善文件列表",
     )
 
     # benchmark 子命令：多轮扫描测量各阶段性能，支持导出/对比基准线
@@ -255,6 +273,15 @@ def _cmd_scan(args: argparse.Namespace) -> int:
     # 大文件跳过阈值：CLI 参数优先（MB 转 byte），其次走规则集，None 让 Scanner 用默认值
     max_file_size = _resolve_max_file_size(args.max_file_size, sp.max_file_size if sp is not None else None)
 
+    # 单文件性能基线记录
+    file_perf_path: Path | None = getattr(args, "file_perf", None)
+    file_perf_compare: Path | None = getattr(args, "file_perf_compare", None)
+    file_perf = None
+    if file_perf_path is not None or file_perf_compare is not None:
+        from fuscan.perf import FilePerfRecorder
+
+        file_perf = FilePerfRecorder()
+
     if use_cache and cache_path is not None:
         # 仅在启用缓存时加载 SQLite 依赖
         from fuscan.cache import CacheStore, compute_source_files
@@ -270,6 +297,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
                 cache=cache,
                 source_files=source_files,
                 scan_extensions=ruleset.scan_extensions,
+                file_perf=file_perf,
             )
             report = _run_scan(scanner, scan_path, args)
         finally:
@@ -281,6 +309,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
             max_file_size=max_file_size,
             ignore_dirs=ignore_dirs,
             scan_extensions=ruleset.scan_extensions,
+            file_perf=file_perf,
         )
         report = _run_scan(scanner, scan_path, args)
 
@@ -305,7 +334,42 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         )
         print(f"性能统计已保存到: {perf_save}", file=sys.stderr)
 
+    # --file-perf 单文件性能基线
+    if file_perf is not None:
+        _handle_file_perf(file_perf, file_perf_path, file_perf_compare, report)
+
     return 0
+
+
+def _handle_file_perf(
+    file_perf: FilePerfRecorder,
+    file_perf_path: Path | None,
+    file_perf_compare: Path | None,
+    report: ScanReport,
+) -> None:
+    """处理单文件性能基线：打印汇总、保存基线、对比历史基线。"""
+    from fuscan.perf import FilePerfRecorder
+
+    file_perf.print_summary(log=logger)
+    if file_perf_path is not None:
+        file_perf.save_to_json(
+            file_perf_path,
+            meta={"scanned_files": report.stats.scanned_files, "root": str(report.root)},
+        )
+        print(f"单文件性能基线已保存到: {file_perf_path}", file=sys.stderr)
+    if file_perf_compare is not None:
+        baseline = FilePerfRecorder.load_from_json(file_perf_compare)
+        diffs = file_perf.compare(baseline, threshold_pct=20.0)
+        if diffs:
+            print(f"\n性能差异（对比基线 {file_perf_compare.name}，阈值 ±20%）:", file=sys.stderr)
+            for d in diffs:
+                direction = "回归" if d.delta_pct > 0 else "改善"
+                print(
+                    f"  {direction} {d.delta_pct:+.1f}%  {d.baseline_ms:.2f}ms → {d.current_ms:.2f}ms  {d.path}",
+                    file=sys.stderr,
+                )
+        else:
+            print(f"\n无显著性能差异（对比基线 {file_perf_compare.name}）", file=sys.stderr)
 
 
 def _run_scan(scanner: Scanner, scan_path: Path, args: argparse.Namespace) -> ScanReport:

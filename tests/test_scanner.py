@@ -3203,6 +3203,647 @@ class TestIter152AdaptBatch:
 
 
 # ---------------------------------------------------------------------------
+# iter-162 并发扫描进度条假卡死修复（in-flight 文件路径跟踪）
+# ---------------------------------------------------------------------------
+
+
+class TestIter162InFlightProgress:
+    """iter-162：并发扫描 wait 超时分支应显示真实 in-flight 文件路径。
+
+    覆盖 _pipeline_phase._collect_concurrent_results 超时分支：
+    多个 worker 同时处理大文件时，wait 超时返回空 done 集，emit 应显示
+    真实正在扫描的文件（_in_flight_paths[0]），而非上一个完成文件的陈旧路径。
+    """
+
+    def test_concurrent_timeout_emits_in_flight_file(self, tmp_path: Path) -> None:
+        """wait 超时分支应显示 in-flight 文件而非陈旧路径。
+
+        通过 monkeypatch 让首个 future 阻塞 1s（> 0.5s 超时阈值），
+        验证超时 emit 的 current_file 是该阻塞文件，而非空串或上次完成路径。
+        """
+        from fuscan.scanner._pipeline_phase import run_pipeline_phase
+        from fuscan.scanner.context import FileEntry
+
+        # 创建 4 个文件，前 3 个让 worker 阻塞 > 0.5s 触发超时分支
+        for i in range(4):
+            (tmp_path / f"slow_{i}.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        scanner = Scanner(rs, max_workers=2, on_progress=lambda _info: None, progress_interval=0.0)
+        # 收集 entries
+        entries: list[FileEntry] = []
+        for i in range(4):
+            p = tmp_path / f"slow_{i}.txt"
+            st = p.stat()
+            entries.append(
+                FileEntry(
+                    path=p,
+                    name=p.name,
+                    size=st.st_size,
+                    mtime=st.st_mtime,
+                    extension="txt",
+                    is_dir=False,
+                )
+            )
+
+        # 记录超时分支 emit 的 current_file
+        timeout_emits: list[str] = []
+        original_emit = scanner._emit_progress
+
+        def _capture_emit(current_file: str, *args: object, **kwargs: object) -> None:
+            # 仅记录非空且非 force 最终的 emit
+            if current_file and kwargs.get("force") and current_file.startswith(str(tmp_path)):
+                timeout_emits.append(current_file)
+            original_emit(current_file, *args, **kwargs)  # type: ignore[arg-type]
+
+        scanner._emit_progress = _capture_emit  # type: ignore[assignment]
+
+        # 用 monkeypatch 让前 2 个文件的 _scan_entry 阻塞 1s
+        original_scan_entry = scanner._scan_entry
+        call_count = [0]
+
+        def _slow_scan_entry(entry: FileEntry) -> ScanResult:
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                time.sleep(1.0)  # 超过 0.5s 超时阈值
+            return original_scan_entry(entry)
+
+        scanner._scan_entry = _slow_scan_entry  # type: ignore[assignment]
+
+        results: list[ScanResult] = []
+        run_pipeline_phase(scanner, entries, results)
+
+        # 验证：超时分支至少触发一次，且 emit 的文件路径在 in-flight 列表中
+        assert timeout_emits, "应至少触发一次超时分支 emit"
+        # 超时 emit 的文件应该是仍在扫描的文件（前 2 个慢文件之一）
+        slow_files = {str(tmp_path / "slow_0.txt"), str(tmp_path / "slow_1.txt")}
+        assert any(e in slow_files for e in timeout_emits), f"超时 emit 应显示 in-flight 慢文件，实际：{timeout_emits}"
+        # 扫描完成后 _in_flight_paths 应清空
+        assert scanner._in_flight_paths == []
+
+    def test_concurrent_submit_cancel_clears_in_flight(self, tmp_path: Path) -> None:
+        """submit 阶段触发取消应清空 _in_flight_paths 并立即返回。
+
+        通过在 submit 循环中触发 _check_control 返回 True，验证
+        cancelled_in_submit 分支清空 _in_flight_paths 且返回全零统计。
+        """
+        from fuscan.scanner._pipeline_phase import run_pipeline_phase
+        from fuscan.scanner.context import FileEntry
+
+        for i in range(10):
+            (tmp_path / f"f{i}.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=4, progress_interval=0.0)
+
+        entries: list[FileEntry] = []
+        for i in range(10):
+            p = tmp_path / f"f{i}.txt"
+            st = p.stat()
+            entries.append(
+                FileEntry(
+                    path=p,
+                    name=p.name,
+                    size=st.st_size,
+                    mtime=st.st_mtime,
+                    extension="txt",
+                    is_dir=False,
+                )
+            )
+
+        # 让 _check_control 在第 3 次 submit 后返回 True
+        call_count = [0]
+        original_check = scanner._check_control
+
+        def _cancel_after_3() -> bool:
+            call_count[0] += 1
+            if call_count[0] >= 3:
+                return True
+            return original_check()
+
+        scanner._check_control = _cancel_after_3  # type: ignore[assignment]
+
+        results: list[ScanResult] = []
+        scanned, matched, errors, matches = run_pipeline_phase(scanner, entries, results)
+        # 取消后立即返回，统计为 0
+        assert scanned == 0
+        assert matched == 0
+        assert errors == 0
+        assert matches == 0
+        # _in_flight_paths 应被清空
+        assert scanner._in_flight_paths == []
+
+    def test_concurrent_collect_cancel_clears_in_flight(self, tmp_path: Path) -> None:
+        """collect 阶段触发取消应清空 _in_flight_paths。
+
+        通过让所有 future 提交完成后在 wait 循环中触发 _check_control，
+        验证取消分支清空 _in_flight_paths。
+        """
+        from fuscan.scanner._pipeline_phase import run_pipeline_phase
+        from fuscan.scanner.context import FileEntry
+
+        for i in range(4):
+            (tmp_path / f"f{i}.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=2, progress_interval=0.0)
+
+        entries: list[FileEntry] = []
+        for i in range(4):
+            p = tmp_path / f"f{i}.txt"
+            st = p.stat()
+            entries.append(
+                FileEntry(
+                    path=p,
+                    name=p.name,
+                    size=st.st_size,
+                    mtime=st.st_mtime,
+                    extension="txt",
+                    is_dir=False,
+                )
+            )
+
+        # 让 _scan_entry 阻塞 0.6s（> 0.5s 超时），并在 _check_control 第 4 次返回 True
+        original_scan_entry = scanner._scan_entry
+        check_count = [0]
+        original_check = scanner._check_control
+
+        def _slow_scan(entry: FileEntry) -> ScanResult:
+            time.sleep(0.6)
+            return original_scan_entry(entry)
+
+        def _cancel_after_4() -> bool:
+            check_count[0] += 1
+            if check_count[0] >= 4:
+                return True
+            return original_check()
+
+        scanner._scan_entry = _slow_scan  # type: ignore[assignment]
+        scanner._check_control = _cancel_after_4  # type: ignore[assignment]
+
+        results: list[ScanResult] = []
+        run_pipeline_phase(scanner, entries, results)
+        # 取消后 _in_flight_paths 应被清空
+        assert scanner._in_flight_paths == []
+
+    def test_sequential_tail_flush_emits_remaining_progress(self, tmp_path: Path) -> None:
+        """顺序扫描尾部补发：batch_match_list 剩余应在循环结束后 extend。
+
+        60 个文件（>50 增量门限）+ batch=1（顺序模式默认）每个文件都触发
+        batch emit，循环结束后 batch_match_list 尾部 extend 路径被覆盖
+        （_on_progress 非 None 时 extend 到 _matched_files）。
+        """
+        for i in range(60):
+            (tmp_path / f"f{i:03d}.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        received: list[ProgressInfo] = []
+        scanner = Scanner(
+            rs,
+            max_workers=1,
+            on_progress=received.append,
+            progress_interval=0.0,
+        )
+        scanner.scan(tmp_path)
+        # 顺序扫描应触发多次 emit（60 个文件 + walk 阶段 + 最终 force）
+        assert len(received) >= 2
+        # 最后一次 emit 应反映全部 60 个文件
+        assert received[-1].scanned >= 60
+        assert received[-1].matched >= 60
+        # _matched_files 应包含命中（尾部 extend 路径覆盖，deque maxlen=50 限制上限）
+        assert len(scanner._matched_files) >= 50
+
+
+# ---------------------------------------------------------------------------
+# iter-163 _content_buckets 分支覆盖（extract_required_exts / 各 mode 桶）
+# ---------------------------------------------------------------------------
+
+
+class TestIter163ContentBucketsBranches:
+    """iter-163：补全 _content_buckets.py 各分支覆盖率。
+
+    覆盖：
+    - extract_required_exts: match is None / pattern 无 '.' / AND 交集为空 / OR exts 为空
+    - build_content_buckets: 各 mode (REGEX/CONTAINS/EQUALS/STARTSWITH/ENDSWITH) 编译路径
+    - match_content_via_buckets: 各 mode detail 构造分支
+    - CONTAINS case_sensitive count 路径与 case-insensitive finditer 路径
+    """
+
+    def test_extract_required_exts_none_match(self) -> None:
+        """match 为 None 时返回 None。"""
+        from fuscan.scanner._content_buckets import extract_required_exts
+
+        rule = Rule(
+            name="r",
+            severity=Severity.INFO,
+            match=LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.CONTAINS, pattern="x"),
+        )
+        # match 非 None 但 target 不是 FILENAME 或 mode 不对 → None
+        assert extract_required_exts(rule.match) is None
+
+    def test_extract_required_exts_filename_no_dot(self) -> None:
+        """FILENAME + ENDSWITH 模式但 pattern 无 '.' 返回 None。"""
+        from fuscan.scanner._content_buckets import extract_required_exts
+
+        rule = Rule(
+            name="r",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.FILENAME,
+                mode=MatchMode.ENDSWITH,
+                pattern="nodot",
+            ),
+        )
+        assert extract_required_exts(rule.match) is None
+
+    def test_extract_required_exts_filename_ext(self) -> None:
+        """FILENAME + ENDSWITH 模式带扩展名返回 frozenset。"""
+        from fuscan.scanner._content_buckets import extract_required_exts
+
+        rule = Rule(
+            name="r",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.FILENAME,
+                mode=MatchMode.ENDSWITH,
+                pattern="file.pdf",
+            ),
+        )
+        result = extract_required_exts(rule.match)
+        assert result == frozenset({"pdf"})
+
+    def test_extract_required_exts_and_intersection_empty(self) -> None:
+        """AND 子项交集为空时返回 None。"""
+        from fuscan.scanner._content_buckets import extract_required_exts
+
+        # 两个 ENDSWITH 子项扩展名不同，AND 交集为空
+        child_a = LeafMatch(
+            target=MatchTarget.FILENAME,
+            mode=MatchMode.ENDSWITH,
+            pattern=".pdf",
+        )
+        child_b = LeafMatch(
+            target=MatchTarget.FILENAME,
+            mode=MatchMode.ENDSWITH,
+            pattern=".docx",
+        )
+        and_match = AndMatch(children=(child_a, child_b))
+        assert extract_required_exts(and_match) is None
+
+    def test_extract_required_exts_or_with_none_child(self) -> None:
+        """OR 子项中含 None 约束返回 None。"""
+        from fuscan.scanner._content_buckets import extract_required_exts
+
+        # child_b 是 CONTENT target，extract 返回 None
+        child_a = LeafMatch(
+            target=MatchTarget.FILENAME,
+            mode=MatchMode.ENDSWITH,
+            pattern=".pdf",
+        )
+        child_b = LeafMatch(
+            target=MatchTarget.CONTENT,
+            mode=MatchMode.CONTAINS,
+            pattern="x",
+        )
+        or_match = OrMatch(children=(child_a, child_b))
+        assert extract_required_exts(or_match) is None
+
+    def test_extract_required_exts_or_empty_children(self) -> None:
+        """OR 无子项时返回 None。"""
+        from fuscan.scanner._content_buckets import extract_required_exts
+
+        or_match = OrMatch(children=())
+        # 空子项 → exts 列表为空 → return None
+        assert extract_required_exts(or_match) is None
+
+    def test_extract_required_exts_not_match_returns_none(self) -> None:
+        """NotMatch 始终返回 None（无法安全反转）。"""
+        from fuscan.scanner._content_buckets import extract_required_exts
+
+        child = LeafMatch(
+            target=MatchTarget.FILENAME,
+            mode=MatchMode.ENDSWITH,
+            pattern=".pdf",
+        )
+        not_match = NotMatch(child=child)
+        assert extract_required_exts(not_match) is None
+
+    def test_build_buckets_equals_mode(self) -> None:
+        """EQUALS 模式规则应合入桶并生成 ^pat$ 正则。"""
+        from fuscan.scanner._content_buckets import build_content_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        r1 = Rule(
+            name="eq1",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.EQUALS,
+                pattern="secret",
+            ),
+        )
+        r2 = Rule(
+            name="eq2",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.EQUALS,
+                pattern="password",
+            ),
+        )
+        pairs = [(r, build_matcher(r.match)) for r in (r1, r2)]
+        buckets, remaining = build_content_buckets(pairs)
+        assert len(buckets) == 1
+        assert len(remaining) == 0
+        # 验证桶匹配：内容完全等于 "secret" 时命中 eq1
+        from fuscan.scanner._content_buckets import match_content_via_buckets
+
+        hits = match_content_via_buckets("secret", buckets)
+        assert any(h.rule_name == "eq1" for h in hits)
+        # detail 应为 "完全相等"
+        eq_hit = next(h for h in hits if h.rule_name == "eq1")
+        assert eq_hit.detail == "完全相等"
+
+    def test_build_buckets_startswith_mode(self) -> None:
+        """STARTSWITH 模式规则应合入桶并生成 ^pat 正则。"""
+        from fuscan.scanner._content_buckets import build_content_buckets, match_content_via_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        r1 = Rule(
+            name="sw1",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.STARTSWITH,
+                pattern="aws-",
+            ),
+        )
+        r2 = Rule(
+            name="sw2",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.STARTSWITH,
+                pattern="ghp_",
+            ),
+        )
+        pairs = [(r, build_matcher(r.match)) for r in (r1, r2)]
+        buckets, _remaining = build_content_buckets(pairs)
+        assert len(buckets) == 1
+        hits = match_content_via_buckets("aws-key-here", buckets)
+        assert any(h.rule_name == "sw1" for h in hits)
+        sw_hit = next(h for h in hits if h.rule_name == "sw1")
+        assert "开头" in sw_hit.detail
+
+    def test_build_buckets_endswith_mode(self) -> None:
+        """ENDSWITH 模式规则应合入桶并生成 pat$ 正则。"""
+        from fuscan.scanner._content_buckets import build_content_buckets, match_content_via_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        r1 = Rule(
+            name="ew1",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.ENDSWITH,
+                pattern="EOF",
+            ),
+        )
+        r2 = Rule(
+            name="ew2",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.ENDSWITH,
+                pattern="END",
+            ),
+        )
+        pairs = [(r, build_matcher(r.match)) for r in (r1, r2)]
+        buckets, _remaining = build_content_buckets(pairs)
+        assert len(buckets) == 1
+        hits = match_content_via_buckets("dataEOF", buckets)
+        assert any(h.rule_name == "ew1" for h in hits)
+        ew_hit = next(h for h in hits if h.rule_name == "ew1")
+        assert "结尾" in ew_hit.detail
+
+    def test_build_buckets_regex_mode(self) -> None:
+        """REGEX 模式规则应合入桶并保留原 pattern。"""
+        from fuscan.scanner._content_buckets import build_content_buckets, match_content_via_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        r1 = Rule(
+            name="re1",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"AKIA[0-9A-Z]{16}",
+            ),
+        )
+        r2 = Rule(
+            name="re2",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"ghp_[A-Za-z0-9]{36}",
+            ),
+        )
+        pairs = [(r, build_matcher(r.match)) for r in (r1, r2)]
+        buckets, _remaining = build_content_buckets(pairs)
+        assert len(buckets) == 1
+        hits = match_content_via_buckets("AKIA1234567890ABCDEF", buckets)
+        assert any(h.rule_name == "re1" for h in hits)
+
+    def test_build_buckets_contains_case_sensitive_count(self) -> None:
+        """CONTAINS + case_sensitive=True 应走 count 路径。"""
+        from fuscan.scanner._content_buckets import build_content_buckets, match_content_via_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        r1 = Rule(
+            name="cs1",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.CONTAINS,
+                pattern="Secret",
+                case_sensitive=True,
+            ),
+        )
+        r2 = Rule(
+            name="cs2",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.CONTAINS,
+                pattern="Password",
+                case_sensitive=True,
+            ),
+        )
+        pairs = [(r, build_matcher(r.match)) for r in (r1, r2)]
+        buckets, _remaining = build_content_buckets(pairs)
+        assert len(buckets) == 1
+        # 内容含 "Secret"（大写 S）应命中 cs1
+        hits = match_content_via_buckets("Secret here", buckets)
+        assert any(h.rule_name == "cs1" for h in hits)
+        # 小写 "secret" 不应命中 cs1（case_sensitive）
+        hits_lower = match_content_via_buckets("secret here", buckets)
+        assert not any(h.rule_name == "cs1" for h in hits_lower)
+
+    def test_build_buckets_single_rule_no_merge(self) -> None:
+        """单条 CONTENT 规则无合并收益，应回到 remaining。"""
+        from fuscan.scanner._content_buckets import build_content_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        r1 = Rule(
+            name="solo",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.CONTAINS,
+                pattern="solo",
+            ),
+        )
+        pairs = [(r1, build_matcher(r1.match))]
+        buckets, remaining = build_content_buckets(pairs)
+        assert len(buckets) == 0
+        assert len(remaining) == 1
+
+    def test_match_buckets_empty_compiled_skipped(self) -> None:
+        """bucket.compiled is None 时跳过匹配。"""
+        from fuscan.scanner._content_buckets import _ContentRuleBucket, match_content_via_buckets
+
+        # 构造一个 compiled=None 的桶
+        bucket = _ContentRuleBucket(mode=MatchMode.CONTAINS, case_sensitive=False)
+        # compiled 默认 None
+        hits = match_content_via_buckets("any content", [bucket])
+        assert hits == []
+
+    def test_match_buckets_contains_empty_pattern_skipped(self) -> None:
+        """CONTAINS case_sensitive 桶中空 contains_patterns 应跳过 count 路径。"""
+        from fuscan.scanner._content_buckets import _ContentRuleBucket, match_content_via_buckets
+
+        # LeafMatch 不允许空 pattern，但 contains_patterns 可手动设为空串
+        # 触发 line 306 的 `if not pat: continue` 防御分支
+        bucket = _ContentRuleBucket(mode=MatchMode.CONTAINS, case_sensitive=True)
+        bucket.rules = [
+            Rule(
+                name="dummy",
+                severity=Severity.INFO,
+                match=LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.CONTAINS,
+                    pattern="dummy",
+                    case_sensitive=True,
+                ),
+            )
+        ]
+        # 手动设 contains_patterns 为空串列表，触发跳过分支
+        bucket.contains_patterns = [""]
+        import re
+
+        bucket.compiled = re.compile("dummy")
+        hits = match_content_via_buckets("any", [bucket])
+        # 空 pattern 不应产生命中
+        assert hits == []
+
+
+# ---------------------------------------------------------------------------
+# iter-164 桶匹配异常 fallback 分支（scanner.py _match_content_via_buckets 异常路径）
+# ---------------------------------------------------------------------------
+
+
+class TestIter164BucketMatchFallback:
+    """iter-164：补全 scanner.py 桶匹配异常 fallback 分支覆盖率。
+
+    覆盖：
+    - _scan_entry_uncached 桶匹配抛异常 → +1 rule_errors，remaining 规则继续执行
+    - _scan_entry_cached 桶匹配抛异常 → +1 errors，缓存模式降级
+    """
+
+    def test_uncached_bucket_match_exception_fallback(self, tmp_path: Path) -> None:
+        """无缓存模式桶匹配抛异常时记 rule_errors 且 remaining 规则继续。"""
+        # 构造 2 条 CONTENT CONTAINS 规则触发桶合并
+        r1 = Rule(
+            name="c1",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.CONTAINS,
+                pattern="secret",
+            ),
+        )
+        r2 = Rule(
+            name="c2",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.CONTAINS,
+                pattern="password",
+            ),
+        )
+        rs = _build_ruleset(r1, r2)
+        scanner = Scanner(rs, max_workers=1)
+        # monkeypatch _match_content_via_buckets_impl 抛异常
+        original = scanner._match_content_via_buckets_impl
+
+        def _raise(_content: str, _buckets: object) -> object:
+            raise RuntimeError("test bucket match failure")
+
+        scanner._match_content_via_buckets_impl = _raise  # type: ignore[assignment]
+        try:
+            (tmp_path / "f.txt").write_text("secret password", encoding="utf-8")
+            report = scanner.scan(tmp_path)
+            # 桶匹配失败 → rule_errors +1，但扫描仍完成
+            assert report.stats.errors >= 1
+        finally:
+            scanner._match_content_via_buckets_impl = original  # type: ignore[assignment]
+
+    def test_cached_bucket_match_exception_fallback(self, tmp_path: Path) -> None:
+        """缓存模式桶匹配抛异常时记 errors 且降级到空匹配。"""
+        from fuscan.cache import CacheStore
+        from fuscan.scanner.result import RuleHit
+
+        r1 = Rule(
+            name="c1",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.CONTAINS,
+                pattern="secret",
+            ),
+        )
+        r2 = Rule(
+            name="c2",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.CONTAINS,
+                pattern="password",
+            ),
+        )
+        rs = _build_ruleset(r1, r2)
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
+        try:
+            scanner = Scanner(rs, cache=cache, max_workers=1)
+            # monkeypatch _match_content_via_buckets 抛异常（缓存模式走这个入口）
+            original = scanner._match_content_via_buckets
+
+            def _raise(_content: str) -> list[RuleHit]:
+                raise RuntimeError("cached bucket match failure")
+
+            scanner._match_content_via_buckets = _raise  # type: ignore[assignment]
+            try:
+                (tmp_path / "f.txt").write_text("secret password", encoding="utf-8")
+                report = scanner.scan(tmp_path)
+                # 桶匹配失败 → errors +1，扫描仍完成
+                assert report.stats.errors >= 1
+            finally:
+                scanner._match_content_via_buckets = original  # type: ignore[assignment]
+        finally:
+            cache.close()
+
+
+# ---------------------------------------------------------------------------
 # iter-164 规则 AST 剪枝预筛（按扩展名分组）
 # ---------------------------------------------------------------------------
 

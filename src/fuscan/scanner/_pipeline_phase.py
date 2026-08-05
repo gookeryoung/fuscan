@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -293,10 +294,8 @@ def _collect_concurrent_results(  # noqa: PLR0912
             entry_path = str(entry.path)
             _last_entry_path = entry_path
             # 从 in-flight 列表移除已完成的（list.remove 是 O(n)，但 max_workers 小通常 ≤16）
-            try:
+            with contextlib.suppress(ValueError):
                 scanner._in_flight_paths.remove(entry_path)
-            except ValueError:
-                pass  # 取消路径已清理，忽略
             # 设置当前文件元信息缓存，供 _emit_progress 填充单文件字段
             scanner._current_file_path = entry_path
             scanner._current_file_size = entry.size

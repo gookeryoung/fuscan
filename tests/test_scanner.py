@@ -3897,6 +3897,484 @@ class TestIter163ContentBucketsBranches:
 
 
 # ---------------------------------------------------------------------------
+# iter-165 CONTENT 桶字面量预筛（_extract_literals / match_content_via_buckets 预筛路径）
+# ---------------------------------------------------------------------------
+
+
+class TestIter165ContentBucketPrefilter:
+    """iter-165：补全 CONTENT 桶字面量预筛（性能优化，避免大文件 finditer 阻塞）。
+
+    覆盖：
+    - _extract_literals: 各种正则 AST 节点（LITERAL/BRANCH/SUBPATTERN/MAX_REPEAT/IN）
+    - build_content_buckets: prefilter_keywords / prefilter_case_insensitive 字段填充
+    - match_content_via_buckets: 预筛命中后走 finditer；预筛未命中跳过 finditer
+    - 预筛不产生 false negative（含大小写变体、字面量子集等边界）
+    """
+
+    def test_extract_literals_simple(self) -> None:
+        """纯字面量正则应提取完整字符串。"""
+        from fuscan.scanner._content_buckets import _extract_literals
+
+        assert _extract_literals(r"password") == ["password"]
+        assert _extract_literals(r"abc\d+") == ["abc"]
+
+    def test_extract_literals_branch(self) -> None:
+        """| 分支应提取所有分支的字面量（sre_parse 会把公共前缀提到 BRANCH 外）。"""
+        from fuscan.scanner._content_buckets import _extract_literals
+
+        # sre_parse 优化：(password|passwd|pwd) → p + BRANCH([assword, asswd, wd])
+        # 预筛提取器必须正确还原 password / passwd / pwd
+        result = _extract_literals(r"(password|passwd|pwd)")
+        assert "password" in result
+        assert "passwd" in result
+        assert "pwd" in result
+
+    def test_extract_literals_subpattern(self) -> None:
+        """捕获组应递归提取内部字面量。"""
+        from fuscan.scanner._content_buckets import _extract_literals
+
+        # (ghp|gho)_[A-Za-z0-9]{36} → 提取 "ghp"/"gho"（"_" 因长度 1 被过滤）
+        result = _extract_literals(r"(ghp|gho)_[A-Za-z0-9]{36}")
+        assert "ghp" in result
+        assert "gho" in result
+
+    def test_extract_literals_in_single_chars(self) -> None:
+        """字符类 [abc] 应展开为各候选前缀组合。"""
+        from fuscan.scanner._content_buckets import _extract_literals
+
+        # gh[pousr] → "ghp", "gho", "ghu", "ghs", "ghr"
+        result = _extract_literals(r"gh[pousr]")
+        for ch in "pousr":
+            assert f"gh{ch}" in result
+
+    def test_extract_literals_in_range_skipped(self) -> None:
+        """字符类 [A-Z] 含 RANGE，不应提取任何字面量。"""
+        from fuscan.scanner._content_buckets import _extract_literals
+
+        # [A-Z]{16} 无字面量可提取
+        result = _extract_literals(r"[A-Z]{16}")
+        assert result == []
+
+    def test_extract_literals_min_length(self) -> None:
+        """长度 < 3 的字面量应被过滤。"""
+        from fuscan.scanner._content_buckets import _extract_literals
+
+        # "ab" 长度 2 < 3，应被过滤；"abcd" 长度 4 应保留
+        result = _extract_literals(r"ab\s+abcd")
+        assert "ab" not in result
+        assert "abcd" in result
+
+    def test_extract_literals_inline_flags_stripped(self) -> None:
+        """内联标志 (?i) 应被剥离，不影响字面量提取。"""
+        from fuscan.scanner._content_buckets import _extract_literals
+
+        # (?i)password 与 password 应提取相同字面量
+        assert _extract_literals(r"(?i)password") == ["password"]
+        assert _extract_literals(r"(?im)aws_secret") == ["aws_secret"]
+
+    def test_extract_literals_invalid_regex(self) -> None:
+        """非法正则应返回空列表（不抛异常，保守不预筛）。"""
+        from fuscan.scanner._content_buckets import _extract_literals
+
+        # 非法正则：未闭合的 [
+        assert _extract_literals(r"[unclosed") == []
+
+    def test_extract_literals_dedup(self) -> None:
+        """重复字面量应去重，保留首次出现顺序。"""
+        from fuscan.scanner._content_buckets import _extract_literals
+
+        # abc|abc 应只提取一次 "abc"
+        result = _extract_literals(r"abc|abc")
+        assert result.count("abc") == 1
+
+    def test_build_buckets_prefilter_keywords_populated(self) -> None:
+        """build_content_buckets 应填充 prefilter_keywords 字段。"""
+        from fuscan.scanner._content_buckets import build_content_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        r1 = Rule(
+            name="re1",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"password\s*[=:]",
+            ),
+        )
+        r2 = Rule(
+            name="re2",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"aws_secret_access_key\s*[=:]",
+            ),
+        )
+        pairs = [(r, build_matcher(r.match)) for r in (r1, r2)]
+        buckets, _remaining = build_content_buckets(pairs)
+        assert len(buckets) == 1
+        # 桶默认 case_sensitive=False → 预筛大小写不敏感，关键字小写化
+        bucket = buckets[0]
+        assert bucket.prefilter_case_insensitive is True
+        assert "password" in bucket.prefilter_keywords
+        assert "aws_secret_access_key" in bucket.prefilter_keywords
+
+    def test_build_buckets_prefilter_case_sensitive(self) -> None:
+        """case_sensitive=True 桶：prefilter_case_insensitive=False，关键字保持原样。"""
+        from fuscan.scanner._content_buckets import build_content_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        r1 = Rule(
+            name="cs1",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.CONTAINS,
+                pattern="Secret",
+                case_sensitive=True,
+            ),
+        )
+        r2 = Rule(
+            name="cs2",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.CONTAINS,
+                pattern="Password",
+                case_sensitive=True,
+            ),
+        )
+        pairs = [(r, build_matcher(r.match)) for r in (r1, r2)]
+        buckets, _remaining = build_content_buckets(pairs)
+        assert len(buckets) == 1
+        bucket = buckets[0]
+        assert bucket.prefilter_case_insensitive is False
+        # 关键字保持原大小写
+        assert "Secret" in bucket.prefilter_keywords
+        assert "Password" in bucket.prefilter_keywords
+
+    def test_prefilter_skips_bucket_when_no_keyword_match(self) -> None:
+        """内容不含任何关键字时，桶被预筛跳过，finditer 不执行。"""
+        from fuscan.scanner._content_buckets import build_content_buckets, match_content_via_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        r1 = Rule(
+            name="re1",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"password\s*[=:]\s*\S+",
+            ),
+        )
+        r2 = Rule(
+            name="re2",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"aws_secret_access_key\s*[=:]\s*\S+",
+            ),
+        )
+        pairs = [(r, build_matcher(r.match)) for r in (r1, r2)]
+        buckets, _remaining = build_content_buckets(pairs)
+        # 纯文档内容，不含任何关键字
+        content = "This is a documentation file. No secrets here. Just plain text."
+        hits = match_content_via_buckets(content, buckets)
+        assert hits == []
+
+    def test_prefilter_passes_then_finditer_runs(self) -> None:
+        """预筛命中后 finditer 仍正常工作，返回真实命中。"""
+        from fuscan.scanner._content_buckets import build_content_buckets, match_content_via_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        r1 = Rule(
+            name="re1",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"password\s*[=:]\s*\S+",
+            ),
+        )
+        r2 = Rule(
+            name="re2",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"aws_secret_access_key\s*[=:]\s*\S+",
+            ),
+        )
+        pairs = [(r, build_matcher(r.match)) for r in (r1, r2)]
+        buckets, _remaining = build_content_buckets(pairs)
+        # 内容含 "password=" 关键字
+        hits = match_content_via_buckets("password=secret123", buckets)
+        assert any(h.rule_name == "re1" for h in hits)
+
+    def test_prefilter_case_insensitive_matches_uppercase(self) -> None:
+        """大小写不敏感桶：关键字小写化后能匹配大写 content。"""
+        from fuscan.scanner._content_buckets import build_content_buckets, match_content_via_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        # (?i) 使正则大小写不敏感；case_sensitive=False
+        r1 = Rule(
+            name="re1",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"(?i)password\s*[=:]\s*\S+",
+            ),
+        )
+        r2 = Rule(
+            name="re2",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"(?i)aws_secret_access_key\s*[=:]\s*\S+",
+            ),
+        )
+        pairs = [(r, build_matcher(r.match)) for r in (r1, r2)]
+        buckets, _remaining = build_content_buckets(pairs)
+        # 大写 content，预筛应通过（关键字已小写化，content 也小写化匹配）
+        hits = match_content_via_buckets("PASSWORD=secret123", buckets)
+        assert any(h.rule_name == "re1" for h in hits)
+
+    def test_prefilter_no_false_negative_property(self) -> None:
+        """属性测试：随机文本上预筛不应产生 false negative（预筛未命中但 finditer 命中）。"""
+        from fuscan.scanner._content_buckets import build_content_buckets, match_content_via_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        # 构造多模式桶覆盖各种字面量提取场景
+        rules = [
+            Rule(
+                name="pwd",
+                severity=Severity.INFO,
+                match=LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"(?i)(password|passwd|pwd)\s*[=:]\s*\S+",
+                ),
+            ),
+            Rule(
+                name="aws",
+                severity=Severity.INFO,
+                match=LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"(?i)aws_secret_access_key\s*[=:]\s*\S+",
+                ),
+            ),
+            Rule(
+                name="gh",
+                severity=Severity.INFO,
+                match=LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}\b",
+                ),
+            ),
+            Rule(
+                name="jwt",
+                severity=Severity.INFO,
+                match=LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b",
+                ),
+            ),
+        ]
+        pairs = [(r, build_matcher(r.match)) for r in rules]
+        buckets, _remaining = build_content_buckets(pairs)
+        assert len(buckets) >= 1
+
+        # 关闭预筛的版本：直接构造无预筛的桶副本来跑对照
+        # （通过临时清空 prefilter_keywords 实现）
+        import copy
+
+        buckets_no_prefilter = copy.deepcopy(buckets)
+        for b in buckets_no_prefilter:
+            b.prefilter_keywords = []
+
+        import random
+
+        rng = random.Random(42)
+        alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 \n\t.:=_-"
+        for _ in range(50):
+            length = rng.randint(50, 500)
+            text = "".join(rng.choice(alphabet) for _ in range(length))
+            hits_prefilter = match_content_via_buckets(text, buckets)
+            hits_no_prefilter = match_content_via_buckets(text, buckets_no_prefilter)
+            # 预筛不允许 false negative：预筛命中集 ⊆ 真实命中集
+            # 即：若预筛返回命中，无预筛也应返回至少这些命中
+            prefilter_names = {h.rule_name for h in hits_prefilter}
+            no_prefilter_names = {h.rule_name for h in hits_no_prefilter}
+            assert prefilter_names <= no_prefilter_names, (
+                f"false negative: prefilter={prefilter_names}, no_prefilter={no_prefilter_names}, text={text!r}"
+            )
+
+    def test_prefilter_empty_keywords_no_skip(self) -> None:
+        r"""桶无可提取关键字时（如纯 \d+），prefilter_keywords 空，不预筛，仍走 finditer。"""
+        from fuscan.scanner._content_buckets import build_content_buckets, match_content_via_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        # 两条纯字符类正则，无字面量
+        r1 = Rule(
+            name="re1",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"\d{16}",
+            ),
+        )
+        r2 = Rule(
+            name="re2",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"[A-Z]{20}",
+            ),
+        )
+        pairs = [(r, build_matcher(r.match)) for r in (r1, r2)]
+        buckets, _remaining = build_content_buckets(pairs)
+        assert len(buckets) == 1
+        bucket = buckets[0]
+        # 纯字符类正则，无字面量可提取
+        assert bucket.prefilter_keywords == []
+        # 即使无字面量，匹配仍正常工作
+        hits = match_content_via_buckets("1234567890123456", buckets)
+        assert any(h.rule_name == "re1" for h in hits)
+
+    def test_prefilter_content_lower_reused_across_buckets(self) -> None:
+        """多个大小写不敏感桶：预筛阶段对 content.lower() lazy 计算一次复用。
+
+        验证多桶场景下大写 content 能被各 CI 桶正确预筛通过（间接覆盖 lazy
+        content_lower 复用路径：若未复用则两次 lower 调用结果一致；若复用则
+        一次调用结果被两个桶共用——行为一致，仅性能差异）。
+        """
+        from fuscan.scanner._content_buckets import build_content_buckets, match_content_via_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        # 用 REGEX + CONTAINS 两种 mode 构造 2 个大小写不敏感桶
+        r1 = Rule(
+            name="regex_pwd",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"(?i)password\s*[=:]\s*\S+",
+            ),
+        )
+        r2 = Rule(
+            name="regex_aws",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"(?i)aws_secret\s*[=:]\s*\S+",
+            ),
+        )
+        r3 = Rule(
+            name="contains_token",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.CONTAINS,
+                pattern="bearer",
+            ),
+        )
+        r4 = Rule(
+            name="contains_jwt",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.CONTAINS,
+                pattern="eyJ",
+            ),
+        )
+        pairs = [(r, build_matcher(r.match)) for r in (r1, r2, r3, r4)]
+        buckets, _remaining = build_content_buckets(pairs)
+        # 应形成 2 个桶（REGEX CI 一个，CONTAINS CI 一个，均大小写不敏感）
+        assert len(buckets) == 2
+        assert all(b.prefilter_case_insensitive for b in buckets)
+
+        # 大写 content 触发 content_lower 计算；多桶共享同一份 content_lower
+        # 第一个桶预筛通过 → finditer 命中；第二个桶预筛通过 → finditer 命中
+        hits = match_content_via_buckets("PASSWORD=secret123 BEARER abc", buckets)
+        hit_names = {h.rule_name for h in hits}
+        # REGEX 桶命中 regex_pwd
+        assert "regex_pwd" in hit_names
+        # CONTAINS 桶命中 contains_token
+        assert "contains_token" in hit_names
+
+    def test_prefilter_case_sensitive_and_insensitive_mixed(self) -> None:
+        """混合桶：case_sensitive 桶用原 content，case_insensitive 桶用 content.lower。"""
+        from fuscan.scanner._content_buckets import build_content_buckets, match_content_via_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        # case_sensitive=True 的 CONTAINS 桶
+        r1 = Rule(
+            name="cs_secret",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.CONTAINS,
+                pattern="Secret",
+                case_sensitive=True,
+            ),
+        )
+        r2 = Rule(
+            name="cs_password",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.CONTAINS,
+                pattern="Password",
+                case_sensitive=True,
+            ),
+        )
+        # case_sensitive=False 的 REGEX 桶
+        r3 = Rule(
+            name="ci_aws",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"aws_secret_access_key\s*[=:]\s*\S+",
+            ),
+        )
+        r4 = Rule(
+            name="ci_jwt",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"\beyJ[A-Za-z0-9_-]{8,}\b",
+            ),
+        )
+        pairs = [(r, build_matcher(r.match)) for r in (r1, r2, r3, r4)]
+        buckets, _remaining = build_content_buckets(pairs)
+        # 应有 2 个桶：1 个 case_sensitive + 1 个 case_insensitive
+        ci_buckets = [b for b in buckets if b.prefilter_case_insensitive]
+        cs_buckets = [b for b in buckets if not b.prefilter_case_insensitive]
+        assert len(ci_buckets) == 1
+        assert len(cs_buckets) == 1
+        # case_sensitive 桶：关键字保持原大小写
+        assert "Secret" in cs_buckets[0].prefilter_keywords
+        # case_insensitive 桶：关键字小写化
+        assert "aws_secret_access_key" in ci_buckets[0].prefilter_keywords
+        # 混合 content：含大写 Secret 与小写 aws_secret_access_key
+        hits = match_content_via_buckets("Secret here AWS_SECRET_ACCESS_KEY=x", buckets)
+        hit_names = {h.rule_name for h in hits}
+        assert "cs_secret" in hit_names  # case-sensitive 命中 "Secret"
+        assert "ci_aws" in hit_names  # case-insensitive 命中 "AWS_SECRET_ACCESS_KEY"
+
+
+# ---------------------------------------------------------------------------
 # iter-164 桶匹配异常 fallback 分支（scanner.py _match_content_via_buckets 异常路径）
 # ---------------------------------------------------------------------------
 

@@ -156,6 +156,10 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
                 matched_files=info.matched_files,
                 phase=info.phase,
                 user_skipped=info.user_skipped + self._cum_user_skipped,
+                # 单文件元信息透传：size/ext/elapsed_ms 仅反映最近一次 emit 的文件
+                current_file_size=info.current_file_size,
+                current_file_ext=info.current_file_ext,
+                current_file_elapsed_ms=info.current_file_elapsed_ms,
             )
         )
 

@@ -222,6 +222,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._progress_total: int = 0
         self._progress_indeterminate: bool = False
         self._current_file: str = ""
+        # 当前文件单文件元信息（scan 阶段填入，walk/archive 阶段为 0/""/0.0）
+        self._current_file_size: int = 0
+        self._current_file_ext: str = ""
+        self._current_file_elapsed_ms: float = 0.0
         self._status_summary: str = STR_STATUS_READY
         self._status_text: str = STR_STATUS_READY
         self._passed_count: int = 0
@@ -355,6 +359,21 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def currentFile(self) -> str:
         """当前正在扫描的文件路径。"""
         return self._current_file
+
+    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def currentFileSize(self) -> int:
+        """当前文件大小（字节）。scan 阶段填入，walk/archive 阶段为 0。"""
+        return self._current_file_size
+
+    @Property(str, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def currentFileExt(self) -> str:
+        """当前文件扩展名（小写无点，如 ``"pdf"``）。scan 阶段填入，其余为空串。"""
+        return self._current_file_ext
+
+    @Property(float, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    def currentFileElapsedMs(self) -> float:
+        """当前文件已解析耗时（毫秒）。scan 阶段填入，其余为 0.0。"""
+        return self._current_file_elapsed_ms
 
     @Property(str, notify=progressChanged)  # pyrefly: ignore [not-callable]
     def statusSummary(self) -> str:
@@ -1169,6 +1188,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 增量扫描统计重置
         self._reused_files = 0
         self._current_file = "准备统计..."
+        # 单文件元信息重置
+        self._current_file_size = 0
+        self._current_file_ext = ""
+        self._current_file_elapsed_ms = 0.0
         self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
         # 阶段 1：FileStatsWorker 执行 walk 收集文件清单
@@ -1261,6 +1284,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 增量扫描统计重置
         self._reused_files = 0
         self._current_file = "准备统计..."
+        # 单文件元信息重置
+        self._current_file_size = 0
+        self._current_file_ext = ""
+        self._current_file_elapsed_ms = 0.0
         self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
         # 阶段 1：FileStatsWorker 执行 walk 收集文件清单（传入 incremental_manifest 启用增量）
@@ -1402,6 +1429,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             if len(path_text) > 100:
                 path_text = "..." + path_text[-97:]
             self._current_file = path_text
+        # 单文件元信息同步（walk/archive 阶段为 0/""/0.0）
+        self._current_file_size = info.current_file_size
+        self._current_file_ext = info.current_file_ext
+        self._current_file_elapsed_ms = info.current_file_elapsed_ms
         self._status_summary = info.summary()
         self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -1732,6 +1763,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._is_paused = False
         self._progress_indeterminate = False
         self._current_file = ""
+        # 单文件元信息重置（扫描结束后不再展示）
+        self._current_file_size = 0
+        self._current_file_ext = ""
+        self._current_file_elapsed_ms = 0.0
         self._cleanup_workers()
         self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
 

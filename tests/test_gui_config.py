@@ -191,6 +191,33 @@ class TestSave:
         controller.save()
         assert len(emitted) == 1
 
+    def test_save_debounces_disk_write(self, controller: ConfigController, config_dir: Path) -> None:
+        """多次 save 合并为一次磁盘写入：timer 未触发前磁盘不应被写入。"""
+        from fuscan.config import load_config
+
+        controller.config.font_size = 20
+        controller.save()
+        # 300ms debounce 未到，磁盘上应仍是旧值（默认 14）
+        assert load_config().font_size == 14
+        # 第二次 save 重启 timer，仍不应写入
+        controller.config.font_size = 24
+        controller.save()
+        assert load_config().font_size == 14
+
+    def test_flush_save_writes_immediately(self, controller: ConfigController, config_dir: Path) -> None:
+        """flush_save 取消 debounce timer 并立即写入磁盘。"""
+        from fuscan.config import load_config
+
+        controller.config.font_size = 20
+        controller.save()
+        assert load_config().font_size == 14  # 未 flush
+        controller.flush_save()
+        assert load_config().font_size == 20  # flush 后立即写入
+
+    def test_flush_save_noop_when_no_pending(self, controller: ConfigController, config_dir: Path) -> None:
+        """无待写入时 flush_save 为 no-op，不抛异常。"""
+        controller.flush_save()  # 不应抛异常
+
 
 class TestDrives:
     def test_drives_returns_list(self, controller: ConfigController) -> None:
@@ -203,6 +230,35 @@ class TestDrives:
         controller.drivesChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
         controller.refresh_drives()
         assert len(emitted) == 1
+
+    def test_drives_cached(self, controller: ConfigController, monkeypatch: pytest.MonkeyPatch) -> None:
+        """连续访问 drives 不重复调用 list_drives（缓存生效）。"""
+        calls: list[int] = []
+
+        def fake_list_drives(include_network: bool = False) -> list[str]:  # noqa: ARG001
+            calls.append(1)
+            return ["C:\\", "D:\\"]
+
+        monkeypatch.setattr("fuscan.scanner.walker.list_drives", fake_list_drives)
+        # 首次访问触发枚举
+        assert controller.drives == ["C:\\", "D:\\"]
+        # 二次访问命中缓存，不再枚举
+        assert controller.drives == ["C:\\", "D:\\"]
+        assert len(calls) == 1
+
+    def test_refresh_drives_clears_cache(self, controller: ConfigController, monkeypatch: pytest.MonkeyPatch) -> None:
+        """refresh_drives 清空缓存，下次访问重新枚举。"""
+        calls: list[int] = []
+
+        def fake_list_drives(include_network: bool = False) -> list[str]:  # noqa: ARG001
+            calls.append(1)
+            return ["C:\\"]
+
+        monkeypatch.setattr("fuscan.scanner.walker.list_drives", fake_list_drives)
+        controller.drives  # 触发首次枚举
+        controller.refresh_drives()
+        controller.drives  # 应重新枚举
+        assert len(calls) == 2
 
 
 class TestResetToDefaults:
@@ -227,14 +283,16 @@ class TestResetToDefaults:
         assert len(emitted) >= 1
 
     def test_persists_to_disk(self, controller: ConfigController, config_dir: Path) -> None:
-        """重置后应保存到磁盘。"""
-        controller.setFontSize(20)
-        controller.resetToDefaults()
-        # 重新加载配置应得到默认值
+        """重置后应保存到磁盘（debounce 路径需 flush_save 强制写入）。"""
         from fuscan.config import load_config
 
-        reloaded = load_config()
-        assert reloaded.font_size == 14
+        controller.setFontSize(20)
+        controller.flush_save()
+        # 验证 20 已写入磁盘（避免断言与默认值巧合相等）
+        assert load_config().font_size == 20
+        controller.resetToDefaults()
+        controller.flush_save()
+        assert load_config().font_size == 14
 
 
 class TestGetConfigValue:

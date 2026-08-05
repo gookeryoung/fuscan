@@ -3023,7 +3023,7 @@ class TestIter152AdaptBatch:
     """iter-152：自适应 progress_emit_batch 与 matched_files 批量 extend 正确性。
 
     覆盖：
-    - _adapt_progress_batch 按 entries 规模分档 (10/20/35/50)
+    - _adapt_progress_batch 按 entries 规模分档 (10/15/20/25)
     - 顺序扫描 (max_workers<=1) 保持 batch=1 不被修改
     - 并发扫描 matched_files 完整性：批量 extend 后与原始逐 append 结果
       集合相等，不丢命中 (path, rule) 元组
@@ -3048,35 +3048,35 @@ class TestIter152AdaptBatch:
         assert scanner._progress_emit_batch == 10
 
     def test_adapt_batch_mid_entries(self) -> None:
-        """1000<entries<=10000：batch=20，平衡开销与反馈。"""
+        """1000<entries<=10000：batch=15，平衡开销与反馈。"""
         rs = _build_ruleset(_content_rule("pwd", "password"))
         scanner = Scanner(rs, max_workers=4)
         scanner._adapt_progress_batch(1001)
-        assert scanner._progress_emit_batch == 20
+        assert scanner._progress_emit_batch == 15
         scanner._adapt_progress_batch(8000)
-        assert scanner._progress_emit_batch == 20
+        assert scanner._progress_emit_batch == 15
         scanner._adapt_progress_batch(10000)
-        assert scanner._progress_emit_batch == 20
+        assert scanner._progress_emit_batch == 15
 
     def test_adapt_batch_large_entries(self) -> None:
-        """10000<entries<=50000：batch=35，降低主线程循环开销。"""
+        """10000<entries<=50000：batch=20，降低主线程循环开销。"""
         rs = _build_ruleset(_content_rule("pwd", "password"))
         scanner = Scanner(rs, max_workers=4)
         scanner._adapt_progress_batch(10001)
-        assert scanner._progress_emit_batch == 35
+        assert scanner._progress_emit_batch == 20
         scanner._adapt_progress_batch(30000)
-        assert scanner._progress_emit_batch == 35
+        assert scanner._progress_emit_batch == 20
         scanner._adapt_progress_batch(50000)
-        assert scanner._progress_emit_batch == 35
+        assert scanner._progress_emit_batch == 20
 
     def test_adapt_batch_huge_entries(self) -> None:
-        """entries>50000：batch=50，最大限度减少 emit 调用。"""
+        """entries>50000：batch=25，最大限度减少 emit 调用。"""
         rs = _build_ruleset(_content_rule("pwd", "password"))
         scanner = Scanner(rs, max_workers=4)
         scanner._adapt_progress_batch(50001)
-        assert scanner._progress_emit_batch == 50
+        assert scanner._progress_emit_batch == 25
         scanner._adapt_progress_batch(200000)
-        assert scanner._progress_emit_batch == 50
+        assert scanner._progress_emit_batch == 25
 
     def test_concurrent_matched_files_complete(self, tmp_path: Path) -> None:
         """并发扫描 matched_files：批量 extend 后元组集合与逐 append 等效。"""

@@ -7,7 +7,7 @@
 
 - :data:`BATCH_THRESHOLD`：批量写入阈值
 - :data:`PROGRESS_LIST_MAX`：进度收集列表上限
-- :data:`GIL_YIELD_INTERVAL`：GIL 让步间隔
+- :data:`GIL_YIELD_THRESHOLD_S`：GIL 让步时间阈值（秒）
 - :func:`build_hit_from_match`：从 :class:`MatchResult` 构造 :class:`RuleHit`
 - :func:`rebuild_hit_from_cache`：从缓存 :class:`RuleHit` 重建（填回 rule_name）
 - :func:`default_extract_content`：默认内容提供器
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 __all__ = [
     "BATCH_THRESHOLD",
     "DEFAULT_MAX_FILE_SIZE",
-    "GIL_YIELD_INTERVAL",
+    "GIL_YIELD_THRESHOLD_S",
     "PROGRESS_LIST_MAX",
     "PROGRESS_MIN_DELTA_FILES",
     "PROGRESS_MIN_DELTA_MATCHES",
@@ -76,19 +76,27 @@ PROGRESS_LIST_MAX: int = 50
 # 进度双门限节流的增量阈值（时间窗 + 增量门）。
 # 即便达到时间窗 elapsed >= _progress_interval，若自上次 emit 以来 scanned/matched
 # 的增量都低于以下阈值，跳过本次 emit，避免 50k+ 小文件扫描时 UI 仍被高频刷新。
-# - PROGRESS_MIN_DELTA_FILES：scanned 至少增加 200 个
-# - PROGRESS_MIN_DELTA_MATCHES：matched 至少增加 50 个（命中率较高时的兜底）
-PROGRESS_MIN_DELTA_FILES: int = 200
-PROGRESS_MIN_DELTA_MATCHES: int = 50
+# - PROGRESS_MIN_DELTA_FILES：scanned 至少增加 50 个
+# - PROGRESS_MIN_DELTA_MATCHES：matched 至少增加 10 个（命中率较高时的兜底）
+# 原 200/50 对 300-1000 文件的中等清单过大，进度条卡在某值长时间不动；
+# 下调到 50/10 后中等清单进度条更新更顺滑，超大清单仍受时间门限保护不至过频
+PROGRESS_MIN_DELTA_FILES: int = 50
+PROGRESS_MIN_DELTA_MATCHES: int = 10
 
 # 进度快照保留的最近 N 条目（配合 _emit_progress 的 tuple 截断）。
 # 避免大规模扫描时 matched_files/skipped_dirs 的 deque 元组转换 O(N) 拷贝开销。
 PROGRESS_SNAPSHOT_TAIL: int = 50
 
-# GIL 让步间隔：_scan_concurrent 每处理 N 个文件 sleep(0) 一次，
-# 让 UI 线程有机会处理 Qt 事件队列。20 个文件约对应 1-5ms 扫描时间，
-# sleep(0) 开销约 1μs，对吞吐影响可忽略。
-GIL_YIELD_INTERVAL: int = 20
+# GIL 让步时间阈值（秒）：扫描循环中距上次让步超过此阈值才调一次 ``sleep(0)``，
+# 让 UI 线程有机会处理 Qt 事件队列。改为时间判断替代原固定计数（20/200）：
+# - 小文件密集场景：单文件耗时 < 1μs，原计数式每 20 个让步一次频率过高
+#   （5 万文件 = 2500 次 sleep(0) 调用，纯系统调用开销约 2.5ms）；
+#   时间式按实际墙钟判断，5ms 内多次让步被合并为一次
+# - 大文件（PDF/DOCX）场景：单文件提取耗时 50ms+，原计数式让步过稀；
+#   时间式确保每 5ms 至少让步一次，UI 调度更平稳
+# 5ms 是经验值：人眼对 100ms 内的卡顿不敏感，5ms 让步频率远低于感知阈值
+# 且对吞吐影响可忽略（sleep(0) 仅放弃剩余时间片，无 I/O 等待）
+GIL_YIELD_THRESHOLD_S: float = 0.005
 
 
 def build_hit_from_match(rule: Rule, result: MatchResult) -> RuleHit:

@@ -141,6 +141,10 @@ class FileStatsWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
                 matched_files=info.matched_files,
                 phase=info.phase,
                 user_skipped=info.user_skipped + self._cum_user_skipped,
+                # 单文件元信息透传（walk 阶段为 0/""/0.0，scan 阶段才填入）
+                current_file_size=info.current_file_size,
+                current_file_ext=info.current_file_ext,
+                current_file_elapsed_ms=info.current_file_elapsed_ms,
             )
         )
 

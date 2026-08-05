@@ -111,6 +111,15 @@ class ProgressInfo:
     # 用户标记跳过的文件数：区别于按扩展名/目录过滤的 skipped，
     # 此为用户在结果详情区主动「标记为跳过」后在本次扫描中跳过的文件数
     user_skipped: int = 0
+    # 当前文件大小（字节）：scan 阶段填入，walk/archive 阶段为 0。
+    # GUI 据此在进度卡片展示「[12.3 MB · pdf · 1.2s]」单文件元信息，
+    # 让用户感知大文件解析进度，避免误以为卡死
+    current_file_size: int = 0
+    # 当前文件扩展名（小写无点，如 ``"pdf"``）：scan 阶段填入，其余阶段为空串
+    current_file_ext: str = ""
+    # 当前文件已解析耗时（毫秒）：scan 阶段填入，
+    # 顺序扫描为单文件解析耗时，并发扫描为提交到完成的时间间隔
+    current_file_elapsed_ms: float = 0.0
 
     def summary(self) -> str:
         """返回实时进度状态栏文本（含速度计算）。

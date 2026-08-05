@@ -12,7 +12,8 @@ perf_log_enabled/ignore_dirs/disabled_extractors）已迁移到 RuleSet 顶层�
 公共 API：
 
 - :class:`ConfigController`：``QObject`` 子类
-- :meth:`ConfigController.save`：保存配置到 YAML
+- :meth:`ConfigController.save`：Debounce 保存配置到 YAML（300ms 内合并多次写入）
+- :meth:`ConfigController.flush_save`：立即 flush 待写入配置（供测试与关闭应用前调用）
 - :meth:`ConfigController.add_scan_path`：添加扫描路径历史
 """
 
@@ -21,15 +22,20 @@ from __future__ import annotations
 import logging
 
 try:
-    from PySide2.QtCore import Property, QObject, Signal, Slot
+    from PySide2.QtCore import Property, QObject, QTimer, Signal, Slot
 except ImportError:  # pragma: no cover
-    from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
+    from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot  # pyrefly: ignore [missing-import]
 
 from fuscan.config import Config, load_config, save_config
 
 __all__ = ["ConfigController"]
 
 logger = logging.getLogger(__name__)
+
+# 配置 debounce 保存延迟（毫秒）：300ms 内多次 save 合并为一次磁盘写入，
+# 避免设置页拖动滑块/输入框时每帧触发一次 YAML 序列化导致主线程卡顿。
+# configChanged 信号仍每次 emit（QML 绑定立即更新），仅磁盘写入被合并
+_SAVE_DEBOUNCE_MS: int = 300
 
 
 class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -47,6 +53,13 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._config: Config = load_config()
+        # Debounce 保存定时器：None 表示尚未创建（惰性创建），
+        # 创建后以 singleShot + start() 重启方式合并 300ms 内多次 save 调用
+        self._save_timer: QTimer | None = None
+        # 盘符列表缓存：None 表示未缓存，首次访问 drives 时填充。
+        # refresh_drives 清空缓存并 emit drivesChanged，下次访问重新枚举。
+        # 避免每次 QML 访问 drives 属性都调用 list_drives（Windows 上较慢）
+        self._drives_cache: list[str] | None = None
 
     @property
     def config(self) -> Config:
@@ -160,22 +173,54 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._on_font_config_changed()
 
     def _on_font_config_changed(self) -> None:
-        """字体配置变更：持久化 + 发出信号。
+        """字体配置变更：debounce 持久化 + 发出信号。
 
         ThemeController 同步由 :class:`AppController` 监听 ``fontConfigChanged``
         信号后调用 ``setFontConfig`` 完成（含最小字号），避免在 ConfigController
         中反向依赖 GUI 层 ThemeController 实例。
+
+        通过 :meth:`save` 走 debounce 路径，避免拖动字号滑块时每帧触发
+        一次 YAML 写入。``fontConfigChanged`` 在 ``save`` 之前 emit，
+        保持与原实现一致的信号顺序（fontConfigChanged → configChanged）。
         """
-        save_config(self._config)
         self.fontConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
-        self.configChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.save()
 
     # ----------------------------- 持久化 -----------------------------
 
     def save(self) -> None:
-        """保存配置到 YAML 文件。"""
-        save_config(self._config)
+        """Debounce 保存配置到 YAML 文件。
+
+        300ms 内多次 ``save`` 调用合并为一次磁盘写入，避免设置页拖动滑块、
+        输入框逐字符输入时每帧触发 YAML 序列化导致主线程卡顿。
+
+        ``configChanged`` 信号每次都立即 emit（反映内存中 Config 已变更），
+        QML 绑定即时更新；仅磁盘写入被 debounce 到最后一次调用后 300ms 执行。
+        """
         self.configChanged.emit()  # pyrefly: ignore [missing-attribute]
+        if self._save_timer is None:
+            self._save_timer = QTimer(self)
+            self._save_timer.setSingleShot(True)
+            self._save_timer.setInterval(_SAVE_DEBOUNCE_MS)
+            self._save_timer.timeout.connect(self._do_save)  # pyrefly: ignore [missing-attribute]
+        # start() 重启计时器：已在运行时取消旧超时，按本次调用重新计时
+        self._save_timer.start()  # pyrefly: ignore [missing-attribute]
+
+    def _do_save(self) -> None:
+        """执行实际的磁盘写入（由 ``_save_timer`` 超时触发）。
+
+        分离为独立方法便于测试中直接调用以跳过 timer 等待。
+        """
+        save_config(self._config)
+
+    def flush_save(self) -> None:
+        """立即 flush 待写入的配置（取消 debounce timer，同步写入磁盘）。
+
+        供测试与关闭应用前调用，确保配置已持久化。无待写入时为 no-op。
+        """
+        if self._save_timer is not None and self._save_timer.isActive():
+            self._save_timer.stop()
+            save_config(self._config)
 
     @Slot()  # pyrefly: ignore [not-callable]
     def resetToDefaults(self) -> None:
@@ -184,22 +229,30 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._config.font_size = 14
         self._config.font_bold = False
         self._config.min_font_size = 12
-        self.save()
         self.fontConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.save()
         logger.info("字体配置已重置为默认值")
 
     @Slot()  # pyrefly: ignore [not-callable]
     def refresh_drives(self) -> None:
-        """刷新盘符列表（QML 通过 drives 属性读取）。"""
+        """刷新盘符列表（清空缓存并通知 QML 重新读取 ``drives`` 属性）。"""
+        self._drives_cache = None
         self.drivesChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     @Property("QVariantList", notify=drivesChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
     def drives(self) -> list[str]:
-        """系统可用盘符列表（如 ``["C:\\", "D:\\"]``）。"""
-        from fuscan.scanner.walker import list_drives
+        """系统可用盘符列表（如 ``["C:\\", "D:\\"]``）。
 
-        try:
-            return [str(d) for d in list_drives(include_network=self._config.include_network_drives)]
-        except OSError:
-            logger.warning("盘符枚举失败", exc_info=True)
-            return []
+        首次访问调用 :func:`list_drives` 并缓存结果，后续访问直接返回缓存，
+        避免 QML 每次 binding 求值都触发 Windows 盘符枚举开销。
+        :meth:`refresh_drives` 清空缓存触发重新枚举。
+        """
+        if self._drives_cache is None:
+            from fuscan.scanner.walker import list_drives
+
+            try:
+                self._drives_cache = [str(d) for d in list_drives(include_network=self._config.include_network_drives)]
+            except OSError:
+                logger.warning("盘符枚举失败", exc_info=True)
+                self._drives_cache = []
+        return self._drives_cache

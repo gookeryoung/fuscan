@@ -49,7 +49,6 @@ from fuscan.scanner._content_buckets import (
     match_content_via_buckets,
 )
 from fuscan.scanner._helpers import (
-    GIL_YIELD_INTERVAL,
     PROGRESS_LIST_MAX,
     PROGRESS_MIN_DELTA_FILES,
     PROGRESS_MIN_DELTA_MATCHES,
@@ -232,15 +231,11 @@ class Scanner:
         # 初始值为 0，首次 emit 会直接通过（因 elapsed >= 0），后续与当前值比较。
         self._last_progress_scanned: int = 0
         self._last_progress_matched: int = 0
-        # 自适应 GIL 让步间隔。
-        # 顺序扫描（max_workers<=1）：主线程独占 GIL，需每 20 个文件让步一次避免 UI 卡死。
-        # 并发扫描（max_workers>1）：PyO3 提取器（pdf_oxide/calamine）在 Rust 层释放 GIL，
-        # worker 线程在 I/O 与提取期间不持 GIL，主线程自然获得调度机会；
-        # 让步间隔从 50 提高到 200，进一步减少 sleep(0) 系统调用开销
-        # （10万文件节省约 10ms），PyO3 释放 GIL 下调度仍顺畅。
-        self._gil_yield_interval: int = (
-            GIL_YIELD_INTERVAL if not max_workers or max_workers <= 1 else GIL_YIELD_INTERVAL * 10
-        )
+        # GIL 让步时间基线：扫描循环中以此值为起点用 time.perf_counter() 判断
+        # 距上次让步是否超过 GIL_YIELD_THRESHOLD_S（5ms），超过才调一次 sleep(0)。
+        # 替代原固定计数（顺序 20 / 并发 200）：时间式按实际墙钟判断，
+        # 小文件密集场景合并多余 sleep(0)，大文件场景保证每 5ms 让步一次
+        self._last_yield_time: float = 0.0
         # 进度 emit 批处理阈值。
         # 并发扫描时每 N 个 future 完成才调用一次 _emit_progress（内部仍有 150ms 节流），
         # 减少 time.perf_counter() + 比较的函数调用开销。
@@ -296,6 +291,13 @@ class Scanner:
         # 键为 str(Path)，值为 file_hash（64 hex，None 表示未登记/不适用）。
         # _scan_entry_cached 优先查本 dict，省掉 SQLite/路径 LRU 查询。
         self._precomputed_file_hashes: dict[str, str | None] = {}
+        # 当前扫描文件元信息缓存：_pipeline_phase 在调 _scan_entry 前设置，
+        # _emit_progress 读取以填充 ProgressInfo 的单文件字段（size/ext/elapsed_ms）。
+        # _current_file_start_time 为 perf_counter 基线，0 表示未设置（walk/archive 阶段）
+        self._current_file_path: str = ""
+        self._current_file_size: int = 0
+        self._current_file_ext: str = ""
+        self._current_file_start_time: float = 0.0
 
     def pause(self) -> None:
         """暂停扫描，阻塞扫描线程直到 resume。"""
@@ -514,24 +516,28 @@ class Scanner:
     def _adapt_progress_batch(self, n_entries: int) -> None:
         """根据待扫描条目数自适应设置 _progress_emit_batch。
 
-        取代一刀切 batch=10 的默认值，按清单规模在 10~50 之间分档：
+        取代一刀切 batch=10 的默认值，按清单规模在 10~25 之间分档：
         - 小清单（<=1000）：batch=10，保留实时反馈
-        - 中等清单（1001~10000）：batch=20，平衡实时性与开销
-        - 大清单（10001~50000）：batch=35，降低主线程 as_completed 循环 overhead
-        - 超大清单（>50000）：batch=50，最大化减少 emit 相关函数调用
+        - 中等清单（1001~10000）：batch=15，平衡实时性与开销
+        - 大清单（10001~50000）：batch=20，降低主线程 as_completed 循环 overhead
+        - 超大清单（>50000）：batch=25，最大化减少 emit 相关函数调用
 
         顺序扫描（max_workers<=1）保持 batch=1 不变，确保用户期望的逐文件反馈。
+
+        原 50/35/20/10 分档对中等清单（300-5000 文件）emit 频次过低，
+        与下调后的双门限（50/10）配合时进度条仍可能停滞；下调到 25/20/15/10
+        使中等清单在 150ms 时间窗内能 emit 1-2 次，进度条更顺滑。
         """
         if not self._max_workers or self._max_workers <= 1:
             return  # 顺序扫描保持每文件 emit
         if n_entries <= 1000:
             self._progress_emit_batch = 10
         elif n_entries <= 10000:
-            self._progress_emit_batch = 20
+            self._progress_emit_batch = 15
         elif n_entries <= 50000:
-            self._progress_emit_batch = 35
+            self._progress_emit_batch = 20
         else:
-            self._progress_emit_batch = 50
+            self._progress_emit_batch = 25
 
     def scan_entries(self, root: Path, walk_result: WalkResult) -> ScanReport:
         """scan + archive 阶段：对预收集的 entries 执行内容扫描。
@@ -778,6 +784,18 @@ class Scanner:
             recent_matched = tuple(list(self._matched_files)[-PROGRESS_SNAPSHOT_TAIL:])
         else:
             recent_matched = ()
+        # 单文件元信息：scan 阶段且 current_file 非空时从缓存读取
+        # walk/archive 阶段或最终空 emit 时清零，避免展示陈旧数据
+        if phase == "scan" and current_file:
+            current_file_size = self._current_file_size
+            current_file_ext = self._current_file_ext
+            current_file_elapsed_ms = (
+                (now - self._current_file_start_time) * 1000.0 if self._current_file_start_time > 0 else 0.0
+            )
+        else:
+            current_file_size = 0
+            current_file_ext = ""
+            current_file_elapsed_ms = 0.0
         self._on_progress(
             ProgressInfo(
                 current_file=current_file,
@@ -792,6 +810,9 @@ class Scanner:
                 matched_files=recent_matched,
                 phase=phase,
                 user_skipped=self._progress_user_skipped,
+                current_file_size=current_file_size,
+                current_file_ext=current_file_ext,
+                current_file_elapsed_ms=current_file_elapsed_ms,
             )
         )
 

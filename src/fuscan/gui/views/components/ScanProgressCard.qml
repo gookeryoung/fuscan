@@ -150,14 +150,41 @@ Rectangle {
                 font.pixelSize: 11
                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
             }
-            Label {
+            RowLayout {
                 Layout.fillWidth: true
-                text: workspaceController.activeScanController.currentFile || "—"
-                font.pixelSize: 12
-                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
-                elide: Text.ElideMiddle
-                // 暂停态淡化提示
-                opacity: workspaceController.activeScanController.isPaused ? 0.6 : 1.0
+                spacing: 6
+                Label {
+                    Layout.fillWidth: true
+                    text: workspaceController.activeScanController.currentFile || "—"
+                    font.pixelSize: 12
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    elide: Text.ElideMiddle
+                    // 暂停态淡化提示
+                    opacity: workspaceController.activeScanController.isPaused ? 0.6 : 1.0
+                }
+                // 单文件元信息标签：大文件显示 [大小 · 扩展名 · 耗时]，
+                // 小文件仅显示 [扩展名 · 大小 KB]；scan 阶段且文件>0 时才展示
+                Label {
+                    visible: workspaceController.activeScanController.scanPhase === "scan"
+                             && workspaceController.activeScanController.currentFileSize > 0
+                    text: {
+                        var size = workspaceController.activeScanController.currentFileSize
+                        var ext = workspaceController.activeScanController.currentFileExt
+                        var ms = workspaceController.activeScanController.currentFileElapsedMs
+                        if (size > 1048576) {
+                            // 大于 1MB：[12.3 MB · pdf · 1.2s]
+                            var sizeMB = (size / 1048576).toFixed(1)
+                            var sec = (ms / 1000.0).toFixed(1)
+                            return "[" + sizeMB + " MB · " + (ext || "?") + " · " + sec + "s]"
+                        }
+                        // 小文件：[pdf · 12.3 KB]
+                        var sizeKB = (size / 1024).toFixed(1)
+                        return "[" + (ext || "?") + " · " + sizeKB + " KB]"
+                    }
+                    font.pixelSize: 11
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    opacity: workspaceController.activeScanController.isPaused ? 0.6 : 1.0
+                }
             }
         }
 

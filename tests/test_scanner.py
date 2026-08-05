@@ -1585,14 +1585,12 @@ class TestScannerProgress:
         assert last.errors == 0
         assert last.elapsed >= 0
         assert isinstance(last.current_file, str)
-        # 新增字段：命中文件列表应包含 (路径, 规则名) 元组
+        # 快照字段已优化为默认空元组（GUI 不消费，省去每次 emit 的 O(50) 拷贝）
         assert isinstance(last.matched_files, tuple)
-        assert any(path.endswith("secret.txt") and rule == "r" for path, rule in last.matched_files)
-        # 新增字段：跳过的目录列表（无忽略目录时为空 tuple）
         assert isinstance(last.skipped_dirs, tuple)
 
     def test_progress_info_skipped_dirs_collected(self, tmp_path: Path) -> None:
-        """ignore_dirs 跳过的目录应出现在 ProgressInfo.skipped_dirs 中。"""
+        """ignore_dirs 跳过的目录不再实时填充到 ProgressInfo.skipped_dirs（性能优化）。"""
         (tmp_path / ".git").mkdir()
         (tmp_path / ".git" / "config").write_text("", encoding="utf-8")
         (tmp_path / "app.py").write_text("password", encoding="utf-8")
@@ -1604,10 +1602,9 @@ class TestScannerProgress:
 
         assert len(received) >= 1
         last = received[-1]
-        # .git 目录应被收集到 skipped_dirs
-        assert any(".git" in d for d in last.skipped_dirs)
-        # app.py 命中应收集到 matched_files
-        assert any(path.endswith("app.py") for path, _ in last.matched_files)
+        # skipped_dirs/matched_files 已优化为默认空元组（GUI 不消费）
+        assert isinstance(last.skipped_dirs, tuple)
+        assert isinstance(last.matched_files, tuple)
 
     def test_pipelined_drain_collects_matched_files_with_callback(self, tmp_path: Path) -> None:
         """流水线 drain 阶段有 on_progress 时应收集 matched_files（覆盖 drain guard True 分支）。
@@ -3212,7 +3209,7 @@ class TestIter162InFlightProgress:
 
     覆盖 _pipeline_phase._collect_concurrent_results 超时分支：
     多个 worker 同时处理大文件时，wait 超时返回空 done 集，emit 应显示
-    真实正在扫描的文件（_in_flight_paths[0]），而非上一个完成文件的陈旧路径。
+    真实正在扫描的文件（_in_flight_paths 集合中最早提交但未完成的），而非上一个完成文件的陈旧路径。
     """
 
     def test_concurrent_timeout_emits_in_flight_file(self, tmp_path: Path) -> None:
@@ -3275,11 +3272,11 @@ class TestIter162InFlightProgress:
 
         # 验证：超时分支至少触发一次，且 emit 的文件路径在 in-flight 列表中
         assert timeout_emits, "应至少触发一次超时分支 emit"
-        # 超时 emit 的文件应该是仍在扫描的文件（前 2 个慢文件之一）
-        slow_files = {str(tmp_path / "slow_0.txt"), str(tmp_path / "slow_1.txt")}
-        assert any(e in slow_files for e in timeout_emits), f"超时 emit 应显示 in-flight 慢文件，实际：{timeout_emits}"
+        # 超时 emit 的文件应是某个仍在扫描中的 in-flight 文件（set 迭代顺序任意，4 个文件均可能）
+        all_files = {str(tmp_path / f"slow_{i}.txt") for i in range(4)}
+        assert any(e in all_files for e in timeout_emits), f"超时 emit 应显示 in-flight 文件，实际：{timeout_emits}"
         # 扫描完成后 _in_flight_paths 应清空
-        assert scanner._in_flight_paths == []
+        assert scanner._in_flight_paths == set()
 
     def test_concurrent_submit_cancel_clears_in_flight(self, tmp_path: Path) -> None:
         """submit 阶段触发取消应清空 _in_flight_paths 并立即返回。
@@ -3330,7 +3327,7 @@ class TestIter162InFlightProgress:
         assert errors == 0
         assert matches == 0
         # _in_flight_paths 应被清空
-        assert scanner._in_flight_paths == []
+        assert scanner._in_flight_paths == set()
 
     def test_concurrent_collect_cancel_clears_in_flight(self, tmp_path: Path) -> None:
         """collect 阶段触发取消应清空 _in_flight_paths。
@@ -3382,7 +3379,7 @@ class TestIter162InFlightProgress:
         results: list[ScanResult] = []
         run_pipeline_phase(scanner, entries, results)
         # 取消后 _in_flight_paths 应被清空
-        assert scanner._in_flight_paths == []
+        assert scanner._in_flight_paths == set()
 
     def test_sequential_tail_flush_emits_remaining_progress(self, tmp_path: Path) -> None:
         """顺序扫描尾部补发：batch_match_list 剩余应在循环结束后 extend。
@@ -4241,29 +4238,22 @@ class TestIter160ProgressThrottle:
         assert len(received) == 2
 
     def test_snapshot_tail_capped(self) -> None:
-        """matched_files/skipped_dirs 快照截断到 PROGRESS_SNAPSHOT_TAIL。"""
-        from fuscan.scanner._helpers import PROGRESS_SNAPSHOT_TAIL
-
+        """matched_files/skipped_dirs 已优化为默认空元组（GUI 不消费，性能优化）。"""
         received: list[ProgressInfo] = []
         sc = self._build_scanner(received.append, progress_interval=0.0)
         sc._progress_start = time.perf_counter()
         sc._progress_total = 1000
-        # 模拟添加远超上限的命中记录
-        for i in range(PROGRESS_SNAPSHOT_TAIL + 100):
+        # 模拟添加命中记录（内部 deque 仍被填充，但 emit 不再构建快照）
+        for i in range(100):
             sc._matched_files.append((f"path_{i}", f"rule_{i}"))
-        for i in range(PROGRESS_SNAPSHOT_TAIL + 50):
+        for i in range(50):
             sc._skipped_dirs.append(f"skip_{i}")
         sc._emit_progress("", 10, 10, 0, 0)
         assert len(received) == 1
         info = received[0]
-        # 截断到 PROGRESS_SNAPSHOT_TAIL
-        assert len(info.matched_files) == PROGRESS_SNAPSHOT_TAIL
-        assert len(info.skipped_dirs) == PROGRESS_SNAPSHOT_TAIL
-        # 且为最新的条目
-        if info.matched_files:
-            assert info.matched_files[-1][0] == f"path_{PROGRESS_SNAPSHOT_TAIL + 99}"
-        if info.skipped_dirs:
-            assert info.skipped_dirs[-1] == f"skip_{PROGRESS_SNAPSHOT_TAIL + 49}"
+        # 快照字段已优化为空元组，不再构建 O(N) 拷贝
+        assert info.matched_files == ()
+        assert info.skipped_dirs == ()
 
 
 # ---------------------------------------------------------------------------

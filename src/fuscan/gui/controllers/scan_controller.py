@@ -142,7 +142,18 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     # ----------------------------- 信号 -----------------------------
 
     scanStateChanged = Signal()
+    # progressChanged 保留为「全量」进度信号（扫描完成/取消/重置时 emit），
+    # 确保向后兼容；高频进度回调拆分到以下细粒度信号，减少 QML 绑定重算量。
     progressChanged = Signal()
+    # walk 阶段独立进度信号：仅 walk 阶段属性（walkDiscovered/walkSkipped 等）
+    # 绑定此信号，scan 阶段进度回调不触发 walk 属性重算。
+    walkProgressChanged = Signal()
+    # scan/archive 阶段独立进度信号：仅扫描进度与统计计数属性绑定，
+    # walk 阶段进度回调不触发 scan 属性重算。
+    scanProgressChanged = Signal()
+    # 阶段切换信号：scanPhase/scanDone/walkDone/statusSummary 绑定，
+    # 仅在阶段变更或扫描终结时 emit，避免每次进度回调触发。
+    phaseChanged = Signal()
     statusChanged = Signal()
     selectedResultChanged = Signal()
     drivesChanged = Signal()
@@ -293,13 +304,13 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """是否暂停中。"""
         return self._is_paused
 
-    @Property(bool, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(bool, notify=phaseChanged)  # pyrefly: ignore [not-callable]
     def cancelling(self) -> bool:
         """是否正在取消扫描中。
 
         cancelScan 设置为 True，_reset_scan_ui 重置为 False（取消完成回调）。
         QML 据此显示模态遮罩防止用户重复操作（与退出保存 Popup 同模式）。
-        notify 复用 progressChanged：cancelScan 与 _reset_scan_ui 均已 emit 该信号。
+        notify 用 phaseChanged：取消与重置均伴随 phaseChanged emit。
         """
         return self._cancelling
 
@@ -324,17 +335,17 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     # ----------------------------- 进度 -----------------------------
 
-    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(int, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def progressScanned(self) -> int:
         """已扫描文件数。"""
         return self._progress_scanned
 
-    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(int, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def progressTotal(self) -> int:
         """总文件数。"""
         return self._progress_total
 
-    @Property(float, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(float, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def progress(self) -> float:
         """进度百分比（0-100）。
 
@@ -350,57 +361,57 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return 0.0
         return min(100.0, self._progress_scanned * 100.0 / self._progress_total)
 
-    @Property(bool, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(bool, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def progressIndeterminate(self) -> bool:
         """进度条是否为不确定模式。"""
         return self._progress_indeterminate
 
-    @Property(str, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(str, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def currentFile(self) -> str:
         """当前正在扫描的文件路径。"""
         return self._current_file
 
-    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(int, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def currentFileSize(self) -> int:
         """当前文件大小（字节）。scan 阶段填入，walk/archive 阶段为 0。"""
         return self._current_file_size
 
-    @Property(str, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(str, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def currentFileExt(self) -> str:
         """当前文件扩展名（小写无点，如 ``"pdf"``）。scan 阶段填入，其余为空串。"""
         return self._current_file_ext
 
-    @Property(float, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(float, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def currentFileElapsedMs(self) -> float:
         """当前文件已解析耗时（毫秒）。scan 阶段填入，其余为 0.0。"""
         return self._current_file_elapsed_ms
 
-    @Property(str, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(str, notify=phaseChanged)  # pyrefly: ignore [not-callable]
     def statusSummary(self) -> str:
         """状态栏摘要文本。"""
         return self._status_summary
 
-    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(int, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def passedCount(self) -> int:
         """已通过文件数。"""
         return self._passed_count
 
-    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(int, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def matchedCount(self) -> int:
         """命中文件数。"""
         return self._matched_count
 
-    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(int, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def skippedCount(self) -> int:
         """跳过文件数。"""
         return self._skipped_count
 
-    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(int, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def errorCount(self) -> int:
         """错误文件数。"""
         return self._error_count
 
-    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(int, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def archiveEntryCount(self) -> int:
         """压缩包内条目数（含在 scanned 中）。
 
@@ -409,7 +420,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """
         return self._archive_entry_count
 
-    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(int, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def reusedFiles(self) -> int:
         """增量扫描：未变更直接复用上次结果的文件数。
 
@@ -417,7 +428,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """
         return self._reused_files
 
-    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(int, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def changedFiles(self) -> int:
         """增量扫描：实际发生内容变更、重新做了 I/O 与规则匹配的文件数。
 
@@ -428,7 +439,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     # ----------------------------- 阶段与收集进度（双进度条） -----------------------------
 
-    @Property(str, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(str, notify=phaseChanged)  # pyrefly: ignore [not-callable]
     def scanPhase(self) -> str:
         """当前扫描阶段。
 
@@ -440,22 +451,22 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """
         return self._scan_phase
 
-    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(int, notify=walkProgressChanged)  # pyrefly: ignore [not-callable]
     def walkDiscovered(self) -> int:
         """walk 阶段已发现的文件总数（持续增长，含跳过项）。"""
         return self._walk_discovered
 
-    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(int, notify=walkProgressChanged)  # pyrefly: ignore [not-callable]
     def walkSkipped(self) -> int:
         """walk 阶段按白名单跳过的文件数（未勾选的扩展名）。"""
         return self._walk_skipped
 
-    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(int, notify=walkProgressChanged)  # pyrefly: ignore [not-callable]
     def walkUserSkipped(self) -> int:
         """walk 阶段用户标记跳过的文件数。"""
         return self._walk_user_skipped
 
-    @Property(int, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(int, notify=walkProgressChanged)  # pyrefly: ignore [not-callable]
     def walkClassified(self) -> int:
         """walk 阶段收集到的符合文件类型的文件数（实际进入扫描阶段的文件数）。
 
@@ -465,22 +476,22 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         classified = self._walk_discovered - self._walk_skipped - self._walk_user_skipped
         return max(0, classified)
 
-    @Property(bool, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(bool, notify=walkProgressChanged)  # pyrefly: ignore [not-callable]
     def walkIndeterminate(self) -> bool:
         """walk 阶段进度条是否为不确定模式（刚启动尚未收到首个进度）。"""
         return self._walk_indeterminate
 
-    @Property(bool, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(bool, notify=phaseChanged)  # pyrefly: ignore [not-callable]
     def walkDone(self) -> bool:
         """walk 阶段是否已完成（用于 UI 标记收集进度条为完成态）。"""
         return self._walk_done
 
-    @Property(bool, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(bool, notify=phaseChanged)  # pyrefly: ignore [not-callable]
     def scanDone(self) -> bool:
         """scan 阶段是否已完成（用于 UI 标记解析进度条为完成态）。"""
         return self._scan_done
 
-    @Property(float, notify=progressChanged)  # pyrefly: ignore [not-callable]
+    @Property(float, notify=walkProgressChanged)  # pyrefly: ignore [not-callable]
     def walkProgress(self) -> float:
         """walk 阶段进度百分比（0-100）。
 
@@ -1192,7 +1203,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._current_file_size = 0
         self._current_file_ext = ""
         self._current_file_elapsed_ms = 0.0
-        self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
         # 阶段 1：FileStatsWorker 执行 walk 收集文件清单
         self._stats_worker = FileStatsWorker(
@@ -1288,7 +1300,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._current_file_size = 0
         self._current_file_ext = ""
         self._current_file_elapsed_ms = 0.0
-        self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
         # 阶段 1：FileStatsWorker 执行 walk 收集文件清单（传入 incremental_manifest 启用增量）
         self._stats_worker = FileStatsWorker(
@@ -1334,7 +1347,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._cancelling = True
         self._set_status("取消中...", "正在取消扫描...")
         self._current_file = "正在取消扫描..."
-        self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
         if self._stats_worker is not None:
             self._stats_worker.cancel()
         if self._worker is not None:
@@ -1398,11 +1412,16 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         根据 ``info.phase`` 分别更新 walk / scan / archive 阶段的独立字段，
         使 QML 双进度条能分别反映收集与解析进度。
+
+        信号拆分：walk 阶段 emit ``walkProgressChanged``，scan/archive 阶段
+        emit ``scanProgressChanged``，阶段切换 emit ``phaseChanged``，
+        避免单一 ``progressChanged`` 触发 22+ 个 QML 绑定全量重算。
         """
         if self._cancelling:
             return
         # 阶段切换：phase 变化时同步 _scan_phase
-        if info.phase != self._scan_phase:
+        phase_changed = info.phase != self._scan_phase
+        if phase_changed:
             self._scan_phase = info.phase
             # walk → scan/archive 切换时标记 walk 阶段完成
             if info.phase in (PHASE_SCAN, PHASE_ARCHIVE) and not self._walk_done:
@@ -1434,7 +1453,13 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._current_file_ext = info.current_file_ext
         self._current_file_elapsed_ms = info.current_file_elapsed_ms
         self._status_summary = info.summary()
-        self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
+        # 细粒度信号：阶段切换 emit phaseChanged，walk/scan 各自 emit 专属信号
+        if phase_changed:
+            self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
+        if info.phase == PHASE_WALK:
+            self.walkProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
+        else:
+            self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     @Slot(object)  # pyrefly: ignore [not-callable]
     def _on_stats_finished(self, results: list[WalkResult]) -> None:
@@ -1459,7 +1484,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._progress_total = sum(len(wr.entries) for wr in results)
         self._progress_indeterminate = False
         self._scan_phase = PHASE_SCAN
-        self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
         cache, source_files = self._build_cache_context()
         assert self._ruleset is not None
         self._worker = ScanWorker(
@@ -1547,8 +1573,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 持久化本次构建的 manifest（仅 startIncrementalScan 设置了 _pending_ws_id）
         if self._pending_ws_id and self._pending_manifest is not None:
             self._save_manifest(self._pending_ws_id, self._pending_manifest)
-        # 重新 emit progressChanged 让统计页/进度条读取最新数值
-        self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
+        # 细粒度信号：让统计页/进度条读取最新数值
+        self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     @Slot(str)  # pyrefly: ignore [not-callable]
     def _on_scan_failed(self, error: str) -> None:
@@ -1745,12 +1772,16 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def _set_status(self, text: str, summary: str | None = None) -> None:
-        """设置状态文本（同时更新 summary）。"""
+        """设置状态文本（同时更新 summary）。
+
+        statusSummary 已迁移到 phaseChanged 信号，不再在此处 emit progressChanged，
+        避免状态文本变更触发全量进度绑定重算。调用方如需通知进度/阶段变更，
+        应自行 emit 对应信号。
+        """
         self._status_text = text
         if summary is not None:
             self._status_summary = summary
         self.statusChanged.emit()  # pyrefly: ignore [missing-attribute]
-        self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def _reset_scan_ui(self) -> None:
         """重置扫描 UI 到空闲状态。
@@ -1768,7 +1799,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._current_file_ext = ""
         self._current_file_elapsed_ms = 0.0
         self._cleanup_workers()
-        self.progressChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def _cleanup_stats_worker(self) -> None:
         """清理 stats worker，非阻塞。

@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -195,10 +194,10 @@ def _scan_concurrent(
         if dup_skipped > 0:
             logger.info("并发扫描：去重 %d 个重复条目", dup_skipped)
         # 一次性提交所有 entries：阶段 1 已完成遍历，entries 内存可见且可索引
-        # 同步维护 _in_flight_paths：submit 成功后 append，_collect_concurrent_results
-        # done 分支 remove。wait 超时分支据此显示真实正在扫描的文件路径，
+        # 同步维护 _in_flight_paths：submit 成功后 add，_collect_concurrent_results
+        # done 分支 discard。wait 超时分支据此显示真实正在扫描的文件路径，
         # 避免多个 worker 同时处理大文件时 UI 看到的始终是「上一个完成的文件」。
-        scanner._in_flight_paths = []
+        scanner._in_flight_paths = set()
         for entry in unique_entries:
             if scanner._check_control():
                 cancelled_in_submit = True
@@ -206,7 +205,7 @@ def _scan_concurrent(
             future = pool.submit(scanner._scan_entry, entry)
             future_to_entry[future] = entry
             submit_times[future] = time.perf_counter()
-            scanner._in_flight_paths.append(str(entry.path))
+            scanner._in_flight_paths.add(str(entry.path))
         if cancelled_in_submit:
             # 取消全部未启动 future，shutdown(wait=False) 不等待已运行 future
             cancel_all_futures(future_to_entry)
@@ -221,7 +220,7 @@ def _scan_concurrent(
         # 为 daemon，进程退出时由 OS 回收；正常完成路径 as_completed 循环已退出，
         # 此时 worker 已空闲，shutdown 仅清理 pool 状态立即返回。
         pool.shutdown(wait=False)
-        # 兜底清空 in-flight 列表：正常完成路径已逐项 remove，取消路径可能残留
+        # 兜底清空 in-flight 集合：正常完成路径已逐项 discard，取消路径可能残留
         scanner._in_flight_paths.clear()
     return scanned, matched, errors, matches
 
@@ -279,7 +278,7 @@ def _collect_concurrent_results(  # noqa: PLR0912
             # 超时：0.5s 内无 future 完成，emit 进度让用户看到"仍在扫描"
             # 优先显示真实 in-flight 文件（最早提交但未完成的），回退到上次完成路径
             if scanner._on_progress is not None:
-                in_flight_file = scanner._in_flight_paths[0] if scanner._in_flight_paths else _last_entry_path
+                in_flight_file = next(iter(scanner._in_flight_paths)) if scanner._in_flight_paths else _last_entry_path
                 scanner._emit_progress(
                     in_flight_file,
                     scanned,
@@ -293,9 +292,8 @@ def _collect_concurrent_results(  # noqa: PLR0912
             entry = future_to_entry[future]
             entry_path = str(entry.path)
             _last_entry_path = entry_path
-            # 从 in-flight 列表移除已完成的（list.remove 是 O(n)，但 max_workers 小通常 ≤16）
-            with contextlib.suppress(ValueError):
-                scanner._in_flight_paths.remove(entry_path)
+            # 从 in-flight 集合移除已完成的（set.discard 是 O(1)，比 list.remove O(n) 更优）
+            scanner._in_flight_paths.discard(entry_path)
             # 设置当前文件元信息缓存，供 _emit_progress 填充单文件字段
             scanner._current_file_path = entry_path
             scanner._current_file_size = entry.size

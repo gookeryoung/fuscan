@@ -452,7 +452,15 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             scan_controller.scanStateChanged.connect(  # pyrefly: ignore [missing-attribute]
                 lambda wid=ws_id: self._sync_workspace_state(wid)
             )
-            scan_controller.progressChanged.connect(  # pyrefly: ignore [missing-attribute]
+            # 细粒度进度信号：phaseChanged + scanProgressChanged + walkProgressChanged
+            # 替代原单一 progressChanged，避免 22+ 个 QML 绑定全量重算
+            scan_controller.phaseChanged.connect(  # pyrefly: ignore [missing-attribute]
+                lambda wid=ws_id: self._sync_workspace_state(wid)
+            )
+            scan_controller.scanProgressChanged.connect(  # pyrefly: ignore [missing-attribute]
+                lambda wid=ws_id: self._sync_workspace_state(wid)
+            )
+            scan_controller.walkProgressChanged.connect(  # pyrefly: ignore [missing-attribute]
                 lambda wid=ws_id: self._sync_workspace_state(wid)
             )
             scan_controller.statusChanged.connect(  # pyrefly: ignore [missing-attribute]
@@ -789,8 +797,9 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def _sync_workspace_state(self, ws_id: str) -> None:
         """从 ScanController 同步状态到 WorkspaceListModel。
 
-        在 ScanController 的 scanStateChanged/progressChanged/statusChanged
-        信号触发时调用，将状态/计数/摘要写回对应 WorkspaceItem。
+        在 ScanController 的 scanStateChanged/phaseChanged/scanProgressChanged/
+        walkProgressChanged/statusChanged 信号触发时调用，将状态/计数/摘要写回对应
+        WorkspaceItem。
         同时维护 :attr:`_active_scan_workspace_id`：扫描中（含暂停态）的工作区
         被标记为 active，扫描结束（完成/取消/失败/就绪）后清空，触发
         :signal:`activeScanChanged` 通知 HomePage 切换视图。

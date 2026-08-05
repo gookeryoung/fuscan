@@ -1,0 +1,126 @@
+{
+  "summary": {
+    "projectName": "fuscan",
+    "locale": "zh-CN",
+    "modelId": "agent-work-loop-v4",
+    "reportContractVersion": 25,
+    "overview": "项目拥有完整的 CI/CD 工具链和较深的测试覆盖，但核心文件的类型检查保护被削弱，GUI 集成测试未纳入自动化验证，会话级行为证据因数据采集不可用而无法评估。",
+    "aiAgentPractice": {
+      "inspectedSurfaces": [
+        "Workflows"
+      ],
+      "coverageRows": [
+        {
+          "surface": "Workflows",
+          "scopes": [
+            "Project"
+          ],
+          "count": 2,
+          "paths": [
+            ".github/workflows/ci.yml",
+            ".github/workflows/release.yml"
+          ]
+        },
+        {
+          "surface": "Custom Agents",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        }
+      ]
+    },
+    "assignmentSummaries": [],
+    "dimensions": [
+      {
+        "id": "task-understanding",
+        "label": "任务理解",
+        "score": 55,
+        "summary": "项目有清晰的 README、pyproject.toml 和 Makefile 入口，但缺少 Qoder 项目级规则文件，任务上下文路由依赖通用发现而非项目特定指令。",
+        "findingRefs": []
+      },
+      {
+        "id": "controlled-execution",
+        "label": "可控执行",
+        "score": 68,
+        "summary": "Makefile 提供完整的一键门禁（lint + typecheck + cov），CI 工作流配置完备，tox 覆盖多版本，启动路径明确；实际 CI 运行状态未在本次观察范围内。",
+        "findingRefs": [
+          "ci-matrix-python-version-gap"
+        ]
+      },
+      {
+        "id": "change-validation",
+        "label": "改动验证",
+        "score": 62,
+        "summary": "95% 覆盖率门槛和 pre-commit 钩子构成较强的验证链，但核心文件的类型检查保护因大量 pyrefly: ignore 被削弱，GUI QML 集成测试排除在 CI 之外。",
+        "findingRefs": [
+          "core-file-type-protection-gap",
+          "gui-qml-test-ci-exclusion"
+        ]
+      },
+      {
+        "id": "reliable-delivery",
+        "label": "可靠交付",
+        "score": 55,
+        "summary": "CI 和发布工作流配置完备（OIDC PyPI 发布 + 原生打包），但实际运行状态和交付接受决策未在本次静态分析中验证。",
+        "findingRefs": []
+      },
+      {
+        "id": "learning-capture",
+        "label": "经验沉淀",
+        "score": 35,
+        "summary": "会话数据源在本次采集窗口内不可用，无法建立任务片段基线；项目未配置 Qoder Skills 或 Memory，重复工作模式检测缺乏规范化事件。",
+        "findingRefs": []
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "core-file-type-protection-gap",
+      "title": "核心控制器文件的类型检查保护被大量 pyrefly: ignore 削弱",
+      "severity": "Medium",
+      "reason": "scan_controller.py（1932 行）是项目主协调器，包含状态机管理、Worker 生命周期、增量扫描等多重职责。该文件中大量 # pyrefly: ignore 注释使 strict 模式类型检查对核心路径的实际保护大幅降低。项目配置了 pyrefly strict 模式（python-version=3.10），但核心变更文件的类型错误可能逃逸到运行时，变更安全性依赖测试而非静态分析。证据来源：静态文件检查，pyrefly.toml 配置与源文件注释对比。",
+      "expectedOutput": [
+        "scan_controller.py 中的 pyrefly: ignore 注释数量显著减少",
+        "pyrefly strict 模式对核心文件恢复有效的类型保护",
+        "make check 全量通过无回归"
+      ],
+      "expectedArtifact": "Source code",
+      "aiFixPrompt": "/better-harness fix this issue\n\n逐步减少 scan_controller.py 中的 pyrefly: ignore 注释，恢复类型检查对核心文件的保护。\n\n## 验证\n\n- 运行 pyrefly 类型检查确认当前错误基线\n- 逐模块移除 pyrefly: ignore 并修复暴露的类型问题\n- 运行 make check 确认无回归",
+      "dimensionRefs": [
+        "change-validation"
+      ]
+    },
+    {
+      "id": "gui-qml-test-ci-exclusion",
+      "title": "GUI QML 集成测试排除在 CI 自动化验证之外",
+      "severity": "Low",
+      "reason": "项目使用 pytest markers 三级分层（slow/gui/gui_qml），CI 中 pytest 使用 -m 'not slow and not gui_qml' 排除 QML 测试。核心控制器 scan_controller.py 到 QML 层的信号桥接、属性绑定正确性仅依赖手动本地验证（QT_QPA_PLATFORM=offscreen），缺乏自动化回归保护。当 GUI 层变更时，信号连接断裂可能在 CI 中无法被检测到。证据来源：ci.yml 配置与 pytest.ini markers 对比。",
+      "expectedOutput": [
+        "CI 工作流包含 GUI QML 集成测试执行步骤",
+        "offscreen 模式下 QML 信号桥接测试可自动运行",
+        "CI 全量通过无回归"
+      ],
+      "expectedArtifact": "CI configuration",
+      "aiFixPrompt": "/better-harness fix this issue\n\n将 GUI QML 集成测试纳入 CI 验证范围，或为其创建独立的 CI job。\n\n## 验证\n\n- 在 CI 中增加 gui_qml 测试执行步骤（可使用 offscreen 模式）\n- 确认 QML 信号桥接测试在 CI 环境中可运行\n- 验证 CI 全量通过",
+      "dimensionRefs": [
+        "change-validation"
+      ]
+    },
+    {
+      "id": "ci-matrix-python-version-gap",
+      "title": "CI 测试矩阵未覆盖 Python 3.11-3.13 中间版本",
+      "severity": "Low",
+      "reason": "tox.ini 配置覆盖 py310-py314 五个 Python 版本，但 CI（ci.yml）仅测试 3.10 和 3.14 两个端点版本。项目声明支持 Python >=3.10 至 3.14，但中间版本（3.11/3.12/3.13）的兼容性未在每次提交时自动验证。如果某个中间版本引入的 API 变更导致兼容性问题，CI 无法及时捕获。benchmark job 固定使用 3.12 但为手动触发。证据来源：tox.ini 与 ci.yml 矩阵配置对比。",
+      "expectedOutput": [
+        "CI 矩阵覆盖至少一个中间 Python 版本，或项目文档明确版本选择策略",
+        "CI 通过无回归"
+      ],
+      "expectedArtifact": "CI configuration",
+      "aiFixPrompt": "/better-harness fix this issue\n\n扩展 CI 测试矩阵以覆盖更多 Python 版本，或在文档中明确说明版本选择策略。\n\n## 验证\n\n- 在 ci.yml 中增加至少一个中间版本（如 3.12）的测试 job\n- 或在项目文档中说明为何仅测试端点版本\n- 确认 CI 通过",
+      "dimensionRefs": [
+        "controlled-execution"
+      ]
+    }
+  ]
+}

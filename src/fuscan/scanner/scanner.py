@@ -53,7 +53,6 @@ from fuscan.scanner._helpers import (
     PROGRESS_LIST_MAX,
     PROGRESS_MIN_DELTA_FILES,
     PROGRESS_MIN_DELTA_MATCHES,
-    PROGRESS_SNAPSHOT_TAIL,
     build_hit_from_match,
     default_extract_content,
     default_extract_content_with_hash,
@@ -390,11 +389,12 @@ class Scanner:
         self._current_file_size: int = 0
         self._current_file_ext: str = ""
         self._current_file_start_time: float = 0.0
-        # 并发模式下正在扫描的文件路径列表（仅主线程读写，无需锁）：
-        # submit 时 append，future 完成时 remove。wait 超时分支据此显示
+        # 并发模式下正在扫描的文件路径集合（仅主线程读写，无需锁）：
+        # submit 时 add，future 完成时 discard。wait 超时分支据此显示
         # 「真实正在扫描的文件」而非上一个完成文件的陈旧路径，
         # 避免「卡在一个文件后突然进度条满了」的假卡死观感。
-        self._in_flight_paths: list[str] = []
+        # 用 set 替代 list，使 add/discard 均为 O(1)（list.remove 为 O(n)）。
+        self._in_flight_paths: set[str] = set()
 
     def pause(self) -> None:
         """暂停扫描，阻塞扫描线程直到 resume。"""
@@ -872,15 +872,10 @@ class Scanner:
         self._last_progress_time = now
         self._last_progress_scanned = scanned
         self._last_progress_matched = matched
-        # 快照仅取最近 PROGRESS_SNAPSHOT_TAIL 条，避免大规模扫描 O(N) 拷贝
-        if self._skipped_dirs:
-            recent_skipped = tuple(list(self._skipped_dirs)[-PROGRESS_SNAPSHOT_TAIL:])
-        else:
-            recent_skipped = ()
-        if self._matched_files:
-            recent_matched = tuple(list(self._matched_files)[-PROGRESS_SNAPSHOT_TAIL:])
-        else:
-            recent_matched = ()
+        # skipped_dirs/matched_files 快照不再每次 emit 构建（deque → list → 切片 → tuple 的
+        # O(PROGRESS_LIST_MAX) 拷贝）。GUI 控制器的 _on_scan_progress 不读取这两个字段，
+        # 它们仅作为 ProgressInfo 的占位默认值保留。若后续有消费方需要实时快照，
+        # 可在此处恢复构建逻辑。
         # 单文件元信息：scan 阶段且 current_file 非空时从缓存读取
         # walk/archive 阶段或最终空 emit 时清零，避免展示陈旧数据
         if phase == "scan" and current_file:
@@ -903,8 +898,8 @@ class Scanner:
                 errors=errors,
                 elapsed=now - self._progress_start,
                 matches=matches,
-                skipped_dirs=recent_skipped,
-                matched_files=recent_matched,
+                # skipped_dirs/matched_files 使用 ProgressInfo 默认空元组，
+                # 不再每次 emit 构建快照（见上方注释）
                 phase=phase,
                 user_skipped=self._progress_user_skipped,
                 current_file_size=current_file_size,

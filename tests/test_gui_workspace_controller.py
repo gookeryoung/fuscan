@@ -2944,6 +2944,21 @@ class TestIter143CoverageGaps:
         """taskOverridesJson 不存在工作区返回 '{}'（iter-143 覆盖行 582）。"""
         assert controller.taskOverridesJson("nonexistent-ws") == "{}"
 
+    def test_workspace_name_nonexistent_returns_empty(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """workspaceName 不存在工作区返回空串（覆盖行 616 None 分支）。"""
+        assert controller.workspaceName("nonexistent-ws") == ""
+
+    def test_workspace_name_returns_name(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """workspaceName 存在的工作区返回其名称。"""
+        ws_id = controller.addWorkspace("我的任务", "folder", "/tmp", "[]", True)
+        assert controller.workspaceName(ws_id) == "我的任务"
+
     def test_set_task_override_ignore_dirs_invalid_type(
         self,
         controller: WorkspaceController,

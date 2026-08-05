@@ -829,6 +829,9 @@ class TestScanWorkerCallbacks:
         assert controller.scanState == "results"
         assert controller.matchedCount == 1
         assert controller.resultModel.rowCount() == 1
+        # 复用/变更文件数 Property（gui_qml 排除时需显式访问覆盖 getter）
+        assert controller.reusedFiles == 0
+        assert controller.changedFiles == 10  # scanned=10, archive_entries=0
 
     def test_on_scan_finished_no_results(
         self,
@@ -911,6 +914,9 @@ class TestProgressCallback:
             elapsed=1.0,
             matches=3,
             phase="scan",
+            current_file_size=12345,
+            current_file_ext="txt",
+            current_file_elapsed_ms=500.0,
         )
         stats_instances[0].emit_progress(info)
 
@@ -921,6 +927,10 @@ class TestProgressCallback:
         assert controller.passedCount == 3  # 5 - 2 - 0
         assert controller.progressIndeterminate is False
         assert "test.txt" in controller.currentFile
+        # 单文件进度字段（iter-148 新增，gui_qml 排除时需显式访问覆盖 getter）
+        assert controller.currentFileSize == 12345
+        assert controller.currentFileExt == "txt"
+        assert controller.currentFileElapsedMs == 500.0
 
     def test_progress_truncates_long_file_path(
         self,

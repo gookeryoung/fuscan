@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -1042,4 +1043,6 @@ class TestBpCommand:
         assert rc == 0
         assert "[PASS]" in out
         assert "超时分支触发" in out
-        assert "slow_00.txt" in out
+        # 输出应包含真实慢文件名（slow_NN.txt），而非占位符 slow_xx.txt
+        # 并发扫描下被跟踪的慢文件由调度决定（slow_00/slow_01 均合法）
+        assert re.search(r"slow_\d+\.txt", out), f"输出应包含真实慢文件名，实际: {out!r}"

@@ -120,6 +120,28 @@ class TestData:
         idx = model.index(1)
         assert model.data(idx, Qt.UserRole + 2) == "敏感内容"
 
+    def test_data_ghost_row_fallback_when_flat_data_none(self, model: ResultListModel) -> None:
+        """_flat_data[row] 为 None 且 _filtered[row] 为 None 时 data() 返回占位。
+
+        覆盖 result_model.data() 行 504-511 幽灵行回退路径：扁平数据未就绪 +
+        filtered 对应行为幽灵行（None）时，按 role 返回占位值
+        （hitsCount=0 / index=row / 其余空串）。
+        该路径在 gui_qml 排除时无 QML delegate 自然访问，需故障注入显式触发。
+        """
+        # 故障注入：模拟懒加载中间状态（扁平数据未填充 + filtered 幽灵行）
+        model._flat_data[0] = None  # type: ignore[attr-defined]
+        filtered_list = list(model._filtered)  # type: ignore[attr-defined]
+        filtered_list[0] = None
+        model._filtered = tuple(filtered_list)  # type: ignore[attr-defined]
+        idx = model.index(0)
+        # hitsCount 占位为 0
+        assert model.data(idx, Qt.UserRole + 5) == 0
+        # index 占位为 row
+        assert model.data(idx, Qt.UserRole + 6) == 0
+        # 其余 role 占位为空串
+        assert model.data(idx, Qt.UserRole + 1) == ""
+        assert model.data(idx, Qt.UserRole + 2) == ""
+
 
 class TestClear:
     def test_clear_empties_rows(self, model: ResultListModel) -> None:

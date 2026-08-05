@@ -675,8 +675,7 @@ def _cmd_bp(args: argparse.Namespace) -> int:  # noqa: PLR0912
     else:
         print(f"  [PASS] 超时分支触发 {result.timeout_emits} 次，current_file 切换到真实 in-flight 慢文件")
         print("  [PASS] 慢文件 elapsed_ms 单调递增，证明在跟踪同一慢文件而非刷新陈旧快文件")
-        sample_slow = next(iter(result.slow_seen), "")
-        sample_name = Path(sample_slow).name if sample_slow else "slow_xx.txt"
+        sample_name = Path(result.max_elapsed_file).name if result.max_elapsed_file else "slow_xx.txt"
         print(f"  [PASS] 假卡死修复生效：用户能看到「正在扫描 {sample_name}」而非陈旧快文件")
 
     return 0 if result.passed else 1

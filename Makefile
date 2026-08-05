@@ -3,8 +3,10 @@
 
 PACKAGE := fuscan
 COV_THRESHOLD := 95
+# 与 CI 一致：排除 slow 与需 QML 引擎的 gui_qml 测试（headless 环境跑不了）
+TEST_MARKERS := "not slow and not gui_qml"
 
-.PHONY: help sync build b clean c test cov lint typecheck check doc tox bump patch minor major push
+.PHONY: help sync build b clean c test test-qml cov lint typecheck check doc tox bump patch minor major push
 
 help: ## 显示帮助信息
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z].*:.*##/ {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -21,11 +23,14 @@ clean c: ## 清理构建产物与缓存
 	find src tests -type d -name __pycache__ -exec rm -rf {} +
 	find src tests -type f -name "*.py[oc]" -delete
 
-test: ## 运行测试（不含覆盖率）
-	uv run pytest -m "not slow"
+test: ## 运行测试（不含覆盖率，与 CI 一致排除 gui_qml）
+	uv run pytest -m $(TEST_MARKERS)
+
+test-qml: ## 补跑 gui_qml 测试（本地有 Qt 环境时用）
+	uv run pytest -m "gui_qml"
 
 cov: ## 运行测试并检查覆盖率
-	uv run pytest -m "not slow" --cov=$(PACKAGE) --cov-fail-under=$(COV_THRESHOLD)
+	uv run pytest -m $(TEST_MARKERS) --cov=$(PACKAGE) --cov-fail-under=$(COV_THRESHOLD)
 
 lint: ## 代码风格检查 (ruff)
 	uv run ruff check .

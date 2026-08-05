@@ -45,7 +45,7 @@ def scan_root(tmp_path: Path) -> Path:
     root = tmp_path / "scan_root"
     root.mkdir()
     (root / "password.txt").write_text("normal", encoding="utf-8")
-    (root / "doc.conf").write_text("password=AKIA1234567890ABCDEF", encoding="utf-8")
+    (root / "doc.txt").write_text("password=AKIA1234567890ABCDEF", encoding="utf-8")
     (root / "readme.md").write_text("hello world", encoding="utf-8")
     (root / ".git").mkdir()
     (root / ".git" / "password.txt").write_text("ignored", encoding="utf-8")
@@ -145,7 +145,7 @@ class TestScanCommand:
         assert "扫描路径" in out
         assert "命中项" in out
         assert "password.txt" in out
-        assert "doc.conf" in out
+        assert "doc.txt" in out
 
     def test_scan_json_output(
         self,
@@ -344,8 +344,8 @@ class TestBuiltinRules:
         rc = main(["scan", str(scan_root)])
         assert rc == 0
         out = capsys.readouterr().out
-        # 内置规则包含通用密码赋值检测，doc.conf 含 password= 应命中
-        assert "doc.conf" in out
+        # 内置规则包含通用密码赋值检测，doc.txt 含 password= 应命中
+        assert "doc.txt" in out
 
     def test_scan_no_builtin_without_rules_errors(self, scan_root: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """--no-builtin 但无 -r 应报错。"""
@@ -373,7 +373,7 @@ class TestBuiltinRules:
         out = capsys.readouterr().out
         # 内置规则与用户规则同时生效
         assert "password.txt" in out  # 用户规则命中
-        assert "doc.conf" in out  # 内置规则命中
+        assert "doc.txt" in out  # 内置规则命中
 
     def test_scan_multiple_user_rules_merged(
         self, scan_root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]

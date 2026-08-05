@@ -269,6 +269,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
                 ignore_dirs=ignore_dirs,
                 cache=cache,
                 source_files=source_files,
+                scan_extensions=ruleset.scan_extensions,
             )
             report = _run_scan(scanner, scan_path, args)
         finally:
@@ -279,6 +280,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
             max_depth=args.max_depth,
             max_file_size=max_file_size,
             ignore_dirs=ignore_dirs,
+            scan_extensions=ruleset.scan_extensions,
         )
         report = _run_scan(scanner, scan_path, args)
 
@@ -365,12 +367,15 @@ def _cmd_benchmark(args: argparse.Namespace) -> int:
                 ignore_dirs=ignore_dirs,
                 cache=cache,
                 source_files=source_files,
+                scan_extensions=ruleset.scan_extensions,
             )
             result = run_benchmark(scanner, scan_path, rounds=args.rounds, warmup=args.warmup, on_round=on_round)
         finally:
             cache.close()
     else:
-        scanner = Scanner(ruleset, max_file_size=max_file_size, ignore_dirs=ignore_dirs)
+        scanner = Scanner(
+            ruleset, max_file_size=max_file_size, ignore_dirs=ignore_dirs, scan_extensions=ruleset.scan_extensions
+        )
         result = run_benchmark(scanner, scan_path, rounds=args.rounds, warmup=args.warmup, on_round=on_round)
 
     comparison = compare_to_baseline(result, baseline) if baseline is not None else None

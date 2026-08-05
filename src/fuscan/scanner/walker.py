@@ -79,6 +79,21 @@ def _is_network_drive(drive: Path) -> bool:
     return drive_type == DRIVE_REMOTE
 
 
+def _ext_from_name(name: str) -> str:
+    """从文件名字符串提取扩展名（小写、去前导点），与 ``_extract_extension`` 一致。
+
+    避免创建 ``Path`` 对象——walk 阶段对 65k+ 文件调用时，``Path()`` 构造
+    开销显著（cProfile 实测占总耗时 ~20%）。
+    """
+    dot = name.rfind(".")
+    if dot > 0:
+        return name[dot + 1 :].lower()
+    if dot == 0 and len(name) > 1:
+        # dotfile 如 .env：取点后部分作为扩展名
+        return name[1:].lower()
+    return ""
+
+
 class FileWalker:
     """递归目录遍历器。
 
@@ -86,11 +101,14 @@ class FileWalker:
     - 按相对路径 glob 通配符匹配忽略目录（如 ``*/vendor/*``）
     - 可选最大深度限制
     - 默认不跟随符号链接，避免环
+    - 可选扩展名白名单早期过滤：``scan_extensions`` 非空时，对不在白名单的
+      文件跳过 ``FileEntry.from_direntry`` 构造（避免 ``stat()`` + ``Path()``
+      开销），仅累加 ``skipped_by_extension`` 计数器供 Scanner 统计
 
     .. note::
-       扩展名过滤改由白名单制（``Scanner._should_scan`` 按
-       ``scan_extensions`` 判断）统一管理，``FileWalker`` 不再持有扩展名黑名单。
-       待扫描文件由 walk 阶段收集后，Scanner 在 ``collect_entries`` 中按白名单过滤。
+       扩展名早期过滤在 walk 阶段进行，避免对 65k+ 不匹配文件创建
+       ``FileEntry``（含 ``stat()`` 系统调用与 ``Path`` 对象分配）。
+       ``Scanner._should_scan`` 保留为安全冗余检查。
     """
 
     def __init__(
@@ -100,6 +118,7 @@ class FileWalker:
         max_depth: int | None = None,
         follow_symlinks: bool = False,
         on_skip_dir: Callable[[str], None] | None = None,
+        scan_extensions: frozenset[str] | None = None,
     ) -> None:
         self._ignore_dirs: set[str] = {d.lower() for d in ignore_dirs}
         self._ignore_paths: list[str] = [p.lower() for p in ignore_paths]
@@ -107,11 +126,21 @@ class FileWalker:
         self._follow_symlinks = follow_symlinks
         self._root: Path | None = None
         self._on_skip_dir = on_skip_dir
+        # 扩展名白名单：None=不过滤（全选快速路径），非空=仅 yield 匹配文件
+        self._scan_extensions: frozenset[str] | None = scan_extensions
+        # walk 阶段被扩展名过滤跳过的文件计数，供 Scanner 累加到 total/skipped
+        self._skipped_by_ext: int = 0
         # follow_symlinks 时跟踪已访问目录的真实路径，检测环路避免无限递归
         self._seen_realpaths: set[str] = set()
 
+    @property
+    def skipped_by_extension(self) -> int:
+        """本次 walk 中被扩展名白名单跳过的文件数。"""
+        return self._skipped_by_ext
+
     def walk(self, root: Path) -> Iterator[FileEntry]:
         """遍历根目录，产出 FileEntry（不包含目录本身）。"""
+        self._skipped_by_ext = 0
         root = root.resolve()
         if not root.exists():
             return
@@ -155,6 +184,11 @@ class FileWalker:
                     continue
                 yield from self._walk_dir(dir_path, depth + 1)
             else:
+                # 扩展名白名单早期过滤：不在白名单的文件跳过 from_direntry 构造
+                # （避免 stat() + Path() 开销），仅累加计数器供 Scanner 统计
+                if self._scan_extensions is not None and _ext_from_name(name) not in self._scan_extensions:
+                    self._skipped_by_ext += 1
+                    continue
                 # 用 DirEntry 构造，复用 scandir 已缓存的 stat，避免 Path.stat() 重复系统调用
                 yield FileEntry.from_direntry(entry)
 

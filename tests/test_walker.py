@@ -32,6 +32,17 @@ class TestFileWalker:
         names = {e.name for e in entries}
         assert names == {"config", "lib.js", "app.py", "app.pyc", "README.md", "doc.TXT"}
 
+    def test_walk_scan_extensions_filter(self, tmp_path: Path) -> None:
+        """scan_extensions 早期过滤：仅 yield 匹配文件，跳过计数器累加。"""
+        _create_tree(tmp_path)
+        walker = FileWalker(scan_extensions=frozenset({"py", "txt"}))
+        entries = list(walker.walk(tmp_path))
+        names = {e.name for e in entries}
+        # 仅 py 和 txt（大小写不敏感）文件被 yield
+        assert names == {"app.py", "doc.TXT"}
+        # 被跳过的文件数：config, lib.js, app.pyc, README.md = 4
+        assert walker.skipped_by_extension == 4
+
     def test_walk_ignore_dirs(self, tmp_path: Path) -> None:
         _create_tree(tmp_path)
         walker = FileWalker(ignore_dirs=(".git", "node_modules"))

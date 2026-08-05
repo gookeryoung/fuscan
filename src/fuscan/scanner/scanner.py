@@ -182,6 +182,7 @@ class Scanner:
             max_depth=max_depth,
             follow_symlinks=follow_symlinks,
             on_skip_dir=self._on_skip_dir_internal,
+            scan_extensions=self._scan_extensions,
         )
         self._scan_archives = scan_archives
         self._max_workers = max_workers
@@ -404,6 +405,8 @@ class Scanner:
 
         if not cancelled:
             # 阶段 1：单线程遍历收集待扫描 entry（I/O 轻量，按全局后缀过滤）
+            # walker 已做扩展名早期过滤（scan_extensions），不匹配的文件不 yield，
+            # 仅累加 walker.skipped_by_extension 计数器，此处累加到 total/skipped
             with self._perf.measure("walk"):
                 for entry in self._walker.walk(root):
                     if self._check_control():
@@ -437,13 +440,19 @@ class Scanner:
                         # 旧实现在此处未同步 self._progress_*，导致 ProgressInfo 中
                         # total/skipped/user_skipped 始终为旧值（0 或上次扫描值），
                         # UI 的 walkDiscovered/walkSkipped 不增长，进度条不动。
-                        self._progress_total = total
-                        self._progress_skipped = skipped
+                        # 累加 walker 早期过滤跳过的文件数，使进度统计完整
+                        ws = self._walker.skipped_by_extension
+                        self._progress_total = total + ws
+                        self._progress_skipped = skipped + ws
                         self._progress_user_skipped = user_skipped
                         self._emit_progress(str(entry.path), 0, 0, 0, phase="walk")
 
         # walk 结束后同步最终统计并强制发送进度，确保 UI 收到完整 walk 统计。
         # 文件数 < 200 时循环内不触发 emit，此处 force=True 是唯一的进度上报点。
+        # 累加 walker 早期扩展名过滤跳过的文件数到 total/skipped
+        walker_skipped = self._walker.skipped_by_extension
+        total += walker_skipped
+        skipped += walker_skipped
         self._progress_total = total
         self._progress_skipped = skipped
         self._progress_user_skipped = user_skipped

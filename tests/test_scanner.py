@@ -3358,7 +3358,9 @@ class TestIter162InFlightProgress:
                 )
             )
 
-        # 让 _scan_entry 阻塞 0.6s（> 0.5s 超时），并在 _check_control 第 4 次返回 True
+        # 让 _scan_entry 阻塞 0.6s（> 0.5s 超时），并在 _check_control 第 5 次返回 True
+        # 4 次 submit 全部 False（让所有 future 提交完成进入 collect 阶段），
+        # collect 阶段首次 _check_control 返回 True 触发取消，覆盖 line 275-278。
         original_scan_entry = scanner._scan_entry
         check_count = [0]
         original_check = scanner._check_control
@@ -3367,14 +3369,14 @@ class TestIter162InFlightProgress:
             time.sleep(0.6)
             return original_scan_entry(entry)
 
-        def _cancel_after_4() -> bool:
+        def _cancel_after_5() -> bool:
             check_count[0] += 1
-            if check_count[0] >= 4:
+            if check_count[0] >= 5:
                 return True
             return original_check()
 
         scanner._scan_entry = _slow_scan  # type: ignore[assignment]
-        scanner._check_control = _cancel_after_4  # type: ignore[assignment]
+        scanner._check_control = _cancel_after_5  # type: ignore[assignment]
 
         results: list[ScanResult] = []
         run_pipeline_phase(scanner, entries, results)

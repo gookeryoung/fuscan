@@ -202,9 +202,10 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._save_timer = QTimer(self)
             self._save_timer.setSingleShot(True)
             self._save_timer.setInterval(_SAVE_DEBOUNCE_MS)
-            self._save_timer.timeout.connect(self._do_save)  # pyrefly: ignore [missing-attribute]
+            self._save_timer.timeout.connect(self._do_save)
         # start() 重启计时器：已在运行时取消旧超时，按本次调用重新计时
-        self._save_timer.start()  # pyrefly: ignore [missing-attribute]
+        # pyrefly: QTimer.start() 重载（无参 / msec），按无参用法校验时仍报 missing-argument
+        self._save_timer.start()  # pyrefly: ignore [missing-argument]
 
     def _do_save(self) -> None:
         """执行实际的磁盘写入（由 ``_save_timer`` 超时触发）。

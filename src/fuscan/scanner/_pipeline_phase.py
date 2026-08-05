@@ -243,7 +243,6 @@ def _collect_concurrent_results(
     matched = 0
     errors = 0
     matches = 0
-    yield_counter = 0
     emit_counter = 0
     # 命中结果批次缓冲，达 emit_batch 时一次性 extend 到共享列表
     batch_match_list: list[tuple[str, str]] = []
@@ -285,9 +284,12 @@ def _collect_concurrent_results(
                 batch_match_list.clear()
             scanner._emit_progress(_last_entry_path, scanned, matched, errors, matches)
             emit_counter = 0
-        yield_counter += 1
-        if yield_counter >= scanner._gil_yield_interval:
-            yield_counter = 0
+        # GIL 让步：并发模式下 worker 在 Rust/C 层释放 GIL，主线程本就能调度，
+        # 但 as_completed 循环本身在 Python 层，仍需定期 sleep(0) 让出时间片。
+        # 时间式判断：距上次让步超过 5ms 才 sleep(0)，避免高吞吐下无谓系统调用
+        now = time.perf_counter()
+        if now - scanner._last_yield_time >= GIL_YIELD_THRESHOLD_S:
+            scanner._last_yield_time = now
             time.sleep(0)
     # 批处理尾部：剩余命中与未 emit 的进度补发一次（避免最后几个文件状态丢失）
     if batch_match_list and scanner._on_progress is not None:

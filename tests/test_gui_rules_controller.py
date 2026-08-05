@@ -1353,11 +1353,13 @@ class TestDisabledRulesPathsPersistence:
         self,
         controller_with_file: RulesController,
         rules_file: Path,
+        config_controller: ConfigController,
     ) -> None:
         """禁用全局规则文件后 disabled_rules_paths 应持久化到 Config。"""
         path_str = str(rules_file)
         controller_with_file.setRuleEnabled(path_str, False)
-        # setRuleEnabled 内部已调用 save()，直接重新加载验证
+        # setRuleEnabled 内部已调用 save()（debounce 路径），需 flush 强制写入磁盘
+        config_controller.flush_save()
         from fuscan.config import load_config
 
         reloaded = load_config()

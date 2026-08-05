@@ -235,7 +235,7 @@ class TestDrives:
         """连续访问 drives 不重复调用 list_drives（缓存生效）。"""
         calls: list[int] = []
 
-        def fake_list_drives(include_network: bool = False) -> list[str]:  # noqa: ARG001
+        def fake_list_drives(include_network: bool = False) -> list[str]:
             calls.append(1)
             return ["C:\\", "D:\\"]
 
@@ -250,14 +250,14 @@ class TestDrives:
         """refresh_drives 清空缓存，下次访问重新枚举。"""
         calls: list[int] = []
 
-        def fake_list_drives(include_network: bool = False) -> list[str]:  # noqa: ARG001
+        def fake_list_drives(include_network: bool = False) -> list[str]:
             calls.append(1)
             return ["C:\\"]
 
         monkeypatch.setattr("fuscan.scanner.walker.list_drives", fake_list_drives)
-        controller.drives  # 触发首次枚举
+        _ = controller.drives  # 触发首次枚举
         controller.refresh_drives()
-        controller.drives  # 应重新枚举
+        _ = controller.drives  # 应重新枚举
         assert len(calls) == 2
 
 

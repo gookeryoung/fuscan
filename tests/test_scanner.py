@@ -1297,32 +1297,23 @@ class TestScannerConcurrency:
         assert report.stats.errors >= 1
         assert report.stats.scanned_files >= 1
 
-    def test_iter111_gil_yield_interval_sequential(self) -> None:
-        """iter-111：顺序扫描（max_workers<=1）使用基础 GIL 让步间隔 20。"""
-        from fuscan.scanner._helpers import GIL_YIELD_INTERVAL
+    def test_iter111_gil_yield_threshold_initial_zero(self) -> None:
+        """iter-111：Scanner 构造时 _last_yield_time 初始化为 0.0。
 
-        rs = _build_ruleset(_filename_rule("r", "x"))
-        # None 与 1 均走顺序路径
-        sc_none = Scanner(rs, max_workers=None)
-        sc_one = Scanner(rs, max_workers=1)
-        assert sc_none._gil_yield_interval == GIL_YIELD_INTERVAL
-        assert sc_one._gil_yield_interval == GIL_YIELD_INTERVAL
-
-    def test_iter111_gil_yield_interval_concurrent(self) -> None:
-        """iter-111/152：并发扫描使用扩大的 GIL 让步间隔（基础 * 10 = 200）。
-
-        iter-152 从 *5//2=50 提升到 *10=200，PyO3 提取器释放 GIL 下
-        仍保持调度顺畅，进一步减少 sleep(0) 系统调用开销。
+        时间式 GIL 让步（替代原计数式 _gil_yield_interval）：
+        首次让步判断 now - 0.0 >= 0.005 必然为真，确保首个文件后即让步一次。
         """
-        from fuscan.scanner._helpers import GIL_YIELD_INTERVAL
-
         rs = _build_ruleset(_filename_rule("r", "x"))
-        sc = Scanner(rs, max_workers=4)
-        expected = GIL_YIELD_INTERVAL * 10
-        assert sc._gil_yield_interval == expected
-        # 基础值为 20，扩大后应为 200
-        assert GIL_YIELD_INTERVAL == 20
-        assert sc._gil_yield_interval == 200
+        sc = Scanner(rs, max_workers=None)
+        assert sc._last_yield_time == 0.0
+        # 不应再存在 _gil_yield_interval 字段（已移除）
+        assert not hasattr(sc, "_gil_yield_interval")
+
+    def test_iter111_gil_yield_threshold_constant_value(self) -> None:
+        """iter-111：GIL_YIELD_THRESHOLD_S 常量值为 0.005（5ms）。"""
+        from fuscan.scanner._helpers import GIL_YIELD_THRESHOLD_S
+
+        assert GIL_YIELD_THRESHOLD_S == 0.005
 
     def test_iter111_progress_emit_batch_sequential(self) -> None:
         """iter-111：顺序扫描的进度 emit 批处理阈值为 1（每文件实时反馈）。"""

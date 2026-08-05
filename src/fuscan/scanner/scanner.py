@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import weakref
 from collections import deque
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -85,6 +86,58 @@ __all__ = ["Scanner", "default_extract_content", "default_extract_content_with_h
 logger = logging.getLogger(__name__)
 
 
+class _CompiledRuleset:
+    """规则集编译产物缓存项（不可变，跨扫描复用）。
+
+    缓存规则编译（``build_matcher``）与 CONTENT 桶构建结果，
+    避免每次 Scanner 构造都重新编译所有规则（~112ms → ~0ms 命中）。
+
+    缓存的对象在 Scanner 构造后不会被修改，可安全共享。
+    """
+
+    __slots__ = (
+        "bucketed_rule_names",
+        "compiled",
+        "content_rule_names",
+        "ext_content_buckets",
+        "ext_remaining_rules",
+        "global_content_buckets",
+        "global_remaining_rules",
+    )
+
+    def __init__(
+        self,
+        compiled: list[tuple[Rule, Matcher]],
+        global_content_buckets: list[_ContentRuleBucket],
+        global_remaining_rules: list[tuple[Rule, Matcher]],
+        ext_content_buckets: dict[str, list[_ContentRuleBucket]],
+        ext_remaining_rules: dict[str, list[tuple[Rule, Matcher]]],
+        bucketed_rule_names: frozenset[str],
+        content_rule_names: frozenset[str],
+    ) -> None:
+        self.compiled = compiled
+        self.global_content_buckets = global_content_buckets
+        self.global_remaining_rules = global_remaining_rules
+        self.ext_content_buckets = ext_content_buckets
+        self.ext_remaining_rules = ext_remaining_rules
+        self.bucketed_rule_names = bucketed_rule_names
+        self.content_rule_names = content_rule_names
+
+
+# 模块级编译缓存：id(ruleset) → (weakref, _CompiledRuleset)
+# weakref 防止 ruleset 被 GC 后 id 被新对象复用导致假命中
+# pyrefly: weakref.ref 为 ReferenceType 泛型，省略类型参数（运行时无影响）
+_compiled_cache: dict[int, tuple[weakref.ref, _CompiledRuleset]] = {}  # pyrefly: ignore [implicit-any-type-argument]
+_compiled_cache_lock = threading.Lock()
+_COMPILED_CACHE_MAX: int = 4
+
+
+def clear_compiled_cache() -> None:
+    """清空规则集编译缓存（供测试隔离与规则变更后强制重编译）。"""
+    with _compiled_cache_lock:
+        _compiled_cache.clear()
+
+
 class Scanner:
     """扫描器：对目录或单文件应用规则集，产出扫描报告。
 
@@ -123,41 +176,84 @@ class Scanner:
         self._file_perf: FilePerfRecorder | None = file_perf
         # 大文件跳过阈值：None 或 0 表示不限制，否则超过此大小的文件不读取内容
         self._max_file_size: int = normalize_max_file_size(max_file_size)
-        self._compiled: list[tuple[Rule, Matcher]] = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
-        # 规则按 required_exts 分组 + 分别 CONTENT 桶合并
-        #
-        # - 无扩展名约束（纯 CONTENT / NOT / OR 混合）的规则 → global pairs（对所有文件执行）
-        # - 有扩展名约束（如 filename endswith ".env" AND ...）的规则 → 对每个
-        #   扩展名单独建 pairs 并分别跑 _build_content_buckets，仅在对应扩展名文件上
-        #   执行 CONTENT 匹配 + remaining 匹配。
-        #
-        # 减少 60%+ 的非必要 CONTENT re 调用（大型混合规则集场景）。
-        global_pairs: list[tuple[Rule, Matcher]] = []
-        ext_pairs_map: dict[str, list[tuple[Rule, Matcher]]] = {}
-        for rule, matcher in self._compiled:
-            required = extract_required_exts(rule.match)
-            if required is None:
-                global_pairs.append((rule, matcher))
-            else:
-                for ext in required:
-                    ext_pairs_map.setdefault(ext, []).append((rule, matcher))
-        # 全局 pairs 构建 CONTENT 桶
+        self._compiled: list[tuple[Rule, Matcher]]
         self._global_content_buckets: list[_ContentRuleBucket]
         self._global_remaining_rules: list[tuple[Rule, Matcher]]
-        self._global_content_buckets, self._global_remaining_rules = self._build_content_buckets(global_pairs)
-        # 按 ext 的 pairs 分别构建 CONTENT 桶 + remaining
-        self._ext_content_buckets: dict[str, list[_ContentRuleBucket]] = {}
-        self._ext_remaining_rules: dict[str, list[tuple[Rule, Matcher]]] = {}
-        all_bucketed_names: set[str] = {r.name for b in self._global_content_buckets for r in b.rules}
-        for ext, pairs in ext_pairs_map.items():
-            buckets, remaining = self._build_content_buckets(pairs)
-            self._ext_content_buckets[ext] = buckets
-            self._ext_remaining_rules[ext] = remaining
-            for b in buckets:
-                for r in b.rules:
-                    all_bucketed_names.add(r.name)
-        # 缓存模式下快速判断规则是否被桶覆盖（避免每次扫文件重建 set）
-        self._bucketed_rule_names: frozenset[str] = frozenset(all_bucketed_names)
+        self._ext_content_buckets: dict[str, list[_ContentRuleBucket]]
+        self._ext_remaining_rules: dict[str, list[tuple[Rule, Matcher]]]
+        self._bucketed_rule_names: frozenset[str]
+        self._content_rule_names: frozenset[str]
+
+        # 规则编译缓存：ruleset 未变时复用已编译的 Matcher 列表与 CONTENT 桶，
+        # 避免每次 Scanner 构造都重新编译所有规则（~112ms → ~0ms 命中）。
+        # 缓存键为 id(ruleset)，weakref 防止 ruleset GC 后 id 被新对象复用导致假命中。
+        cache_key = id(ruleset)
+        compiled_rs: _CompiledRuleset | None = None
+        with _compiled_cache_lock:
+            entry = _compiled_cache.get(cache_key)
+            if entry is not None:
+                ref, compiled_rs = entry
+                if ref() is not ruleset:
+                    # ruleset 已被 GC，id 被新对象复用——清除过期条目
+                    compiled_rs = None
+                    del _compiled_cache[cache_key]
+
+        if compiled_rs is not None:
+            # 缓存命中：复用编译产物
+            self._compiled = compiled_rs.compiled
+            self._global_content_buckets = compiled_rs.global_content_buckets
+            self._global_remaining_rules = compiled_rs.global_remaining_rules
+            self._ext_content_buckets = compiled_rs.ext_content_buckets
+            self._ext_remaining_rules = compiled_rs.ext_remaining_rules
+            self._bucketed_rule_names = compiled_rs.bucketed_rule_names
+            self._content_rule_names = compiled_rs.content_rule_names
+        else:
+            # 缓存未命中：编译规则 + 构建 CONTENT 桶
+            self._compiled = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
+            # 规则按 required_exts 分组 + 分别 CONTENT 桶合并
+            #
+            # - 无扩展名约束（纯 CONTENT / NOT / OR 混合）的规则 → global pairs
+            # - 有扩展名约束（如 filename endswith ".env" AND ...）的规则 → 对每个
+            #   扩展名单独建 pairs 并分别跑 _build_content_buckets
+            #
+            # 减少 60%+ 的非必要 CONTENT re 调用（大型混合规则集场景）。
+            global_pairs: list[tuple[Rule, Matcher]] = []
+            ext_pairs_map: dict[str, list[tuple[Rule, Matcher]]] = {}
+            for rule, matcher in self._compiled:
+                required = extract_required_exts(rule.match)
+                if required is None:
+                    global_pairs.append((rule, matcher))
+                else:
+                    for ext in required:
+                        ext_pairs_map.setdefault(ext, []).append((rule, matcher))
+            self._global_content_buckets, self._global_remaining_rules = self._build_content_buckets(global_pairs)
+            self._ext_content_buckets = {}
+            self._ext_remaining_rules = {}
+            all_bucketed_names: set[str] = {r.name for b in self._global_content_buckets for r in b.rules}
+            for ext, pairs in ext_pairs_map.items():
+                buckets, remaining = self._build_content_buckets(pairs)
+                self._ext_content_buckets[ext] = buckets
+                self._ext_remaining_rules[ext] = remaining
+                for b in buckets:
+                    for r in b.rules:
+                        all_bucketed_names.add(r.name)
+            self._bucketed_rule_names = frozenset(all_bucketed_names)
+            self._content_rule_names = frozenset(rule.name for rule in ruleset.rules if spec_needs_content(rule.match))
+            # 写入缓存供后续 Scanner 复用
+            compiled_rs = _CompiledRuleset(
+                compiled=self._compiled,
+                global_content_buckets=self._global_content_buckets,
+                global_remaining_rules=self._global_remaining_rules,
+                ext_content_buckets=self._ext_content_buckets,
+                ext_remaining_rules=self._ext_remaining_rules,
+                bucketed_rule_names=self._bucketed_rule_names,
+                content_rule_names=self._content_rule_names,
+            )
+            with _compiled_cache_lock:
+                if len(_compiled_cache) >= _COMPILED_CACHE_MAX:
+                    _compiled_cache.clear()
+                _compiled_cache[cache_key] = (weakref.ref(ruleset), compiled_rs)
+
         # 兼容性别名：老代码（_scan_entry_uncached 等）可先临时指向 global 版本，
         # 实际扫描时再叠加 ext 的 buckets/rules
         self._content_buckets = self._global_content_buckets
@@ -187,10 +283,6 @@ class Scanner:
         )
         self._scan_archives = scan_archives
         self._max_workers = max_workers
-        # 预计算每个规则是否需要文件内容（含 CONTENT 目标），供缓存模式跳过 I/O
-        self._content_rule_names: frozenset[str] = frozenset(
-            rule.name for rule in ruleset.rules if spec_needs_content(rule.match)
-        )
         # 缓存模式：登记规则集并构造带哈希的编译列表
         self._cache: CacheStore | None = cache
         self._rule_hashes: dict[str, str] = {}

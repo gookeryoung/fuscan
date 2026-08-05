@@ -145,6 +145,7 @@ class FakeScanner:
         self.scan_calls: list[Path] = []
         self.collect_calls: list[Path] = []
         self.scan_entries_calls: list[tuple[Path, WalkResult]] = []
+        self.filter_entries_calls: list[WalkResult] = []
 
     def pause(self) -> None:
         self.pause_called = True
@@ -166,6 +167,11 @@ class FakeScanner:
         if self.__class__.walk_results_queue:
             return self.__class__.walk_results_queue.pop(0)
         return self.__class__.next_walk_result or _make_walk_result(root)
+
+    def filter_entries(self, walk_result: WalkResult) -> WalkResult:
+        """iter-148：filter 阶段薄包装，返回原 WalkResult（mock 不做实际筛选）。"""
+        self.filter_entries_calls.append(walk_result)
+        return walk_result
 
     def scan_entries(self, root: Path, walk_result: WalkResult) -> ScanReport:
         self.scan_entries_calls.append((root, walk_result))

@@ -1,9 +1,10 @@
 """扫描器：协调遍历器与匹配引擎，输出扫描报告。
 
-两阶段扫描架构：
+三阶段扫描架构：
 
 1. 单线程遍历目录树收集待扫描文件清单（按全局 ``scan_extensions`` 过滤）
-2. ``max_workers > 1`` 时用 ThreadPoolExecutor 并发扫描清单，否则顺序扫描
+2. 对 walk 产物二次筛选（剔除空/超限/不可读/符号链接文件）
+3. ``max_workers > 1`` 时用 ThreadPoolExecutor 并发扫描清单，否则顺序扫描
 
 压缩包扫描在 ``max_workers > 1`` 时按 archive 文件级别并行：不同 archive
 用线程池并发扫描，单个 archive 内条目顺序执行（避免 reader 共享竞争）。
@@ -14,8 +15,9 @@
 - :mod:`fuscan.scanner._content_buckets`：CONTENT 规则桶构建与匹配（合并 OR 正则加速）
 - :mod:`fuscan.scanner._archive_phase`：archive 阶段并行扫描子流程
 - :mod:`fuscan.scanner._pipeline_phase`：scan 阶段顺序/并发扫描子流程
+- :mod:`fuscan.scanner._filter_phase`：filter 阶段二次筛选子流程
 - :mod:`fuscan.scanner._cache_phase`：缓存模式扫描辅助（BatchBuffer/缓存命中重建）
-- 本模块：:class:`Scanner` 主类，串联 walk → scan → archive 三阶段
+- 本模块：:class:`Scanner` 主类，串联 walk → filter → scan → archive 四阶段
 """
 
 from __future__ import annotations
@@ -49,6 +51,7 @@ from fuscan.scanner._content_buckets import (
     extract_required_exts,
     match_content_via_buckets,
 )
+from fuscan.scanner._filter_phase import run_filter_phase
 from fuscan.scanner._helpers import (
     PROGRESS_LIST_MAX,
     PROGRESS_MIN_DELTA_FILES,
@@ -66,6 +69,7 @@ from fuscan.scanner.context import ContentProvider, FileEntry, MatchContext
 from fuscan.scanner.manifest import FileFingerprint, IncrementalManifest
 from fuscan.scanner.matchers import Matcher, build_matcher
 from fuscan.scanner.result import (
+    FilterStats,
     ProgressInfo,
     RuleHit,
     ScanReport,
@@ -439,23 +443,42 @@ class Scanner:
         self._skipped_dirs.append(dir_path)
 
     def scan(self, root: Path) -> ScanReport:
-        """扫描根目录，返回完整报告（``collect_entries`` + ``scan_entries`` 串联）。
+        """扫描根目录，返回完整报告（``collect_entries`` + ``filter_entries`` + ``scan_entries`` 串联）。
 
-        两阶段扫描架构：
+        三阶段扫描架构：
 
         1. **阶段 1 - 收集**：:meth:`collect_entries` 单线程遍历目录树，按全局
            ``scan_extensions`` 过滤生成待扫描文件清单。遍历为 I/O 轻量操作，单线程已足够。
-        2. **阶段 2 - 扫描**：:meth:`scan_entries` 在 ``max_workers > 1`` 时用
-           ThreadPoolExecutor 并发扫描文件清单，否则顺序扫描。先收集再扫描避免了 walk
+        2. **阶段 2 - 筛选**：:meth:`filter_entries` 对 walk 产物二次筛选，剔除空/
+           超限/不可读/符号链接文件，使 scan 阶段分母准确、进度反馈更真实。
+        3. **阶段 3 - 扫描**：:meth:`scan_entries` 在 ``max_workers > 1`` 时用
+           ThreadPoolExecutor 并发扫描清单，否则顺序扫描。先收集再扫描避免了 walk
            与 scan 争抢磁盘 I/O 导致的吞吐下降，且可对清单做全局后缀过滤减少无效提交。
-        3. **阶段 3 - 压缩包**：顺序扫描压缩包内条目（避免 ArchiveScanner 线程安全问题）。
+        4. **阶段 4 - 压缩包**：顺序扫描压缩包内条目（避免 ArchiveScanner 线程安全问题）。
 
-        ``on_progress`` 回调在遍历和扫描阶段按时间节流反馈进度。
+        ``on_progress`` 回调在遍历、筛选和扫描阶段按时间节流反馈进度。
         职责拆分后，``FileStatsWorker`` 可独立调用 :meth:`collect_entries`，
-        ``ScanWorker`` 接收 :class:`WalkResult` 后调用 :meth:`scan_entries` 跳过 walk。
+        ``ScanWorker`` 接收 :class:`WalkResult` 后依次调用 :meth:`filter_entries`、
+        :meth:`scan_entries` 跳过 walk。
         """
         walk_result = self.collect_entries(root)
-        return self.scan_entries(root, walk_result)
+        filtered_walk = self.filter_entries(walk_result)
+        return self.scan_entries(root, filtered_walk)
+
+    def filter_entries(self, walk_result: WalkResult) -> WalkResult:
+        """filter 阶段：对 walk 产物二次筛选，剔除空/超限/不可读/符号链接文件。
+
+        委托 :func:`run_filter_phase` 执行，本方法为薄包装以维持调用点简洁
+        （与 :meth:`scan_entries` 委托 :func:`run_pipeline_phase` 模式一致）。
+
+        筛选后返回新 WalkResult，``filtered_entries`` 为可扫描清单，
+        ``filter_stats`` 为剔除明细。``scan_entries`` 优先使用 ``filtered_entries``
+        （非空时），未调用本方法时回退到 ``entries``（向后兼容）。
+
+        :param walk_result: :meth:`collect_entries` 的产物
+        :return: 带 ``filtered_entries`` 与 ``filter_stats`` 的新 WalkResult
+        """
+        return run_filter_phase(self, walk_result)  # pyrefly: ignore [bad-argument-type]
 
     def collect_entries(self, root: Path) -> WalkResult:
         """walk 阶段：单线程遍历目录树收集待扫描文件清单，按过滤规则筛选。
@@ -656,7 +679,17 @@ class Scanner:
         self._progress_start = time.perf_counter()
         self._pause_event.set()
 
-        entries = list(walk_result.entries)
+        # 优先使用 filter 阶段产出的 filtered_entries（已剔除空/超限/不可读/符号链接）。
+        # 用 filter_stats 是否为 None 判断 filter 是否运行过，而非 filtered_entries 真值——
+        # 否则当所有文件都被剔除时 filtered_entries 为空 tuple 会误回退到 entries，
+        # 导致已剔除的超限文件被重新纳入扫描。
+        # 未调用 filter_entries（filter_stats 为 None）时回退到 entries（向后兼容）。
+        if walk_result.filter_stats is not None:
+            entries = list(walk_result.filtered_entries)
+            filter_removed = walk_result.filter_stats.total_removed
+        else:
+            entries = list(walk_result.entries)
+            filter_removed = 0
         total = walk_result.total
         skipped = walk_result.skipped
         user_skipped = walk_result.user_skipped
@@ -786,6 +819,9 @@ class Scanner:
             archive_entries=archive_entries,
             # 增量扫描未变更文件数（本次从 prev_report 复用的文件数）
             unchanged_files=self._unchanged_count,
+            # filter 阶段剔除的文件总数（empty/oversize/unreadable/symlink 之和）；
+            # 未调用 filter_entries 时为 0（向后兼容）
+            filter_removed=filter_removed,
             # PerfStats 始终启用，导出各阶段统计供 GUI/CLI 展示与持久化
             perf_summary=self._perf.to_dict(),
         )
@@ -838,6 +874,8 @@ class Scanner:
         matches: int = 0,
         force: bool = False,
         phase: str = "scan",
+        filter_stats: FilterStats | None = None,
+        filter_total: int | None = None,
     ) -> None:
         """双门限节流后调用 on_progress 回调。
 
@@ -853,8 +891,13 @@ class Scanner:
 
         :param matches: 累计匹配文本条数（区别于 matched 的命中文件数）。
         :param force: 为 True 时跳过节流，强制发送（如最终进度）。
-        :param phase: 当前扫描阶段：``"walk"``/``"scan"``/``"archive"``，
+        :param phase: 当前扫描阶段：``"walk"``/``"filter"``/``"scan"``/``"archive"``，
             GUI 据此显示不同提示文案，避免 walk 阶段 scanned=0 被误以为卡住。
+        :param filter_stats: filter 阶段四类剔除原因累计数；仅 ``phase=="filter"``
+            时传入，其他阶段为 None（ProgressInfo 的 filter_removed_* 字段默认为 0）
+        :param filter_total: filter 阶段待筛选文件总数；仅 ``phase=="filter"`` 时
+            传入，覆盖 ``self._progress_total``（filter 阶段 total 应为 entries 长度，
+            而非 scan 阶段的 len(entries)+unchanged_count）
         """
         if self._on_progress is None:
             return
@@ -878,7 +921,7 @@ class Scanner:
         # 它们仅作为 ProgressInfo 的占位默认值保留。若后续有消费方需要实时快照，
         # 可在此处恢复构建逻辑。
         # 单文件元信息：scan 阶段且 current_file 非空时从缓存读取
-        # walk/archive 阶段或最终空 emit 时清零，避免展示陈旧数据
+        # walk/filter/archive 阶段或最终空 emit 时清零，避免展示陈旧数据
         if phase == "scan" and current_file:
             current_file_size = self._current_file_size
             current_file_ext = self._current_file_ext
@@ -889,11 +932,25 @@ class Scanner:
             current_file_size = 0
             current_file_ext = ""
             current_file_elapsed_ms = 0.0
+        # filter 阶段填充四类剔除字段；其他阶段恒为 0（ProgressInfo 默认值）
+        if phase == "filter" and filter_stats is not None:
+            filter_removed_empty = filter_stats.removed_empty
+            filter_removed_oversize = filter_stats.removed_oversize
+            filter_removed_unreadable = filter_stats.removed_unreadable
+            filter_removed_symlink = filter_stats.removed_symlink
+        else:
+            filter_removed_empty = 0
+            filter_removed_oversize = 0
+            filter_removed_unreadable = 0
+            filter_removed_symlink = 0
+        # filter 阶段 total 覆盖：filter_total 为 entries 长度，
+        # scan 阶段的 _progress_total 含 unchanged_count 不适用于 filter
+        progress_total = filter_total if (phase == "filter" and filter_total is not None) else self._progress_total
         self._on_progress(
             ProgressInfo(
                 current_file=current_file,
                 scanned=scanned,
-                total=self._progress_total,
+                total=progress_total,
                 skipped=self._progress_skipped,
                 matched=matched,
                 errors=errors,
@@ -906,6 +963,10 @@ class Scanner:
                 current_file_size=current_file_size,
                 current_file_ext=current_file_ext,
                 current_file_elapsed_ms=current_file_elapsed_ms,
+                filter_removed_empty=filter_removed_empty,
+                filter_removed_oversize=filter_removed_oversize,
+                filter_removed_unreadable=filter_removed_unreadable,
+                filter_removed_symlink=filter_removed_symlink,
             )
         )
 
@@ -1118,17 +1179,21 @@ class Scanner:
     def _scan_entry_uncached(self, entry: FileEntry) -> ScanResult:
         """对单个文件应用所有规则（无缓存）。
 
-        以下两种情况跳过内容提取（使用空内容提供器），FILENAME/PATH 规则仍可命中：
-
-        - 规则集不含任何 CONTENT 规则（``_content_rule_names`` 为空）——所有文件均跳过 I/O
-        - 文件超过 ``max_file_size`` ——大文件跳过避免一次性读入内存导致卡死
+        当规则集不含任何 CONTENT 规则（``_content_rule_names`` 为空）时跳过
+        内容提取（使用空内容提供器），FILENAME/PATH 规则仍可命中。
 
         通过 ``_get_effective_buckets_and_rules`` 仅取当前 entry.extension
         真正需要的 CONTENT 桶 + remaining 规则，减少 60%+ 非必要 CONTENT re 调用。
+
+        .. note::
+            ``max_file_size`` 大文件跳过逻辑已前移到 filter 阶段（:func:`run_filter_phase`），
+            超限文件不会进入 ``entries`` 清单，故本方法不再做 size 检查。``scan_file``
+            单文件扫描入口未走 filter 阶段，但仍由 :func:`extract_with_cache` /
+            内容提供器内部做 size 限制保护（``max_size`` 默认 50MB）。
         """
         # 是否需要读取内容：含 CONTENT 规则时才读取
         need_content = bool(self._content_rule_names)
-        skip_content = (not need_content) or (self._max_file_size > 0 and entry.size > self._max_file_size)
+        skip_content = not need_content
         if skip_content:
             context = MatchContext(entry, content_provider=empty_content_provider)
         else:

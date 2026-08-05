@@ -79,8 +79,8 @@ class TestScannerBasic:
 
     def test_scan_respects_ignore_dirs(self, tmp_path: Path) -> None:
         (tmp_path / ".git").mkdir()
-        (tmp_path / ".git" / "password.txt").write_text("", encoding="utf-8")
-        (tmp_path / "password.txt").write_text("", encoding="utf-8")
+        (tmp_path / ".git" / "password.txt").write_text("x", encoding="utf-8")
+        (tmp_path / "password.txt").write_text("x", encoding="utf-8")
         rs = _build_ruleset(_filename_rule("r", "password"))
         scanner = Scanner(rs, ignore_dirs=(".git",))
         report = scanner.scan(tmp_path)
@@ -89,8 +89,8 @@ class TestScannerBasic:
 
     def test_scan_respects_scan_extensions_whitelist(self, tmp_path: Path) -> None:
         """iter-87 白名单制：仅扫描 scan_extensions 指定后缀的文件。"""
-        (tmp_path / "password.pyc").write_text("", encoding="utf-8")
-        (tmp_path / "password.txt").write_text("", encoding="utf-8")
+        (tmp_path / "password.pyc").write_text("x", encoding="utf-8")
+        (tmp_path / "password.txt").write_text("x", encoding="utf-8")
         rs = _build_ruleset(_filename_rule("r", "password"))
         scanner = Scanner(rs, scan_extensions=("txt",))
         report = scanner.scan(tmp_path)
@@ -384,6 +384,292 @@ class TestScannerCollectScanSplit:
         assert report.hits == ()
 
 
+class TestScannerFilterPhase:
+    """iter-148 三阶段扫描重构的 filter 阶段测试。
+
+    覆盖 :func:`run_filter_phase` 各筛除原因（empty/oversize/unreadable/symlink）、
+    :meth:`Scanner.filter_entries` 薄包装、:meth:`Scanner.scan_entries` 优先使用
+    ``filtered_entries`` 与回退 ``entries`` 的向后兼容行为，以及 filter 阶段进度 emit。
+    """
+
+    def test_filter_removes_empty_files(self, tmp_path: Path) -> None:
+        """size==0 的文件被 filter 阶段剔除，不进入扫描队列。"""
+        (tmp_path / "empty.txt").write_text("", encoding="utf-8")
+        (tmp_path / "real.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs)
+        walk_result = scanner.collect_entries(tmp_path)
+        filtered = scanner.filter_entries(walk_result)
+        assert filtered.filter_stats is not None
+        assert filtered.filter_stats.removed_empty == 1
+        assert filtered.filter_stats.total_removed == 1
+        # filtered_entries 仅含 real.txt
+        assert len(filtered.filtered_entries) == 1
+        assert filtered.filtered_entries[0].path.name == "real.txt"
+
+    def test_filter_removes_oversize_files(self, tmp_path: Path) -> None:
+        """size > max_file_size 的文件被 filter 阶段剔除。"""
+        (tmp_path / "big.txt").write_text("x" * 100 + "password", encoding="utf-8")
+        (tmp_path / "small.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_file_size=20)
+        walk_result = scanner.collect_entries(tmp_path)
+        filtered = scanner.filter_entries(walk_result)
+        assert filtered.filter_stats is not None
+        assert filtered.filter_stats.removed_oversize == 1
+        assert len(filtered.filtered_entries) == 1
+        assert filtered.filtered_entries[0].path.name == "small.txt"
+
+    def test_filter_keeps_archive_oversize_when_scan_archives(self, tmp_path: Path) -> None:
+        """启用 scan_archives 时压缩包文件不参与 oversize 判断（作为容器由 ArchiveScanner 处理）。"""
+        import zipfile
+
+        zip_path = tmp_path / "a.zip"
+        with zipfile.ZipFile(str(zip_path), "w") as zf:
+            zf.writestr("big.txt", "x" * 100 + "password")
+            zf.writestr("small.txt", "password")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        # 阈值远小于 zip 文件本身的大小，但 zip 应保留以供 archive 阶段处理
+        scanner = Scanner(rs, scan_archives=True, max_file_size=10)
+        walk_result = scanner.collect_entries(tmp_path)
+        filtered = scanner.filter_entries(walk_result)
+        assert filtered.filter_stats is not None
+        assert filtered.filter_stats.removed_oversize == 0
+        # zip 文件保留在 filtered_entries 中
+        assert any(e.path.name == "a.zip" for e in filtered.filtered_entries)
+
+    def test_filter_removes_oversize_archive_when_scan_archives_disabled(self, tmp_path: Path) -> None:
+        """未启用 scan_archives 时压缩包文件按普通文件参与 oversize 判断。"""
+        import zipfile
+
+        zip_path = tmp_path / "a.zip"
+        with zipfile.ZipFile(str(zip_path), "w") as zf:
+            zf.writestr("big.txt", "x" * 100 + "password")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        # scan_archives=False：zip 作为普通文件，超限即剔除
+        scanner = Scanner(rs, scan_archives=False, max_file_size=10)
+        walk_result = scanner.collect_entries(tmp_path)
+        filtered = scanner.filter_entries(walk_result)
+        assert filtered.filter_stats is not None
+        assert filtered.filter_stats.removed_oversize == 1
+
+    def test_filter_removes_unreadable_files(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """os.access 返回 False 的文件被 filter 阶段剔除。"""
+        (tmp_path / "ok.txt").write_text("password", encoding="utf-8")
+        (tmp_path / "denied.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs)
+        walk_result = scanner.collect_entries(tmp_path)
+        # 模拟 denied.txt 不可读：os.access 对该路径返回 False
+        denied_path = str(tmp_path / "denied.txt")
+        original_access = __import__("os").access
+
+        def mock_access(path: object, mode: int) -> bool:
+            if str(path) == denied_path:
+                return False
+            return original_access(path, mode)
+
+        # _filter_phase.py 内 os.access 已在模块顶层 import
+        import fuscan.scanner._filter_phase as filter_module
+
+        monkeypatch.setattr(filter_module.os, "access", mock_access)
+        filtered = scanner.filter_entries(walk_result)
+        assert filtered.filter_stats is not None
+        assert filtered.filter_stats.removed_unreadable == 1
+        # ok.txt 保留
+        assert len(filtered.filtered_entries) == 1
+        assert filtered.filtered_entries[0].path.name == "ok.txt"
+
+    def test_filter_removes_symlink_files(self, tmp_path: Path) -> None:
+        """follow_symlinks=False 时符号链接文件被 filter 阶段剔除。"""
+        import sys
+
+        target = tmp_path / "real.txt"
+        target.write_text("password", encoding="utf-8")
+        link = tmp_path / "link.txt"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            pytest.skip("当前平台不支持创建符号链接")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, follow_symlinks=False)
+        walk_result = scanner.collect_entries(tmp_path)
+        # Windows 上 is_symlink 可能行为不一，跳过断言若未生成符号链接
+        if not sys.platform.startswith("win") and not link.is_symlink():
+            pytest.skip("符号链接未成功创建")
+        filtered = scanner.filter_entries(walk_result)
+        assert filtered.filter_stats is not None
+        assert filtered.filter_stats.removed_symlink >= 1
+        # 符号链接被剔除，仅保留 real.txt
+        assert all(not e.path.is_symlink() for e in filtered.filtered_entries)
+
+    def test_filter_keeps_symlink_when_follow_symlinks_true(self, tmp_path: Path) -> None:
+        """follow_symlinks=True 时符号链接文件不被 filter 阶段剔除。"""
+        target = tmp_path / "real.txt"
+        target.write_text("password", encoding="utf-8")
+        link = tmp_path / "link.txt"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            pytest.skip("当前平台不支持创建符号链接")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, follow_symlinks=True)
+        walk_result = scanner.collect_entries(tmp_path)
+        filtered = scanner.filter_entries(walk_result)
+        assert filtered.filter_stats is not None
+        assert filtered.filter_stats.removed_symlink == 0
+
+    def test_filter_stats_correctly_populated(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """FilterStats 四类计数正确（混合场景）。"""
+        # empty 文件
+        (tmp_path / "empty.txt").write_text("", encoding="utf-8")
+        # oversize 文件
+        (tmp_path / "big.txt").write_text("x" * 100, encoding="utf-8")
+        # 正常文件
+        (tmp_path / "ok.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_file_size=20)
+        walk_result = scanner.collect_entries(tmp_path)
+        filtered = scanner.filter_entries(walk_result)
+        assert filtered.filter_stats is not None
+        assert filtered.filter_stats.removed_empty == 1
+        assert filtered.filter_stats.removed_oversize == 1
+        assert filtered.filter_stats.removed_unreadable == 0
+        assert filtered.filter_stats.removed_symlink == 0
+        assert filtered.filter_stats.total_removed == 2
+        # 仅 ok.txt 保留
+        assert len(filtered.filtered_entries) == 1
+        assert filtered.filtered_entries[0].path.name == "ok.txt"
+
+    def test_scan_entries_prefers_filtered_entries(self, tmp_path: Path) -> None:
+        """scan_entries 优先使用 filtered_entries（非空时），entries 字段被忽略。"""
+        (tmp_path / "empty.txt").write_text("", encoding="utf-8")
+        (tmp_path / "real.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs)
+        walk_result = scanner.collect_entries(tmp_path)
+        filtered = scanner.filter_entries(walk_result)
+        # entries 仍含全部文件（filter 不修改 entries 字段，仅填 filtered_entries）
+        assert len(walk_result.entries) == 2
+        assert len(filtered.entries) == 2
+        assert len(filtered.filtered_entries) == 1
+        report = scanner.scan_entries(tmp_path, filtered)
+        # 仅 real.txt 进入扫描，命中
+        assert report.stats.matched_files == 1
+        assert report.stats.filter_removed == 1
+
+    def test_scan_entries_falls_back_to_entries(self, tmp_path: Path) -> None:
+        """filtered_entries 为空时 scan_entries 回退到 entries（向后兼容）。"""
+        (tmp_path / "a.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs)
+        # 直接构造无 filtered_entries 的 WalkResult（旧调用方场景）
+        walk_result = scanner.collect_entries(tmp_path)
+        assert len(walk_result.filtered_entries) == 0
+        assert walk_result.filter_stats is None
+        report = scanner.scan_entries(tmp_path, walk_result)
+        # 回退到 entries，正常扫描
+        assert report.stats.matched_files == 1
+        assert report.stats.filter_removed == 0
+
+    def test_scan_entry_uncached_no_longer_skips_oversize(self, tmp_path: Path) -> None:
+        """iter-148：_scan_entry_uncached 不再做 max_file_size 跳过（已前移到 filter）。
+
+        scan_file 单文件入口未走 filter 阶段，但仍由内容提供器内部 size 限制保护。
+        """
+        (tmp_path / "big.txt").write_text("x" * 100 + "password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        # max_file_size 远小于文件大小，但 scan_file 不走 filter 阶段
+        scanner = Scanner(rs, max_file_size=10)
+        result = scanner.scan_file(tmp_path / "big.txt")
+        # _scan_entry_uncached 不再跳过 oversize；内容提取由 default_content_provider
+        # 内部 max_size=50MB 限制保护（big.txt 仅 109 字节，未超限，内容正常读取）
+        assert result.has_hit
+
+    def test_scan_stats_filter_removed_accumulated(self, tmp_path: Path) -> None:
+        """ScanStats.filter_removed 正确累计被 filter 剔除的文件总数。"""
+        # 两个空文件 + 一个 oversize 文件 + 一个正常文件
+        (tmp_path / "empty1.txt").write_text("", encoding="utf-8")
+        (tmp_path / "empty2.txt").write_text("", encoding="utf-8")
+        (tmp_path / "big.txt").write_text("x" * 100, encoding="utf-8")
+        (tmp_path / "ok.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_file_size=20)
+        report = scanner.scan(tmp_path)
+        assert report.stats.filter_removed == 3  # 2 empty + 1 oversize
+
+    def test_filter_phase_progress_emits(self, tmp_path: Path) -> None:
+        """filter 阶段每 N 个文件 emit 一次 phase='filter' 进度，结束时强制 emit。"""
+        # 创建 250+ 文件触发多次 emit（_FILTER_EMIT_INTERVAL=200）
+        for i in range(250):
+            (tmp_path / f"f{i:03d}.txt").write_text("x", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        captured: list[ProgressInfo] = []
+
+        def on_progress(info: ProgressInfo) -> None:
+            captured.append(info)
+
+        scanner = Scanner(rs, on_progress=on_progress, progress_interval=0.0)
+        scanner.scan(tmp_path)
+        # 应有 phase='filter' 的 emit
+        filter_progress = [p for p in captured if p.phase == "filter"]
+        assert len(filter_progress) >= 1
+        # 最后一次 filter emit 应反映完整 entries 处理
+        last_filter = filter_progress[-1]
+        assert last_filter.scanned == 250  # 全部 entries 处理完毕
+
+    def test_filter_phase_progress_summary_text(self, tmp_path: Path) -> None:
+        """ProgressInfo.summary() 在 phase='filter' 时返回筛选阶段文案。"""
+        (tmp_path / "empty.txt").write_text("", encoding="utf-8")
+        (tmp_path / "ok.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        captured: list[ProgressInfo] = []
+
+        def on_progress(info: ProgressInfo) -> None:
+            captured.append(info)
+
+        scanner = Scanner(rs, on_progress=on_progress, progress_interval=0.0)
+        scanner.scan(tmp_path)
+        filter_progress = [p for p in captured if p.phase == "filter"]
+        assert filter_progress, "应至少有一次 filter 阶段进度"
+        summary = filter_progress[-1].summary()
+        assert "筛选" in summary
+        assert "空" in summary
+
+    def test_scan_full_pipeline_filter_stats_in_report(self, tmp_path: Path) -> None:
+        """完整 scan() 流程后 ScanStats.filter_removed 反映 filter 剔除数。"""
+        (tmp_path / "empty.txt").write_text("", encoding="utf-8")
+        (tmp_path / "big.txt").write_text("x" * 100, encoding="utf-8")
+        (tmp_path / "ok.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_file_size=20)
+        report = scanner.scan(tmp_path)
+        # 2 个被剔除（empty + oversize）
+        assert report.stats.filter_removed == 2
+        # 仅 ok.txt 命中
+        assert report.stats.matched_files == 1
+        # summary 应含「筛选剔除」片段
+        assert "筛选剔除" in report.stats.summary()
+
+    def test_filter_phase_walk_result_cancelled_skips_filter(self, tmp_path: Path) -> None:
+        """walk_result.cancelled=True 时 filter 阶段跳过筛选，filter_stats 仍为空 stats。"""
+        (tmp_path / "a.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs)
+        cancelled_walk = WalkResult(
+            root=tmp_path,
+            entries=(FileEntry.from_path(tmp_path / "a.txt"),),
+            total=1,
+            cancelled=True,
+        )
+        filtered = scanner.filter_entries(cancelled_walk)
+        # 取消时跳过筛选循环，filter_stats 仍为零值
+        assert filtered.filter_stats is not None
+        assert filtered.filter_stats.total_removed == 0
+        assert len(filtered.filtered_entries) == 0
+        assert filtered.cancelled is True
+
+
 class TestScannerRules:
     def test_content_rule_triggers(self, tmp_path: Path) -> None:
         (tmp_path / "a.txt").write_text("contains AKIA key", encoding="utf-8")
@@ -450,9 +736,9 @@ class TestScannerRules:
         assert report.stats.matched_files == 2
 
     def test_not_composite_rule(self, tmp_path: Path) -> None:
-        (tmp_path / "password.txt").write_text("", encoding="utf-8")
+        (tmp_path / "password.txt").write_text("x", encoding="utf-8")
         (tmp_path / "backup").mkdir()
-        (tmp_path / "backup" / "password.txt").write_text("", encoding="utf-8")
+        (tmp_path / "backup" / "password.txt").write_text("x", encoding="utf-8")
         rule = Rule(
             name="not-backup",
             severity=Severity.WARNING,
@@ -2160,16 +2446,21 @@ class TestScannerCache:
     def test_filename_rule_not_cached_across_same_content_paths(self, tmp_path: Path) -> None:
         """同内容不同路径的文件，FILENAME 规则结果不可串号。
 
-        场景：两个空文件路径不同（/match.txt 与 /nope.txt），FILENAME 规则
+        场景：两个内容相同的文件路径不同（/match.txt 与 /nope.txt），FILENAME 规则
         contains "match"。首次扫描后 match.txt 命中、nope.txt 未命中；
-        二次扫描时即使两者 file_hash 相同（空内容），nope.txt 仍不应错误继承
+        二次扫描时即使两者 file_hash 相同，nope.txt 仍不应错误继承
         match.txt 的命中。同时验证 match.txt 二次扫描仍命中（路径预筛命中后
         重新评估 FILENAME 规则，结果应与首次一致）。
+
+        iter-148：原场景使用空文件触发同 file_hash，但 filter 阶段会剔除空文件，
+        故改为非空内容相同的文件（file_hash 仍相同）。
         """
         from fuscan.cache import CacheStore
 
-        (tmp_path / "match.txt").write_text("", encoding="utf-8")
-        (tmp_path / "nope.txt").write_text("", encoding="utf-8")
+        # 两个内容相同的非空文件（避免被 filter 阶段剔除）
+        same_content = "same content here"
+        (tmp_path / "match.txt").write_text(same_content, encoding="utf-8")
+        (tmp_path / "nope.txt").write_text(same_content, encoding="utf-8")
         rs = _build_ruleset(_filename_rule("fn", "match"))
 
         cache_path = tmp_path / "cache.db"
@@ -3058,7 +3349,7 @@ class TestScannerMaxFileSize:
         assert scanner._max_file_size == DEFAULT_MAX_FILE_SIZE
 
     def test_scan_skips_oversize_file_content(self, tmp_path: Path) -> None:
-        """非缓存模式下超过 ``max_file_size`` 的文件不读取内容（内容规则不命中）。"""
+        """非缓存模式下超过 ``max_file_size`` 的文件被 filter 阶段剔除（不进入扫描队列）。"""
         # 写入超过 10 字节的大文件
         big_content = "x" * 100 + "password"
         (tmp_path / "big.txt").write_text(big_content, encoding="utf-8")
@@ -3066,18 +3357,26 @@ class TestScannerMaxFileSize:
         # 设置阈值为 10 字节，big.txt 超过阈值
         scanner = Scanner(rs, max_file_size=10)
         report = scanner.scan(tmp_path)
-        # 大文件内容被跳过，content 规则不命中
+        # 大文件被 filter 阶段剔除，content 规则不命中
         assert report.stats.matched_files == 0
+        # filter_removed 统计应反映剔除
+        assert report.stats.filter_removed == 1
 
-    def test_scan_keeps_filename_rule_on_oversize_file(self, tmp_path: Path) -> None:
-        """大文件跳过内容提取，但 filename 规则仍应命中。"""
+    def test_scan_oversize_file_removed_entirely(self, tmp_path: Path) -> None:
+        """iter-148：超限文件被 filter 阶段整体剔除，filename 规则也不再求值。
+
+        旧实现 ``_scan_entry_uncached`` 内做 ``max_file_size`` 跳过——仅跳过内容
+        提取，FILENAME/PATH 规则仍可命中。iter-148 将该逻辑前移到 filter 阶段，
+        超限文件不进入扫描队列，FILENAME 规则也不会求值。
+        """
         (tmp_path / "secret.txt").write_text("x" * 100, encoding="utf-8")
         rs = _build_ruleset(_filename_rule("敏感名", "secret"))
         # 阈值远小于文件大小
         scanner = Scanner(rs, max_file_size=10)
         report = scanner.scan(tmp_path)
-        # filename 规则不依赖内容，应命中
-        assert report.stats.matched_files == 1
+        # filter 阶段整体剔除超限文件，filename 规则不命中
+        assert report.stats.matched_files == 0
+        assert report.stats.filter_removed == 1
 
     def test_scan_skips_content_io_when_no_content_rules(self, tmp_path: Path) -> None:
         """规则集不含 CONTENT 规则时，扫描器跳过所有文件内容读取。
@@ -3127,20 +3426,24 @@ class TestScannerMaxFileSize:
         assert report.stats.matched_files == 1
 
     def test_scan_cached_skips_oversize_file_content(self, tmp_path: Path) -> None:
-        """缓存模式下超过 ``max_file_size`` 的文件不读取内容。"""
+        """缓存模式下超过 ``max_file_size`` 的文件被 filter 阶段剔除。"""
         from fuscan.cache import CacheStore
 
+        # 扫描根用子目录，避免 cache.db/-wal/-shm 落在扫描范围内污染 filter_removed
+        scan_dir = tmp_path / "scan"
+        scan_dir.mkdir()
         big_content = "x" * 100 + "password"
-        (tmp_path / "big.txt").write_text(big_content, encoding="utf-8")
+        (scan_dir / "big.txt").write_text(big_content, encoding="utf-8")
         rs = _build_ruleset(_content_rule("pwd", "password"))
 
         cache = CacheStore(tmp_path / "cache.db")
         try:
             # 阈值远小于文件大小
             scanner = Scanner(rs, cache=cache, max_file_size=10)
-            report = scanner.scan(tmp_path)
-            # 大文件内容被跳过，content 规则不命中
+            report = scanner.scan(scan_dir)
+            # 大文件被 filter 阶段剔除，不进入缓存扫描路径
             assert report.stats.matched_files == 0
+            assert report.stats.filter_removed == 1
         finally:
             cache.close()
 

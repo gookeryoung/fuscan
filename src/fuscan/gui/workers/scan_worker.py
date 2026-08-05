@@ -110,6 +110,8 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         self._cum_user_skipped = 0
         # 多根路径累计压缩包内条目数
         self._cum_archive_entries = 0
+        # 多根路径累计 filter 阶段剔除文件数（empty/oversize/unreadable/symlink 之和）
+        self._cum_filter_removed = 0
         self._start_time: float = 0.0
 
     def pause(self) -> None:
@@ -139,7 +141,13 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
             self._scanner.cancel()
 
     def _on_progress(self, info: ProgressInfo) -> None:
-        """Scanner 进度回调：累加前序根路径的统计后 emit。"""
+        """Scanner 进度回调：累加前序根路径的统计后 emit。
+
+        filter 阶段四类剔除字段（filter_removed_*）直接透传不累计——
+        filter 是单线程顺序阶段，单次 emit 的累计值已包含前序 entries 的剔除数，
+        无需 worker 层再叠加。其他阶段（walk/scan/archive）这些字段恒为 0，
+        透传也不会引入误差。
+        """
         elapsed = time.monotonic() - self._start_time
         self.progress_info.emit(  # pyrefly: ignore [missing-attribute]
             ProgressInfo(
@@ -160,6 +168,12 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
                 current_file_size=info.current_file_size,
                 current_file_ext=info.current_file_ext,
                 current_file_elapsed_ms=info.current_file_elapsed_ms,
+                # filter 阶段四类剔除原因累计数：Scanner 内已累计本次 walk_result 的全部剔除，
+                # worker 无需再叠加（与 scanned/matched 的多根累计语义不同）
+                filter_removed_empty=info.filter_removed_empty,
+                filter_removed_oversize=info.filter_removed_oversize,
+                filter_removed_unreadable=info.filter_removed_unreadable,
+                filter_removed_symlink=info.filter_removed_symlink,
             )
         )
 
@@ -203,10 +217,12 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
             # 必须用 report.cancelled 累积取消标志，否则取消的扫描会被误判为正常完成
             was_cancelled = False
 
-            # precollected 模式：跳过 walk，遍历预收集的 WalkResult 调 scan_entries；
-            # 否则遍历 roots 调 scan（walk + scan 串联，向后兼容）
+            # precollected 模式：跳过 walk，对每个 wr 先 filter 再 scan_entries；
+            # 否则遍历 roots 调 scan（walk + filter + scan 串联，向后兼容）
             if self._precollected is not None:
-                reports = (self._scanner.scan_entries(wr.root, wr) for wr in self._precollected)
+                reports = (
+                    self._scanner.scan_entries(wr.root, self._scanner.filter_entries(wr)) for wr in self._precollected
+                )
             else:
                 reports = (self._scanner.scan(root) for root in self._roots)
 
@@ -244,6 +260,8 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
                     total_matches=self._cum_matches,
                     user_skipped=self._cum_user_skipped,
                     archive_entries=self._cum_archive_entries,
+                    # filter 阶段剔除的文件总数（多根路径累加）
+                    filter_removed=self._cum_filter_removed,
                     perf_summary=self._perf.to_dict(),
                 ),
                 cancelled=was_cancelled,
@@ -270,5 +288,6 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         self._cum_matches += report.stats.total_matches
         self._cum_user_skipped += report.stats.user_skipped
         self._cum_archive_entries += report.stats.archive_entries
+        self._cum_filter_removed += report.stats.filter_removed
         if report.stats.perf_summary:
             self._perf.merge_dict(report.stats.perf_summary)

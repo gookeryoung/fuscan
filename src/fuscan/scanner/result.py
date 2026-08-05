@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from fuscan.scanner.manifest import IncrementalManifest
 
 __all__ = [
+    "FilterStats",
     "MatchResult",
     "ProgressInfo",
     "RuleHit",
@@ -82,6 +83,37 @@ class MatchResult:
 
 
 @dataclass(frozen=True)
+class FilterStats:
+    """筛选阶段统计：walk 产物经 :func:`run_filter_phase` 二次过滤后的剔除明细。
+
+    四类剔除原因互斥（同一文件仅归入首个命中的类别，按 empty → oversize →
+    unreadable → symlink 顺序判断）：
+
+    - ``removed_empty``：``entry.size == 0``，扫描无意义（CONTENT 规则无文本可匹配）
+    - ``removed_oversize``：``max_file_size > 0 and entry.size > max_file_size``，
+      避免一次性读入内存导致卡死
+    - ``removed_unreadable``：``os.access(entry.path, os.R_OK) == False``，
+      避免 scan 阶段抛 OSError（Windows 上基本为 0，Unix 真实权限检查）
+    - ``removed_symlink``：``follow_symlinks=False`` 且 ``entry.path.is_symlink()``，
+      避免重复扫描链接目标
+
+    :class:`WalkResult.filter_stats` 为 ``None`` 表示未经筛选阶段（向后兼容旧
+    调用方直接构造的 WalkResult）；非 None 时 ``filtered_entries`` 为筛选后
+    的可扫描文件清单，``scan_entries`` 优先使用。
+    """
+
+    removed_empty: int = 0
+    removed_oversize: int = 0
+    removed_unreadable: int = 0
+    removed_symlink: int = 0
+
+    @property
+    def total_removed(self) -> int:
+        """被筛选剔除的文件总数（四类原因之和）。"""
+        return self.removed_empty + self.removed_oversize + self.removed_unreadable + self.removed_symlink
+
+
+@dataclass(frozen=True)
 class ProgressInfo:
     """扫描进度信息（实时反馈给 UI）。
 
@@ -89,8 +121,9 @@ class ProgressInfo:
     walk 阶段（已扫描=0）误以为扫描卡住：
 
     - ``"walk"``：阶段 1，遍历目录树收集待扫描文件清单
-    - ``"scan"``：阶段 2，并发/顺序解析文件内容
-    - ``"archive"``：阶段 3，扫描压缩包内条目
+    - ``"filter"``：阶段 2，对 walk 产物二次筛选（剔除空/超限/不可读/符号链接）
+    - ``"scan"``：阶段 3，并发/顺序解析文件内容
+    - ``"archive"``：阶段 4，扫描压缩包内条目
     """
 
     current_file: str = ""
@@ -106,12 +139,12 @@ class ProgressInfo:
     skipped_dirs: tuple[str, ...] = ()
     # 命中的 (文件路径, 规则名) 列表（最近 500 条）
     matched_files: tuple[tuple[str, str], ...] = ()
-    # 当前扫描阶段：walk/scan/archive
+    # 当前扫描阶段：walk/filter/scan/archive
     phase: str = "scan"
     # 用户标记跳过的文件数：区别于按扩展名/目录过滤的 skipped，
     # 此为用户在结果详情区主动「标记为跳过」后在本次扫描中跳过的文件数
     user_skipped: int = 0
-    # 当前文件大小（字节）：scan 阶段填入，walk/archive 阶段为 0。
+    # 当前文件大小（字节）：scan 阶段填入，walk/filter/archive 阶段为 0。
     # GUI 据此在进度卡片展示「[12.3 MB · pdf · 1.2s]」单文件元信息，
     # 让用户感知大文件解析进度，避免误以为卡死
     current_file_size: int = 0
@@ -120,12 +153,20 @@ class ProgressInfo:
     # 当前文件已解析耗时（毫秒）：scan 阶段填入，
     # 顺序扫描为单文件解析耗时，并发扫描为提交到完成的时间间隔
     current_file_elapsed_ms: float = 0.0
+    # filter 阶段四类剔除原因累计数（仅 phase=="filter" 时非零）：
+    # GUI 据此在筛选阶段展示「已剔除 N 个空文件 / M 个超限文件」明细，
+    # 让用户感知筛选进度而非空白等待
+    filter_removed_empty: int = 0
+    filter_removed_oversize: int = 0
+    filter_removed_unreadable: int = 0
+    filter_removed_symlink: int = 0
 
     def summary(self) -> str:
         """返回实时进度状态栏文本（含速度计算）。
 
         根据 ``phase`` 返回不同文案（四阶段命名）：
         walk 阶段（解析目录）突出已发现文件数与白名单跳过数，
+        filter 阶段（二次筛选）突出各类剔除原因明细，
         scan 阶段（文件解析）展示完整扫描指标，
         archive 阶段突出压缩包扫描进度。
         """
@@ -133,6 +174,19 @@ class ProgressInfo:
             return (
                 f"解析目录 | 已发现 {self.total} 个文件 | 跳过 {self.skipped} | "
                 f"用户跳过 {self.user_skipped} | 已用 {self.elapsed:.1f}s"
+            )
+        if self.phase == "filter":
+            removed = (
+                self.filter_removed_empty
+                + self.filter_removed_oversize
+                + self.filter_removed_unreadable
+                + self.filter_removed_symlink
+            )
+            return (
+                f"筛选文件 | 已处理 {self.scanned} | 剔除 {removed} "
+                f"(空 {self.filter_removed_empty} / 超限 {self.filter_removed_oversize} / "
+                f"不可读 {self.filter_removed_unreadable} / 符号链接 {self.filter_removed_symlink}) | "
+                f"已用 {self.elapsed:.1f}s"
             )
         if self.phase == "archive":
             return (
@@ -331,6 +385,11 @@ class ScanStats:
     # 增量扫描时未变更文件数：从 prev_report 复用上次命中结果、未重新读取内容
     # 做 I/O 的文件数。全量扫描时为 0；增量扫描越大，此值越接近 total_files。
     unchanged_files: int = 0
+    # 筛选阶段剔除的文件总数（empty/oversize/unreadable/symlink 四类之和）。
+    # 多根路径扫描时由 ScanWorker 累加各 report 的 filter_removed。
+    # 与 skipped_files 区分：skipped_files 是 walk 阶段按扩展名/目录过滤的文件数，
+    # filter_removed 是 filter 阶段对 walk 产物二次剔除的文件数
+    filter_removed: int = 0
     # 各阶段性能统计（PerfStats 始终启用）：
     # {stage_name: {"total_ms": float, "count": int, "max_ms": float}}
     # None 表示未采集（如测试构造的 ScanStats）；空 dict 表示扫描无数据
@@ -354,6 +413,8 @@ class ScanStats:
 
         当 ``archive_entries > 0`` 时在"扫描"后注明含压缩包内条目数，
         避免 ``scanned_files > total_files`` 时用户误解为统计异常。
+        ``filter_removed > 0`` 时附加"筛选剔除 N"，让用户感知 filter 阶段
+        剔除的文件数（与 skipped_files 区分）。
         """
         prefix = "已取消" if cancelled else "完成"
         scan_part = f"扫描 {self.scanned_files}"
@@ -362,8 +423,11 @@ class ScanStats:
         unchanged_part = ""
         if self.unchanged_files > 0:
             unchanged_part = f" | 复用 {self.unchanged_files}"
+        filter_part = ""
+        if self.filter_removed > 0:
+            filter_part = f" | 筛选剔除 {self.filter_removed}"
         return (
-            f"{prefix}: 总计 {self.total_files} | {scan_part}{unchanged_part} | "
+            f"{prefix}: 总计 {self.total_files} | {scan_part}{unchanged_part}{filter_part} | "
             f"跳过 {self.skipped_files} | 用户跳过 {self.user_skipped} | "
             f"命中 {self.matched_files} | 条数 {self.total_matches} | "
             f"错误 {self.errors} | 耗时 {self.duration_seconds:.2f}s"
@@ -375,7 +439,7 @@ class WalkResult:
     """walk 阶段产物：单根路径遍历收集的待扫描文件清单与统计。
 
     职责拆分（stats/scan worker 分离）后，``FileStatsWorker`` 执行 walk 阶段
-    产出本对象，``ScanWorker`` 接收后跳过 walk 直接进入 scan/archive 阶段，
+    产出本对象，``ScanWorker`` 接收后跳过 walk 直接进入 filter/scan/archive 阶段，
     使 UI 能更早展示确定的 ``total``，且两 worker 的取消/暂停各自独立。
 
     :param root: 本次 walk 的根路径
@@ -392,6 +456,11 @@ class WalkResult:
         避免增量合并时把已删除文件的命中结果重新加入结果列表。ScanWorker 用
         precollected 模式调 scan_entries 时，Scanner 实例自身 _current_manifest
         为 None（collect_entries 未被本实例调用），需从 WalkResult 恢复。
+    :param filtered_entries: filter 阶段剔除空/超限/不可读/符号链接后的
+        可扫描文件清单。``scan_entries`` 优先使用此字段（非空时），
+        否则回退到 ``entries``（向后兼容未经筛选阶段的调用方）
+    :param filter_stats: filter 阶段剔除明细统计；``None`` 表示未经筛选阶段
+        （旧调用方直接构造 WalkResult）；非 None 时 ``filtered_entries`` 已就绪
     """
 
     root: Path
@@ -403,6 +472,9 @@ class WalkResult:
     cancelled: bool = False
     unchanged_count: int = 0
     manifest: IncrementalManifest | None = None
+    # filter 阶段产物：默认 None / 空 tuple 表示未经筛选阶段（向后兼容）
+    filtered_entries: tuple[FileEntry, ...] = field(default_factory=tuple)
+    filter_stats: FilterStats | None = None
 
 
 @dataclass(frozen=True)
@@ -585,6 +657,8 @@ class ScanReport:
             total_matches=int(stats_data.get("total_matches", 0)),
             user_skipped=int(stats_data.get("user_skipped", 0)),
             archive_entries=int(stats_data.get("archive_entries", 0)),
+            # filter_removed 持久化（与 archive_entries 同级，供历史报告复盘）
+            filter_removed=int(stats_data.get("filter_removed", 0)),
             # perf_summary 不持久化（运行时统计，重启后无意义）
             perf_summary=None,
         )

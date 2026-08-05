@@ -120,6 +120,7 @@ STATE_RESULTS: str = "results"
 # 扫描阶段字符串（QML 侧 StatsPage.qml 按 phase 切换展示）
 PHASE_SETUP: str = "setup"
 PHASE_WALK: str = "walk"
+PHASE_FILTER: str = "filter"
 PHASE_SCAN: str = "scan"
 PHASE_ARCHIVE: str = "archive"
 PHASE_DONE: str = "done"
@@ -1410,12 +1411,16 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def _on_scan_progress(self, info: ProgressInfo) -> None:
         """扫描实时进度回调（节流由 worker 内部完成）。
 
-        根据 ``info.phase`` 分别更新 walk / scan / archive 阶段的独立字段，
+        根据 ``info.phase`` 分别更新 walk / filter / scan / archive 阶段的独立字段，
         使 QML 双进度条能分别反映收集与解析进度。
 
-        信号拆分：walk 阶段 emit ``walkProgressChanged``，scan/archive 阶段
+        信号拆分：walk 阶段 emit ``walkProgressChanged``，filter/scan/archive 阶段
         emit ``scanProgressChanged``，阶段切换 emit ``phaseChanged``，
         避免单一 ``progressChanged`` 触发 22+ 个 QML 绑定全量重算。
+
+        filter 阶段属于「非 walk」分支——``scanned`` 复用为「已处理文件数」，
+        ``total`` 为待筛选 entries 长度。filter→scan 切换时若 walk 未标记完成
+        则补标记（防御性，正常流程 walk 已在 stats_finished 标记完成）。
         """
         if self._cancelling:
             return
@@ -1423,8 +1428,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         phase_changed = info.phase != self._scan_phase
         if phase_changed:
             self._scan_phase = info.phase
-            # walk → scan/archive 切换时标记 walk 阶段完成
-            if info.phase in (PHASE_SCAN, PHASE_ARCHIVE) and not self._walk_done:
+            # walk → filter/scan/archive 切换时标记 walk 阶段完成
+            # filter 阶段在 walk 之后，filter→scan 切换时若 walk 未标记则补标记
+            if info.phase in (PHASE_FILTER, PHASE_SCAN, PHASE_ARCHIVE) and not self._walk_done:
                 self._walk_done = True
                 self._walk_indeterminate = False
         # walk 阶段：仅 discovered/skipped/user_skipped 增长，scanned/matched/errors 恒为 0
@@ -1434,7 +1440,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._walk_skipped = info.skipped
             self._walk_user_skipped = info.user_skipped
         else:
-            # scan/archive 阶段：更新解析进度
+            # filter/scan/archive 阶段：更新解析进度
+            # filter 阶段 scanned 字段复用为「已处理文件数」，total 为 entries 长度；
+            # scan/archive 阶段 scanned/total 为常规扫描进度
             self._progress_indeterminate = False
             self._progress_scanned = info.scanned
             self._progress_total = info.total
@@ -1448,7 +1456,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             if len(path_text) > 100:
                 path_text = "..." + path_text[-97:]
             self._current_file = path_text
-        # 单文件元信息同步（walk/archive 阶段为 0/""/0.0）
+        # 单文件元信息同步（walk/filter/archive 阶段为 0/""/0.0）
         self._current_file_size = info.current_file_size
         self._current_file_ext = info.current_file_ext
         self._current_file_elapsed_ms = info.current_file_elapsed_ms

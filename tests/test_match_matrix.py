@@ -416,14 +416,16 @@ class TestEdgeCases:
     """边界场景：空文件、大文件、二进制、GBK 编码、嵌套目录。"""
 
     def test_empty_file_not_error(self, tmp_path: Path) -> None:
-        """空文件不应报错，content 规则不命中。"""
+        """空文件不应报错，由 filter 阶段剔除不计入 scanned。"""
         (tmp_path / "empty.txt").write_text("", encoding="utf-8")
         rule = _leaf(MatchTarget.CONTENT, MatchMode.CONTAINS, "anything", name="r")
         scanner = Scanner(_rs(rule))
         report = scanner.scan(tmp_path)
         assert report.stats.errors == 0
         assert report.stats.matched_files == 0
-        assert report.stats.scanned_files == 1
+        # iter-148：空文件由 filter 阶段剔除，不进入 scan 阶段
+        assert report.stats.scanned_files == 0
+        assert report.stats.filter_removed == 1
 
     def test_large_file_skipped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """超过 max_size 的文件应跳过内容读取（返回空内容）。"""

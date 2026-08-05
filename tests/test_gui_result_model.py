@@ -1094,6 +1094,7 @@ class TestIter156LazyFill:
         m.set_results(results)
         # 手动等待 worker 完成，但不取消懒填充（保留懒加载状态用于断言）
         import time
+
         try:
             from PySide2.QtCore import QCoreApplication
         except ImportError:  # pragma: no cover
@@ -1131,7 +1132,7 @@ class TestIter156LazyFill:
 
     def test_get_result_returns_real_even_when_ghost_row(self, qapp: QApplication, tmp_path: Path) -> None:
         """get_result(row) 即使 row 对应 _filtered[row] 为 None 也应返回真实 ScanResult。
-    
+
         iter-156：过滤排序后结果顺序可能与原 results 顺序不同（sort+倒排索引裁剪重新排序），
         因此只断言 got.path 必须属于原 results 的某条路径，而非严格按下标相等。
         """
@@ -1265,6 +1266,7 @@ class TestIter159FlatData:
         m.set_results(_build_large_results(tmp_path, n=n))
         # 手动等待 worker 完成，但不取消懒填充
         import time
+
         try:
             from PySide2.QtCore import QCoreApplication
         except ImportError:  # pragma: no cover

@@ -538,7 +538,8 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         """
         self._results = results
         # 索引延后到后台线程构建（_schedule_filter_refresh 中 FilterWorker 负责）
-        self._severity_index, self._rule_index = {}, {}
+        self._severity_index: dict[Severity, list[int]] = {}
+        self._rule_index: dict[str, list[int]] = {}
         # 结果集变化，排序缓存全部失效
         self._sort_cache.clear()
         self._schedule_filter_refresh()
@@ -870,7 +871,8 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             return False
         self._results = new_results
         # 索引延后到后台线程构建（_schedule_filter_refresh 中 FilterWorker 负责）
-        self._severity_index, self._rule_index = {}, {}
+        self._severity_index: dict[Severity, list[int]] = {}
+        self._rule_index: dict[str, list[int]] = {}
         self._sort_cache.clear()
         # 结果集变化时同步清空扁平数据，等待 _schedule_filter_refresh 重建
         self._flat_data = []

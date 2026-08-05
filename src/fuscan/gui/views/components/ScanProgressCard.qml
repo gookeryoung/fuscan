@@ -188,162 +188,155 @@ Rectangle {
             }
         }
 
-        // ---------- 第三行：双进度条（收集 + 解析） ----------
+        // ---------- 第三行：流程时间线（GitHub Actions 风格阶段节点） ----------
+        // 收集 → 筛选 → 解析 三个阶段节点竖直串联，节点间以连接线相连；
+        // 进行中的节点显示旋转转圈动画，完成的节点显示对勾。
+        // filter 阶段极快（仅 size 比较），单独成节点以直观展示"剔除 N"详情。
         ColumnLayout {
+            id: phaseTimeline
             Layout.fillWidth: true
-            spacing: 8
+            spacing: 0
 
-            // ----- 阶段 1：收集文件清单（walk） -----
-            ColumnLayout {
+            // 阶段状态求值：返回 "pending" / "running" / "done"
+            // walk：done=walkDone；running=phase=="walk"；否则 pending
+            // filter：running=filterActive；done=walk 已完成且已进入 scan/archive/done；否则 pending
+            // scan：running=phase 属 scan/archive；done=scanDone；否则 pending
+            readonly property var sc: workspaceController.activeScanController
+            function walkNodeState() {
+                if (phaseTimeline.sc.walkDone) return "done"
+                if (phaseTimeline.sc.scanPhase === "walk") return "running"
+                return "pending"
+            }
+            function filterNodeState() {
+                if (phaseTimeline.sc.filterActive) return "running"
+                // walk 完成且已推进到 scan/archive/done，说明 filter 已走完
+                var p = phaseTimeline.sc.scanPhase
+                if (phaseTimeline.sc.walkDone && (p === "scan" || p === "archive" || p === "done"))
+                    return "done"
+                return "pending"
+            }
+            function scanNodeState() {
+                if (phaseTimeline.sc.scanDone) return "done"
+                var p = phaseTimeline.sc.scanPhase
+                if (p === "scan" || p === "archive") return "running"
+                return "pending"
+            }
+
+            // ----- 节点 1：收集文件清单（walk） -----
+            PhaseNode {
                 Layout.fillWidth: true
-                spacing: 4
+                theme: card.theme
+                nodeState: phaseTimeline.walkNodeState()
+                accentColor: theme.colorPrimary
+                title: "收集文件清单"
+                showTopLine: false
+                progressIndeterminate: phaseTimeline.sc.walkIndeterminate
+                progressValue: phaseTimeline.sc.walkIndeterminate ? -1 : phaseTimeline.sc.walkProgress
+                detail: phaseTimeline.sc.walkIndeterminate
+                    ? "统计中..."
+                    : (phaseTimeline.sc.walkClassified + " / " + phaseTimeline.sc.walkDiscovered
+                       + ((phaseTimeline.sc.walkSkipped > 0 || phaseTimeline.sc.walkUserSkipped > 0)
+                          ? " · 跳过 " + (phaseTimeline.sc.walkSkipped + phaseTimeline.sc.walkUserSkipped)
+                          : ""))
+            }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 6
-                    // 阶段标识圆点：进行中=主色脉冲，完成=成功色，未开始=灰
-                    Rectangle {
-                        width: 8
-                        height: 8
-                        radius: 4
-                        color: workspaceController.activeScanController.walkDone
-                            ? theme.colorSuccess
-                            : (workspaceController.activeScanController.scanPhase === "walk"
-                               ? theme.colorPrimary : theme.colorBorder)
+            // ----- 节点 2：筛选文件（filter，剔除空/超限/不可读/符号链接） -----
+            PhaseNode {
+                Layout.fillWidth: true
+                theme: card.theme
+                nodeState: phaseTimeline.filterNodeState()
+                accentColor: theme.colorWarning
+                title: "筛选文件"
+                progressIndeterminate: true
+                progressValue: -1
+                detail: {
+                    var removed = phaseTimeline.sc.filterRemovedEmpty
+                                  + phaseTimeline.sc.filterRemovedOversize
+                                  + phaseTimeline.sc.filterRemovedUnreadable
+                                  + phaseTimeline.sc.filterRemovedSymlink
+                    // 有剔除时展示明细，无剔除时仅展示总数（避免长串 0）
+                    if (removed > 0) {
+                        return "剔除 " + removed + "（空 " + phaseTimeline.sc.filterRemovedEmpty
+                               + " · 超限 " + phaseTimeline.sc.filterRemovedOversize
+                               + " · 不可读 " + phaseTimeline.sc.filterRemovedUnreadable
+                               + " · 链接 " + phaseTimeline.sc.filterRemovedSymlink + "）"
                     }
-                    Label {
-                        text: "收集文件清单"
-                        font.pixelSize: 11
-                        font.bold: workspaceController.activeScanController.scanPhase === "walk"
-                        color: workspaceController.activeScanController.walkDone
-                            ? theme.colorSuccess
-                            : (workspaceController.activeScanController.scanPhase === "walk"
-                               ? theme.colorPrimary
-                               : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary))
-                    }
-                    Item { Layout.fillWidth: true }
-                    // 统计文字精简——去掉冗长前缀，改为「纳入 / 发现 · 跳过 N」紧凑格式
-                    // 跳过数 = 类型不符 + 用户标记，仅在有跳过时显示，避免空载噪音
-                    Label {
-                        text: workspaceController.activeScanController.walkIndeterminate
-                            ? "统计中..."
-                            : (workspaceController.activeScanController.walkClassified
-                               + " / " + workspaceController.activeScanController.walkDiscovered
-                               + ((workspaceController.activeScanController.walkSkipped > 0
-                                   || workspaceController.activeScanController.walkUserSkipped > 0)
-                                  ? " · 跳过 "
-                                    + (workspaceController.activeScanController.walkSkipped
-                                       + workspaceController.activeScanController.walkUserSkipped)
-                                  : ""))
-                        font.pixelSize: 11
-                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                    }
-                }
-                ProgressBar {
-                    id: walkProgressBar
-                    Layout.fillWidth: true
-                    // walk 阶段无确定 total：刚启动 indeterminate，收到首个进度后按"已分类占比"显示
-                    indeterminate: workspaceController.activeScanController.walkIndeterminate
-                    from: 0.0
-                    to: 100.0
-                    value: workspaceController.activeScanController.walkProgress
-                    background: Rectangle {
-                        implicitHeight: 6
-                        color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                        radius: 3
-                    }
-                    contentItem: Item {
-                        implicitHeight: 6
-                        Rectangle {
-                            width: walkProgressBar.visualPosition * parent.width
-                            height: parent.height
-                            radius: 3
-                            color: workspaceController.activeScanController.walkDone
-                                ? theme.colorSuccess : theme.colorPrimary
-                        }
-                    }
+                    return phaseTimeline.filterNodeState() === "pending" ? "" : "剔除 0"
                 }
             }
 
-            // ----- 阶段 2：解析文件内容（filter → scan） -----
-            ColumnLayout {
+            // ----- 节点 3：解析文件内容（scan / archive） -----
+            PhaseNode {
                 Layout.fillWidth: true
-                spacing: 4
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 6
-                    Rectangle {
-                        width: 8
-                        height: 8
-                        radius: 4
-                        color: workspaceController.activeScanController.scanDone
-                            ? theme.colorSuccess
-                            : (workspaceController.activeScanController.scanPhase === "filter"
-                               || workspaceController.activeScanController.scanPhase === "scan"
-                               || workspaceController.activeScanController.scanPhase === "archive"
-                               ? card.statusColor()
-                               : theme.colorBorder)
-                    }
-                    Label {
-                        text: "解析文件内容"
-                        font.pixelSize: 11
-                        font.bold: workspaceController.activeScanController.scanPhase === "filter"
-                            || workspaceController.activeScanController.scanPhase === "scan"
-                            || workspaceController.activeScanController.scanPhase === "archive"
-                        color: (workspaceController.activeScanController.scanPhase === "filter"
-                                || workspaceController.activeScanController.scanPhase === "scan"
-                                || workspaceController.activeScanController.scanPhase === "archive")
-                            ? card.statusColor()
-                            : (workspaceController.activeScanController.scanDone
-                               ? theme.colorSuccess
-                               : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary))
-                    }
-                    Item { Layout.fillWidth: true }
-                    // filter 阶段展示"剔除 N"详情（对应后端 filter_removed_* 字段），
-                    // scan/archive 阶段展示常规"已扫描 / 总数"进度
-                    Label {
-                        text: {
-                            var sc = workspaceController.activeScanController
-                            if (sc.filterActive) {
-                                var removed = sc.filterRemovedEmpty + sc.filterRemovedOversize
-                                              + sc.filterRemovedUnreadable + sc.filterRemovedSymlink
-                                return "剔除 " + removed
-                            }
-                            if (sc.progressIndeterminate) return "等待中..."
-                            var t = sc.progressScanned + " / " + sc.progressTotal
-                            if (sc.archiveEntryCount > 0)
-                                t += "（含压缩包 " + sc.archiveEntryCount + "）"
-                            return t
-                        }
-                        font.pixelSize: 11
-                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
-                    }
+                theme: card.theme
+                nodeState: phaseTimeline.scanNodeState()
+                accentColor: card.statusColor()
+                title: "解析文件内容"
+                showBottomLine: false
+                // 可展开查看具体文件解析明细（GitHub Actions 风格）：
+                // 仅在解析阶段进行中或完成后可展开，pending 时无明细
+                expandable: phaseTimeline.scanNodeState() !== "pending"
+                progressIndeterminate: phaseTimeline.sc.progressIndeterminate && !phaseTimeline.sc.filterActive
+                progressValue: phaseTimeline.sc.progressIndeterminate ? -1 : phaseTimeline.sc.progress
+                detail: {
+                    if (phaseTimeline.scanNodeState() === "pending") return ""
+                    if (phaseTimeline.sc.progressIndeterminate && !phaseTimeline.sc.scanDone) return "等待中..."
+                    var t = phaseTimeline.sc.progressScanned + " / " + phaseTimeline.sc.progressTotal
+                    if (phaseTimeline.sc.archiveEntryCount > 0)
+                        t += "（含压缩包 " + phaseTimeline.sc.archiveEntryCount + "）"
+                    // 平均速度（文件/s）便于横向性能比较
+                    var spd = phaseTimeline.sc.scanSpeed
+                    if (spd > 0)
+                        t += " · 平均 " + spd.toFixed(0) + " 文件/s"
+                    return t
                 }
-                ProgressBar {
-                    id: scanProgressBar
-                    Layout.fillWidth: true
-                    // scan 阶段未开始时 indeterminate（walk 进行中）
-                    indeterminate: workspaceController.activeScanController.progressIndeterminate
-                    // 改用 progress 百分比（0-100），扫描完成时 progress=100 进度条满。
-                    // 原 progressScanned/progressTotal 在扫描完成时可能 scanned<total
-                    // （错误文件未计入），导致 visualPosition<1 进度条未满。
-                    from: 0.0
-                    to: 100.0
-                    value: workspaceController.activeScanController.progress
-                    background: Rectangle {
-                        implicitHeight: 6
-                        color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
-                        radius: 3
-                    }
-                    contentItem: Item {
-                        implicitHeight: 6
-                        Rectangle {
-                            width: scanProgressBar.visualPosition * parent.width
-                            height: parent.height
-                            radius: 3
-                            color: workspaceController.activeScanController.scanDone
-                                ? theme.colorSuccess : card.statusColor()
+
+                // 展开明细区：最近解析文件列表（最新在前），逐行展示 文件名 · 大小 · 耗时
+                expandContent: Component {
+                    ColumnLayout {
+                        spacing: 2
+
+                        Repeater {
+                            model: phaseTimeline.sc.recentParsedFiles
+                            delegate: RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+                                // 文件名（取路径末段，避免过长）
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: {
+                                        var p = modelData.path || ""
+                                        var idx = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"))
+                                        return idx >= 0 ? p.substring(idx + 1) : p
+                                    }
+                                    font.pixelSize: 10
+                                    color: card.theme.isDark ? card.theme.colorTextSecondary : card.theme.colorTextSecondary
+                                    elide: Text.ElideMiddle
+                                }
+                                // 大小 · 耗时
+                                Label {
+                                    text: {
+                                        var size = modelData.size || 0
+                                        var sizeStr = size > 1048576
+                                            ? (size / 1048576).toFixed(1) + " MB"
+                                            : (size / 1024).toFixed(1) + " KB"
+                                        var ms = modelData.elapsedMs || 0
+                                        var msStr = ms >= 1000
+                                            ? (ms / 1000.0).toFixed(1) + "s"
+                                            : ms.toFixed(0) + "ms"
+                                        return sizeStr + " · " + msStr
+                                    }
+                                    font.pixelSize: 10
+                                    color: card.theme.isDark ? card.theme.colorTextSecondary : card.theme.colorTextSecondary
+                                }
+                            }
+                        }
+                        // 空态提示：暂无解析明细
+                        Label {
+                            visible: phaseTimeline.sc.recentParsedFiles.length === 0
+                            text: "暂无解析明细"
+                            font.pixelSize: 10
+                            color: card.theme.isDark ? card.theme.colorTextSecondary : card.theme.colorTextSecondary
                         }
                     }
                 }

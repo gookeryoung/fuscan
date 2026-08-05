@@ -931,6 +931,15 @@ class TestProgressCallback:
         assert controller.currentFileSize == 12345
         assert controller.currentFileExt == "txt"
         assert controller.currentFileElapsedMs == 500.0
+        # 平均速度：scanned=5 / elapsed=1.0 = 5.0 文件/s
+        assert controller.scanSpeed == 5.0
+        # 最近解析文件明细：size>0 且有路径时记录一条
+        recent = controller.recentParsedFiles
+        assert len(recent) == 1
+        assert recent[0]["path"] == "/tmp/test.txt"
+        assert recent[0]["size"] == 12345
+        assert recent[0]["ext"] == "txt"
+        assert recent[0]["elapsedMs"] == 500.0
 
     def test_progress_truncates_long_file_path(
         self,
@@ -2563,6 +2572,74 @@ class TestIter143CoverageGaps:
         controller._on_scan_progress(scan_info)
         assert controller._walk_done is True
         assert controller._walk_indeterminate is False
+
+    def test_scan_speed_zero_when_no_elapsed(self, controller: ScanController) -> None:
+        """scanSpeed 在 elapsed<=0 时返回 0.0（避免除零）。"""
+        assert controller.scanSpeed == 0.0
+        # elapsed=0 的 scan 进度不应触发除零
+        controller._on_scan_progress(ProgressInfo(phase="scan", scanned=5, total=10, elapsed=0.0))
+        assert controller.scanSpeed == 0.0
+
+    def test_recent_parsed_files_skips_zero_size(self, controller: ScanController) -> None:
+        """current_file_size<=0 的回调不应记入解析明细（避免 walk/archive 汇总污染）。"""
+        # 无文件大小：不记录
+        controller._on_scan_progress(
+            ProgressInfo(phase="scan", scanned=1, total=1, current_file="/a.txt", current_file_size=0)
+        )
+        assert controller.recentParsedFiles == []
+        # 有文件大小：记录一条
+        controller._on_scan_progress(
+            ProgressInfo(phase="scan", scanned=2, total=2, current_file="/b.txt", current_file_size=100)
+        )
+        assert len(controller.recentParsedFiles) == 1
+
+    def test_recent_parsed_files_newest_first(self, controller: ScanController) -> None:
+        """recentParsedFiles 最新解析的文件排在列表首位。"""
+        for i in range(3):
+            controller._on_scan_progress(
+                ProgressInfo(
+                    phase="scan",
+                    scanned=i + 1,
+                    total=3,
+                    current_file=f"/f{i}.txt",
+                    current_file_size=10,
+                )
+            )
+        recent = controller.recentParsedFiles
+        assert [item["path"] for item in recent] == ["/f2.txt", "/f1.txt", "/f0.txt"]
+
+    def test_recent_parsed_files_maxlen(self, controller: ScanController) -> None:
+        """解析明细超出上限时 deque 自动丢弃最旧条目。"""
+        from fuscan.gui.controllers.scan_controller import _RECENT_FILES_MAX
+
+        for i in range(_RECENT_FILES_MAX + 10):
+            controller._on_scan_progress(
+                ProgressInfo(
+                    phase="scan",
+                    scanned=i + 1,
+                    total=_RECENT_FILES_MAX + 10,
+                    current_file=f"/f{i}.txt",
+                    current_file_size=10,
+                )
+            )
+        assert len(controller.recentParsedFiles) == _RECENT_FILES_MAX
+
+    def test_start_scan_resets_speed_and_recent_files(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """startScan 应重置累计耗时与解析明细，避免上次扫描残留。"""
+        # 先制造残留状态
+        controller._scan_elapsed = 5.0
+        controller._recent_files.append({"path": "/old.txt", "size": 1, "ext": "txt", "elapsedMs": 1.0})
+        # 启动新扫描
+        controller.setScanModeIndex(1)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+        assert controller.scanSpeed == 0.0
+        assert controller.recentParsedFiles == []
 
     def test_on_stats_finished_with_none_stats_worker(
         self,

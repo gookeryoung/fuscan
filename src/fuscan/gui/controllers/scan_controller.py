@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -127,6 +128,10 @@ PHASE_DONE: str = "done"
 
 # 增量扫描清单持久化目录（与 results 目录并行，存放 <ws_id>.json）
 _MANIFESTS_DIR: Path = CONFIG_DIR / "manifests"
+
+# 解析节点展开明细保留的最近文件条数上限：GitHub Actions 风格明细区
+# 仅展示最近解析的若干文件，避免海量文件时列表无限增长拖慢 QML 渲染。
+_RECENT_FILES_MAX: int = 50
 
 
 class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -238,6 +243,14 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._current_file_size: int = 0
         self._current_file_ext: str = ""
         self._current_file_elapsed_ms: float = 0.0
+        # scan/archive 阶段累计耗时（秒）：用于计算平均速度（文件/s），
+        # 供 GUI 在解析节点展示「平均 N 文件/s」便于横向性能比较。
+        # 由 _on_scan_progress 从 ProgressInfo.elapsed 更新，startScan 时重置为 0。
+        self._scan_elapsed: float = 0.0
+        # 最近解析文件明细（deque，maxlen 限制上限避免无限增长）：
+        # 每项为 {"path": str, "size": int, "ext": str, "elapsedMs": float}，
+        # 供 GUI 在解析节点展开区以 GitHub Actions 风格列表展示具体解析信息。
+        self._recent_files: deque[dict[str, object]] = deque(maxlen=_RECENT_FILES_MAX)
         self._status_summary: str = STR_STATUS_READY
         self._status_text: str = STR_STATUS_READY
         self._passed_count: int = 0
@@ -395,6 +408,28 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def currentFileElapsedMs(self) -> float:
         """当前文件已解析耗时（毫秒）。scan 阶段填入，其余为 0.0。"""
         return self._current_file_elapsed_ms
+
+    @Property(float, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
+    def scanSpeed(self) -> float:
+        """解析阶段平均速度（文件/秒），便于横向性能比较。
+
+        用 ``progressScanned / scan 阶段累计耗时`` 计算；耗时 <= 0 时返回 0.0
+        （避免除零，扫描刚开始或 walk/filter 阶段尚未累计耗时）。GUI 在解析
+        节点详情展示「平均 N 文件/s」。扫描完成后仍反映最后一次进度回调的均速。
+        """
+        if self._scan_elapsed <= 0:
+            return 0.0
+        return self._progress_scanned / self._scan_elapsed
+
+    @Property("QVariantList", notify=scanProgressChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
+    def recentParsedFiles(self) -> list[dict[str, object]]:
+        """最近解析文件明细列表（最新在前），供解析节点展开区展示。
+
+        每项为 ``{"path", "size", "ext", "elapsedMs"}``，供 QML ListView 以
+        GitHub Actions 风格逐行展示具体解析信息（文件名 · 大小 · 耗时）。
+        返回副本并倒序（最新解析的文件排在列表首位）。
+        """
+        return list(reversed(self._recent_files))
 
     @Property(str, notify=phaseChanged)  # pyrefly: ignore [not-callable]
     def statusSummary(self) -> str:
@@ -1251,6 +1286,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._current_file_size = 0
         self._current_file_ext = ""
         self._current_file_elapsed_ms = 0.0
+        # 平均速度与解析明细重置（避免上次扫描残留）
+        self._scan_elapsed = 0.0
+        self._recent_files.clear()
         self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -1354,6 +1392,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._current_file_size = 0
         self._current_file_ext = ""
         self._current_file_elapsed_ms = 0.0
+        # 平均速度与解析明细重置（避免上次扫描残留）
+        self._scan_elapsed = 0.0
+        self._recent_files.clear()
         self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -1460,6 +1501,37 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     # ----------------------------- 内部槽（worker 信号） -----------------------------
 
+    def _update_scan_phase_progress(self, info: ProgressInfo) -> None:
+        """更新 scan/archive 阶段进度字段（由 :meth:`_on_scan_progress` 调用）。
+
+        拆分为独立方法以控制 :meth:`_on_scan_progress` 的分支复杂度。
+        filter→scan 切换时 ``_filter_active`` 由 True 降为 False，QML 据此从
+        转圈+剔除详情切回常规扫描进度展示。同步累计耗时（供平均速度计算）
+        与最近解析文件明细（供解析节点展开区展示具体文件信息）。
+        """
+        if self._filter_active:
+            self._filter_active = False
+        self._progress_indeterminate = False
+        self._progress_scanned = info.scanned
+        self._progress_total = info.total
+        self._matched_count = info.matched
+        self._skipped_count = info.skipped
+        self._error_count = info.errors
+        self._passed_count = max(info.scanned - info.matched - info.errors, 0)
+        # 累计耗时供平均速度计算（ProgressInfo.elapsed 为 scan 阶段累计秒）
+        self._scan_elapsed = info.elapsed
+        # 追加最近解析文件明细：仅在有实际文件路径且大小>0（真实解析了内容）时
+        # 记录，避免 walk/archive 汇总回调污染明细列表。
+        if info.current_file and info.current_file_size > 0:
+            self._recent_files.append(
+                {
+                    "path": info.current_file,
+                    "size": info.current_file_size,
+                    "ext": info.current_file_ext,
+                    "elapsedMs": info.current_file_elapsed_ms,
+                }
+            )
+
     @Slot(object)  # pyrefly: ignore [not-callable]
     def _on_scan_progress(self, info: ProgressInfo) -> None:
         """扫描实时进度回调（节流由 worker 内部完成）。
@@ -1505,17 +1577,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._filter_removed_symlink = info.filter_removed_symlink
         else:
             # scan/archive 阶段：退出 filter 态，更新解析进度
-            # filter→scan 切换时 _filter_active 由 True 降为 False，
-            # QML 据此从转圈+剔除详情切回常规扫描进度展示
-            if self._filter_active:
-                self._filter_active = False
-            self._progress_indeterminate = False
-            self._progress_scanned = info.scanned
-            self._progress_total = info.total
-            self._matched_count = info.matched
-            self._skipped_count = info.skipped
-            self._error_count = info.errors
-            self._passed_count = max(info.scanned - info.matched - info.errors, 0)
+            self._update_scan_phase_progress(info)
         # 当前文件截断显示
         if info.current_file:
             path_text = info.current_file

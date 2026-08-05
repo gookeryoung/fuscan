@@ -2,6 +2,7 @@
 <RCC version="1.0">
   <qresource prefix="/">
     <file alias="qml/components/IconButton.qml">views/components/IconButton.qml</file>
+    <file alias="qml/components/PhaseNode.qml">views/components/PhaseNode.qml</file>
     <file alias="qml/components/ResultDetailPanel.qml">views/components/ResultDetailPanel.qml</file>
     <file alias="qml/components/RulesPanel.qml">views/components/RulesPanel.qml</file>
     <file alias="qml/components/ScanProgressCard.qml">views/components/ScanProgressCard.qml</file>

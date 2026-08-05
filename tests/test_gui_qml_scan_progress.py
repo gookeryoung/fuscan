@@ -33,7 +33,7 @@ pytestmark = [pytest.mark.gui, pytest.mark.gui_qml]
 try:
     from PySide2.QtCore import QTimer, QtMsgType, QUrl, qInstallMessageHandler
     from PySide2.QtGui import QGuiApplication
-    from PySide2.QtQml import QQmlApplicationEngine
+    from PySide2.QtQml import QQmlApplicationEngine, QQmlComponent
 
     PYSIDE2_AVAILABLE = True
 except ImportError:
@@ -45,7 +45,7 @@ except ImportError:
         qInstallMessageHandler,
     )
     from PySide6.QtGui import QGuiApplication  # type: ignore[no-redef]
-    from PySide6.QtQml import QQmlApplicationEngine  # type: ignore[no-redef]
+    from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent  # type: ignore[no-redef]
 
 try:
     from fuscan.gui.controllers import AppController, register_qml_types
@@ -178,5 +178,144 @@ def test_no_binding_loop_warnings(
 
     binding_loops = [w for w in warnings if "binding loop" in w.lower()]
     assert not binding_loops, f"QML 报 binding loop（共 {len(binding_loops)} 条）:\n" + "\n".join(binding_loops[:5])
+
+    controller.cleanup()
+
+
+def _instantiate_phase_node(
+    app: QGuiApplication,
+    controller: AppController,
+    engine: QQmlApplicationEngine,
+    node_state: str,
+) -> object:
+    """用 QQmlComponent 从源码目录实例化 PhaseNode 并设置状态。
+
+    :param node_state: pending / running / done
+    :return: 实例化的 QML 对象（失败时抛断言）
+    """
+    views_dir = Path(__file__).resolve().parents[1] / "src" / "fuscan" / "gui" / "views"
+    qml = (
+        "import QtQuick 2.15\n"
+        'import "components"\n'
+        "PhaseNode {\n"
+        '    title: "测试阶段"\n'
+        '    detail: "剔除 3"\n'
+        f'    nodeState: "{node_state}"\n'
+        "}\n"
+    )
+    component = QQmlComponent(engine)
+    component.setData(qml.encode("utf-8"), QUrl.fromLocalFile(str(views_dir / "inline.qml")))
+    obj = component.create(engine.rootContext())
+    assert obj is not None, f"PhaseNode({node_state}) 实例化失败：{component.errorString()}"
+    return obj
+
+
+def test_phase_node_three_states_no_errors(
+    qml_warnings_handler: tuple[list[str], Callable[[], None]],
+) -> None:
+    """PhaseNode 三种状态（pending/running/done）实例化应无 QML 错误。
+
+    覆盖 GitHub Actions 风格流程节点：验证状态指示器（空心圈/转圈/对勾）、
+    连接线与 Canvas 绘制在各状态下均无 null TypeError、无组件加载失败。
+    """
+    warnings, _ = qml_warnings_handler
+    app, controller, engine = _build_engine_with_main_qml()
+
+    objs = [_instantiate_phase_node(app, controller, engine, s) for s in ("pending", "running", "done")]
+    _process_events(app, 400)
+
+    null_errors = _filter_null_errors(warnings)
+    assert not null_errors, f"PhaseNode 报 null TypeError（共 {len(null_errors)} 条）:\n" + "\n".join(null_errors[:5])
+    # 保持引用避免 GC 影响事件循环
+    assert len(objs) == 3
+
+    controller.cleanup()
+
+
+def test_phase_node_done_uses_success_color(
+    qml_warnings_handler: tuple[list[str], Callable[[], None]],
+) -> None:
+    """done 态实心圆应用 doneColor（成功绿）而非 accentColor（橙）。
+
+    覆盖需求1：筛选节点 accentColor=warning（橙），完成后对勾应显示成功语义
+    绿色。验证 doneColor 默认取 theme.colorSuccess，且与传入的 accentColor 分离。
+    """
+    warnings, _ = qml_warnings_handler
+    app, controller, engine = _build_engine_with_main_qml()
+
+    views_dir = Path(__file__).resolve().parents[1] / "src" / "fuscan" / "gui" / "views"
+    qml = (
+        "import QtQuick 2.15\n"
+        "import fuscan.theme 1.0\n"
+        'import "components"\n'
+        "PhaseNode {\n"
+        '    title: "筛选文件"\n'
+        '    nodeState: "done"\n'
+        "    accentColor: Theme.colorWarning\n"
+        "}\n"
+    )
+    component = QQmlComponent(engine)
+    component.setData(qml.encode("utf-8"), QUrl.fromLocalFile(str(views_dir / "inline.qml")))
+    obj: object = component.create(engine.rootContext())
+    assert obj is not None, f"PhaseNode 实例化失败：{component.errorString()}"
+    _process_events(app, 200)
+
+    # doneColor 默认为成功色，且不等于传入的 accentColor（warning 橙）
+    done_color = obj.property("doneColor")  # type: ignore[attr-defined]
+    accent_color = obj.property("accentColor")  # type: ignore[attr-defined]
+    assert done_color is not None
+    assert done_color != accent_color, "done 态用色应与 running 强调色（warning）区分"
+
+    null_errors = _filter_null_errors(warnings)
+    assert not null_errors, "PhaseNode(done) 报 null TypeError:\n" + "\n".join(null_errors[:5])
+
+    controller.cleanup()
+
+
+def test_phase_node_expandable_with_content(
+    qml_warnings_handler: tuple[list[str], Callable[[], None]],
+) -> None:
+    """可展开 PhaseNode 注入 expandContent Component 并切换 expanded 应无错误。
+
+    覆盖需求3：解析节点可展开查看具体文件解析明细。验证 expandable/expanded
+    属性与 expandContent Component（Loader 延迟加载）在展开/收起时均无 QML 错误。
+    """
+    warnings, _ = qml_warnings_handler
+    app, controller, engine = _build_engine_with_main_qml()
+
+    views_dir = Path(__file__).resolve().parents[1] / "src" / "fuscan" / "gui" / "views"
+    qml = (
+        "import QtQuick 2.15\n"
+        "import QtQuick.Layouts 1.15\n"
+        "import QtQuick.Controls 2.15\n"
+        'import "components"\n'
+        "PhaseNode {\n"
+        '    title: "解析文件内容"\n'
+        '    nodeState: "running"\n'
+        "    expandable: true\n"
+        "    expanded: true\n"
+        "    expandContent: Component {\n"
+        "        ColumnLayout {\n"
+        '            Label { text: "a.txt · 1.0 KB · 5ms" }\n'
+        "        }\n"
+        "    }\n"
+        "}\n"
+    )
+    component = QQmlComponent(engine)
+    component.setData(qml.encode("utf-8"), QUrl.fromLocalFile(str(views_dir / "inline.qml")))
+    obj: object = component.create(engine.rootContext())
+    assert obj is not None, f"可展开 PhaseNode 实例化失败：{component.errorString()}"
+    _process_events(app, 200)
+
+    assert obj.property("expandable") is True  # type: ignore[attr-defined]
+    assert obj.property("expanded") is True  # type: ignore[attr-defined]
+    # 收起后再展开，验证 Loader active 切换无错误
+    obj.setProperty("expanded", False)  # type: ignore[attr-defined]
+    _process_events(app, 100)
+    obj.setProperty("expanded", True)  # type: ignore[attr-defined]
+    _process_events(app, 100)
+
+    null_errors = _filter_null_errors(warnings)
+    assert not null_errors, "可展开 PhaseNode 报 null TypeError:\n" + "\n".join(null_errors[:5])
 
     controller.cleanup()

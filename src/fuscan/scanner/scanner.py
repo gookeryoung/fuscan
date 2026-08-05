@@ -1180,12 +1180,33 @@ class Scanner:
     def _rebuild_from_full_cache(
         self,
         entry: FileEntry,
-        applicable: list[tuple[Rule, Matcher, str]],
+        cacheable_pairs: list[tuple[Rule, Matcher, str]],
+        path_only_pairs: list[tuple[Rule, Matcher, str]],
         cached: dict[str, RuleHit | None],
         cached_file_hash: str,
     ) -> ScanResult:
-        """全部规则已缓存命中时，从缓存重建 ScanResult。"""
-        hits, rule_errors = build_hits_from_cache(applicable, cached)
+        """全部 CONTENT 规则已缓存命中且无组合规则需内容时，从缓存重建 ScanResult。
+
+        - ``cacheable_pairs``（纯 CONTENT LeafMatch）：从 ``cached`` 重建命中，不读文件
+        - ``path_only_pairs``（FILENAME/PATH LeafMatch + 仅含路径的纯组合）：
+          用空内容提供器重新评估，结果**不写回缓存**（避免同 file_hash 不同路径串号）
+
+        路径预筛 ``lookup_file_hash`` 已通过 ``(path, mtime, size)`` 验证路径未变，
+        FILENAME/PATH 规则结果在路径不变时必然不变，重新评估结果与首次扫描一致，
+        故无需查/写缓存。
+        """
+        hits, rule_errors = build_hits_from_cache(cacheable_pairs, cached)
+        if path_only_pairs:
+            context = MatchContext(entry, content_provider=empty_content_provider)
+            for rule, matcher, _rule_hash in path_only_pairs:
+                try:
+                    match_result = matcher.matches(context)
+                except Exception:
+                    rule_errors += 1
+                    logger.warning("规则 %s 求值失败 %s", rule.name, entry.path, exc_info=True)
+                    continue
+                if match_result.matched:
+                    hits.append(build_hit_from_match(rule, match_result))
         # 累积元数据刷新到批量缓冲（无新 scan_results 需写入，hits=()）
         self._add_to_batch(
             BatchWriteItem(
@@ -1201,19 +1222,20 @@ class Scanner:
     def _scan_entry_cached(self, entry: FileEntry) -> ScanResult:  # noqa: PLR0912
         """缓存模式扫描：先查缓存，命中直接复用，未命中走匹配器并写入缓存。
 
+        规则按可缓存性分类（避免同 ``file_hash`` 不同路径串号）：
+
+        - **cacheable**（纯 CONTENT LeafMatch）：按 ``file_hash`` 查/写缓存
+        - **path_only**（FILENAME/PATH LeafMatch + 纯路径组合）：不缓存，
+          路径预筛已验证 ``(path, mtime, size)`` 一致时直接重新评估，无 I/O
+        - **combo_needs_content**（含 CONTENT 子项的组合）：不缓存，需读文件
+
         优化路径：
 
-        1. **filename/path 规则跳过 I/O**：若所有适用规则均不含 CONTENT 目标，
-           走 :meth:`_scan_entry_uncached`，避免无谓的哈希计算
-        2. **mtime 预筛跳过 read_bytes**：``CacheStore.lookup_file_hash`` 按
-           ``(path, mtime, size)`` 查询已登记的 ``file_hash``。若所有适用规则
-           都已缓存（命中或未命中），则**完全跳过文件读取**，仅复用缓存结果
-        3. **提取内容缓存**：``CacheStore.get_extracted_content`` 按
-           ``file_hash`` 查询提取器结果，命中则跳过 ``extract_content_from_bytes``；
-           同内容不同路径（如 node_modules 重复依赖）可跳过 docx/pptx 提取开销
-        4. **常规路径**：一次 I/O 同时取内容和文件哈希
-           （:meth:`_extract_with_cache`），静态闭包包装内容
-           传给 :class:`MatchContext`，避免改 MatchContext 接口
+        1. **无 CONTENT 规则**：走 :meth:`_scan_entry_uncached`，避免哈希计算
+        2. **mtime 预筛 + 全 CONTENT 命中**：跳过文件读取，从缓存重建
+           CONTENT 命中 + 用空内容提供器重新评估 path_only 规则
+        3. **提取内容缓存**：``get_extracted_content`` 命中跳过提取器开销
+        4. **常规路径**：一次 I/O 同时取内容和文件哈希（:meth:`_extract_with_cache`）
         """
         assert self._cache is not None  # 仅类型收窄，调用方已保证非 None
         # 全局 scan_extensions 已在 _should_scan 阶段按白名单统一过滤，
@@ -1224,30 +1246,38 @@ class Scanner:
             return self._scan_entry_uncached(entry)
 
         applicable: list[tuple[Rule, Matcher, str]] = list(self._compiled_with_hash)
-        rule_hashes = [rh for _, _, rh in applicable]
 
-        # 缓存键仅包含内容哈希，不区分路径/文件名。
-        # 当规则集中存在 **任何** 非 CONTENT 目标规则（文件名匹配、路径匹配、
-        # 以及所有组合器匹配——组合器可能嵌有非 CONTENT 子规则）时，
-        # 内容相同但路径/文件名不同的文件（如全部空文件）会从缓存读到
-        # 彼此的命中结果，造成严重串号。在此保守地对这类扫描场景禁用缓存
-        # （读写均跳过），确保结果正确优先。实际项目中纯 CONTENT 规则集
-        # （最常见场景）仍能享受缓存加速。
-        disable_cache: bool = False
-        for rule, _, _ in applicable:
+        # 按可缓存性分类规则，避免对 FILENAME/PATH/组合规则误用 file_hash 缓存：
+        #
+        # 缓存键为 ``file_hash``，仅与文件内容相关。CONTENT 规则结果完全由
+        # 内容决定，可按 ``file_hash`` 安全缓存。FILENAME/PATH 规则结果与
+        # 路径/文件名相关，同内容不同路径的文件会从缓存读到彼此的命中结果
+        # （串号），不可按 ``file_hash`` 缓存——但因路径预筛已验证
+        # ``(path, mtime, size)`` 一致，重新评估结果与首次一致，且无 I/O 开销。
+        # 组合规则可能依赖内容（``spec_needs_content`` 为 True 时需读文件），
+        # 亦不缓存以避免串号。
+        cacheable_pairs: list[tuple[Rule, Matcher, str]] = []  # 纯 CONTENT LeafMatch
+        path_only_pairs: list[tuple[Rule, Matcher, str]] = []  # FILENAME/PATH LeafMatch + 纯路径组合
+        combo_needs_content_pairs: list[tuple[Rule, Matcher, str]] = []  # 含 CONTENT 子项的组合
+        for triplet in applicable:
+            rule = triplet[0]
             spec = rule.match
-            if not isinstance(spec, LeafMatch):
-                disable_cache = True
-                break
-            if spec.target is not MatchTarget.CONTENT:
-                disable_cache = True
-                break
+            if isinstance(spec, LeafMatch) and spec.target is MatchTarget.CONTENT:
+                cacheable_pairs.append(triplet)
+            elif spec_needs_content(spec):
+                combo_needs_content_pairs.append(triplet)
+            else:
+                path_only_pairs.append(triplet)
+        cacheable_rule_hashes: list[str] = [rh for _, _, rh in cacheable_pairs]
+        cacheable_rule_hash_set: set[str] = set(cacheable_rule_hashes)
+        has_combo_needs_content: bool = bool(combo_needs_content_pairs)
 
-        # mtime 预筛：若 (path, mtime, size) 已登记且所有规则都已缓存，
-        # 完全跳过 read_bytes，仅从缓存重建 ScanResult。
-        cached: dict[str, RuleHit | None] | None = None
+        # mtime 预筛：若 (path, mtime, size) 已登记且所有 CONTENT 规则都已缓存，
+        # 完全跳过 read_bytes——CONTENT 规则从缓存重建，FILENAME/PATH 规则
+        # 用空内容提供器重新评估（无 I/O）。组合规则需内容时仍走慢路径。
+        cached: dict[str, RuleHit | None] = {}
         cached_file_hash: str | None = None
-        if not disable_cache:
+        if cacheable_rule_hashes:
             with self._perf.measure("cache_lookup"):
                 # 优先查批量预热的预计算结果，省掉 LRU 锁/SQLite
                 pre_key = str(entry.path)
@@ -1255,11 +1285,15 @@ class Scanner:
                     cached_file_hash = self._precomputed_file_hashes[pre_key]
                 else:
                     cached_file_hash = self._cache.lookup_file_hash(entry.path, entry.mtime, entry.size)
-                if cached_file_hash is not None and rule_hashes:
-                    cached = self._cache.get_cached_hits(cached_file_hash, rule_hashes)
-            if cached_file_hash is not None and cached is not None and all(rh in cached for rh in rule_hashes):
-                # 全部规则已缓存命中（含未命中记录），无需读文件
-                return self._rebuild_from_full_cache(entry, applicable, cached, cached_file_hash)
+                if cached_file_hash is not None:
+                    cached = self._cache.get_cached_hits(cached_file_hash, cacheable_rule_hashes)
+            if (
+                cached_file_hash is not None
+                and all(rh in cached for rh in cacheable_rule_hashes)
+                and not has_combo_needs_content
+            ):
+                # 全部 CONTENT 规则已缓存命中，无组合规则需内容：跳过 I/O 重建
+                return self._rebuild_from_full_cache(entry, cacheable_pairs, path_only_pairs, cached, cached_file_hash)
 
         # 常规路径：读文件 + 算哈希 + 查提取内容缓存 + 未命中执行提取
         content, file_hash = self._extract_with_cache(entry)
@@ -1269,13 +1303,15 @@ class Scanner:
 
         context = MatchContext(entry, content_provider=_static_provider)
 
-        with self._perf.measure("cache_lookup_hits"):
-            # disable_cache 或 file_hash 为 None（无法提取内容）
-            # 时跳过缓存查询，避免命中结果串号。
-            if disable_cache or file_hash is None or not rule_hashes:
-                cached = {}
-            else:
-                cached = self._cache.get_cached_hits(file_hash, rule_hashes)
+        # 用实际 file_hash 查缓存命中（path 预筛未命中或 file_hash 与预筛不一致时）
+        if (
+            file_hash is not None
+            and cacheable_rule_hashes
+            and (cached_file_hash is None or file_hash != cached_file_hash)
+        ):
+            with self._perf.measure("cache_lookup_hits"):
+                cached = self._cache.get_cached_hits(file_hash, cacheable_rule_hashes)
+        # else: 无 CONTENT 规则或 file_hash 为 None（空文件/无法提取）→ cached 保持为 {}
 
         hits: list[RuleHit] = []
         rule_errors = 0
@@ -1313,15 +1349,17 @@ class Scanner:
             if match_result.matched:
                 hit = build_hit_from_match(rule, match_result)
                 hits.append(hit)
-                batch_hits.append((rule_hash, hit))
-            else:
-                # 未命中也缓存，避免重复扫描（disable_cache 时不写入 batch_hits）
+                # 仅缓存纯 CONTENT LeafMatch 规则，FILENAME/PATH/组合规则
+                # 不写入缓存避免同 file_hash 不同路径串号
+                if rule_hash in cacheable_rule_hash_set:
+                    batch_hits.append((rule_hash, hit))
+            elif rule_hash in cacheable_rule_hash_set:
+                # 未命中也缓存（仅 CONTENT 规则），避免重复扫描
                 batch_hits.append((rule_hash, None))
 
         # 累积到批量缓冲，达到阈值后由 _add_to_batch 自动 flush
-        # disable_cache 或 file_hash 为 None（空文件 / 无法提取内容）
-        # 时跳过写入缓存，防止命中结果串号。
-        if not disable_cache and file_hash is not None:
+        # file_hash 为 None（空文件 / 无法提取内容）时跳过写入缓存
+        if file_hash is not None:
             self._add_to_batch(
                 BatchWriteItem(
                     file_hash=file_hash,

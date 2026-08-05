@@ -2157,6 +2157,83 @@ class TestScannerCache:
         finally:
             cache.close()
 
+    def test_filename_rule_not_cached_across_same_content_paths(self, tmp_path: Path) -> None:
+        """同内容不同路径的文件，FILENAME 规则结果不可串号。
+
+        场景：两个空文件路径不同（/match.txt 与 /nope.txt），FILENAME 规则
+        contains "match"。首次扫描后 match.txt 命中、nope.txt 未命中；
+        二次扫描时即使两者 file_hash 相同（空内容），nope.txt 仍不应错误继承
+        match.txt 的命中。同时验证 match.txt 二次扫描仍命中（路径预筛命中后
+        重新评估 FILENAME 规则，结果应与首次一致）。
+        """
+        from fuscan.cache import CacheStore
+
+        (tmp_path / "match.txt").write_text("", encoding="utf-8")
+        (tmp_path / "nope.txt").write_text("", encoding="utf-8")
+        rs = _build_ruleset(_filename_rule("fn", "match"))
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
+        try:
+            scanner1 = Scanner(rs, cache=cache)
+            report1 = scanner1.scan(tmp_path)
+            assert report1.stats.matched_files == 1
+            hit_paths1 = {hit.path for hit in report1.hits}
+            assert hit_paths1 == {tmp_path / "match.txt"}
+
+            # 二次扫描：路径预筛命中，FILENAME 规则重新评估，结果应一致
+            scanner2 = Scanner(rs, cache=cache)
+            report2 = scanner2.scan(tmp_path)
+            assert report2.stats.matched_files == 1
+            hit_paths2 = {hit.path for hit in report2.hits}
+            assert hit_paths2 == {tmp_path / "match.txt"}, (
+                f"FILENAME 规则结果串号：期望仅 match.txt 命中，实际 {hit_paths2}"
+            )
+        finally:
+            cache.close()
+
+    def test_filename_rule_hot_cache_skips_read_bytes(self, tmp_path: Path) -> None:
+        """含 FILENAME 规则的规则集二次扫描应跳过 read_bytes（mtime 预筛命中 + 全 CONTENT 缓存）。
+
+        回归防护：修复前 ``disable_cache`` 检查导致含 FILENAME 规则时整个文件缓存被禁用，
+        每次扫描都重新读文件。修复后 FILENAME 规则不缓存但重新评估（无 I/O），
+        CONTENT 规则仍走缓存，热缓存场景应跳过文件读取。
+        """
+        from fuscan.cache import CacheStore
+
+        path = tmp_path / "match.txt"
+        path.write_text("password here", encoding="utf-8")
+        # 1 FILENAME + 1 CONTENT：覆盖修复路径
+        rs = _build_ruleset(
+            _filename_rule("fn", "match"),
+            _content_rule("pwd", "password"),
+        )
+
+        cache_path = tmp_path / "cache.db"
+        cache = CacheStore(cache_path)
+        try:
+            scanner1 = Scanner(rs, cache=cache)
+            scanner1.scan(tmp_path)
+
+            # 二次扫描：文件未修改，应走 mtime 预筛 + 缓存重建路径
+            call_count = 0
+            original_read_bytes = Path.read_bytes
+
+            def counting_read_bytes(self: Path) -> bytes:
+                nonlocal call_count
+                if self.name == "match.txt":
+                    call_count += 1
+                return original_read_bytes(self)
+
+            scanner2 = Scanner(rs, cache=cache)
+            with pytest.MonkeyPatch.context() as mp:
+                mp.setattr(Path, "read_bytes", counting_read_bytes)
+                report2 = scanner2.scan(tmp_path)
+            assert call_count == 0, f"热缓存场景仍读文件 {call_count} 次"
+            assert report2.stats.matched_files == 1
+        finally:
+            cache.close()
+
     def test_extract_content_cache_skips_extract_on_second_path(self, tmp_path: Path) -> None:
         """同内容不同路径的文件，第二次扫描应命中提取内容缓存，跳过 extract。"""
         from fuscan.cache import CacheStore

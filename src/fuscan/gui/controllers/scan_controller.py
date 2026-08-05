@@ -251,13 +251,22 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 阶段独立进度（双进度条）：
         # walk 阶段：discovered 持续增长，skipped/user_skipped 反映白名单与用户标记跳过
         # scan 阶段：scanned/total 反映解析进度，与上方 progressScanned/progressTotal 同步
-        self._scan_phase: str = PHASE_SETUP  # setup / walk / scan / archive / done
+        self._scan_phase: str = PHASE_SETUP  # setup / walk / filter / scan / archive / done
         self._walk_discovered: int = 0
         self._walk_skipped: int = 0
         self._walk_user_skipped: int = 0
         self._walk_indeterminate: bool = False
         self._walk_done: bool = False
         self._scan_done: bool = False
+        # filter 阶段统计——四类剔除计数（空/超限/不可读/符号链接）。
+        # filter 是 walk 与 scan 之间的快速筛选阶段，对 walk 产物二次过滤，
+        # 剔除本不应进入扫描队列的条目。``_filter_active`` 标记当前是否处于
+        # filter 阶段，供 QML 切换"解析文件内容"行的展示形态（转圈+剔除详情）。
+        self._filter_active: bool = False
+        self._filter_removed_empty: int = 0
+        self._filter_removed_oversize: int = 0
+        self._filter_removed_unreadable: int = 0
+        self._filter_removed_symlink: int = 0
 
         # 扫描目标
         self._scan_mode_index: int = SCAN_MODE_STR_TO_INDEX.get(self._config.scan_mode, SCAN_MODE_DEFAULT_INDEX)
@@ -446,11 +455,43 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         - ``"setup"``：未开始
         - ``"walk"``：收集文件清单（FileStatsWorker 运行中）
+        - ``"filter"``：筛选文件（剔除空/超限/不可读/符号链接）
         - ``"scan"``：解析文件内容（ScanWorker 主阶段）
         - ``"archive"``：扫描压缩包内条目
         - ``"done"``：全部完成
         """
         return self._scan_phase
+
+    # ---- filter 阶段统计（QML 据此切换"解析文件内容"行为转圈+剔除详情） ----
+
+    @Property(bool, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
+    def filterActive(self) -> bool:
+        """当前是否处于 filter 阶段。
+
+        QML 据此将"解析文件内容"行切换为转圈+剔除详情展示，
+        避免将 filter 的已处理/总数误展示为扫描进度。
+        """
+        return self._filter_active
+
+    @Property(int, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
+    def filterRemovedEmpty(self) -> int:
+        """filter 阶段剔除的空文件数。"""
+        return self._filter_removed_empty
+
+    @Property(int, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
+    def filterRemovedOversize(self) -> int:
+        """filter 阶段剔除的超限文件数。"""
+        return self._filter_removed_oversize
+
+    @Property(int, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
+    def filterRemovedUnreadable(self) -> int:
+        """filter 阶段剔除的不可读文件数。"""
+        return self._filter_removed_unreadable
+
+    @Property(int, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
+    def filterRemovedSymlink(self) -> int:
+        """filter 阶段剔除的符号链接文件数。"""
+        return self._filter_removed_symlink
 
     @Property(int, notify=walkProgressChanged)  # pyrefly: ignore [not-callable]
     def walkDiscovered(self) -> int:
@@ -1188,6 +1229,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._walk_discovered = 0
         self._walk_skipped = 0
         self._walk_user_skipped = 0
+        # filter 阶段状态重置（避免上次扫描的剔除计数残留）
+        self._filter_active = False
+        self._filter_removed_empty = 0
+        self._filter_removed_oversize = 0
+        self._filter_removed_unreadable = 0
+        self._filter_removed_symlink = 0
         # scan 阶段进度字段重置
         self._progress_indeterminate = True
         self._progress_scanned = 0
@@ -1285,6 +1332,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._walk_discovered = 0
         self._walk_skipped = 0
         self._walk_user_skipped = 0
+        # filter 阶段状态重置（避免上次扫描的剔除计数残留）
+        self._filter_active = False
+        self._filter_removed_empty = 0
+        self._filter_removed_oversize = 0
+        self._filter_removed_unreadable = 0
+        self._filter_removed_symlink = 0
         # scan 阶段进度字段重置
         self._progress_indeterminate = True
         self._progress_scanned = 0
@@ -1439,10 +1492,23 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._walk_discovered = info.total
             self._walk_skipped = info.skipped
             self._walk_user_skipped = info.user_skipped
+        elif info.phase == PHASE_FILTER:
+            # filter 阶段：转圈+剔除详情，不更新扫描进度字段。
+            # filter 是快速阶段（仅 size 比较 + os.access），用确定进度条会
+            # 让用户误以为正在解析文件内容；改用 indeterminate 转圈，
+            # 并填入四类剔除计数供 QML 展示详情。
+            self._filter_active = True
+            self._progress_indeterminate = True
+            self._filter_removed_empty = info.filter_removed_empty
+            self._filter_removed_oversize = info.filter_removed_oversize
+            self._filter_removed_unreadable = info.filter_removed_unreadable
+            self._filter_removed_symlink = info.filter_removed_symlink
         else:
-            # filter/scan/archive 阶段：更新解析进度
-            # filter 阶段 scanned 字段复用为「已处理文件数」，total 为 entries 长度；
-            # scan/archive 阶段 scanned/total 为常规扫描进度
+            # scan/archive 阶段：退出 filter 态，更新解析进度
+            # filter→scan 切换时 _filter_active 由 True 降为 False，
+            # QML 据此从转圈+剔除详情切回常规扫描进度展示
+            if self._filter_active:
+                self._filter_active = False
             self._progress_indeterminate = False
             self._progress_scanned = info.scanned
             self._progress_total = info.total

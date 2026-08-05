@@ -265,7 +265,7 @@ Rectangle {
                 }
             }
 
-            // ----- 阶段 2：解析文件内容（scan） -----
+            // ----- 阶段 2：解析文件内容（filter → scan） -----
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 4
@@ -279,7 +279,8 @@ Rectangle {
                         radius: 4
                         color: workspaceController.activeScanController.scanDone
                             ? theme.colorSuccess
-                            : (workspaceController.activeScanController.scanPhase === "scan"
+                            : (workspaceController.activeScanController.scanPhase === "filter"
+                               || workspaceController.activeScanController.scanPhase === "scan"
                                || workspaceController.activeScanController.scanPhase === "archive"
                                ? card.statusColor()
                                : theme.colorBorder)
@@ -287,9 +288,11 @@ Rectangle {
                     Label {
                         text: "解析文件内容"
                         font.pixelSize: 11
-                        font.bold: workspaceController.activeScanController.scanPhase === "scan"
+                        font.bold: workspaceController.activeScanController.scanPhase === "filter"
+                            || workspaceController.activeScanController.scanPhase === "scan"
                             || workspaceController.activeScanController.scanPhase === "archive"
-                        color: (workspaceController.activeScanController.scanPhase === "scan"
+                        color: (workspaceController.activeScanController.scanPhase === "filter"
+                                || workspaceController.activeScanController.scanPhase === "scan"
                                 || workspaceController.activeScanController.scanPhase === "archive")
                             ? card.statusColor()
                             : (workspaceController.activeScanController.scanDone
@@ -297,14 +300,22 @@ Rectangle {
                                : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary))
                     }
                     Item { Layout.fillWidth: true }
+                    // filter 阶段展示"剔除 N"详情（对应后端 filter_removed_* 字段），
+                    // scan/archive 阶段展示常规"已扫描 / 总数"进度
                     Label {
-                        text: workspaceController.activeScanController.progressIndeterminate
-                            ? "等待中..."
-                            : (workspaceController.activeScanController.progressScanned + " / "
-                               + workspaceController.activeScanController.progressTotal
-                               + (workspaceController.activeScanController.archiveEntryCount > 0
-                                  ? "（含压缩包 " + workspaceController.activeScanController.archiveEntryCount + "）"
-                                  : ""))
+                        text: {
+                            var sc = workspaceController.activeScanController
+                            if (sc.filterActive) {
+                                var removed = sc.filterRemovedEmpty + sc.filterRemovedOversize
+                                              + sc.filterRemovedUnreadable + sc.filterRemovedSymlink
+                                return "剔除 " + removed
+                            }
+                            if (sc.progressIndeterminate) return "等待中..."
+                            var t = sc.progressScanned + " / " + sc.progressTotal
+                            if (sc.archiveEntryCount > 0)
+                                t += "（含压缩包 " + sc.archiveEntryCount + "）"
+                            return t
+                        }
                         font.pixelSize: 11
                         color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                     }

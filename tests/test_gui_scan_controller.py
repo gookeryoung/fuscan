@@ -1081,6 +1081,85 @@ class TestScanPhaseProgress:
         assert controller.progressTotal == 40
         assert controller.matchedCount == 2
 
+    def test_filter_phase_activates_spinner_and_populates_removed(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """filter 阶段：转圈 indeterminate=True，四类剔除计数透传 QML 属性。"""
+        stats_instances, _ = fake_workers
+        controller.setScanModeIndex(1)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+
+        # walk 阶段
+        walk_info = ProgressInfo(current_file="/tmp/x.txt", total=50, skipped=10, phase="walk")
+        stats_instances[0].emit_progress(walk_info)
+
+        # 切换到 filter 阶段
+        filter_info = ProgressInfo(
+            current_file="",
+            scanned=30,
+            total=50,
+            phase="filter",
+            filter_removed_empty=5,
+            filter_removed_oversize=3,
+            filter_removed_unreadable=1,
+            filter_removed_symlink=2,
+        )
+        stats_instances[0].emit_progress(filter_info)
+
+        assert controller.scanPhase == "filter"
+        assert controller.filterActive is True
+        assert controller.progressIndeterminate is True
+        assert controller.filterRemovedEmpty == 5
+        assert controller.filterRemovedOversize == 3
+        assert controller.filterRemovedUnreadable == 1
+        assert controller.filterRemovedSymlink == 2
+
+    def test_filter_to_scan_phase_deactivates_spinner(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """filter→scan 切换：filterActive 降为 False，indeterminate 关闭，恢复扫描进度。"""
+        stats_instances, _ = fake_workers
+        controller.setScanModeIndex(1)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+
+        # walk → filter
+        stats_instances[0].emit_progress(ProgressInfo(total=50, skipped=10, phase="walk"))
+        stats_instances[0].emit_progress(
+            ProgressInfo(
+                scanned=30,
+                total=50,
+                phase="filter",
+                filter_removed_empty=5,
+                filter_removed_oversize=3,
+                filter_removed_unreadable=1,
+                filter_removed_symlink=2,
+            )
+        )
+        assert controller.filterActive is True
+
+        # filter → scan
+        scan_info = ProgressInfo(
+            scanned=10,
+            total=40,
+            matched=2,
+            phase="scan",
+        )
+        stats_instances[0].emit_progress(scan_info)
+
+        assert controller.scanPhase == "scan"
+        assert controller.filterActive is False
+        assert controller.progressIndeterminate is False
+        assert controller.progressScanned == 10
+        assert controller.progressTotal == 40
+
     def test_walk_progress_zero_when_discovered_zero(
         self,
         controller: ScanController,

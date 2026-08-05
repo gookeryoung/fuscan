@@ -37,7 +37,7 @@ class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
     """后台过滤+排序工作线程。
 
     同时在后台线程构建倒排索引（严重度/规则名），避免主线程
-    在大结果集（>= ``_ASYNC_THRESHOLD``）场景下同步构建索引阻塞 UI。
+    在结果集较大（>= ``_INDEX_THRESHOLD``）时同步构建索引阻塞 UI。
     索引仅在结果数 >= ``_INDEX_THRESHOLD`` 时构建；小结果集返回空字典。
 
     :param results: 原始结果元组
@@ -62,12 +62,16 @@ class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         *,
         build_index: bool = True,
         index_threshold: int = 2000,
+        index_results: tuple[ScanResult, ...] | None = None,
     ) -> None:
         """初始化过滤线程。
 
         :param build_index: 是否在后台同时构建倒排索引（默认 True）
         :param index_threshold: 结果数达到该阈值才构建索引（默认 2000，与
             ``result_model._INDEX_THRESHOLD`` 保持一致）
+        :param index_results: 索引构建所使用的结果元组（默认 ``results``）。
+            当 ``results`` 为经过倒排索引裁剪后的候选子集时，调用方可传入
+            完整原始结果元组，使索引位置与 ``self._results`` 保持一致。
         """
         super().__init__()
 
@@ -79,6 +83,8 @@ class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         self._sort_ascending = sort_ascending
         self._build_index = build_index
         self._index_threshold = index_threshold
+        # 索引构建使用的结果集（默认与过滤输入相同；调用方可传入完整结果保持索引位置对齐）
+        self._index_results = index_results if index_results is not None else results
 
     def run(self) -> None:
         """线程入口：执行过滤+排序，同时可选构建倒排索引。"""
@@ -90,9 +96,9 @@ class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
             self._sort_field,
             self._sort_ascending,
         )
-        # 后台构建倒排索引（仅对原始结果 >= 阈值时）
-        if self._build_index and len(self._results) >= self._index_threshold:
-            severity_index, rule_index = build_indices(self._results)
+        # 后台构建倒排索引（仅对索引结果集 >= 阈值时）
+        if self._build_index and len(self._index_results) >= self._index_threshold:
+            severity_index, rule_index = build_indices(self._index_results)
         else:
             severity_index: dict[Severity, list[int]] = {}
             rule_index: dict[str, list[int]] = {}

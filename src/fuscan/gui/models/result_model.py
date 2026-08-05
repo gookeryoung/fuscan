@@ -532,20 +532,13 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         替换后自动重新应用当前过滤+排序条件，视图同步刷新。
         ``beginResetModel``/``endResetModel`` 由 ``_schedule_filter_refresh``
         或 ``_on_filter_done`` 统一管理，避免双重 reset。
-        结果量 >= ``_INDEX_THRESHOLD`` 时预构建倒排索引，并清空排序缓存。
-        结果量 >= ``_ASYNC_THRESHOLD`` 时，索引构建移至 FilterWorker 后台
-        完成（``_on_filter_done`` 回调接收并应用），主线程仅对小/中结果集同步构建。
+        索引构建统一延后到 ``_schedule_filter_refresh`` 中处理：
+        结果量 >= ``_INDEX_THRESHOLD`` 时由 FilterWorker 后台构建倒排索引，
+        小结果集无需索引（线性扫描足够快）。
         """
         self._results = results
-        n = len(results)
-        # 仅对小/中结果集（< _ASYNC_THRESHOLD）同步构建索引；
-        # 大结果集的索引交给 FilterWorker 后台构建（见 _schedule_filter_refresh / _on_filter_done）
-        if n < _ASYNC_THRESHOLD and n >= _INDEX_THRESHOLD:
-            self._severity_index, self._rule_index = build_indices(results)
-        else:
-            empty_sev: dict[Severity, list[int]] = {}
-            empty_rule: dict[str, list[int]] = {}
-            self._severity_index, self._rule_index = empty_sev, empty_rule
+        # 索引延后到后台线程构建（_schedule_filter_refresh 中 FilterWorker 负责）
+        self._severity_index, self._rule_index = {}, {}
         # 结果集变化，排序缓存全部失效
         self._sort_cache.clear()
         self._schedule_filter_refresh()
@@ -876,13 +869,8 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         if len(new_results) == len(self._results):
             return False
         self._results = new_results
-        # 大结果集（>= _ASYNC_THRESHOLD）的索引交给 FilterWorker 后台构建
-        if len(new_results) < _ASYNC_THRESHOLD and len(new_results) >= _INDEX_THRESHOLD:
-            self._severity_index, self._rule_index = build_indices(new_results)
-        else:
-            empty_sev: dict[Severity, list[int]] = {}
-            empty_rule: dict[str, list[int]] = {}
-            self._severity_index, self._rule_index = empty_sev, empty_rule
+        # 索引延后到后台线程构建（_schedule_filter_refresh 中 FilterWorker 负责）
+        self._severity_index, self._rule_index = {}, {}
         self._sort_cache.clear()
         # 结果集变化时同步清空扁平数据，等待 _schedule_filter_refresh 重建
         self._flat_data = []
@@ -1035,9 +1023,10 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
     def _schedule_filter_refresh(self) -> None:
         """根据结果量选择同步或异步路径刷新 ``_filtered`` 视图。
 
-        - 结果数 < ``_ASYNC_THRESHOLD``：主线程同步执行，立即 reset model
-        - 结果数 >= ``_ASYNC_THRESHOLD``：取消旧 worker，启动新 ``FilterWorker``
-          后台执行，完成后通过 :meth:`_on_filter_done` 回调到主线程 reset
+        - 结果数 < ``_INDEX_THRESHOLD``：主线程同步执行，立即 reset model
+          （小结果集线性扫描足够快，无需索引与后台线程开销）
+        - 结果数 >= ``_INDEX_THRESHOLD``：取消旧 worker，启动新 ``FilterWorker``
+          后台执行过滤+排序+索引构建，完成后通过 :meth:`_on_filter_done` 回调到主线程 reset
 
         调度前先查排序缓存（相同结果集+相同条件直接复用），再用倒排索引
         裁剪规则/严重度维度（候选子集缩小后再 filter_text+排序）。
@@ -1063,8 +1052,8 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         # 2. 倒排索引裁剪：规则/严重度两维度裁剪为候选子集（filter_text 仍在 filter_and_sort 中完成）
         candidates = self._candidate_results()
 
-        if len(self._results) < _ASYNC_THRESHOLD:
-            # 同步路径：小结果集直接计算，立即刷新
+        if len(self._results) < _INDEX_THRESHOLD:
+            # 同步路径：小结果集直接计算，立即刷新（无需索引与后台线程）
             new_filtered = filter_and_sort(
                 candidates,
                 self._filter_text,
@@ -1078,7 +1067,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             self._apply_filtered_result(new_filtered, generation=None)
             return
 
-        # 异步路径：大结果集移至后台线程
+        # 异步路径：中大结果集移至后台线程（过滤+排序+索引构建）
         # generation 自增，回调时校验，丢弃过期结果（用户可能已修改过滤条件）
         self._filter_generation += 1
         gen = self._filter_generation
@@ -1094,6 +1083,8 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             sort_ascending=self._sort_ascending,
             build_index=True,
             index_threshold=_INDEX_THRESHOLD,
+            # 索引建在全量 _results 上（非裁剪后的 candidates），保持索引位置与 _results 对齐
+            index_results=self._results,
         )
         worker.done.connect(  # pyrefly: ignore [missing-attribute]
             lambda filtered, sev_idx, rule_idx, g=gen, key=cache_key: self._on_filter_done(

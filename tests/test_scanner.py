@@ -3209,7 +3209,7 @@ class TestIter162InFlightProgress:
 
     覆盖 _pipeline_phase._collect_concurrent_results 超时分支：
     多个 worker 同时处理大文件时，wait 超时返回空 done 集，emit 应显示
-    真实正在扫描的文件（_in_flight_paths 集合中最早提交但未完成的），而非上一个完成文件的陈旧路径。
+    真实正在扫描的文件（_in_flight_meta 映射中最早提交但未完成的），而非上一个完成文件的陈旧路径。
     """
 
     def test_concurrent_timeout_emits_in_flight_file(self, tmp_path: Path) -> None:
@@ -3275,14 +3275,14 @@ class TestIter162InFlightProgress:
         # 超时 emit 的文件应是某个仍在扫描中的 in-flight 文件（set 迭代顺序任意，4 个文件均可能）
         all_files = {str(tmp_path / f"slow_{i}.txt") for i in range(4)}
         assert any(e in all_files for e in timeout_emits), f"超时 emit 应显示 in-flight 文件，实际：{timeout_emits}"
-        # 扫描完成后 _in_flight_paths 应清空
-        assert scanner._in_flight_paths == set()
+        # 扫描完成后 _in_flight_meta 应清空
+        assert scanner._in_flight_meta == {}
 
     def test_concurrent_submit_cancel_clears_in_flight(self, tmp_path: Path) -> None:
-        """submit 阶段触发取消应清空 _in_flight_paths 并立即返回。
+        """submit 阶段触发取消应清空 _in_flight_meta 并立即返回。
 
         通过在 submit 循环中触发 _check_control 返回 True，验证
-        cancelled_in_submit 分支清空 _in_flight_paths 且返回全零统计。
+        cancelled_in_submit 分支清空 _in_flight_meta 且返回全零统计。
         """
         from fuscan.scanner._pipeline_phase import run_pipeline_phase
         from fuscan.scanner.context import FileEntry
@@ -3326,14 +3326,14 @@ class TestIter162InFlightProgress:
         assert matched == 0
         assert errors == 0
         assert matches == 0
-        # _in_flight_paths 应被清空
-        assert scanner._in_flight_paths == set()
+        # _in_flight_meta 应被清空
+        assert scanner._in_flight_meta == {}
 
     def test_concurrent_collect_cancel_clears_in_flight(self, tmp_path: Path) -> None:
-        """collect 阶段触发取消应清空 _in_flight_paths。
+        """collect 阶段触发取消应清空 _in_flight_meta。
 
         通过让所有 future 提交完成后在 wait 循环中触发 _check_control，
-        验证取消分支清空 _in_flight_paths。
+        验证取消分支清空 _in_flight_meta。
         """
         from fuscan.scanner._pipeline_phase import run_pipeline_phase
         from fuscan.scanner.context import FileEntry
@@ -3378,8 +3378,160 @@ class TestIter162InFlightProgress:
 
         results: list[ScanResult] = []
         run_pipeline_phase(scanner, entries, results)
-        # 取消后 _in_flight_paths 应被清空
-        assert scanner._in_flight_paths == set()
+        # 取消后 _in_flight_meta 应被清空
+        assert scanner._in_flight_meta == {}
+
+    def test_concurrent_timeout_syncs_current_file_meta(self, tmp_path: Path) -> None:
+        """iter-167：wait 超时分支应同步设置 _current_file_* 为真实 in-flight 文件元信息。
+
+        覆盖 _pipeline_phase._collect_concurrent_results 超时分支的同步逻辑：
+        当 wait 超时且 in-flight 文件非空时，应取最早提交的 in-flight 文件，
+        同步更新 _current_file_path/size/ext/start_time 为该文件的元信息，
+        让 UI 显示「[大小 · ext · elapsed_ms]」与当前路径一致，
+        修复「路径是 A、大小/扩展名是上一个完成的 B」的错配假卡死观感。
+        """
+        from fuscan.scanner._pipeline_phase import run_pipeline_phase
+        from fuscan.scanner.context import FileEntry
+
+        # 创建 2 个不同大小的文件，让 worker 阻塞 > 0.5s 触发超时分支
+        (tmp_path / "slow_a.txt").write_text("a" * 100, encoding="utf-8")
+        (tmp_path / "slow_b.txt").write_text("b" * 200, encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        # max_workers=2 走 _scan_concurrent 分支，2 个文件都阻塞以触发 wait 超时
+        scanner = Scanner(rs, max_workers=2, on_progress=lambda _info: None, progress_interval=0.0)
+        entries: list[FileEntry] = []
+        for name, size in (("slow_a.txt", 100), ("slow_b.txt", 200)):
+            p = tmp_path / name
+            entries.append(
+                FileEntry(
+                    path=p,
+                    name=p.name,
+                    size=size,
+                    mtime=p.stat().st_mtime,
+                    extension="txt",
+                    is_dir=False,
+                )
+            )
+
+        # 让两个文件都阻塞 > 0.5s 触发超时分支
+        original_scan_entry = scanner._scan_entry
+
+        def _slow_scan(entry: FileEntry) -> ScanResult:
+            time.sleep(0.8)  # > 0.5s 超时阈值
+            return original_scan_entry(entry)
+
+        scanner._scan_entry = _slow_scan  # type: ignore[assignment]
+
+        # 拦截 _emit_progress，记录每次超时分支同步后的 _current_file_* 状态
+        captured: list[tuple[str, int, str, float]] = []
+        original_emit = scanner._emit_progress
+
+        def _capture_emit(current_file: str, *args: object, **kwargs: object) -> None:
+            # 仅记录 force=True 的超时分支 emit
+            if kwargs.get("force") and current_file:
+                captured.append(
+                    (
+                        scanner._current_file_path,
+                        scanner._current_file_size,
+                        scanner._current_file_ext,
+                        scanner._current_file_start_time,
+                    )
+                )
+            original_emit(current_file, *args, **kwargs)  # type: ignore[arg-type]
+
+        scanner._emit_progress = _capture_emit  # type: ignore[assignment]
+
+        results: list[ScanResult] = []
+        run_pipeline_phase(scanner, entries, results)
+
+        # 验证：超时分支至少触发一次
+        assert captured, "应至少触发一次超时分支同步 _current_file_*"
+        # 超时分支同步的 _current_file_* 应与 in-flight 文件元信息一致（路径/大小/扩展名）
+        # entries[0].size=100, entries[1].size=200，超时时最早提交的应是 entries[0]
+        # （dict 保序，slow_a.txt 先 submit 故 next(iter()) 取到它）
+        first_capture = captured[0]
+        expected_path = str(entries[0].path)
+        assert first_capture[0] == expected_path, (
+            f"超时分支应同步为最早提交的 in-flight 文件路径，实际：{first_capture[0]}"
+        )
+        assert first_capture[1] == 100, f"超时分支应同步为该文件大小 100，实际：{first_capture[1]}"
+        assert first_capture[2] == "txt", f"超时分支应同步为该文件扩展名 txt，实际：{first_capture[2]}"
+        # start_time 应为 submit 时记录的 perf_counter 值（>0，且早于 emit 时刻）
+        assert first_capture[3] > 0.0, f"超时分支应同步为 submit_time（>0），实际：{first_capture[3]}"
+        # 扫描完成后 _in_flight_meta 应清空
+        assert scanner._in_flight_meta == {}
+
+    def test_concurrent_timeout_in_flight_empty_falls_back_to_last(self, tmp_path: Path) -> None:
+        """iter-167：wait 超时时若 _in_flight_meta 已空，回退到 _last_entry_path。
+
+        覆盖 _pipeline_phase._collect_concurrent_results 超时分支的兜底逻辑：
+        理论上 pending 非空时 _in_flight_meta 必然非空（done 分支同步 pop），
+        但若 race-condition 下 _in_flight_meta 恰为空，应回退到 _last_entry_path
+        而非抛 StopIteration，保证扫描稳定性。
+        """
+        import fuscan.scanner._pipeline_phase as pp
+        from fuscan.scanner._pipeline_phase import run_pipeline_phase
+        from fuscan.scanner.context import FileEntry
+
+        (tmp_path / "slow.txt").write_text("password", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=2, on_progress=lambda _info: None, progress_interval=0.0)
+        p = tmp_path / "slow.txt"
+        st = p.stat()
+        entries: list[FileEntry] = [
+            FileEntry(
+                path=p,
+                name=p.name,
+                size=st.st_size,
+                mtime=st.st_mtime,
+                extension="txt",
+                is_dir=False,
+            )
+        ]
+
+        # 让 worker 阻塞 0.8s 触发首次 wait 超时
+        original_scan_entry = scanner._scan_entry
+
+        def _slow_scan(entry: FileEntry) -> ScanResult:
+            time.sleep(0.8)
+            return original_scan_entry(entry)
+
+        scanner._scan_entry = _slow_scan  # type: ignore[assignment]
+
+        # 拦截 emit：记录所有 force=True 的 emit，含空串（兜底回退到 _last_entry_path 初始值）
+        captured: list[str] = []
+        original_emit = scanner._emit_progress
+
+        def _capture_emit(current_file: str, *args: object, **kwargs: object) -> None:
+            if kwargs.get("force"):
+                captured.append(current_file)
+            original_emit(current_file, *args, **kwargs)  # type: ignore[arg-type]
+
+        scanner._emit_progress = _capture_emit  # type: ignore[assignment]
+
+        # monkeypatch wait：首次返回 (空 done, 全部 pending) 模拟超时，
+        # 并清空 _in_flight_meta 强制走 else 兜底分支
+        original_wait = pp.wait
+        call_count = [0]
+
+        def _mock_wait(fs, timeout, return_when):  # type: ignore[no-untyped-def]
+            call_count[0] += 1
+            if call_count[0] == 1:
+                scanner._in_flight_meta.clear()
+                return set(), set(fs)
+            return original_wait(fs, timeout, return_when=return_when)
+
+        pp.wait = _mock_wait  # type: ignore[assignment]
+        try:
+            results: list[ScanResult] = []
+            run_pipeline_phase(scanner, entries, results)
+        finally:
+            pp.wait = original_wait  # type: ignore[assignment]
+
+        # 验证：超时分支应触发，且兜底 emit 的 current_file 是 _last_entry_path 初始值（空串）
+        assert captured, "应至少触发一次超时分支 emit"
+        assert any(c == "" for c in captured), f"兜底分支应回退到 _last_entry_path 空串，实际：{captured}"
 
     def test_sequential_tail_flush_emits_remaining_progress(self, tmp_path: Path) -> None:
         """顺序扫描尾部补发：batch_match_list 剩余应在循环结束后 extend。

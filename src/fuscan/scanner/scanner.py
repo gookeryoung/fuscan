@@ -389,12 +389,13 @@ class Scanner:
         self._current_file_size: int = 0
         self._current_file_ext: str = ""
         self._current_file_start_time: float = 0.0
-        # 并发模式下正在扫描的文件路径集合（仅主线程读写，无需锁）：
-        # submit 时 add，future 完成时 discard。wait 超时分支据此显示
-        # 「真实正在扫描的文件」而非上一个完成文件的陈旧路径，
-        # 避免「卡在一个文件后突然进度条满了」的假卡死观感。
-        # 用 set 替代 list，使 add/discard 均为 O(1)（list.remove 为 O(n)）。
-        self._in_flight_paths: set[str] = set()
+        # 并发模式下正在扫描的文件元信息映射（仅主线程读写，无需锁）：
+        # path → (size, ext, submit_time)。submit 时登记，future 完成时 pop。
+        # wait 超时分支据此同步设置 _current_file_* 为真实 in-flight 文件元信息，
+        # 避免 UI 显示「路径是 A、大小/扩展名是上一个完成的 B」的错配，
+        # 修复「卡在一个文件后 elapsed_ms 持续涨但 size/ext 不变」的假卡死观感。
+        # dict 在 3.7+ 保序：next(iter(...)) 取最早提交（最可能卡最久）的文件。
+        self._in_flight_meta: dict[str, tuple[int, str, float]] = {}
 
     def pause(self) -> None:
         """暂停扫描，阻塞扫描线程直到 resume。"""

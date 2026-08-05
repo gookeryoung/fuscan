@@ -194,23 +194,26 @@ def _scan_concurrent(
         if dup_skipped > 0:
             logger.info("并发扫描：去重 %d 个重复条目", dup_skipped)
         # 一次性提交所有 entries：阶段 1 已完成遍历，entries 内存可见且可索引
-        # 同步维护 _in_flight_paths：submit 成功后 add，_collect_concurrent_results
-        # done 分支 discard。wait 超时分支据此显示真实正在扫描的文件路径，
-        # 避免多个 worker 同时处理大文件时 UI 看到的始终是「上一个完成的文件」。
-        scanner._in_flight_paths = set()
+        # 同步维护 _in_flight_meta：submit 成功后登记 (size, ext, submit_time)，
+        # _collect_concurrent_results 的 done 分支 pop。wait 超时分支据此
+        # 同步设置 _current_file_* 为真实正在扫描的文件元信息，
+        # 避免 UI 显示「路径是 A、大小/扩展名是上一个完成的 B」的错配，
+        # 修复「卡在一个文件后 elapsed_ms 持续涨但 size/ext 不变」的假卡死观感。
+        scanner._in_flight_meta = {}
         for entry in unique_entries:
             if scanner._check_control():
                 cancelled_in_submit = True
                 break
             future = pool.submit(scanner._scan_entry, entry)
             future_to_entry[future] = entry
-            submit_times[future] = time.perf_counter()
-            scanner._in_flight_paths.add(str(entry.path))
+            submit_time = time.perf_counter()
+            submit_times[future] = submit_time
+            scanner._in_flight_meta[str(entry.path)] = (entry.size, entry.extension, submit_time)
         if cancelled_in_submit:
             # 取消全部未启动 future，shutdown(wait=False) 不等待已运行 future
             cancel_all_futures(future_to_entry)
             pool.shutdown(wait=False)
-            scanner._in_flight_paths.clear()
+            scanner._in_flight_meta.clear()
             return scanned, matched, errors, matches
         scanned, matched, errors, matches = _collect_concurrent_results(
             scanner, future_to_entry, results, pool, submit_times
@@ -220,8 +223,8 @@ def _scan_concurrent(
         # 为 daemon，进程退出时由 OS 回收；正常完成路径 as_completed 循环已退出，
         # 此时 worker 已空闲，shutdown 仅清理 pool 状态立即返回。
         pool.shutdown(wait=False)
-        # 兜底清空 in-flight 集合：正常完成路径已逐项 discard，取消路径可能残留
-        scanner._in_flight_paths.clear()
+        # 兜底清空 in-flight 映射：正常完成路径已逐项 pop，取消路径可能残留
+        scanner._in_flight_meta.clear()
     return scanned, matched, errors, matches
 
 
@@ -276,11 +279,21 @@ def _collect_concurrent_results(  # noqa: PLR0912
         done, pending = wait(pending, timeout=PRE_SCAN_EMIT_INTERVAL_S, return_when=FIRST_COMPLETED)
         if not done:
             # 超时：0.5s 内无 future 完成，emit 进度让用户看到"仍在扫描"
-            # 优先显示真实 in-flight 文件（最早提交但未完成的），回退到上次完成路径
+            # 同步设置 _current_file_* 为真实 in-flight 文件元信息（最早提交的），
+            # 让 UI 显示「[大小 · ext · elapsed_ms]」与当前路径一致，
+            # 修复「路径是 A、大小是上一个完成的 B」的错配假卡死观感。
+            # 优先选择最早提交（最可能卡最久）的 in-flight 文件，回退到上次完成路径。
             if scanner._on_progress is not None:
-                in_flight_file = next(iter(scanner._in_flight_paths)) if scanner._in_flight_paths else _last_entry_path
+                if scanner._in_flight_meta:
+                    in_flight_path, (if_size, if_ext, if_submit_time) = next(iter(scanner._in_flight_meta.items()))
+                    scanner._current_file_path = in_flight_path
+                    scanner._current_file_size = if_size
+                    scanner._current_file_ext = if_ext
+                    scanner._current_file_start_time = if_submit_time
+                else:
+                    in_flight_path = _last_entry_path
                 scanner._emit_progress(
-                    in_flight_file,
+                    in_flight_path,
                     scanned,
                     matched,
                     errors,
@@ -292,8 +305,8 @@ def _collect_concurrent_results(  # noqa: PLR0912
             entry = future_to_entry[future]
             entry_path = str(entry.path)
             _last_entry_path = entry_path
-            # 从 in-flight 集合移除已完成的（set.discard 是 O(1)，比 list.remove O(n) 更优）
-            scanner._in_flight_paths.discard(entry_path)
+            # 从 in-flight 映射移除已完成的（dict.pop 是 O(1)）
+            scanner._in_flight_meta.pop(entry_path, None)
             # 设置当前文件元信息缓存，供 _emit_progress 填充单文件字段
             scanner._current_file_path = entry_path
             scanner._current_file_size = entry.size

@@ -7,7 +7,7 @@
 验证维度：
 
 1. **超时分支触发**：``wait(timeout=PRE_SCAN_EMIT_INTERVAL_S)`` 超时后 emit 进度
-2. **current_file 切换到慢文件**：超时时 ``_in_flight_paths[0]`` 是真实正在扫描的慢文件
+2. **current_file 切换到慢文件**：超时时 ``next(iter(_in_flight_meta))`` 是真实正在扫描的慢文件，且 ``_current_file_size/ext/elapsed_ms`` 与该慢文件同步
 3. **elapsed_ms 单调递增**：同一慢文件在多次超时 emit 中 elapsed 持续增长，
    证明在跟踪同一慢文件而非刷新陈旧快文件
 

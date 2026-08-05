@@ -390,6 +390,11 @@ class Scanner:
         self._current_file_size: int = 0
         self._current_file_ext: str = ""
         self._current_file_start_time: float = 0.0
+        # 并发模式下正在扫描的文件路径列表（仅主线程读写，无需锁）：
+        # submit 时 append，future 完成时 remove。wait 超时分支据此显示
+        # 「真实正在扫描的文件」而非上一个完成文件的陈旧路径，
+        # 避免「卡在一个文件后突然进度条满了」的假卡死观感。
+        self._in_flight_paths: list[str] = []
 
     def pause(self) -> None:
         """暂停扫描，阻塞扫描线程直到 resume。"""

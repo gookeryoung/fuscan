@@ -1106,13 +1106,28 @@ class TestIter153DiffRefresh:
 class TestIter156LazyFill:
     """iter-156：大结果集幽灵行+分帧懒加载正确性测试。"""
 
-    def test_large_result_set_uses_lazy_fill_initial_none_rows(self, qapp: QApplication, tmp_path: Path) -> None:
-        """大结果集 set_results 后，_filtered 初始应为全 None（幽灵行），_filtered_real 为完整真实。"""
+    def test_large_result_set_uses_lazy_fill_initial_none_rows(
+        self, qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """大结果集 set_results 后，_filtered 初始应为全 None（幽灵行），_filtered_real 为完整真实。
+
+        通过 monkeypatch 拦截 ``_fill_next_chunk``：``processEvents()`` 会一并处理
+        zero-delay ``QTimer.singleShot(0, ...)``，若不拦截，2 批（n=2500,
+        batch=2000）即可填完，``_lazystate`` 被清空无法断言「懒加载状态已建立」。
+        拦截后仅记录调度次数，不执行实际填充，保留 lazystate 供断言。
+        """
         from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD
 
         m = ResultListModel()
         n = _VIRTUALIZE_THRESHOLD + 500
         results = _build_large_results(tmp_path, n=n)
+        # 拦截 _fill_next_chunk：避免 processEvents 递归触发懒填充清空 lazystate
+        fill_calls: list[int] = []
+
+        def _track_fill() -> None:
+            fill_calls.append(1)
+
+        monkeypatch.setattr(m, "_fill_next_chunk", _track_fill)
         m.set_results(results)
         # 手动等待 worker 完成，但不取消懒填充（保留懒加载状态用于断言）
         import time
@@ -1126,7 +1141,7 @@ class TestIter156LazyFill:
             QCoreApplication.processEvents()
             time.sleep(0.005)
             elapsed += 5
-        # 仅 1 轮事件让 done 信号回调执行，不继续处理 QTimer
+        # done 信号回调在 processEvents 中执行，QTimer 被 _track_fill 拦截
         QCoreApplication.processEvents()
         # 真实副本：完整无 None
         assert len(m._filtered_real) == n  # type: ignore[attr-defined]
@@ -1137,6 +1152,10 @@ class TestIter156LazyFill:
         none_count = sum(1 for x in m._filtered if x is None)  # type: ignore[attr-defined]
         # visible_end < 0 时，优先填充可能为空，大量仍为 None
         assert none_count > 0, "大结果集懒加载初期应有幽灵行（至少部分 None）"
+        # 验证 QTimer.singleShot 确实调度了 _fill_next_chunk（懒加载已启动）
+        assert len(fill_calls) >= 1, "_fill_next_chunk 应被 QTimer.singleShot 调度"
+        # 清理：取消懒加载避免后续 QTimer 触发影响其他测试
+        m._cancel_lazy_fill(and_fill_rest=False)  # type: ignore[attr-defined]
 
     def test_filtered_results_never_contains_none(self, qapp: QApplication, tmp_path: Path) -> None:
         """filtered_results 属性永远返回真实值（无 None），即使处于懒加载阶段。"""

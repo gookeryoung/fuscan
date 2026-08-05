@@ -265,6 +265,23 @@ def _extract_literals(pattern: str, min_len: int = 3) -> list[str]:
     return result
 
 
+def _dedup_substrings(keywords: list[str]) -> list[str]:
+    """去重并去子串：若 kw1 是 kw2 的子串，仅保留 kw2（kw2 命中时 kw1 必命中）。
+
+    先按插入顺序去重，再按长度降序检查——若某关键字是已保留关键字的子串则丢弃。
+    用于桶级与逐规则预筛关键字精简，避免冗余的 ``in`` 检查。
+
+    :param keywords: 原始关键字列表（可能含重复与子串关系）
+    :return: 精简后的关键字列表
+    """
+    unique = list(dict.fromkeys(keywords))
+    kept: list[str] = []
+    for kw in sorted(unique, key=len, reverse=True):
+        if not any(kw in other for other in kept):
+            kept.append(kw)
+    return kept
+
+
 @dataclass
 class _ContentRuleBucket:
     """一组同 mode + 同 case_sensitive 的顶层纯 CONTENT 规则。
@@ -291,8 +308,18 @@ class _ContentRuleBucket:
     # 无可用关键字（如纯 ``\d+`` 正则），不预筛，仍走 finditer
     prefilter_keywords: list[str] = field(default_factory=list)
     # 预筛是否大小写不敏感（桶 ``case_sensitive=False`` 或任一规则含 ``(?i)`` 内联标志）。
-    # True 时关键字已小写化，匹配时 content 也需小写化（lazy 计算）
+    # True 时关键字已小写化，匹配时 content 也小写化（lazy 计算）
     prefilter_case_insensitive: bool = False
+    # 逐规则预筛关键字：per_rule_keywords[i] 为 rules[i] 的字面量片段列表（长度>=3，
+    # 已去子串/去重）。空列表表示该规则无可提取字面量（如纯 ``[A-Z]{16}``），
+    # 匹配时始终参与（保守不预筛）。与 rules/contains_patterns/sub_parts 下标对齐。
+    per_rule_keywords: list[list[str]] = field(default_factory=list)
+    # 逐规则子正则片段：sub_parts[i] 为 rules[i] 的命名捕获组子正则
+    # （``(?P<_fi>...)``，含内联 flag 包装），供活跃子集动态复合正则拼接复用。
+    sub_parts: list[str] = field(default_factory=list)
+    # 活跃子集复合正则缓存：frozenset(活跃规则下标) -> 已编译复合正则。
+    # 避免每次匹配都重编译活跃子集（普通文档活跃子集稳定，命中率高）。
+    sub_compiled_cache: dict[frozenset[int], Pattern[str]] = field(default_factory=dict)
 
 
 def build_content_buckets(  # noqa: PLR0912
@@ -348,6 +375,9 @@ def build_content_buckets(  # noqa: PLR0912
         parts: list[str] = []
         # 收集预筛关键字（桶内所有规则字面量片段）与内联 (?i) 标志
         prefilter_keywords: list[str] = []
+        # 逐规则关键字与子正则片段（下标与 bucket.rules 对齐）
+        per_rule_keywords: list[list[str]] = []
+        sub_parts: list[str] = []
         has_inline_ignorecase = False
         for i, rule in enumerate(bucket.rules):
             spec = rule.match
@@ -371,12 +401,16 @@ def build_content_buckets(  # noqa: PLR0912
                 has_inline_ignorecase = True
             if sub_flags:
                 flag_str = _flags_to_chars(sub_flags)
-                parts.append(rf"(?{flag_str}:(?P<{grp_name}>{sub_clean}))")
+                part = rf"(?{flag_str}:(?P<{grp_name}>{sub_clean}))"
             else:
-                parts.append(rf"(?P<{grp_name}>{sub})")
+                part = rf"(?P<{grp_name}>{sub})"
+            parts.append(part)
+            sub_parts.append(part)
             bucket.group_to_idx[grp_name] = i
-            # 从清洗后的子正则中提取字面量片段作为预筛关键字
-            prefilter_keywords.extend(_extract_literals(sub_clean))
+            # 从清洗后的子正则中提取字面量片段作为预筛关键字（桶级合并 + 逐规则记录）
+            rule_literals = _extract_literals(sub_clean)
+            prefilter_keywords.extend(rule_literals)
+            per_rule_keywords.append(rule_literals)
         flags = 0 if case_sensitive else re.IGNORECASE
         try:
             compiled = re.compile("|".join(parts), flags)
@@ -387,41 +421,92 @@ def build_content_buckets(  # noqa: PLR0912
                 bucketed_rule_names.discard(r.name)
             continue
         bucket.compiled = compiled
+        bucket.sub_parts = sub_parts
         # 设置预筛关键字：桶 case_sensitive=False 或任一规则含 (?i) 时按大小写不敏感处理
         # （关键字小写化，匹配时 content 也小写化）；否则保持原样
         prefilter_ci = (not case_sensitive) or has_inline_ignorecase
         if prefilter_ci:
-            raw_keywords = list(dict.fromkeys(k.lower() for k in prefilter_keywords))
+            # 桶级与逐规则关键字同步小写化
+            bucket.prefilter_keywords = _dedup_substrings([k.lower() for k in prefilter_keywords])
+            bucket.per_rule_keywords = [_dedup_substrings([k.lower() for k in kws]) for kws in per_rule_keywords]
         else:
-            raw_keywords = list(dict.fromkeys(prefilter_keywords))
-        # 去子串：若 kw1 是 kw2 的子串，保留 kw2 即可（kw2 命中时 kw1 必命中）。
-        # 按长度降序排列，依次检查是否为已保留关键字的子串
-        sorted_kw = sorted(raw_keywords, key=len, reverse=True)
-        kept: list[str] = []
-        for kw in sorted_kw:
-            if not any(kw in other for other in kept):
-                kept.append(kw)
-        bucket.prefilter_keywords = kept
+            bucket.prefilter_keywords = _dedup_substrings(prefilter_keywords)
+            bucket.per_rule_keywords = [_dedup_substrings(kws) for kws in per_rule_keywords]
         bucket.prefilter_case_insensitive = prefilter_ci
         compiled_buckets.append(bucket)
     remaining = [(r, m) for r, m in src_pairs if r.name not in bucketed_rule_names]
     return compiled_buckets, remaining
 
 
+def _compute_active_indices(bucket: _ContentRuleBucket, haystack: str) -> list[int]:
+    """计算桶内**活跃规则下标**：其 per-rule 关键字出现在 haystack 中（或无关键字）。
+
+    逐规则预筛的核心——相比桶级 ``any()`` 粗粒度短路，本函数精确到"哪几条规则
+    的字面量真正出现"，使普通文档只对少数命中关键字的规则运行正则，
+    而非整桶复合正则全量 ``finditer``（普通 md 偶现常见词即触发全桶的根因）。
+
+    - ``per_rule_keywords[i]`` 为空：该规则无可提取字面量（如纯 ``[A-Z]{16}``），
+      无法安全预筛，始终视为活跃（保守不漏）。
+    - 非空：任一关键字出现在 haystack 中则活跃；均不出现则该规则必不命中，剔除。
+
+    :param bucket: 目标桶（须已构建 per_rule_keywords）
+    :param haystack: 已按大小写规则处理的内容（不敏感桶为小写化后的 content）
+    :return: 活跃规则下标列表（升序，与 rules 下标对齐）
+    """
+    active: list[int] = []
+    for idx in range(len(bucket.rules)):
+        kws: list[str] = bucket.per_rule_keywords[idx] if idx < len(bucket.per_rule_keywords) else []
+        if not kws or any(kw in haystack for kw in kws):
+            active.append(idx)
+    return active
+
+
+def _get_active_compiled(bucket: _ContentRuleBucket, active_idx: list[int]) -> Pattern[str] | None:
+    """获取仅含 ``active_idx`` 规则的复合正则（带缓存），全部活跃时复用 bucket.compiled。
+
+    普通文档活跃子集稳定（通常 0~1 条），以 ``frozenset(active_idx)`` 为键缓存
+    编译结果，避免每次匹配重编译；密钥密集文档退化为全桶（直接用 bucket.compiled），
+    无回归。命名组 ``_f{i}`` 与 ``group_to_idx`` 一致，分派逻辑不变。
+
+    :param bucket: 目标桶（须已构建 sub_parts）
+    :param active_idx: 活跃规则下标列表（非空）
+    :return: 已编译复合正则；编译失败返回 None（调用方回退到 bucket.compiled）
+    """
+    if len(active_idx) == len(bucket.rules):
+        # 全部活跃：直接用整桶复合正则（等价旧行为）
+        return bucket.compiled
+    key = frozenset(active_idx)
+    cached = bucket.sub_compiled_cache.get(key)
+    if cached is not None:
+        return cached
+    parts = [bucket.sub_parts[i] for i in active_idx]
+    flags = 0 if bucket.case_sensitive else re.IGNORECASE
+    try:
+        compiled = re.compile("|".join(parts), flags)
+    except re.error:
+        # 理论上不会发生（子片段均来自构建期已编译成功的整桶正则）；
+        # 保守回退到整桶正则，避免漏匹配
+        return bucket.compiled
+    bucket.sub_compiled_cache[key] = compiled
+    return compiled
+
+
 def match_content_via_buckets(  # noqa: PLR0912
     content: str,
     buckets: list[_ContentRuleBucket],
 ) -> list[RuleHit]:
-    """对指定的 CONTENT 桶执行一次 finditer 分派并返回命中列表。
+    """对指定的 CONTENT 桶执行**逐规则预筛 + 活跃子集匹配**并返回命中列表。
 
-    在调用 ``finditer`` 前对每个桶做**字面量预筛**：从桶内规则的字面量片段中
-    提取关键字，若 content 中不含任一关键字，则桶内所有规则必然不命中，
-    可直接跳过 ``finditer``。对大文件（5MB md）从 770ms 降至 ~18ms（60x 加速）。
+    两级预筛：先用桶级关键字 ``any()`` 快速短路整桶（0 关键字命中直接跳过），
+    再用 per-rule 关键字精确筛出**活跃规则子集**，仅对该子集动态编译复合正则并
+    ``finditer``。相比旧的桶级粗粒度预筛（偶现一个常见词即跑整桶复合正则），
+    普通文档只对真正命中关键字的规则运行正则，避免大文本 finditer 阻塞。
 
     预筛保证不产生 false negative：
 
     - 关键字为正则字面量片段，必然出现在任何匹配文本中
     - 对 ``|`` 分支提取所有分支的字面量，预筛用 ``any()`` 短路
+    - 无字面量规则（如纯 ``[A-Z]{16}``）始终活跃，不漏匹配
     - 大小写不敏感桶（``case_sensitive=False`` 或含 ``(?i)``）：关键字小写化，
       content 也小写化（lazy 一次性计算）
 
@@ -435,25 +520,27 @@ def match_content_via_buckets(  # noqa: PLR0912
     for bucket in buckets:
         if bucket.compiled is None:
             continue
-        # 字面量预筛：若所有关键字均不在 content 中，跳过 finditer
-        if bucket.prefilter_keywords:
-            if bucket.prefilter_case_insensitive:
-                if content_lower is None:
-                    content_lower = content.lower()
-                haystack = content_lower
-            else:
-                haystack = content
-            # any() 短路：命中任一关键字即通过
-            if not any(kw in haystack for kw in bucket.prefilter_keywords):
-                continue
+        # 选择预筛 haystack：不敏感桶用小写化 content（lazy），否则用原 content
+        if bucket.prefilter_case_insensitive:
+            if content_lower is None:
+                content_lower = content.lower()
+            haystack = content_lower
+        else:
+            haystack = content
+        # 桶级快速短路：整桶关键字均不在 content 中 → 桶内所有规则必不命中
+        if bucket.prefilter_keywords and not any(kw in haystack for kw in bucket.prefilter_keywords):
+            continue
+        # 逐规则预筛：计算活跃规则下标，仅对活跃子集运行匹配
+        active_idx = _compute_active_indices(bucket, haystack)
+        if not active_idx:
+            continue
+        active_set = set(active_idx)
         # 先按规则聚合：rule_idx -> [first_match_text, total_count]
         # 对 CONTAINS(case_sensitive)：直接用 count 计算，不走 finditer
         per_rule: list[tuple[str, int] | None] = [None] * len(bucket.rules)
         if bucket.mode == MatchMode.CONTAINS and bucket.case_sensitive:
-            # 与旧 _apply_contains 一致：非重叠 count，match_text=pattern
-            for idx, rule in enumerate(bucket.rules):
-                spec = rule.match
-                assert isinstance(spec, LeafMatch)
+            # 与旧 _apply_contains 一致：非重叠 count，match_text=pattern；仅活跃规则
+            for idx in active_idx:
                 pat = bucket.contains_patterns[idx]
                 if not pat:
                     continue
@@ -461,12 +548,17 @@ def match_content_via_buckets(  # noqa: PLR0912
                 if cnt > 0:
                     per_rule[idx] = (pat, cnt)
         else:
-            for m in bucket.compiled.finditer(content):
+            compiled = _get_active_compiled(bucket, active_idx)
+            if compiled is None:
+                continue
+            for m in compiled.finditer(content):
                 last = m.lastgroup
                 if last is None:
                     continue
                 idx = bucket.group_to_idx.get(last)
-                if idx is None:
+                # 活跃子集正则理论上只含活跃组，但整桶回退时可能命中非活跃组，
+                # 用 active_set 二次校验保持语义一致
+                if idx is None or idx not in active_set:
                     continue
                 txt = m.group(0)
                 prev = per_rule[idx]

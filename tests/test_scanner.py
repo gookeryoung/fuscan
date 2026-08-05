@@ -5380,3 +5380,183 @@ class TestIter161ConcurrentDedup:
         assert matches == 0
         assert len(results) == 1
         assert errors == 0
+
+
+class TestPerRuleContentPrefilter:
+    """CONTENT 桶逐规则预筛：仅对关键字实际出现的规则子集运行匹配。
+
+    覆盖需求：普通文档偶现常见词（如 password）不应触发整桶复合正则，
+    只触发对应规则，避免大文本 finditer 阻塞。
+    """
+
+    @staticmethod
+    def _regex_content_rule(name: str, pattern: str, *, case_sensitive: bool = False) -> Rule:
+        return Rule(
+            name=name,
+            severity=Severity.CRITICAL,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=pattern,
+                case_sensitive=case_sensitive,
+            ),
+        )
+
+    def _build_bucket(self, *rules: Rule):  # type: ignore[no-untyped-def]
+        from fuscan.scanner._content_buckets import build_content_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        pairs = [(r, build_matcher(r.match)) for r in rules]
+        buckets, _remaining = build_content_buckets(pairs)
+        return buckets
+
+    def test_single_keyword_activates_one_rule(self) -> None:
+        """仅含 password 的内容只激活对应规则，不触发整桶。"""
+        from fuscan.scanner._content_buckets import _compute_active_indices
+
+        rules = [
+            self._regex_content_rule("r_pwd", r"password"),
+            self._regex_content_rule("r_ghp", r"ghp_[A-Za-z0-9]{36}"),
+            self._regex_content_rule("r_aiza", r"AIza[0-9A-Za-z_-]{35}"),
+        ]
+        buckets = self._build_bucket(*rules)
+        assert len(buckets) == 1
+        bucket = buckets[0]
+        content = "some password here " * 100
+        haystack = content.lower() if bucket.prefilter_case_insensitive else content
+        active = _compute_active_indices(bucket, haystack)
+        active_names = {bucket.rules[i].name for i in active}
+        assert active_names == {"r_pwd"}
+
+    def test_multiple_keywords_activate_multiple_rules(self) -> None:
+        """含多个不同前缀关键字时激活对应多条规则。"""
+        from fuscan.scanner._content_buckets import _compute_active_indices
+
+        rules = [
+            self._regex_content_rule("r_pwd", r"password"),
+            self._regex_content_rule("r_ghp", r"ghp_[A-Za-z0-9]{36}"),
+            self._regex_content_rule("r_aiza", r"AIza[0-9A-Za-z_-]{35}"),
+        ]
+        buckets = self._build_bucket(*rules)
+        bucket = buckets[0]
+        content = "password and ghp_ prefix and AIza key"
+        haystack = content.lower() if bucket.prefilter_case_insensitive else content
+        active = _compute_active_indices(bucket, haystack)
+        active_names = {bucket.rules[i].name for i in active}
+        # 大小写不敏感桶：password/ghp/aiza 前缀均出现
+        assert "r_pwd" in active_names
+        assert "r_ghp" in active_names
+        assert "r_aiza" in active_names
+
+    def test_no_keyword_short_circuits(self) -> None:
+        """完全无关键字时活跃规则集为空（桶级/逐规则均短路）。"""
+        from fuscan.scanner._content_buckets import _compute_active_indices
+
+        rules = [
+            self._regex_content_rule("r_ghp", r"ghp_[A-Za-z0-9]{36}"),
+            self._regex_content_rule("r_aiza", r"AIza[0-9A-Za-z_-]{35}"),
+        ]
+        buckets = self._build_bucket(*rules)
+        bucket = buckets[0]
+        content = "完全干净的普通中文文档，没有任何敏感前缀。" * 50
+        haystack = content.lower() if bucket.prefilter_case_insensitive else content
+        active = _compute_active_indices(bucket, haystack)
+        assert active == []
+
+    def test_real_secret_still_matches(self, tmp_path: Path) -> None:
+        """真实密钥（ghp_ / AIza）仍被正确命中，预筛不产生 false negative。"""
+        ghp = "ghp_" + "a" * 36
+        aiza = "AIza" + "B" * 35
+        content = f"config line1\ngithub={ghp}\ngcp={aiza}\n"
+        rules = [
+            self._regex_content_rule("r_ghp", r"ghp_[A-Za-z0-9]{36}"),
+            self._regex_content_rule("r_aiza", r"AIza[0-9A-Za-z_-]{35}"),
+        ]
+        from fuscan.scanner._content_buckets import match_content_via_buckets
+
+        buckets = self._build_bucket(*rules)
+        hits = match_content_via_buckets(content, buckets)
+        hit_names = {h.rule_name for h in hits}
+        assert hit_names == {"r_ghp", "r_aiza"}
+
+    def test_no_literal_rules_always_active(self) -> None:
+        """无字面量规则（纯字符类）始终活跃且能正常命中。"""
+        from fuscan.scanner._content_buckets import _compute_active_indices, match_content_via_buckets
+
+        rules = [
+            self._regex_content_rule("r_upper", r"[A-Z]{16}", case_sensitive=True),
+            self._regex_content_rule("r_digits", r"[0-9]{16}", case_sensitive=True),
+        ]
+        buckets = self._build_bucket(*rules)
+        bucket = buckets[0]
+        # 两条规则均无可提取字面量，per_rule_keywords 为空 → 始终活跃
+        assert all(kws == [] for kws in bucket.per_rule_keywords)
+        content = "token ABCDEFGHIJKLMNOP and 1234567890123456"
+        haystack = content if bucket.case_sensitive else content.lower()
+        active = _compute_active_indices(bucket, haystack)
+        assert set(active) == {0, 1}
+        hits = match_content_via_buckets(content, buckets)
+        assert {h.rule_name for h in hits} == {"r_upper", "r_digits"}
+
+    def test_active_subset_regex_cached(self) -> None:
+        """同一活跃子集第二次匹配应命中 sub_compiled_cache。"""
+        from fuscan.scanner._content_buckets import match_content_via_buckets
+
+        rules = [
+            self._regex_content_rule("r_pwd", r"password"),
+            self._regex_content_rule("r_ghp", r"ghp_[A-Za-z0-9]{36}"),
+            self._regex_content_rule("r_aiza", r"AIza[0-9A-Za-z_-]{35}"),
+        ]
+        buckets = self._build_bucket(*rules)
+        bucket = buckets[0]
+        content = "only password word repeated " * 20
+        match_content_via_buckets(content, buckets)
+        # 活跃子集为单规则 {r_pwd 的下标}，应写入缓存
+        assert len(bucket.sub_compiled_cache) == 1
+        cached_key = next(iter(bucket.sub_compiled_cache))
+        cached_pattern = bucket.sub_compiled_cache[cached_key]
+        # 第二次匹配同一子集：缓存复用，键集合不新增
+        match_content_via_buckets(content, buckets)
+        assert len(bucket.sub_compiled_cache) == 1
+        assert bucket.sub_compiled_cache[cached_key] is cached_pattern
+
+    def test_all_active_reuses_full_bucket_regex(self) -> None:
+        """全部规则活跃时复用整桶 compiled，不新增子集缓存。"""
+        from fuscan.scanner._content_buckets import match_content_via_buckets
+
+        rules = [
+            self._regex_content_rule("r_pwd", r"password"),
+            self._regex_content_rule("r_pwd2", r"passwd"),
+        ]
+        buckets = self._build_bucket(*rules)
+        bucket = buckets[0]
+        # 内容含两条规则的关键字 → 全部活跃 → 用整桶 compiled
+        content = "password and passwd both present"
+        hits = match_content_via_buckets(content, buckets)
+        assert {h.rule_name for h in hits} == {"r_pwd", "r_pwd2"}
+        assert bucket.sub_compiled_cache == {}
+
+    def test_contains_case_sensitive_per_rule_prefilter(self) -> None:
+        """CONTAINS(case_sensitive) 桶仅对活跃规则做 count。"""
+        from fuscan.scanner._content_buckets import match_content_via_buckets
+
+        rules = [
+            Rule(
+                name="c_secret",
+                severity=Severity.CRITICAL,
+                match=LeafMatch(
+                    target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="SECRET_TOKEN", case_sensitive=True
+                ),
+            ),
+            Rule(
+                name="c_apikey",
+                severity=Severity.CRITICAL,
+                match=LeafMatch(
+                    target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="APIKEY_VALUE", case_sensitive=True
+                ),
+            ),
+        ]
+        buckets = self._build_bucket(*rules)
+        content = "line with SECRET_TOKEN present, APIKEY absent"
+        hits = match_content_via_buckets(content, buckets)
+        assert {h.rule_name for h in hits} == {"c_secret"}

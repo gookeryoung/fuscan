@@ -391,9 +391,17 @@ def build_content_buckets(  # noqa: PLR0912
         # （关键字小写化，匹配时 content 也小写化）；否则保持原样
         prefilter_ci = (not case_sensitive) or has_inline_ignorecase
         if prefilter_ci:
-            bucket.prefilter_keywords = list(dict.fromkeys(k.lower() for k in prefilter_keywords))
+            raw_keywords = list(dict.fromkeys(k.lower() for k in prefilter_keywords))
         else:
-            bucket.prefilter_keywords = list(dict.fromkeys(prefilter_keywords))
+            raw_keywords = list(dict.fromkeys(prefilter_keywords))
+        # 去子串：若 kw1 是 kw2 的子串，保留 kw2 即可（kw2 命中时 kw1 必命中）。
+        # 按长度降序排列，依次检查是否为已保留关键字的子串
+        sorted_kw = sorted(raw_keywords, key=len, reverse=True)
+        kept: list[str] = []
+        for kw in sorted_kw:
+            if not any(kw in other for other in kept):
+                kept.append(kw)
+        bucket.prefilter_keywords = kept
         bucket.prefilter_case_insensitive = prefilter_ci
         compiled_buckets.append(bucket)
     remaining = [(r, m) for r, m in src_pairs if r.name not in bucketed_rule_names]

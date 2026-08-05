@@ -3987,6 +3987,42 @@ class TestIter165ContentBucketPrefilter:
         result = _extract_literals(r"abc|abc")
         assert result.count("abc") == 1
 
+    def test_build_buckets_prefilter_substring_removal(self) -> None:
+        """build_content_buckets 应去除子串关键字（保留最长者）。"""
+        from fuscan.scanner._content_buckets import build_content_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        # xox[abpr] → 提取 "xox"/"xoxa"/"xoxb"/"xoxp"/"xoxr"
+        # 去子串后应只保留 4 个最长者（"xoxa"/"xoxb"/"xoxp"/"xoxr"），移除 "xox"
+        r1 = Rule(
+            name="re1",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"\bxox[abpr]-[A-Za-z0-9-]{10,72}\b",
+            ),
+        )
+        r2 = Rule(
+            name="re2",
+            severity=Severity.INFO,
+            match=LeafMatch(
+                target=MatchTarget.CONTENT,
+                mode=MatchMode.REGEX,
+                pattern=r"(?i)(password|passwd|pwd)\s*[=:]\s*\S+",
+            ),
+        )
+        pairs = [(r, build_matcher(r.match)) for r in (r1, r2)]
+        buckets, _remaining = build_content_buckets(pairs)
+        assert len(buckets) == 1
+        bucket = buckets[0]
+        # "xox" 是 "xoxa" 等的子串，应被移除
+        assert "xox" not in bucket.prefilter_keywords
+        assert "xoxa" in bucket.prefilter_keywords
+        # "pwd" 不是 "password"/"passwd" 的子串，应保留
+        assert "pwd" in bucket.prefilter_keywords
+        assert "password" in bucket.prefilter_keywords
+
     def test_build_buckets_prefilter_keywords_populated(self) -> None:
         """build_content_buckets 应填充 prefilter_keywords 字段。"""
         from fuscan.scanner._content_buckets import build_content_buckets

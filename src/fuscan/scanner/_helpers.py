@@ -41,6 +41,7 @@ __all__ = [
     "BATCH_THRESHOLD",
     "DEFAULT_MAX_FILE_SIZE",
     "GIL_YIELD_THRESHOLD_S",
+    "PRE_SCAN_EMIT_INTERVAL_S",
     "PROGRESS_LIST_MAX",
     "PROGRESS_MIN_DELTA_FILES",
     "PROGRESS_MIN_DELTA_MATCHES",
@@ -97,6 +98,12 @@ PROGRESS_SNAPSHOT_TAIL: int = 50
 # 5ms 是经验值：人眼对 100ms 内的卡顿不敏感，5ms 让步频率远低于感知阈值
 # 且对吞吐影响可忽略（sleep(0) 仅放弃剩余时间片，无 I/O 等待）
 GIL_YIELD_THRESHOLD_S: float = 0.005
+
+# 预扫描进度 emit 时间阈值（秒）：扫描循环中距上次 emit 超过此阈值时，
+# 在开始提取下一个文件内容前先 emit 一次进度（force=True），
+# 让用户立即看到"正在扫描 xxx.pdf..."而非上一个文件的陈旧信息。
+# 0.5s 平衡实时性与开销：人眼对 500ms 以内的延迟不敏感，超过 500ms 则明显卡顿
+PRE_SCAN_EMIT_INTERVAL_S: float = 0.5
 
 
 def build_hit_from_match(rule: Rule, result: MatchResult) -> RuleHit:

@@ -19,11 +19,15 @@ from __future__ import annotations
 
 import logging
 import time
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import TYPE_CHECKING
 
 from fuscan.scanner._executor import DaemonThreadPoolExecutor
-from fuscan.scanner._helpers import GIL_YIELD_THRESHOLD_S, cancel_all_futures
+from fuscan.scanner._helpers import (
+    GIL_YIELD_THRESHOLD_S,
+    PRE_SCAN_EMIT_INTERVAL_S,
+    cancel_all_futures,
+)
 from fuscan.scanner.result import ScanResult
 
 if TYPE_CHECKING:
@@ -93,6 +97,11 @@ def _scan_sequential(
         scanner._current_file_size = entry.size
         scanner._current_file_ext = entry.extension
         scanner._current_file_start_time = time.perf_counter()
+        # 预扫描 emit：距上次 emit 超过阈值时，在提取前先 emit 一次，
+        # 让用户立即看到"正在扫描 xxx.pdf..."而非上一个文件的陈旧信息。
+        # force=True 绕过节流，确保大文件提取前 UI 即时更新。
+        if time.perf_counter() - scanner._last_progress_time >= PRE_SCAN_EMIT_INTERVAL_S:
+            scanner._emit_progress(str(entry.path), scanned, matched, errors, matches, force=True)
         try:
             result = scanner._scan_entry(entry)
             scanned += 1
@@ -208,7 +217,7 @@ def _scan_concurrent(
     return scanned, matched, errors, matches
 
 
-def _collect_concurrent_results(
+def _collect_concurrent_results(  # noqa: PLR0912
     scanner: Scanner,
     future_to_entry: dict[Future[ScanResult], FileEntry],
     results: list[ScanResult],
@@ -247,50 +256,68 @@ def _collect_concurrent_results(
     # 命中结果批次缓冲，达 emit_batch 时一次性 extend 到共享列表
     batch_match_list: list[tuple[str, str]] = []
     _last_entry_path: str = ""
-    for future in as_completed(future_to_entry):
+    # 用 wait(timeout) 替代 as_completed：当所有 worker 都在处理大文件时，
+    # as_completed 会阻塞到首个 future 完成而无进度反馈；wait 每 0.5s 超时
+    # 返回一次，让主线程能 emit 进度展示"正在扫描..."避免 UI 长时间无响应。
+    pending: set[Future[ScanResult]] = set(future_to_entry)
+    while pending:
         if scanner._check_control():
             cancel_all_futures(future_to_entry)
             pool.shutdown(wait=False)
             break
-        entry = future_to_entry[future]
-        entry_path = str(entry.path)
-        _last_entry_path = entry_path
-        # 设置当前文件元信息缓存，供 _emit_progress 填充单文件字段
-        scanner._current_file_path = entry_path
-        scanner._current_file_size = entry.size
-        scanner._current_file_ext = entry.extension
-        scanner._current_file_start_time = submit_times.get(future, 0.0)
-        scanned += 1
-        try:
-            result = future.result()
-            if result.has_hit:
-                matched += 1
-                matches += result.total_match_count
-                if scanner._on_progress is not None:
-                    # 先累积到批次列表，后续 emit 时一次性 extend
-                    for hit in result.hits:
-                        batch_match_list.append((entry_path, hit.rule_name))
-            errors += result.errors
-            results.append(result)
-        except Exception:
-            errors += 1
-            logger.warning("扫描文件失败 %s", entry_path, exc_info=True)
-        # 批处理 emit，减少并发高吞吐场景下的进度回调开销
-        emit_counter += 1
-        if emit_counter >= scanner._progress_emit_batch:
-            # flush 命中批次到共享列表（extend 比多次 append 快）
-            if batch_match_list and scanner._on_progress is not None:
-                scanner._matched_files.extend(batch_match_list)
-                batch_match_list.clear()
-            scanner._emit_progress(_last_entry_path, scanned, matched, errors, matches)
-            emit_counter = 0
-        # GIL 让步：并发模式下 worker 在 Rust/C 层释放 GIL，主线程本就能调度，
-        # 但 as_completed 循环本身在 Python 层，仍需定期 sleep(0) 让出时间片。
-        # 时间式判断：距上次让步超过 5ms 才 sleep(0)，避免高吞吐下无谓系统调用
-        now = time.perf_counter()
-        if now - scanner._last_yield_time >= GIL_YIELD_THRESHOLD_S:
-            scanner._last_yield_time = now
-            time.sleep(0)
+        done, pending = wait(pending, timeout=PRE_SCAN_EMIT_INTERVAL_S, return_when=FIRST_COMPLETED)
+        if not done:
+            # 超时：0.5s 内无 future 完成，emit 进度让用户看到"仍在扫描"
+            if scanner._on_progress is not None:
+                scanner._emit_progress(
+                    scanner._current_file_path or _last_entry_path,
+                    scanned,
+                    matched,
+                    errors,
+                    matches,
+                    force=True,
+                )
+            continue
+        for future in done:
+            entry = future_to_entry[future]
+            entry_path = str(entry.path)
+            _last_entry_path = entry_path
+            # 设置当前文件元信息缓存，供 _emit_progress 填充单文件字段
+            scanner._current_file_path = entry_path
+            scanner._current_file_size = entry.size
+            scanner._current_file_ext = entry.extension
+            scanner._current_file_start_time = submit_times.get(future, 0.0)
+            scanned += 1
+            try:
+                result = future.result()
+                if result.has_hit:
+                    matched += 1
+                    matches += result.total_match_count
+                    if scanner._on_progress is not None:
+                        # 先累积到批次列表，后续 emit 时一次性 extend
+                        for hit in result.hits:
+                            batch_match_list.append((entry_path, hit.rule_name))
+                errors += result.errors
+                results.append(result)
+            except Exception:
+                errors += 1
+                logger.warning("扫描文件失败 %s", entry_path, exc_info=True)
+            # 批处理 emit，减少并发高吞吐场景下的进度回调开销
+            emit_counter += 1
+            if emit_counter >= scanner._progress_emit_batch:
+                # flush 命中批次到共享列表（extend 比多次 append 快）
+                if batch_match_list and scanner._on_progress is not None:
+                    scanner._matched_files.extend(batch_match_list)
+                    batch_match_list.clear()
+                scanner._emit_progress(_last_entry_path, scanned, matched, errors, matches)
+                emit_counter = 0
+            # GIL 让步：并发模式下 worker 在 Rust/C 层释放 GIL，主线程本就能调度，
+            # 但 wait 循环本身在 Python 层，仍需定期 sleep(0) 让出时间片。
+            # 时间式判断：距上次让步超过 5ms 才 sleep(0)，避免高吞吐下无谓系统调用
+            now = time.perf_counter()
+            if now - scanner._last_yield_time >= GIL_YIELD_THRESHOLD_S:
+                scanner._last_yield_time = now
+                time.sleep(0)
     # 批处理尾部：剩余命中与未 emit 的进度补发一次（避免最后几个文件状态丢失）
     if batch_match_list and scanner._on_progress is not None:
         scanner._matched_files.extend(batch_match_list)

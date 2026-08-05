@@ -5560,3 +5560,118 @@ class TestPerRuleContentPrefilter:
         content = "line with SECRET_TOKEN present, APIKEY absent"
         hits = match_content_via_buckets(content, buckets)
         assert {h.rule_name for h in hits} == {"c_secret"}
+
+
+def _plain_entry(path: Path) -> FileEntry:
+    """从路径构造 FileEntry（测试辅助）。"""
+    st = path.stat()
+    return FileEntry(
+        path=path,
+        name=path.name,
+        size=st.st_size,
+        mtime=st.st_mtime,
+        extension=path.suffix.lower().lstrip("."),
+        is_dir=False,
+    )
+
+
+class TestPerFileElapsedMs:
+    """单文件解析耗时应为该文件真实耗时，而非累计耗时。
+
+    覆盖需求：解析详情展开列表中每个文件旁的耗时应是单文件解析用时。
+    并发模式下 submit_time≈扫描起点，若用 now-submit_time 会呈累计增长；
+    ScanResult.elapsed_ms 由 worker 实测，collector 据此反推起点得到单文件耗时。
+    """
+
+    def test_scan_result_carries_elapsed_ms(self, tmp_path: Path) -> None:
+        """_scan_entry 应始终回填非负的 elapsed_ms（无论是否启用 file_perf）。"""
+        p = tmp_path / "a.txt"
+        p.write_text("hello world content", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=1, cache=None)
+        result = scanner._scan_entry(_plain_entry(p))
+        assert result.elapsed_ms >= 0.0
+
+    def test_concurrent_elapsed_not_cumulative(self, tmp_path: Path) -> None:
+        """并发模式下单文件耗时不应随队列位置单调递增（不是累计耗时）。
+
+        用注入固定 sleep 的 content_provider 让每个文件解析耗时相近（约 20ms），
+        断言 progress 上报的 current_file_elapsed_ms 稳定在单文件量级，
+        而非随完成顺序累加到数百毫秒。
+        """
+        from fuscan.scanner._pipeline_phase import run_pipeline_phase
+
+        file_count = 8
+        per_file_sleep = 0.02  # 20ms/文件
+        for i in range(file_count):
+            (tmp_path / f"f_{i}.txt").write_text(f"body {i}", encoding="utf-8")
+
+        def _slow_provider(_entry: FileEntry) -> str:
+            time.sleep(per_file_sleep)
+            return "no hit content"
+
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        elapsed_samples: list[float] = []
+        scanner = Scanner(
+            rs,
+            max_workers=4,
+            cache=None,
+            content_provider=_slow_provider,
+            on_progress=lambda info: (
+                elapsed_samples.append(info.current_file_elapsed_ms)
+                if info.phase == "scan" and info.current_file_elapsed_ms > 0
+                else None
+            ),
+            progress_interval=0.0,
+        )
+        # 每文件都 emit，确保采集到每个文件的单文件耗时样本
+        scanner._progress_emit_batch = 1
+        entries = [_plain_entry(tmp_path / f"f_{i}.txt") for i in range(file_count)]
+        results: list[ScanResult] = []
+        run_pipeline_phase(scanner, entries, results)
+
+        assert len(results) == file_count
+        # 单文件耗时应在单文件量级（约 20ms，宽松上界 200ms 容忍调度抖动），
+        # 而非累计到 file_count*20ms=160ms 以上并持续增长
+        assert elapsed_samples, "应至少上报一次 scan 阶段单文件耗时"
+        cumulative_ceiling_ms = per_file_sleep * file_count * 1000 * 0.9  # 累计耗时下界
+        for sample in elapsed_samples:
+            assert sample < cumulative_ceiling_ms, f"单文件耗时 {sample}ms 疑似累计耗时"
+
+    def test_sequential_elapsed_is_per_file(self, tmp_path: Path) -> None:
+        """顺序模式单文件耗时同样为单文件量级（回归保护）。"""
+        from fuscan.scanner._pipeline_phase import run_pipeline_phase
+
+        file_count = 5
+        per_file_sleep = 0.02
+        for i in range(file_count):
+            (tmp_path / f"s_{i}.txt").write_text(f"body {i}", encoding="utf-8")
+
+        def _slow_provider(_entry: FileEntry) -> str:
+            time.sleep(per_file_sleep)
+            return "no hit content"
+
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        elapsed_samples: list[float] = []
+        scanner = Scanner(
+            rs,
+            max_workers=1,
+            cache=None,
+            content_provider=_slow_provider,
+            on_progress=lambda info: (
+                elapsed_samples.append(info.current_file_elapsed_ms)
+                if info.phase == "scan" and info.current_file_elapsed_ms > 0
+                else None
+            ),
+            progress_interval=0.0,
+        )
+        # 顺序模式默认 batch=1，此处显式设置以保证逐文件 emit
+        scanner._progress_emit_batch = 1
+        entries = [_plain_entry(tmp_path / f"s_{i}.txt") for i in range(file_count)]
+        results: list[ScanResult] = []
+        run_pipeline_phase(scanner, entries, results)
+
+        assert len(results) == file_count
+        cumulative_ceiling_ms = per_file_sleep * file_count * 1000 * 0.9
+        for sample in elapsed_samples:
+            assert sample < cumulative_ceiling_ms

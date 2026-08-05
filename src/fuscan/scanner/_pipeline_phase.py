@@ -171,8 +171,6 @@ def _scan_concurrent(
     errors = 0
     matches = 0
     future_to_entry: dict[Future[ScanResult], FileEntry] = {}
-    # 每个 future 的提交时间，供 _collect_concurrent_results 计算「提交到完成」耗时
-    submit_times: dict[Future[ScanResult], float] = {}
     # 不使用 with 语句：取消时需要 shutdown(wait=False) 立即返回，
     # 避免某个 worker 卡在 read_bytes() 上导致 with 退出时无限阻塞。
     # 已运行 worker 在后台完成（_scan_entry 入口已检查取消标志会快速返回），
@@ -207,7 +205,6 @@ def _scan_concurrent(
             future = pool.submit(scanner._scan_entry, entry)
             future_to_entry[future] = entry
             submit_time = time.perf_counter()
-            submit_times[future] = submit_time
             scanner._in_flight_meta[str(entry.path)] = (entry.size, entry.extension, submit_time)
         if cancelled_in_submit:
             # 取消全部未启动 future，shutdown(wait=False) 不等待已运行 future
@@ -215,9 +212,7 @@ def _scan_concurrent(
             pool.shutdown(wait=False)
             scanner._in_flight_meta.clear()
             return scanned, matched, errors, matches
-        scanned, matched, errors, matches = _collect_concurrent_results(
-            scanner, future_to_entry, results, pool, submit_times
-        )
+        scanned, matched, errors, matches = _collect_concurrent_results(scanner, future_to_entry, results, pool)
     finally:
         # wait=False 不阻塞主线程。DaemonThreadPoolExecutor 的 worker
         # 为 daemon，进程退出时由 OS 回收；正常完成路径 as_completed 循环已退出，
@@ -233,7 +228,6 @@ def _collect_concurrent_results(  # noqa: PLR0912
     future_to_entry: dict[Future[ScanResult], FileEntry],
     results: list[ScanResult],
     pool: ThreadPoolExecutor,
-    submit_times: dict[Future[ScanResult], float],
 ) -> tuple[int, int, int, int]:
     """阻塞收集 future 结果，返回 ``(scanned, matched, errors, matches)``。
 
@@ -252,12 +246,14 @@ def _collect_concurrent_results(  # noqa: PLR0912
     list.append 的 C-level 调用次数与 Python 层循环（单文件多规则场景下
     可节省 30~50% 的命中聚合 overhead）。
 
+    单文件耗时展示：done 分支用 ``result.elapsed_ms``（worker 实测）反推
+    ``_current_file_start_time``，使 ``_emit_progress`` 得到单文件真实解析
+    耗时而非「提交到完成」的累计耗时。
+
     :param scanner: 所属 Scanner 实例（提供控制状态、进度回调、批处理参数）
     :param future_to_entry: future → entry 映射，由 :func:`_scan_concurrent` 提交
     :param results: 共享结果列表，本方法将 future 结果 append 到此列表
     :param pool: 所属线程池，取消时调 ``shutdown(wait=False)`` 立即返回
-    :param submit_times: 每个 future 的提交时间（``time.perf_counter`` 基线），
-        供 _emit_progress 计算「提交到完成」单文件耗时
     """
     scanned = 0
     matched = 0
@@ -311,10 +307,13 @@ def _collect_concurrent_results(  # noqa: PLR0912
             scanner._current_file_path = entry_path
             scanner._current_file_size = entry.size
             scanner._current_file_ext = entry.extension
-            scanner._current_file_start_time = submit_times.get(future, 0.0)
             scanned += 1
             try:
                 result = future.result()
+                # 用 worker 实测的单文件耗时反推起点，令 _emit_progress 得到
+                # 单文件真实解析耗时（并发下 submit_time≈扫描起点，若用
+                # now-submit_time 会呈累计增长，展示为「累计用时」而非单文件用时）
+                scanner._current_file_start_time = time.perf_counter() - result.elapsed_ms / 1000.0
                 if result.has_hit:
                     matched += 1
                     matches += result.total_match_count
@@ -325,6 +324,7 @@ def _collect_concurrent_results(  # noqa: PLR0912
                 errors += result.errors
                 results.append(result)
             except Exception:
+                # 异常路径不更新单文件耗时（该文件不进入 recentParsedFiles）
                 errors += 1
                 logger.warning("扫描文件失败 %s", entry_path, exc_info=True)
             # 批处理 emit，减少并发高吞吐场景下的进度回调开销

@@ -259,6 +259,10 @@ class ScanResult:
     user_skipped: bool = False
     # 压缩包根路径：非 None 时标识本结果为压缩包内部条目
     archive_path: Path | None = None
+    # 单文件解析真实耗时（毫秒）：_scan_entry 测量后回填，供并发模式进度
+    # 展示单文件耗时。并发模式下 submit_time≈扫描起点，now-submit_time 是
+    # 累计耗时而非单文件耗时，故 collector 用本字段反推真实起点。
+    elapsed_ms: float = 0.0
 
     @property
     def has_hit(self) -> bool:

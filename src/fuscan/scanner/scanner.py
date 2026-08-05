@@ -28,6 +28,7 @@ import time
 import weakref
 from collections import deque
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -1150,31 +1151,31 @@ class Scanner:
         缓存模式下委托 :meth:`_scan_entry_cached`，否则走 :meth:`_scan_entry_uncached`。
         取消时立即返回空结果，避免已提交的 future 执行无谓的 I/O。
 
-        若 ``file_perf`` 记录器已启用，在每个文件扫描完成后记录总耗时，
+        始终测量单文件解析耗时并回填到 ``ScanResult.elapsed_ms``：并发模式下
+        collector 无法从 ``submit_time`` 得到真实单文件耗时（submit_time≈扫描起点，
+        now-submit_time 为累计耗时），故由本方法在 worker 内实测。``perf_counter``
+        开销为纳秒级，远小于单文件解析耗时，对吞吐无实质影响。
+
+        若 ``file_perf`` 记录器已启用，另在每个文件扫描完成后 ``record`` 总耗时，
         用于性能基线对比与瓶颈定位。
         """
         if self._cancel_event.is_set():
             return ScanResult(path=entry.path, size=entry.size, hits=(), errors=0)
-        if self._file_perf is None:
-            # 快速路径：无单文件计时
-            if self._cache is None:
-                return self._scan_entry_uncached(entry)
-            return self._scan_entry_cached(entry)
-        # 计时路径：记录单文件总耗时
         t0 = time.perf_counter()
         if self._cache is None:
             result = self._scan_entry_uncached(entry)
         else:
             result = self._scan_entry_cached(entry)
         total_ms = (time.perf_counter() - t0) * 1000.0
-        self._file_perf.record(
-            path=str(entry.path),
-            extension=entry.extension,
-            size=entry.size,
-            total_ms=total_ms,
-            hit_count=len(result.hits),
-        )
-        return result
+        if self._file_perf is not None:
+            self._file_perf.record(
+                path=str(entry.path),
+                extension=entry.extension,
+                size=entry.size,
+                total_ms=total_ms,
+                hit_count=len(result.hits),
+            )
+        return replace(result, elapsed_ms=total_ms)
 
     def _scan_entry_uncached(self, entry: FileEntry) -> ScanResult:
         """对单个文件应用所有规则（无缓存）。

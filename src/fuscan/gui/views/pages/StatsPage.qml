@@ -121,7 +121,7 @@ Item {
                 // ---------- 收集阶段（walk）进度 ----------
                 GroupBox {
                     Layout.fillWidth: true
-                    title: "收集文件清单"
+                    title: "收集文件"
                     visible: workspaceController.currentScanController.scanPhase !== "setup"
                     ColumnLayout {
                         anchors.fill: parent
@@ -152,6 +152,13 @@ Item {
                                     : (workspaceController.currentScanController.scanPhase === "walk"
                                        ? theme.colorPrimary
                                        : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary))
+                            }
+                            // 收集用时（后端 walkElapsedText 已格式化，空串表示未开始）
+                            Label {
+                                visible: !!workspaceController.currentScanController.walkElapsedText
+                                text: "用时 " + workspaceController.currentScanController.walkElapsedText
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                             }
                             Item { Layout.fillWidth: true }
                             Label {
@@ -244,7 +251,7 @@ Item {
                 // ---------- 解析阶段（scan）进度 ----------
                 GroupBox {
                     Layout.fillWidth: true
-                    title: "解析文件内容"
+                    title: "解析文件"
                     visible: workspaceController.currentScanController.scanPhase !== "setup"
                     ColumnLayout {
                         anchors.fill: parent
@@ -277,6 +284,13 @@ Item {
                                         || workspaceController.currentScanController.scanPhase === "archive")
                                        ? theme.colorWarning
                                        : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary))
+                            }
+                            // 解析用时（后端 scanElapsedText 已格式化，空串表示未进入解析阶段）
+                            Label {
+                                visible: !!workspaceController.currentScanController.scanElapsedText
+                                text: "用时 " + workspaceController.currentScanController.scanElapsedText
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                             }
                             Item { Layout.fillWidth: true }
                             Label {

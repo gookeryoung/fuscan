@@ -222,22 +222,30 @@ Rectangle {
                 return "pending"
             }
 
-            // ----- 节点 1：收集文件清单（walk） -----
+            // ----- 节点 1：收集文件（walk） -----
             PhaseNode {
                 Layout.fillWidth: true
                 theme: card.theme
                 nodeState: phaseTimeline.walkNodeState()
                 accentColor: theme.colorPrimary
-                title: "收集文件清单"
+                title: "收集文件"
                 showTopLine: false
                 progressIndeterminate: phaseTimeline.sc.walkIndeterminate
                 progressValue: phaseTimeline.sc.walkIndeterminate ? -1 : phaseTimeline.sc.walkProgress
-                detail: phaseTimeline.sc.walkIndeterminate
-                    ? "统计中..."
-                    : (phaseTimeline.sc.walkClassified + " / " + phaseTimeline.sc.walkDiscovered
-                       + ((phaseTimeline.sc.walkSkipped > 0 || phaseTimeline.sc.walkUserSkipped > 0)
-                          ? " · 跳过 " + (phaseTimeline.sc.walkSkipped + phaseTimeline.sc.walkUserSkipped)
-                          : ""))
+                detail: {
+                    if (phaseTimeline.walkNodeState() === "pending") return ""
+                    var t = phaseTimeline.sc.walkIndeterminate
+                        ? "统计中..."
+                        : (phaseTimeline.sc.walkClassified + " / " + phaseTimeline.sc.walkDiscovered
+                           + ((phaseTimeline.sc.walkSkipped > 0 || phaseTimeline.sc.walkUserSkipped > 0)
+                              ? " · 跳过 " + (phaseTimeline.sc.walkSkipped + phaseTimeline.sc.walkUserSkipped)
+                              : ""))
+                    // 收集用时（后端 walkElapsedText 已格式化，空串表示未开始）
+                    var el = phaseTimeline.sc.walkElapsedText
+                    if (el)
+                        t += " · 用时 " + el
+                    return t
+                }
             }
 
             // ----- 节点 2：筛选文件（filter，剔除空/超限/不可读/符号链接） -----
@@ -265,13 +273,13 @@ Rectangle {
                 }
             }
 
-            // ----- 节点 3：解析文件内容（scan / archive） -----
+            // ----- 节点 3：解析文件（scan / archive） -----
             PhaseNode {
                 Layout.fillWidth: true
                 theme: card.theme
                 nodeState: phaseTimeline.scanNodeState()
                 accentColor: card.statusColor()
-                title: "解析文件内容"
+                title: "解析文件"
                 showBottomLine: false
                 // 可展开查看具体文件解析明细（GitHub Actions 风格）：
                 // 仅在解析阶段进行中或完成后可展开，pending 时无明细
@@ -288,55 +296,122 @@ Rectangle {
                     var spd = phaseTimeline.sc.scanSpeed
                     if (spd > 0)
                         t += " · 平均 " + spd.toFixed(0) + " 文件/s"
+                    // 解析用时（后端 scanElapsedText 已格式化，空串表示未进入解析阶段）
+                    var el = phaseTimeline.sc.scanElapsedText
+                    if (el)
+                        t += " · 用时 " + el
                     return t
                 }
 
-                // 展开明细区：最近解析文件列表（最新在前），逐行展示 文件名 · 大小 · 耗时
+                // 展开明细区：最近解析文件列表（最新在前）。
+                // 卡片式容器：圆角边框 + 表头 + 可滚动列表（限高避免撑爆卡片），
+                // 逐行 文件名 · [大小 · 耗时] 徽标，隔行浅底提升可读性。
                 expandContent: Component {
-                    ColumnLayout {
-                        spacing: 2
+                    Rectangle {
+                        // 有明细时按内容高度撑开（上限 200），空态固定矮高。
+                        // Loader 将本 Rectangle 拉伸至其宽度，故无需 Layout.fillWidth；
+                        // implicitHeight 驱动 Loader 高度。
+                        implicitHeight: phaseTimeline.sc.recentParsedFiles.length === 0
+                            ? 40
+                            : Math.min(200, fileList.contentHeight + fileListHeader.height + 12)
+                        radius: card.theme.radiusMd
+                        color: card.theme.isDark ? card.theme.colorBgAppDark : card.theme.colorBgApp
+                        border.width: 1
+                        border.color: card.theme.isDark ? card.theme.colorBorderDark : card.theme.colorBorder
 
-                        Repeater {
-                            model: phaseTimeline.sc.recentParsedFiles
-                            delegate: RowLayout {
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            spacing: 0
+
+                            // 表头：文件名 / 大小 · 耗时
+                            RowLayout {
+                                id: fileListHeader
                                 Layout.fillWidth: true
                                 spacing: 6
-                                // 文件名（取路径末段，避免过长）
                                 Label {
                                     Layout.fillWidth: true
-                                    text: {
-                                        var p = modelData.path || ""
-                                        var idx = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"))
-                                        return idx >= 0 ? p.substring(idx + 1) : p
-                                    }
-                                    font.pixelSize: 10
+                                    text: "最近解析（" + phaseTimeline.sc.recentParsedFiles.length + "）"
+                                    font.pixelSize: card.theme.fontSizeMin
+                                    font.bold: true
                                     color: card.theme.isDark ? card.theme.colorTextSecondary : card.theme.colorTextSecondary
-                                    elide: Text.ElideMiddle
                                 }
-                                // 大小 · 耗时
                                 Label {
-                                    text: {
-                                        var size = modelData.size || 0
-                                        var sizeStr = size > 1048576
-                                            ? (size / 1048576).toFixed(1) + " MB"
-                                            : (size / 1024).toFixed(1) + " KB"
-                                        var ms = modelData.elapsedMs || 0
-                                        var msStr = ms >= 1000
-                                            ? (ms / 1000.0).toFixed(1) + "s"
-                                            : ms.toFixed(0) + "ms"
-                                        return sizeStr + " · " + msStr
-                                    }
-                                    font.pixelSize: 10
+                                    text: "大小 · 耗时"
+                                    font.pixelSize: card.theme.fontSizeMin
                                     color: card.theme.isDark ? card.theme.colorTextSecondary : card.theme.colorTextSecondary
                                 }
                             }
-                        }
-                        // 空态提示：暂无解析明细
-                        Label {
-                            visible: phaseTimeline.sc.recentParsedFiles.length === 0
-                            text: "暂无解析明细"
-                            font.pixelSize: 10
-                            color: card.theme.isDark ? card.theme.colorTextSecondary : card.theme.colorTextSecondary
+
+                            // 分隔线
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.topMargin: 4
+                                Layout.bottomMargin: 2
+                                height: 1
+                                color: card.theme.isDark ? card.theme.colorBorderDark : card.theme.colorBorder
+                                visible: phaseTimeline.sc.recentParsedFiles.length > 0
+                            }
+
+                            // 空态提示
+                            Label {
+                                Layout.fillWidth: true
+                                visible: phaseTimeline.sc.recentParsedFiles.length === 0
+                                text: "暂无解析明细"
+                                horizontalAlignment: Text.AlignHCenter
+                                font.pixelSize: card.theme.fontSizeMin
+                                color: card.theme.isDark ? card.theme.colorTextSecondary : card.theme.colorTextSecondary
+                            }
+
+                            // 可滚动文件列表（限高，最新在前）
+                            ListView {
+                                id: fileList
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                visible: phaseTimeline.sc.recentParsedFiles.length > 0
+                                clip: true
+                                boundsBehavior: Flickable.StopAtBounds
+                                model: phaseTimeline.sc.recentParsedFiles
+                                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                                delegate: Rectangle {
+                                    width: ListView.view ? ListView.view.width : 0
+                                    height: 24
+                                    // 隔行浅底提升可读性
+                                    color: index % 2 === 0
+                                        ? "transparent"
+                                        : (card.theme.isDark ? card.theme.colorBgHoverDark : card.theme.colorBgHover)
+                                    radius: card.theme.radiusSm
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 4
+                                        anchors.rightMargin: 4
+                                        spacing: 6
+                                        // 文件名（后端已取路径末段）
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: modelData.name || ""
+                                            font.pixelSize: card.theme.fontSizeSmall
+                                            color: card.theme.isDark ? card.theme.colorTextPrimaryDark : card.theme.colorTextPrimary
+                                            elide: Text.ElideMiddle
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        // 大小 · 耗时徽标（后端预格式化）
+                                        Rectangle {
+                                            Layout.preferredHeight: 18
+                                            Layout.preferredWidth: metaLabel.implicitWidth + 12
+                                            radius: card.theme.radiusSm
+                                            color: card.theme.isDark ? card.theme.colorBgSelectedDark : card.theme.colorBgSelected
+                                            Label {
+                                                id: metaLabel
+                                                anchors.centerIn: parent
+                                                text: (modelData.sizeText || "") + " · " + (modelData.elapsedText || "")
+                                                font.pixelSize: card.theme.fontSizeMin
+                                                color: card.theme.isDark ? card.theme.colorTextSecondary : card.theme.colorTextSecondary
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

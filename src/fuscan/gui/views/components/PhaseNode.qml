@@ -182,6 +182,7 @@ Item {
         spacing: 3
 
         RowLayout {
+            id: titleRow
             Layout.fillWidth: true
             spacing: 6
             Label {
@@ -192,39 +193,71 @@ Item {
                     ? (node.theme.isDark ? node.theme.colorTextSecondary : node.theme.colorTextSecondary)
                     : (node.nodeState === "done" ? node.doneColor : node.accentColor)
             }
-            // 展开箭头：仅可展开节点显示，点击切换 expanded（GitHub Actions 折叠交互）
-            Item {
-                Layout.preferredWidth: 14
-                Layout.preferredHeight: 14
+            Item { Layout.fillWidth: true }
+            Label {
+                text: node.detail
+                font.pixelSize: 11
+                color: node.theme.isDark ? node.theme.colorTextSecondary : node.theme.colorTextSecondary
+            }
+            // 展开/收起 明细：pill 样式按钮（文字提示 + chevron），扩大点击热区、
+            // 提供 hover 背景反馈，明确可点击态。仅可展开节点显示（GitHub Actions
+            // 折叠交互）。收起时 chevron 指右并显示「展开明细」，展开时 chevron
+            // 指下并显示「收起明细」，交互语义清晰。
+            Rectangle {
+                id: expandToggle
                 visible: node.expandable
-                Image {
-                    id: chevronIcon
-                    anchors.fill: parent
-                    source: "qrc:/icons/down_arrow.svg"
-                    sourceSize: Qt.size(14, 14)
-                    // 收起时旋转 -90° 指向右侧，展开时 0° 指向下方
-                    rotation: node.expanded ? 0 : -90
-                    visible: false
-                    Behavior on rotation {
-                        NumberAnimation { duration: 120 }
+                Layout.preferredHeight: 22
+                Layout.preferredWidth: toggleRow.implicitWidth + 14
+                radius: node.theme.radiusSm
+                color: toggleHover.hovered
+                    ? (node.theme.isDark ? node.theme.colorBgHoverDark : node.theme.colorBgHover)
+                    : "transparent"
+                border.width: 1
+                border.color: toggleHover.hovered
+                    ? (node.theme.isDark ? node.theme.colorBorderDark : node.theme.colorBorder)
+                    : "transparent"
+                Behavior on color { ColorAnimation { duration: 120 } }
+
+                RowLayout {
+                    id: toggleRow
+                    anchors.centerIn: parent
+                    spacing: 4
+                    Label {
+                        text: node.expanded ? "收起明细" : "展开明细"
+                        font.pixelSize: node.theme.fontSizeMin
+                        color: node.theme.isDark ? node.theme.colorTextSecondary : node.theme.colorTextSecondary
+                    }
+                    Item {
+                        Layout.preferredWidth: 12
+                        Layout.preferredHeight: 12
+                        Image {
+                            id: chevronIcon
+                            anchors.fill: parent
+                            source: "qrc:/icons/down_arrow.svg"
+                            sourceSize: Qt.size(12, 12)
+                            // 收起时旋转 -90° 指向右侧，展开时 0° 指向下方
+                            rotation: node.expanded ? 0 : -90
+                            visible: false
+                            Behavior on rotation {
+                                NumberAnimation { duration: 120 }
+                            }
+                        }
+                        ColorOverlay {
+                            anchors.fill: chevronIcon
+                            source: chevronIcon
+                            color: node.theme.isDark ? node.theme.colorTextSecondary : node.theme.colorTextSecondary
+                        }
                     }
                 }
-                ColorOverlay {
-                    anchors.fill: chevronIcon
-                    source: chevronIcon
-                    color: node.theme.isDark ? node.theme.colorTextSecondary : node.theme.colorTextSecondary
+
+                HoverHandler {
+                    id: toggleHover
                 }
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
                     onClicked: node.expanded = !node.expanded
                 }
-            }
-            Item { Layout.fillWidth: true }
-            Label {
-                text: node.detail
-                font.pixelSize: 11
-                color: node.theme.isDark ? node.theme.colorTextSecondary : node.theme.colorTextSecondary
             }
         }
 
@@ -258,6 +291,7 @@ Item {
         Loader {
             id: expandArea
             Layout.fillWidth: true
+            Layout.topMargin: active ? 6 : 0
             active: node.expandable && node.expanded
             visible: active
             sourceComponent: node.expandContent

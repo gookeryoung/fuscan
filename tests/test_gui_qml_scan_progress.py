@@ -290,7 +290,7 @@ def test_phase_node_expandable_with_content(
         "import QtQuick.Controls 2.15\n"
         'import "components"\n'
         "PhaseNode {\n"
-        '    title: "解析文件内容"\n'
+        '    title: "解析文件"\n'
         '    nodeState: "running"\n'
         "    expandable: true\n"
         "    expanded: true\n"

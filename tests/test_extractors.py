@@ -165,9 +165,13 @@ class TestTextExtractor:
             extractor.extract(tmp_path / "missing.txt")
 
     def test_charset_normalizer_fallback(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """charset-normalizer 未安装时回退到 UTF-8/GBK 解码。"""
+        """charset-normalizer 未安装时回退到 UTF-8/GBK 解码。
+
+        内容用 GBK 编码写入，使其无法命中 UTF-8 快路径，从而进入
+        charset-normalizer 分支触发 ImportError 回退（回退链中 GBK 可解）。
+        """
         path = tmp_path / "fallback.txt"
-        path.write_text("回退解码 password", encoding="utf-8")
+        path.write_bytes("回退解码 password".encode("gbk"))
 
         import builtins
 
@@ -207,9 +211,13 @@ class TestTextExtractor:
             TextExtractor().extract(path)
 
     def test_charset_normalizer_exception_fallback(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """charset-normalizer 抛异常时回退到 UTF-8 解码。"""
+        """charset-normalizer 抛异常时回退到 UTF-8/GBK 解码。
+
+        内容用 GBK 编码写入，使其无法命中 UTF-8 快路径，从而进入
+        charset-normalizer 分支触发 RuntimeError 回退（回退链中 GBK 可解）。
+        """
         path = tmp_path / "test.txt"
-        path.write_text("异常回退 password", encoding="utf-8")
+        path.write_bytes("异常回退 password".encode("gbk"))
 
         def fake_from_bytes(data: bytes):
             raise RuntimeError("模拟检测异常")
@@ -219,9 +227,13 @@ class TestTextExtractor:
         assert "异常回退 password" in content
 
     def test_charset_normalizer_none_fallback_to_latin1(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """charset-normalizer 返回 None 时回退到 latin-1 解码任意字节。"""
+        """charset-normalizer 返回 None 时回退到 latin-1 解码任意字节。
+
+        字节须既非 BOM 也非合法 UTF-8，才不会命中头部快路径而进入
+        charset-normalizer 分支（``\\x80\\x81\\xfd`` 为孤立续字节，非法 UTF-8）。
+        """
         path = tmp_path / "test.txt"
-        path.write_bytes(b"\xff\xfe\xfd")
+        path.write_bytes(b"\x80\x81\xfd")
 
         monkeypatch.setattr("charset_normalizer.from_bytes", lambda data: type("R", (), {"best": lambda self: None})())
         content = TextExtractor().extract(path)

@@ -216,9 +216,19 @@ class TextExtractor(Extractor):
         统一行尾为 ``\\n``：Windows 上 ``write_text`` 会将 ``\\n`` 写为 ``\\r\\n``，
         若不规范化会导致 CONTENT EQUALS 等严格比较在跨平台时失败。
 
-        大 bytes（>10MB）用文件头检测编码，跳过 charset-normalizer 全量分析；
-        小 bytes 用 charset-normalizer 精确检测。
+        解码优先级：
+
+        1. **头部快路径**（BOM / 整段严格 UTF-8）：命中即跳过 charset-normalizer
+           全量分析。为零误判，仅当 BOM 明确或整段字节严格 UTF-8 解码成功
+           （纯 ASCII 属其子集）时走快路径；GBK 等无法确证的编码不走，
+           避免「头部纯 ASCII 但正文 GBK」被 UTF-8 ``errors="ignore"`` 误吞。
+        2. **大 bytes（>10MB）头部检测**：超阈值文件用文件头启发式检测编码。
+        3. **charset-normalizer 精确检测**：前两者未命中时的通用回退。
         """
+        fast = _fast_decode(data)
+        if fast is not None:
+            return _normalize_newlines(fast)
+
         if len(data) > _LARGE_FILE_THRESHOLD:
             encoding = _detect_encoding_from_header(data[:_HEADER_SIZE])
             if encoding is not None:
@@ -293,6 +303,36 @@ class SourceCodeExtractor(TextExtractor):
     def engine_info(self) -> str:
         """charset-normalizer + 内置解码。"""
         return "charset-normalizer"
+
+
+def _fast_decode(data: bytes) -> str | None:
+    """头部快路径解码：仅对可确证的编码返回解码结果，否则返回 None。
+
+    命中条件（保守，零误判）：
+
+    - **BOM 明确**：UTF-8-SIG / UTF-32 / UTF-16，直接按对应编码解码整段。
+    - **整段严格 UTF-8**：无 BOM 时对整段字节做严格 UTF-8 解码，成功即确证
+      为 UTF-8（纯 ASCII 属其子集）。对整段而非仅头部解码，规避多字节字符
+      在取样边界被截断的误判。
+
+    GBK 等无法仅凭字节确证的编码返回 None，交由 charset-normalizer 统计检测，
+    避免「头部纯 ASCII 但正文 GBK 中文」被 UTF-8 ``errors="ignore"`` 误吞。
+
+    :param data: 完整文件字节
+    :return: 命中时返回解码字符串；未命中返回 None
+    """
+    # BOM 检测（UTF-32 须在 UTF-16 前检查，其 BOM 是 UTF-16 BOM 的扩展）
+    if data.startswith(b"\xef\xbb\xbf"):
+        return data.decode("utf-8-sig", errors="ignore")
+    if data.startswith(b"\xff\xfe\x00\x00") or data.startswith(b"\x00\x00\xfe\xff"):
+        return data.decode("utf-32", errors="ignore")
+    if data.startswith(b"\xff\xfe") or data.startswith(b"\xfe\xff"):
+        return data.decode("utf-16", errors="ignore")
+    # 无 BOM：整段严格 UTF-8 解码，成功即确证 UTF-8
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 def _detect_encoding_from_header(header: bytes) -> str | None:

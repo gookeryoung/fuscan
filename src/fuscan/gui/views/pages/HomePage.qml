@@ -1428,7 +1428,8 @@ Item {
         // 历史列表（按时间倒序）
         property var historyList: []
         // 对比结果对象（current/previous/summary/trend/...）
-        property var comparison: {}
+        // 用 ({}) 明确空对象字面量——裸 {} 会被 QML 解析为空块语句使属性为 undefined
+        property var comparison: ({})
 
         contentItem: Rectangle {
             color: theme.isDark ? theme.colorBgCard : theme.colorBgCard

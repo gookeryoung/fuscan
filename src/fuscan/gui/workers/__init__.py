@@ -7,12 +7,14 @@
 - :class:`FileStatsWorker`：后台文件统计线程（walk 阶段，产出待扫描文件清单）
 - :class:`ScanWorker`：后台扫描线程（scan/archive 阶段，可接收预收集清单）
 - :class:`ExportWorker`：后台导出线程
+- :class:`DetailWorker`：后台构建选中结果命中详情线程（读文件补上下文）
 """
 
 from __future__ import annotations
 
+from fuscan.gui.workers.detail_worker import DetailWorker
 from fuscan.gui.workers.export_worker import ExportWorker
 from fuscan.gui.workers.scan_worker import ScanWorker
 from fuscan.gui.workers.stats_worker import FileStatsWorker
 
-__all__ = ["ExportWorker", "FileStatsWorker", "ScanWorker"]
+__all__ = ["DetailWorker", "ExportWorker", "FileStatsWorker", "ScanWorker"]

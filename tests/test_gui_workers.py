@@ -27,7 +27,7 @@ pytestmark = pytest.mark.gui
 
 try:
     from fuscan.gui.models.result_model import SORT_FILE_PATH, SORT_SEVERITY
-    from fuscan.gui.workers import ExportWorker, FileStatsWorker, ScanWorker
+    from fuscan.gui.workers import DetailWorker, ExportWorker, FileStatsWorker, ScanWorker
     from fuscan.gui.workers.filter_worker import FilterWorker
     from fuscan.gui.workers.restore_worker import ResultRestoreWorker
     from fuscan.rules.model import (
@@ -1072,3 +1072,76 @@ class TestFilterWorker:
         assert isinstance(filtered, tuple)
         assert len(filtered) == 1
         assert filtered[0].path == tmp_path / "a.txt"
+
+
+class TestDetailWorker:
+    """``DetailWorker`` 测试：后台构建命中详情后 emit done 携带 (model, generation)。
+
+    Windows 约束：直接同步调用 ``run()`` + 真实 ``Signal.connect`` 收集 payload，
+    不真实 ``start()``（PySide2 + Windows 真实线程启动会崩溃）。
+    """
+
+    def test_run_emits_full_model_with_context(self, tmp_path: Path) -> None:
+        """run() 读文件补上下文并携带世代号回传。"""
+        src = tmp_path / "a.txt"
+        src.write_text("line0\npassword=secret\nline2\n", encoding="utf-8")
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.CRITICAL,
+            detail="detail",
+            match_text="password",
+        )
+        result = _make_scan_result(src, hits=(hit,))
+        worker = DetailWorker(result, 7)
+
+        done_payloads: list[tuple[object, ...]] = []
+        worker.done.connect(lambda *args: done_payloads.append(args))  # pyrefly: ignore [missing-attribute]
+
+        worker.run()
+
+        assert len(done_payloads) == 1
+        model, generation = done_payloads[0]
+        assert generation == 7
+        assert isinstance(model, list)
+        assert len(model) == 1
+        assert ">>> password=secret" in str(model[0]["context"])
+
+    def test_run_none_result_emits_empty(self) -> None:
+        """None 结果 emit 空列表。"""
+        worker = DetailWorker(None, 3)
+        done_payloads: list[tuple[object, ...]] = []
+        worker.done.connect(lambda *args: done_payloads.append(args))  # pyrefly: ignore [missing-attribute]
+
+        worker.run()
+
+        assert len(done_payloads) == 1
+        model, generation = done_payloads[0]
+        assert model == []
+        assert generation == 3
+
+    def test_run_archive_entry_uses_detail(self, tmp_path: Path) -> None:
+        """压缩包条目用 detail 兜底（不读文件）。"""
+        archive = tmp_path / "a.zip"
+        archive.write_bytes(b"PK\x03\x04")
+        hit = RuleHit(
+            rule_name="规则",
+            severity=Severity.WARNING,
+            detail="内部条目: pw",
+            match_text="pw",
+        )
+        result = ScanResult(
+            path=tmp_path / "a.zip!inner.txt",
+            size=100,
+            hits=(hit,),
+            archive_path=archive,
+        )
+        worker = DetailWorker(result, 1)
+        done_payloads: list[tuple[object, ...]] = []
+        worker.done.connect(lambda *args: done_payloads.append(args))  # pyrefly: ignore [missing-attribute]
+
+        worker.run()
+
+        model, generation = done_payloads[0]
+        assert generation == 1
+        assert isinstance(model, list)
+        assert model[0]["context"] == "内部条目: pw"

@@ -20,6 +20,7 @@ pytestmark = pytest.mark.gui
 
 try:
     from fuscan.config import Config  # noqa: F401
+    from fuscan.gui.controllers._result_detail import build_detail_hits_full
     from fuscan.gui.controllers.config_controller import ConfigController
     from fuscan.gui.controllers.rules_controller import RulesController
     from fuscan.gui.controllers.scan_controller import ScanController
@@ -191,6 +192,76 @@ class FakeScanWorker:
         self.cancelled.emit(report)
 
 
+class FakeDetailSignal:
+    """模拟 :class:`DetailWorker` 的双参数 ``done`` 信号 ``Signal(list, int)``。
+
+    :class:`FakeSignal` 仅支持单参数 emit，命中详情信号需回传
+    ``(model, generation)`` 两参数，故单列一个双参数版本。
+    """
+
+    def __init__(self) -> None:
+        self._callbacks: list[Any] = []
+
+    def connect(self, cb: Any) -> None:
+        self._callbacks.append(cb)
+
+    def disconnect(self, cb: Any) -> None:
+        """移除已注册回调；未注册时抛 RuntimeError（与 PySide2 一致）。"""
+        try:
+            self._callbacks.remove(cb)
+        except ValueError as exc:
+            raise RuntimeError from exc
+
+    def emit(self, model: Any, generation: int) -> None:
+        for cb in list(self._callbacks):
+            cb(model, generation)
+
+
+class FakeDetailWorker:
+    """模拟 :class:`DetailWorker`，避免启动真实 QThread。
+
+    构造时记录 ``result``/``generation`` 供断言，``start`` 不自动 emit，
+    由测试显式调用 :meth:`emit_done` 模拟后台补齐上下文完成。
+    """
+
+    instances: list[FakeDetailWorker] = []
+
+    def __init__(self, result: ScanResult | None, generation: int) -> None:
+        self.__class__.instances.append(self)
+        self.result = result
+        self.generation = generation
+        self.done = FakeDetailSignal()
+        self.start_called = False
+        self.quit_called = False
+        self.wait_called = False
+        self.terminate_called = False
+        self._running = True
+
+    def start(self) -> None:
+        """start() 不自动触发回调，由测试显式调用 emit_done。"""
+        self.start_called = True
+
+    def quit(self) -> None:
+        self.quit_called = True
+
+    def wait(self, _msecs: int = 0) -> bool:
+        self.wait_called = True
+        self._running = False
+        return True
+
+    def terminate(self) -> None:
+        self.terminate_called = True
+
+    def deleteLater(self) -> None:
+        """模拟 Qt deleteLater。"""
+
+    def isRunning(self) -> bool:
+        return self._running
+
+    def emit_done(self, model: list[dict[str, object]], generation: int) -> None:
+        self.done.emit(model, generation)
+
+
 @pytest.fixture()
 def config_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """将 ~/.fuscan 重定向到 tmp_path，避免污染用户配置。"""
@@ -226,6 +297,14 @@ def fake_workers(monkeypatch: pytest.MonkeyPatch) -> tuple[list[FakeStatsWorker]
     monkeypatch.setattr("fuscan.gui.controllers.scan_controller.FileStatsWorker", FakeStatsWorker)
     monkeypatch.setattr("fuscan.gui.controllers.scan_controller.ScanWorker", FakeScanWorker)
     return FakeStatsWorker.instances, FakeScanWorker.instances
+
+
+@pytest.fixture()
+def fake_detail_workers(monkeypatch: pytest.MonkeyPatch) -> list[FakeDetailWorker]:
+    """替换 ScanController 中的 DetailWorker 为 Fake，返回构造实例列表供断言。"""
+    FakeDetailWorker.instances.clear()
+    monkeypatch.setattr("fuscan.gui.controllers.scan_controller.DetailWorker", FakeDetailWorker)
+    return FakeDetailWorker.instances
 
 
 class TestInitialState:
@@ -3098,3 +3177,277 @@ class TestIter143CoverageGaps:
         assert stubborn.cancel_called is True
         assert stubborn.wait_called is True
         assert stubborn.terminate_called is True
+
+
+class TestDetailHitsModel:
+    """选中结果命中详情异步构建：轻量占位即时可读 + 后台 worker 补齐上下文。
+
+    覆盖 :meth:`ScanController._refresh_detail_hits` /
+    :meth:`_on_detail_done` / :meth:`_cancel_detail_worker` /
+    :meth:`_cleanup_detail_worker` 及 cleanup/quick_cancel 清理路径。
+    """
+
+    @staticmethod
+    def _populate(controller: ScanController, tmp_path: Path) -> Path:
+        """写入一个含 ``password`` 的真实文件并设为唯一结果，返回文件路径。"""
+        src = tmp_path / "secret.txt"
+        src.write_text("line1\nlogin password=secret\nline3\n", encoding="utf-8")
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.CRITICAL,
+            detail="占位详情",
+            match_text="password=secret",
+            match_texts=("password=secret",),
+        )
+        result = ScanResult(path=src, size=src.stat().st_size, hits=(hit,))
+        controller._result_model.set_results((result,))
+        return src
+
+    def test_light_model_immediately_readable(
+        self,
+        controller: ScanController,
+        fake_detail_workers: list[FakeDetailWorker],
+        tmp_path: Path,
+    ) -> None:
+        """选中变化后 detailHitsModel 立即返回轻量占位（context=detail），且启动 worker。"""
+        self._populate(controller, tmp_path)
+        controller.setSelectedResultIndex(0)
+
+        model = controller.detailHitsModel
+        assert len(model) == 1
+        # 轻量占位：context 取 hit.detail，尚未读文件补上下文
+        assert model[0]["context"] == "占位详情"
+        assert model[0]["matchText"] == "password=secret"
+        # 已启动一个 DetailWorker
+        assert len(fake_detail_workers) == 1
+        assert fake_detail_workers[0].start_called is True
+        assert fake_detail_workers[0].generation == controller._detail_generation
+
+    def test_worker_done_replaces_with_full_context(
+        self,
+        controller: ScanController,
+        fake_detail_workers: list[FakeDetailWorker],
+        tmp_path: Path,
+    ) -> None:
+        """worker done 回调（世代号匹配）替换缓存为完整上下文并 emit。"""
+        self._populate(controller, tmp_path)
+        controller.setSelectedResultIndex(0)
+        worker = fake_detail_workers[0]
+
+        changed: list[int] = []
+        controller.detailHitsModelChanged.connect(lambda: changed.append(1))  # pyrefly: ignore [missing-attribute]
+
+        # 模拟后台构建完整模型（真实调用 build_detail_hits_full 读文件补上下文）
+        full = build_detail_hits_full(controller._get_selected_result())
+        worker.emit_done(full, worker.generation)
+
+        model = controller.detailHitsModel
+        assert ">>> login password=secret" in str(model[0]["context"])
+        assert changed  # detailHitsModelChanged 已 emit
+
+    def test_stale_generation_discarded(
+        self,
+        controller: ScanController,
+        fake_detail_workers: list[FakeDetailWorker],
+        tmp_path: Path,
+    ) -> None:
+        """旧世代号的 worker done 回调被丢弃，不覆盖新缓存。"""
+        self._populate(controller, tmp_path)
+        controller.setSelectedResultIndex(0)
+        stale_worker = fake_detail_workers[0]
+        stale_gen = stale_worker.generation
+
+        # 再次刷新（选中未变则不触发，故直接调 _refresh_detail_hits 模拟过滤/排序刷新）
+        controller._refresh_detail_hits()
+        assert controller._detail_generation != stale_gen
+
+        current_model = controller.detailHitsModel
+        # 旧 worker 用过期世代号 emit，应被丢弃
+        stale_worker.emit_done([{"ruleName": "过期"}], stale_gen)
+        assert controller.detailHitsModel == current_model
+
+    def test_archive_entry_synchronous_no_worker(
+        self,
+        controller: ScanController,
+        fake_detail_workers: list[FakeDetailWorker],
+        tmp_path: Path,
+    ) -> None:
+        """压缩包内部条目主线程同步构建（context=detail），不启动 worker。"""
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.CRITICAL,
+            detail="压缩包内命中",
+            match_text="password",
+        )
+        result = ScanResult(
+            path=Path("inner/secret.txt"),
+            size=100,
+            hits=(hit,),
+            archive_path=tmp_path / "bundle.zip",
+        )
+        controller._result_model.set_results((result,))
+        controller.setSelectedResultIndex(0)
+
+        model = controller.detailHitsModel
+        assert model[0]["context"] == "压缩包内命中"
+        # 压缩包条目不读文件，不建 worker
+        assert fake_detail_workers == []
+
+    def test_none_selection_no_worker(
+        self,
+        controller: ScanController,
+        fake_detail_workers: list[FakeDetailWorker],
+        tmp_path: Path,
+    ) -> None:
+        """无选中结果时缓存清空为空列表，不启动 worker。"""
+        self._populate(controller, tmp_path)
+        controller.setSelectedResultIndex(0)
+        assert len(fake_detail_workers) == 1
+
+        # 取消选中：缓存清空、不新建 worker（仅取消旧 worker）
+        controller.setSelectedResultIndex(-1)
+        assert controller.detailHitsModel == []
+        # None 分支不新建 worker，故仍是之前那 1 个（已取消）
+        assert len(fake_detail_workers) == 1
+
+    def test_rapid_switch_cancels_previous_worker(
+        self,
+        controller: ScanController,
+        fake_detail_workers: list[FakeDetailWorker],
+        tmp_path: Path,
+    ) -> None:
+        """快速切换选中时取消旧 worker（quit+wait+deleteLater）并建新 worker。"""
+        src1 = tmp_path / "a.txt"
+        src1.write_text("password=1\n", encoding="utf-8")
+        src2 = tmp_path / "b.txt"
+        src2.write_text("password=2\n", encoding="utf-8")
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.CRITICAL,
+            detail="d",
+            match_text="password",
+            match_texts=("password",),
+        )
+        results = (
+            ScanResult(path=src1, size=src1.stat().st_size, hits=(hit,)),
+            ScanResult(path=src2, size=src2.stat().st_size, hits=(hit,)),
+        )
+        controller._result_model.set_results(results)
+
+        controller.setSelectedResultIndex(0)
+        first_worker = fake_detail_workers[0]
+        controller.setSelectedResultIndex(1)
+
+        # 第一个 worker 被取消
+        assert first_worker.wait_called is True
+        # 新建了第二个 worker
+        assert len(fake_detail_workers) == 2
+        assert controller._detail_worker is fake_detail_workers[1]
+
+    def test_on_detail_done_cleans_up_worker(
+        self,
+        controller: ScanController,
+        fake_detail_workers: list[FakeDetailWorker],
+        tmp_path: Path,
+    ) -> None:
+        """worker done 后 _detail_worker 被清理为 None（_cleanup_detail_worker）。"""
+        self._populate(controller, tmp_path)
+        controller.setSelectedResultIndex(0)
+        worker = fake_detail_workers[0]
+
+        worker.emit_done([], worker.generation)
+        assert controller._detail_worker is None
+
+    def test_on_detail_done_matching_generation_replaces_model(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """_on_detail_done 世代号匹配时替换缓存并 emit（直接调用精确覆盖）。"""
+        controller._detail_generation = 5
+        changed: list[int] = []
+        controller.detailHitsModelChanged.connect(lambda: changed.append(1))  # pyrefly: ignore [missing-attribute]
+
+        full_model: list[dict[str, object]] = [{"ruleName": "r", "context": "完整上下文"}]
+        controller._on_detail_done(full_model, 5)
+
+        assert controller._detail_hits_model == full_model
+        assert controller.detailHitsModel == full_model
+        assert changed  # detailHitsModelChanged 已 emit
+
+    def test_on_detail_done_stale_generation_discarded(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """_on_detail_done 世代号不匹配时丢弃，不替换缓存（直接调用精确覆盖）。"""
+        controller._detail_generation = 9
+        controller._detail_hits_model = [{"ruleName": "旧"}]
+
+        controller._on_detail_done([{"ruleName": "过期"}], 3)
+
+        assert controller._detail_hits_model == [{"ruleName": "旧"}]
+
+    def test_cleanup_workers_cleans_detail_worker(
+        self,
+        controller: ScanController,
+        fake_detail_workers: list[FakeDetailWorker],
+        tmp_path: Path,
+    ) -> None:
+        """_cleanup_workers 非阻塞清理 detail worker（deleteLater + 置 None）。"""
+        self._populate(controller, tmp_path)
+        controller.setSelectedResultIndex(0)
+        assert controller._detail_worker is not None
+
+        controller._cleanup_workers()
+        assert controller._detail_worker is None
+
+    def test_quick_cancel_terminates_stubborn_detail_worker(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """quick_cancel 时 detail worker wait 后仍 isRunning 应 terminate。"""
+
+        class StubbornDetailWorker:
+            """wait 后仍 isRunning=True 的 detail worker 桩。"""
+
+            def __init__(self) -> None:
+                self.quit_called = False
+                self.wait_called = False
+                self.terminate_called = False
+
+            def quit(self) -> None:
+                self.quit_called = True
+
+            def wait(self, _msecs: int = 0) -> bool:
+                self.wait_called = True
+                return False  # 仍 running
+
+            def terminate(self) -> None:
+                self.terminate_called = True
+
+            def isRunning(self) -> bool:
+                return True
+
+            def deleteLater(self) -> None:
+                pass
+
+        stubborn = StubbornDetailWorker()
+        controller._detail_worker = stubborn  # type: ignore[bad-assignment]
+        controller.quick_cancel()
+        assert stubborn.quit_called is True
+        assert stubborn.wait_called is True
+        assert stubborn.terminate_called is True
+
+    def test_cleanup_cancels_detail_worker(
+        self,
+        controller: ScanController,
+        fake_detail_workers: list[FakeDetailWorker],
+        tmp_path: Path,
+    ) -> None:
+        """cleanup 阻塞取消 detail worker（quit+wait+deleteLater 置 None）。"""
+        self._populate(controller, tmp_path)
+        controller.setSelectedResultIndex(0)
+        worker = fake_detail_workers[0]
+
+        controller.cleanup()
+        assert worker.wait_called is True
+        assert controller._detail_worker is None

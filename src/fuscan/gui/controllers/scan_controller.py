@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import sqlite3
 import threading
@@ -47,7 +48,8 @@ from fuscan.gui.controllers._manifest import (
     save_manifest as _save_manifest_fn,
 )
 from fuscan.gui.controllers._result_detail import (
-    build_detail_hits_model,
+    build_detail_hits_full,
+    build_detail_hits_light,
     can_replace_result,
     move_to_staging,
     replace_selected,
@@ -77,7 +79,7 @@ from fuscan.gui.scan_mode import (
     SCAN_MODE_STR_TO_INDEX,
     scan_mode_index_to_str,
 )
-from fuscan.gui.workers import FileStatsWorker, ScanWorker
+from fuscan.gui.workers import DetailWorker, FileStatsWorker, ScanWorker
 from fuscan.processing.skip_store import SkipStore
 from fuscan.rules import (
     RuleError,
@@ -176,6 +178,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     phaseChanged = Signal()
     statusChanged = Signal()
     selectedResultChanged = Signal()
+    # detailHitsModel 独立刷新信号：命中详情由后台 DetailWorker 补齐上下文后
+    # 替换缓存并 emit 此信号触发 QML Repeater.model 重求值。与 selectedResultChanged
+    # 分离——「详情就绪」与「选中变化」是两件事，独立信号避免 worker 完成时连带
+    # 触发 detailFilePath/detailHitsCount 等其余绑 selectedResultChanged 的属性重算，
+    # 且无信号环。
+    detailHitsModelChanged = Signal()
     drivesChanged = Signal()
     scanModeChanged = Signal()
     folderRootChanged = Signal()
@@ -207,6 +215,13 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._last_report: ScanReport | None = None
         self._worker: ScanWorker | None = None
         self._stats_worker: FileStatsWorker | None = None
+        # 命中详情后台构建 worker 与状态：选中变化时先用 build_detail_hits_light
+        # 填 _detail_hits_model 缓存（主线程即时可读），再启动 DetailWorker 读文件
+        # 补齐上下文。_detail_generation 世代号随每次刷新自增，_on_detail_done
+        # 按世代号丢弃过期回调，避免快速切换选中时旧结果覆盖新结果。
+        self._detail_worker: DetailWorker | None = None
+        self._detail_generation: int = 0
+        self._detail_hits_model: list[dict[str, object]] = []
         self._cache: CacheStore | None = None
         # SkipStore 共享实例——由 WorkspaceController 注入全局共享
         # SkipStore，避免 N 个工作区各自读 ~/.fuscan/skips.json 造成的重复 I/O。
@@ -934,6 +949,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if index != self._selected_result_index:
             self._selected_result_index = index
             self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
+            self._refresh_detail_hits()
 
     @Property(str, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
     def detailFilePath(self) -> str:
@@ -947,14 +963,20 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         result = self._get_selected_result()
         return len(result.hits) if result is not None else 0
 
-    @Property("QVariantList", notify=selectedResultChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
+    @Property("QVariantList", notify=detailHitsModelChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
     def detailHitsModel(self) -> list[dict[str, object]]:
         """选中结果的命中详情列表（QML 直接 ListView 绑定）。
 
-        每条命中包含：规则名、严重度文本/色值、上下文（detail）、匹配文本、
-        匹配条数、匹配目标（filename/content/path）、规则描述（供详情面板展示）。
+        直接返回 :attr:`_detail_hits_model` 缓存——选中变化时由
+        :meth:`_refresh_detail_hits` 先填轻量占位（主线程即时可读），
+        后台 :class:`DetailWorker` 读文件补齐上下文后替换缓存并
+        emit :attr:`detailHitsModelChanged`。getter 内绝不读文件。
+
+        每条命中包含：规则名、严重度文本/色值、上下文（初始为 detail 占位，
+        随后由 worker 补为文件上下文）、匹配文本、匹配条数、匹配目标
+        （filename/content/path）、规则描述（供详情面板展示）。
         """
-        return build_detail_hits_model(self._get_selected_result())
+        return self._detail_hits_model
 
     @Property(str, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
     def detailFileSize(self) -> str:
@@ -1015,6 +1037,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if self._selected_result_index >= self._result_model.rowCount():
             self.setSelectedResultIndex(-1)
         self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self._refresh_detail_hits()
 
     @Slot("QVariantList")  # pyrefly: ignore [not-callable]
     def setResultFilterRules(self, rule_names: list[str]) -> None:
@@ -1026,6 +1049,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if self._selected_result_index >= self._result_model.rowCount():
             self.setSelectedResultIndex(-1)
         self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self._refresh_detail_hits()
 
     @Slot("QVariantList")  # pyrefly: ignore [not-callable]
     def setResultFilterSeverities(self, severities: list[str]) -> None:
@@ -1043,6 +1067,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if self._selected_result_index >= self._result_model.rowCount():
             self.setSelectedResultIndex(-1)
         self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self._refresh_detail_hits()
 
     @Slot(str, bool)  # pyrefly: ignore [not-callable]
     def setResultSort(self, field: str, ascending: bool) -> None:
@@ -1055,6 +1080,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if self._selected_result_index >= self._result_model.rowCount():
             self.setSelectedResultIndex(-1)
         self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self._refresh_detail_hits()
 
     @Slot()  # pyrefly: ignore [not-callable]
     def clearResultFilters(self) -> None:
@@ -1062,6 +1088,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._result_model.clear_filters()
         # 清除过滤后 rowCount 通常增加，选中索引仍有效，无需重置
         self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self._refresh_detail_hits()
 
     @Property(int, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
     def resultTotalCount(self) -> int:
@@ -1246,6 +1273,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             # 重置选中索引，触发 QML 详情面板清空
             self._selected_result_index = -1
             self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
+            self._refresh_detail_hits()
         return msg
 
     @Slot(str, result=str)  # pyrefly: ignore [not-callable]
@@ -1317,6 +1345,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         self._result_model.clear()
         self._selected_result_index = -1
+        self._refresh_detail_hits()
         self._cancelling = False
         self._is_paused = False
         self._set_scan_state(STATE_SCANNING)
@@ -1430,6 +1459,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         self._result_model.clear()
         self._selected_result_index = -1
+        self._refresh_detail_hits()
         self._cancelling = False
         self._is_paused = False
         self._set_scan_state(STATE_SCANNING)
@@ -2068,6 +2098,88 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
+    def _refresh_detail_hits(self) -> None:
+        """刷新选中结果的命中详情（主线程即时占位 + 后台补齐上下文）。
+
+        幂等——每次调用都取消旧 worker 并自增世代号，重复调用仅多一次
+        取消/重建，无副作用，故所有选中变化/过滤排序/复位路径可无条件调用。
+
+        流程：
+
+        - 无选中结果 → 缓存清空为 ``[]``，emit。
+        - 压缩包内部条目 → 主线程同步 :func:`build_detail_hits_full`（不读文件），
+          emit，跳过 worker。
+        - 正常文件 → 先 :func:`build_detail_hits_light` 填缓存 + emit（UI 立即
+          出规则名/匹配文本），再启动 :class:`DetailWorker` 读文件补齐上下文。
+        """
+        self._cancel_detail_worker()
+        self._detail_generation += 1
+        generation = self._detail_generation
+        result = self._get_selected_result()
+        if result is None:
+            self._detail_hits_model = []
+            self.detailHitsModelChanged.emit()  # pyrefly: ignore [missing-attribute]
+            return
+        if result.archive_path is not None:
+            # 压缩包条目不读文件，主线程同步构建即可（等价 light，无 I/O）
+            self._detail_hits_model = build_detail_hits_full(result)
+            self.detailHitsModelChanged.emit()  # pyrefly: ignore [missing-attribute]
+            return
+        # 先填轻量占位模型，主线程即时可读
+        self._detail_hits_model = build_detail_hits_light(result)
+        self.detailHitsModelChanged.emit()  # pyrefly: ignore [missing-attribute]
+        # 后台读文件补齐上下文
+        worker = DetailWorker(result, generation)
+        worker.done.connect(self._on_detail_done)  # pyrefly: ignore [missing-attribute]
+        self._detail_worker = worker
+        worker.start()
+
+    def _on_detail_done(self, model: list[dict[str, object]], generation: int) -> None:
+        """DetailWorker 完成回调：世代号匹配则替换缓存并 emit。
+
+        :param model: worker 构建的完整命中详情列表（含文件上下文）
+        :param generation: worker 携带的世代号；不等于当前世代号则丢弃
+            （选中已切换，此结果过期）
+        """
+        self._cleanup_detail_worker()
+        if generation != self._detail_generation:
+            # 选中已切换，本次结果过期，丢弃
+            return
+        self._detail_hits_model = model
+        self.detailHitsModelChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    def _cancel_detail_worker(self) -> None:
+        """取消并等待 detail worker 退出（阻塞短时）。
+
+        detail worker 任务短（读一次文件+定位），无内部取消标志，用
+        ``quit()`` 请求退出事件循环 + ``wait(500)`` 短等；先 disconnect
+        避免退出中的 worker emit 触发过期回调。
+        """
+        if self._detail_worker is None:
+            return
+        with contextlib.suppress(RuntimeError):
+            # 信号已断开或从未连接，忽略
+            self._detail_worker.done.disconnect(self._on_detail_done)  # pyrefly: ignore [missing-attribute]
+        if self._detail_worker.isRunning():
+            self._detail_worker.quit()
+            self._detail_worker.wait(500)
+        self._detail_worker.deleteLater()
+        self._detail_worker = None
+
+    def _cleanup_detail_worker(self) -> None:
+        """清理 detail worker，非阻塞。
+
+        worker 在 emit ``done`` 后 ``run()`` 即将退出，disconnect 信号 +
+        ``deleteLater`` 由 Qt 回收，不 ``wait()`` 避免主线程冻结。
+        """
+        if self._detail_worker is None:
+            return
+        with contextlib.suppress(RuntimeError):
+            # 信号已断开或从未连接，忽略
+            self._detail_worker.done.disconnect(self._on_detail_done)  # pyrefly: ignore [missing-attribute]
+        self._detail_worker.deleteLater()
+        self._detail_worker = None
+
     def _cleanup_stats_worker(self) -> None:
         """清理 stats worker，非阻塞。
 
@@ -2113,6 +2225,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._worker.deleteLater()
             self._worker = None
         self._cleanup_stats_worker()
+        self._cleanup_detail_worker()
 
     def cleanup(self) -> None:
         """窗口关闭时清理资源（worker + cache）。
@@ -2127,6 +2240,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if self._stats_worker is not None and self._stats_worker.isRunning():
             self._stats_worker.cancel()
             self._stats_worker.wait(500)
+        # detail worker 任务短，quit + wait(500) 内退出（无内部循环）
+        self._cancel_detail_worker()
         self._cleanup_workers()
         if self._cache is not None:
             try:
@@ -2167,6 +2282,15 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 self._stats_worker.wait(100)
             self._stats_worker.deleteLater()
             self._stats_worker = None
+        # detail worker：quit + wait(200) + terminate 后备
+        if self._detail_worker is not None and self._detail_worker.isRunning():
+            self._detail_worker.quit()
+            self._detail_worker.wait(200)
+            if self._detail_worker.isRunning():
+                self._detail_worker.terminate()
+                self._detail_worker.wait(100)
+            self._detail_worker.deleteLater()
+            self._detail_worker = None
         # 取消未完成的 FilterWorker
         self._result_model.cleanup()
         # 异步关闭 cache，避免 WAL 文件膨胀

@@ -50,6 +50,9 @@ try:
         save_cached_results,
     )
     from fuscan.gui.controllers._result_detail import (
+        _MAX_CONTEXT_FILE_SIZE,
+        build_detail_hits_full,
+        build_detail_hits_light,
         build_detail_hits_model,
         can_replace_result,
         move_to_staging,
@@ -762,9 +765,9 @@ class TestExtractContext:
         self,
         tmp_path: Path,
     ) -> None:
-        """文件超过 _MAX_CONTEXT_FILE_SIZE (1MB) 时跳过上下文提取。"""
+        """文件超过 _MAX_CONTEXT_FILE_SIZE 时跳过上下文提取（1.5MB 远超 256KB）。"""
         src = tmp_path / "large.txt"
-        # 写入 1.5MB 内容（超过 1MB 限制）
+        # 写入 1.5MB 内容（远超 256KB 限制）
         src.write_text("a" * (1024 * 1024 + 512), encoding="utf-8")
 
         hit = RuleHit(
@@ -841,6 +844,171 @@ class TestExtractContext:
         assert ">>> password=123" in context
         assert "    line2" in context
         assert "    line3" in context
+
+
+class TestBuildDetailHitsLight:
+    """测试 build_detail_hits_light 纯内存构建（不读文件）。"""
+
+    def test_none_result_returns_empty(self) -> None:
+        """None 结果返回空列表。"""
+        assert build_detail_hits_light(None) == []
+
+    def test_light_never_reads_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """light 构建绝不读文件，context 直接取 hit.detail。"""
+        src = tmp_path / "a.txt"
+        src.write_text("password=secret\n", encoding="utf-8")
+
+        read_calls = 0
+        real_read_text = Path.read_text
+
+        def counting_read_text(self: Path, *args: object, **kwargs: object) -> str:
+            nonlocal read_calls
+            read_calls += 1
+            return real_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.CRITICAL,
+            detail="line 0: password=secret",
+            match_text="password",
+        )
+        result = _make_result(src, hits=(hit,))
+        model = build_detail_hits_light(result)
+
+        assert read_calls == 0
+        assert len(model) == 1
+        # context 取 detail 占位，不含 >>> 标记
+        assert model[0]["context"] == "line 0: password=secret"
+
+    def test_light_key_set_matches_full(self, tmp_path: Path) -> None:
+        """light 与 full 键集完全一致，仅 context 值不同。"""
+        src = tmp_path / "a.txt"
+        src.write_text("password=secret\n", encoding="utf-8")
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.WARNING,
+            detail="detail占位",
+            match_text="password",
+        )
+        result = _make_result(src, hits=(hit,))
+        light = build_detail_hits_light(result)
+        full = build_detail_hits_full(result)
+        assert light[0].keys() == full[0].keys()
+
+
+class TestBuildDetailHitsFull:
+    """测试 build_detail_hits_full 批量读文件补上下文。"""
+
+    def test_none_result_returns_empty(self) -> None:
+        """None 结果返回空列表。"""
+        assert build_detail_hits_full(None) == []
+
+    def test_same_file_multi_hits_reads_once(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """同一文件多条命中只读文件一次（批处理）。"""
+        src = tmp_path / "a.txt"
+        src.write_text(
+            "line0\napi_key=AAA\nline2\ntoken=BBB\nline4\n",
+            encoding="utf-8",
+        )
+
+        read_calls = 0
+        real_read_text = Path.read_text
+
+        def counting_read_text(self: Path, *args: object, **kwargs: object) -> str:
+            nonlocal read_calls
+            read_calls += 1
+            return real_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+        hit1 = RuleHit(
+            rule_name="密钥",
+            severity=Severity.CRITICAL,
+            detail="d1",
+            match_text="api_key=AAA",
+        )
+        hit2 = RuleHit(
+            rule_name="令牌",
+            severity=Severity.WARNING,
+            detail="d2",
+            match_text="token=BBB",
+        )
+        result = _make_result(src, hits=(hit1, hit2))
+        model = build_detail_hits_full(result)
+
+        # 同文件两命中只读一次
+        assert read_calls == 1
+        assert len(model) == 2
+        # 各命中上下文独立定位
+        assert ">>> api_key=AAA" in str(model[0]["context"])
+        assert ">>> token=BBB" in str(model[1]["context"])
+
+    def test_first_match_line_when_repeated(self, tmp_path: Path) -> None:
+        """match_text 多行出现时取首个命中行。"""
+        src = tmp_path / "a.txt"
+        src.write_text("pw\nother\npw\n", encoding="utf-8")
+        hit = RuleHit(
+            rule_name="规则",
+            severity=Severity.INFO,
+            detail="d",
+            match_text="pw",
+        )
+        result = _make_result(src, hits=(hit,))
+        model = build_detail_hits_full(result)
+        context = str(model[0]["context"])
+        # 首个命中在第 0 行：start=0, end=min(3,3)=3，>>> 标记应在首行
+        assert context.startswith(">>> pw")
+
+    def test_archive_entry_equivalent_to_light(self, tmp_path: Path) -> None:
+        """压缩包条目 full 等价 light（不读文件，用 detail 兜底）。"""
+        archive = tmp_path / "a.zip"
+        archive.write_bytes(b"PK\x03\x04")
+        hit = RuleHit(
+            rule_name="规则",
+            severity=Severity.WARNING,
+            detail="内部条目: pw",
+            match_text="pw",
+        )
+        result = _make_result(tmp_path / "a.zip!inner.txt", hits=(hit,), archive_path=archive)
+        full = build_detail_hits_full(result)
+        light = build_detail_hits_light(result)
+        assert full == light
+        assert full[0]["context"] == "内部条目: pw"
+
+    def test_threshold_is_256kb(self) -> None:
+        """_MAX_CONTEXT_FILE_SIZE 锁定为 256KB。"""
+        assert _MAX_CONTEXT_FILE_SIZE == 256 * 1024
+
+    def test_context_falls_back_when_over_256kb(self, tmp_path: Path) -> None:
+        """300KB 文件超过 256KB 阈值 → context 回退 detail。"""
+        src = tmp_path / "big.txt"
+        # 300KB，首行含 match_text（若读文件会命中，但因超限不读）
+        src.write_text("password=x\n" + ("a" * (300 * 1024)), encoding="utf-8")
+        hit = RuleHit(
+            rule_name="规则",
+            severity=Severity.CRITICAL,
+            detail="detail兜底",
+            match_text="password",
+        )
+        result = _make_result(src, hits=(hit,))
+        model = build_detail_hits_full(result)
+        assert model[0]["context"] == "detail兜底"
+
+    def test_empty_match_text_uses_detail(self, tmp_path: Path) -> None:
+        """空 match_text 不定位上下文，直接用 detail。"""
+        src = tmp_path / "a.txt"
+        src.write_text("hello\n", encoding="utf-8")
+        hit = RuleHit(
+            rule_name="规则",
+            severity=Severity.INFO,
+            detail="仅detail",
+            match_text="",
+        )
+        result = _make_result(src, hits=(hit,))
+        model = build_detail_hits_full(result)
+        assert model[0]["context"] == "仅detail"
 
 
 class TestMoveToStaging:

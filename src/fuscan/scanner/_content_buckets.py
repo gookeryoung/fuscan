@@ -28,6 +28,7 @@ OR 复合正则（``(?P<_f0>pat0)|(?P<_f1>pat1)|...``），一次 ``finditer`` �
 from __future__ import annotations
 
 import re
+import time
 import warnings
 from dataclasses import dataclass, field
 from re import Pattern
@@ -50,7 +51,7 @@ from fuscan.rules.model import (
     OrMatch,
     Rule,
 )
-from fuscan.scanner._helpers import build_hit_from_match
+from fuscan.scanner._helpers import GIL_YIELD_THRESHOLD_S, build_hit_from_match
 from fuscan.scanner.matchers import Matcher
 from fuscan.scanner.result import MatchResult, RuleHit
 
@@ -517,6 +518,13 @@ def match_content_via_buckets(  # noqa: PLR0912
     hits: list[RuleHit] = []
     # 大小写不敏感预筛时复用同一份小写化 content（lazy 计算）
     content_lower: str | None = None
+    # GIL 让步基线：本函数在扫描 worker 线程内执行，桶间的 finditer 是持 GIL 的
+    # 纯 Python C 调用。在每个桶处理完成后按时间式判断让步（距上次让步超过
+    # GIL_YIELD_THRESHOLD_S 才 sleep(0)），把「单文件内多个 finditer 背靠背」
+    # 拆成多个可让步点，令 GUI 主线程能在文件扫描中途抢到 GIL，缓解界面冻结。
+    # 基线为函数局部变量（严禁挂到共享状态——多 worker 会竞争）；每次调用重置
+    # 计时可接受（每个文件独立起点，反而让步更勤更保守）。
+    last_yield = time.perf_counter()
     for bucket in buckets:
         if bucket.compiled is None:
             continue
@@ -599,4 +607,11 @@ def match_content_via_buckets(  # noqa: PLR0912
                 match_description=spec.description,
             )
             hits.append(build_hit_from_match(rule, result))
+        # 桶处理完成：按时间式让步。continue 短路路径（无关键字/无活跃规则）
+        # 开销极小且不持 GIL 太久，不经过此处也无碍；走到这里的桶意味着刚跑过
+        # 可能较重的 finditer/count，正是需要给主线程让出 GIL 的时机。
+        now = time.perf_counter()
+        if now - last_yield >= GIL_YIELD_THRESHOLD_S:
+            last_yield = now
+            time.sleep(0)
     return hits

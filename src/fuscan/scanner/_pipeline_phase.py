@@ -181,7 +181,10 @@ def _scan_concurrent(
     # 避免某个 worker 卡在 read_bytes() 上导致 with 退出时无限阻塞。
     # 已运行 worker 在后台完成（_scan_entry 入口已检查取消标志会快速返回），
     # 不影响下次扫描（Scanner 每次扫描重新构造，不复用线程池）。
-    pool = DaemonThreadPoolExecutor(max_workers=scanner._max_workers)
+    # 用有效并发度 _effective_max_workers（措施3：CONTENT 正则密集 + 非原生提取器
+    # 场景已降至 2）构造线程池，而非用户配置的原始 _max_workers。降档缓解多 worker
+    # 持 GIL 独占导致的 GUI 冻结；原生提取器为主场景 _effective_max_workers 仍等于原值。
+    pool = DaemonThreadPoolExecutor(max_workers=scanner._effective_max_workers)
     try:
         cancelled_in_submit = False
         # 并发提交前按路径去重，避免同一文件被重复扫描

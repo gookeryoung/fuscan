@@ -168,7 +168,9 @@ def run_archive_phase(
     # 使用 DaemonThreadPoolExecutor，finally 中 shutdown(wait=False)
     # 不阻塞主线程，避免取消路径下 worker 卡在慢 I/O 时 ScanWorker.run 不返回。
     future_to_entry: dict[Future[tuple[ScanResult, ...]], FileEntry] = {}
-    pool = DaemonThreadPoolExecutor(max_workers=scanner._max_workers)
+    # 与 scan 阶段一致用 _effective_max_workers：压缩包内条目扫描同样跑持 GIL 的
+    # CONTENT 正则，降档缓解 GUI 冻结（原生提取器为主场景仍等于原值）。
+    pool = DaemonThreadPoolExecutor(max_workers=scanner._effective_max_workers)
     try:
         cancelled_in_walk = False
         for entry in archive_entries:

@@ -55,6 +55,7 @@ __all__ = [
     "empty_content_provider",
     "engine_for_extension",
     "is_minified_content",
+    "is_native_engine",
     "normalize_max_file_size",
     "rebuild_hit_from_cache",
     "spec_needs_content",
@@ -178,6 +179,44 @@ def engine_for_extension(extension: str) -> str:
     if extractor is None:
         return _FALLBACK_ENGINE
     return extractor.engine_info or _FALLBACK_ENGINE
+
+
+# 会在解析期释放 GIL 的原生引擎（Rust/C/C++ 扩展）引擎名集合。
+#
+# 这些引擎用原生扩展做重活（PDF 页面布局、Excel 单元格转换、XML libxml2 解析），
+# 在原生代码内会主动释放 GIL，故多个 worker 线程可真正并行、且不长时间独占 GIL，
+# GUI 主线程仍能抢到锁保持响应。判据来源（见各 extractor 的 engine_info）：
+#
+# - ``pdf_oxide``（Rust + PyO3）/ ``pypdfium2``（pdfium C++）→ PDF
+# - ``python-calamine``（Rust + PyO3）→ XLSX/XLS
+# - ``lxml``（libxml2 C）→ DOCX/PPTX/ODT/ODS
+#
+# 反之，纯 Python 引擎（``charset-normalizer`` 文本解码、``olefile`` DOC/PPT、
+# ``ElementTree`` ODF 回退、``email（标准库）``、``纯文本`` 回退读取）在解析期
+# 持 GIL，与同样持 GIL 的 CONTENT 正则 ``re.finditer`` 争抢主线程 GIL，
+# 是扫描期 GUI 冻结的主因。
+_NATIVE_ENGINES: frozenset[str] = frozenset(
+    {
+        "pdf_oxide",
+        "pypdfium2",
+        "python-calamine",
+        "lxml",
+    }
+)
+
+
+def is_native_engine(extension: str) -> bool:
+    """按扩展名判断其提取器是否使用会释放 GIL 的原生引擎。
+
+    用于扫描并发降档判据：若扫描目标主要落在**非原生引擎**（纯 Python 解析，
+    持 GIL）且规则以 CONTENT 正则为主，多 worker 线程会长时间独占 GIL 令
+    GUI 主线程冻结，此时应动态降低并发（见 :meth:`Scanner._compute_effective_max_workers`）。
+    原生引擎（PDF/Excel/XML）在解析期释放 GIL，可保持高并发。
+
+    :param extension: 扩展名（不含点，大小写不敏感；空串表示无扩展名）
+    :return: True 表示该扩展名的提取器使用原生（GIL 释放）引擎
+    """
+    return engine_for_extension(extension) in _NATIVE_ENGINES
 
 
 # 压缩/打包产物识别阈值（按内容特征判定，与文件名无关）。

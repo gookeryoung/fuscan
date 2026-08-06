@@ -54,6 +54,7 @@ from fuscan.scanner._content_buckets import (
 )
 from fuscan.scanner._filter_phase import run_filter_phase
 from fuscan.scanner._helpers import (
+    GIL_YIELD_THRESHOLD_S,
     PROGRESS_LIST_MAX,
     PROGRESS_MIN_DELTA_FILES,
     PROGRESS_MIN_DELTA_MATCHES,
@@ -63,6 +64,7 @@ from fuscan.scanner._helpers import (
     empty_content_provider,
     engine_for_extension,
     is_minified_content,
+    is_native_engine,
     normalize_max_file_size,
     rebuild_hit_from_cache,
     spec_needs_content,
@@ -136,6 +138,12 @@ class _CompiledRuleset:
 _compiled_cache: dict[int, tuple[weakref.ref, _CompiledRuleset]] = {}  # pyrefly: ignore [implicit-any-type-argument]
 _compiled_cache_lock = threading.Lock()
 _COMPILED_CACHE_MAX: int = 4
+
+# 措施3 并发降档目标：CONTENT 正则密集 + 非原生（持 GIL）提取器场景，将有效并发
+# 降至此值，缓解多 worker 线程独占 GIL 导致的 GUI 冻结。取 2 而非 1：仍保留一路
+# 并发让原生提取器（若清单中有少量 PDF/Excel）与 I/O 重叠，又不至于让持 GIL 的
+# 纯 Python worker 数量压垮主线程。
+_DOWNSCALED_MAX_WORKERS: int = 2
 
 
 def clear_compiled_cache() -> None:
@@ -403,6 +411,52 @@ class Scanner:
         # 修复「卡在一个文件后 elapsed_ms 持续涨但 size/ext 不变」的假卡死观感。
         # dict 在 3.7+ 保序：next(iter(...)) 取最早提交（最可能卡最久）的文件。
         self._in_flight_meta: dict[str, tuple[int, str, float]] = {}
+        # 有效并发度（措施3：CONTENT 正则密集 + 非原生提取器场景动态降档）：
+        # 保留用户配置的原始 self._max_workers 不动（供展示/覆盖语义），实际扫描
+        # 分派用 self._effective_max_workers。判据见 _compute_effective_max_workers。
+        self._effective_max_workers: int | None = self._compute_effective_max_workers()
+
+    def _compute_effective_max_workers(self) -> int | None:
+        """计算有效并发度：CONTENT 正则密集 + 非原生提取器场景动态降档至 2。
+
+        扫描期 GUI 冻结的主因是「多 worker 线程持 GIL 跑纯 Python CPU 密集任务」。
+        当以下条件同时成立时，多 worker 只会加剧 GIL 争抢而非提升吞吐（纯 Python
+        任务受 GIL 串行化，并发数越高主线程越难抢到 GIL），故降并发至 2 保住 GUI 响应：
+
+        - ``max_workers > 2``：本就低并发无需再降。
+        - 规则以 **CONTENT 正则为主**（``_content_rule_names`` 非空）：CONTENT 匹配
+          ``re.finditer`` 持 GIL，是主线程争抢的直接对手。
+        - 扫描目标 **主要落在非原生引擎**（纯 Python 解析，持 GIL）：由 ``scan_extensions``
+          判断——``None``（扫描所有扩展名）以文本源码为主（``charset-normalizer`` 持 GIL），
+          视为非原生；显式白名单则看其中原生引擎（PDF/Excel/XML，解析期释放 GIL）扩展名
+          占比，占比不足半数视为非原生为主。
+
+        原生引擎为主（如只扫 PDF/XLSX/DOCX）时保持用户配置的高并发——原生代码解析期
+        释放 GIL，多线程可真正并行且不长时间独占 GIL，GUI 不受影响。
+
+        :return: 有效并发度；不满足降档条件时返回原始 ``self._max_workers``
+        """
+        max_workers = self._max_workers
+        if max_workers is None or max_workers <= _DOWNSCALED_MAX_WORKERS:
+            # 未指定或本就 <=2：无降档空间
+            return max_workers
+        if not self._content_rule_names:
+            # 无 CONTENT 正则规则：主线程无 finditer 争抢对手，保持高并发
+            return max_workers
+        # 判断扫描目标是否以非原生（持 GIL）引擎为主
+        exts = self._scan_extensions
+        if exts is None:
+            # 扫描所有扩展名：以文本源码为绝对多数（charset-normalizer 持 GIL），
+            # 视为非原生为主，降档
+            return _DOWNSCALED_MAX_WORKERS
+        if not exts:
+            # 空白名单（用户全部取消勾选）：无文件可扫，并发度无意义，保持原值
+            return max_workers
+        native = sum(1 for ext in exts if is_native_engine(ext))
+        if native * 2 >= len(exts):
+            # 原生引擎扩展名占半数及以上：解析期释放 GIL，保持高并发
+            return max_workers
+        return _DOWNSCALED_MAX_WORKERS
 
     def pause(self) -> None:
         """暂停扫描，阻塞扫描线程直到 resume。"""
@@ -1238,6 +1292,9 @@ class Scanner:
         # 全局 scan_extensions 已在 _should_scan 阶段按白名单统一过滤，
         # 此处对进入扫描队列的文件应用剩余规则（组合型 / FILENAME/PATH /
         # 非 CONTENT 目标 / 单条规则未达合并阈值 / 编译失败降级）。
+        # GIL 让步基线（函数局部）：remaining 规则逐条 matcher.matches 含持 GIL 的
+        # 纯 Python re 调用，在 worker 线程内按时间式让步给 GUI 主线程让出 GIL。
+        last_yield = time.perf_counter()
         for rule, matcher in effective_remaining:
             try:
                 with self._perf.measure("match"):
@@ -1248,6 +1305,10 @@ class Scanner:
                 continue
             if result.matched:
                 hits.append(build_hit_from_match(rule, result))
+            now = time.perf_counter()
+            if now - last_yield >= GIL_YIELD_THRESHOLD_S:
+                last_yield = now
+                time.sleep(0)
 
         return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)
 
@@ -1419,6 +1480,11 @@ class Scanner:
         else:
             remaining_applicable = applicable
         rule_errors += self._run_cached_applicable_bucket_pass(content, bucket_applicable, cached, hits, batch_hits)
+        # GIL 让步基线（函数局部，多 worker 各自持有不竞争）：remaining 规则逐条
+        # matcher.matches 含持 GIL 的纯 Python re 调用，在 worker 线程内按时间式
+        # 让步给 GUI 主线程让出 GIL。缓存命中的 continue 分支开销极小、不持 GIL 太久，
+        # 不经过末尾让步检查也无碍。
+        last_yield = time.perf_counter()
         for rule, matcher, rule_hash in remaining_applicable:
             if rule_hash in cached:
                 result = cached[rule_hash]
@@ -1445,6 +1511,10 @@ class Scanner:
             elif rule_hash in cacheable_rule_hash_set:
                 # 未命中也缓存（仅 CONTENT 规则），避免重复扫描
                 batch_hits.append((rule_hash, None))
+            now = time.perf_counter()
+            if now - last_yield >= GIL_YIELD_THRESHOLD_S:
+                last_yield = now
+                time.sleep(0)
 
         # 累积到批量缓冲，达到阈值后由 _add_to_batch 自动 flush
         # file_hash 为 None（空文件 / 无法提取内容）时跳过写入缓存

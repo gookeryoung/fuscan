@@ -24,6 +24,7 @@ from fuscan.rules.model import (
     Severity,
 )
 from fuscan.scanner import Scanner, ScanReport, ScanResult, default_extract_content
+from fuscan.scanner._content_buckets import _ContentRuleBucket
 from fuscan.scanner.context import FileEntry
 from fuscan.scanner.result import ProgressInfo, ScanStats, WalkResult
 
@@ -5867,3 +5868,310 @@ class TestMinifiedContentSkipped:
             assert report.stats.matched_files == 0
         finally:
             cache.close()
+
+
+class TestTuneGilSwitchInterval:
+    """措施2：进程级下调 GIL 线程切换间隔，缓解扫描期 GUI 冻结。"""
+
+    def test_sets_interval(self) -> None:
+        """调用后 ``sys.getswitchinterval()`` 变为目标值（默认 1ms）。"""
+        import sys
+
+        from fuscan.app import _tune_gil_switch_interval
+
+        original = sys.getswitchinterval()
+        try:
+            _tune_gil_switch_interval()
+            assert sys.getswitchinterval() == pytest.approx(0.001)
+        finally:
+            sys.setswitchinterval(original)
+
+    def test_custom_interval(self) -> None:
+        """可传入自定义间隔。"""
+        import sys
+
+        from fuscan.app import _tune_gil_switch_interval
+
+        original = sys.getswitchinterval()
+        try:
+            _tune_gil_switch_interval(0.002)
+            assert sys.getswitchinterval() == pytest.approx(0.002)
+        finally:
+            sys.setswitchinterval(original)
+
+
+class TestIsNativeEngine:
+    """``is_native_engine`` 判断扩展名对应提取器是否使用释放 GIL 的原生引擎。"""
+
+    def test_text_engine_not_native(self) -> None:
+        """文本/源码（charset-normalizer 纯 Python）非原生。"""
+        from fuscan.scanner._helpers import is_native_engine
+
+        assert is_native_engine("txt") is False
+        assert is_native_engine("py") is False
+
+    def test_pdf_engine_native(self) -> None:
+        """PDF（pdf_oxide/pypdfium2 原生）为原生引擎。"""
+        from fuscan.scanner._helpers import is_native_engine
+
+        assert is_native_engine("pdf") is True
+
+    def test_office_xml_engine_native(self) -> None:
+        """DOCX/XLSX（lxml/calamine 原生）为原生引擎。"""
+        from fuscan.scanner._helpers import is_native_engine
+
+        assert is_native_engine("docx") is True
+        assert is_native_engine("xlsx") is True
+
+    def test_legacy_office_engine_not_native(self) -> None:
+        """DOC/PPT（olefile 纯 Python）非原生。"""
+        from fuscan.scanner._helpers import is_native_engine
+
+        assert is_native_engine("doc") is False
+
+    def test_unregistered_extension_not_native(self) -> None:
+        """未注册扩展名回退纯文本读取，非原生。"""
+        from fuscan.scanner._helpers import is_native_engine
+
+        assert is_native_engine("no_such_ext_xyz") is False
+
+
+class TestEffectiveMaxWorkers:
+    """措施3：CONTENT 正则密集 + 非原生提取器场景动态降并发至 2。
+
+    ``_effective_max_workers`` 在保住高并发（原生提取器为主 / 无 CONTENT 规则）与
+    降档保住 GUI 响应（纯 Python 提取器 + CONTENT 正则密集）之间做静态判据。
+    """
+
+    def test_content_rule_all_extensions_downscaled(self) -> None:
+        """CONTENT 规则 + 扫描所有扩展名（文本源码为主，持 GIL）→ 降档至 2。"""
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=5)
+        assert scanner._max_workers == 5
+        assert scanner._effective_max_workers == 2
+
+    def test_content_rule_native_extensions_kept(self) -> None:
+        """CONTENT 规则 + 只扫原生引擎扩展名（PDF，解析释放 GIL）→ 保持原值。"""
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=5, scan_extensions=("pdf",))
+        assert scanner._effective_max_workers == 5
+
+    def test_content_rule_native_majority_kept(self) -> None:
+        """CONTENT 规则 + 原生扩展名占多数（pdf/xlsx vs py）→ 保持原值。"""
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=5, scan_extensions=("pdf", "xlsx", "py"))
+        assert scanner._effective_max_workers == 5
+
+    def test_content_rule_non_native_extensions_downscaled(self) -> None:
+        """CONTENT 规则 + 只扫非原生扩展名（py/txt，持 GIL）→ 降档至 2。"""
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=5, scan_extensions=("py", "txt"))
+        assert scanner._effective_max_workers == 2
+
+    def test_no_content_rule_kept(self) -> None:
+        """无 CONTENT 规则（仅 FILENAME，主线程无 finditer 争抢对手）→ 保持原值。"""
+        rs = _build_ruleset(_filename_rule("env", ".env"))
+        scanner = Scanner(rs, max_workers=5)
+        assert scanner._effective_max_workers == 5
+
+    def test_low_workers_no_downscale_room(self) -> None:
+        """max_workers=2（已是降档目标）→ 无降档空间，保持 2。"""
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=2)
+        assert scanner._effective_max_workers == 2
+
+    def test_none_workers_kept_none(self) -> None:
+        """未指定 max_workers（None）→ 保持 None（顺序扫描，无并发降档语义）。"""
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=None)
+        assert scanner._effective_max_workers is None
+
+    def test_empty_whitelist_kept(self) -> None:
+        """空白名单（用户全部取消勾选，无文件可扫）→ 并发度无意义，保持原值。"""
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=5, scan_extensions=())
+        assert scanner._effective_max_workers == 5
+
+
+class TestContentBucketsGilYield:
+    """措施1：``match_content_via_buckets`` 桶间按时间式让步（``time.sleep(0)``）。
+
+    不测墙钟或是否卡顿（必然 flaky），仅通过 monkeypatch ``_content_buckets`` 内的
+    ``time.perf_counter``/``time.sleep`` 断言让步行为：跑过 finditer 的桶在距上次让步
+    超过阈值时调用一次 ``sleep(0)``。
+    """
+
+    @staticmethod
+    def _build_two_bucket_content() -> tuple[list[_ContentRuleBucket], str]:
+        """构造含 >=2 条同 (mode, case_sensitive) CONTENT 规则的桶 + 命中内容。"""
+        from fuscan.scanner._content_buckets import build_content_buckets
+        from fuscan.scanner.matchers import build_matcher
+
+        # 同 (REGEX, case_sensitive=True) 的两条规则 → 合并为一个桶（>=2 条才建桶）
+        rules = [
+            _content_rule("r_alpha", "alphakeyword"),
+            _content_rule("r_beta", "betakeyword"),
+        ]
+        # CONTAINS → 转 REGEX 桶；两条同桶
+        pairs = [(r, build_matcher(r.match)) for r in rules]
+        buckets, _remaining = build_content_buckets(pairs)
+        # 内容同时含两个关键字 → 桶内活跃、走 finditer 分支
+        content = "prefix alphakeyword middle betakeyword suffix\n" * 3
+        return buckets, content
+
+    def test_yield_called_when_threshold_exceeded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """桶跑过 finditer 且距上次让步超阈值 → 调用一次 ``time.sleep(0)``。"""
+        from fuscan.scanner import _content_buckets
+
+        buckets, content = self._build_two_bucket_content()
+        assert buckets, "预期至少构建一个 CONTENT 桶"
+
+        sleep_calls: list[float] = []
+        # perf_counter 每次调用递增大于阈值，确保让步条件必然成立
+        counter = {"t": 0.0}
+
+        def fake_perf_counter() -> float:
+            counter["t"] += _content_buckets.GIL_YIELD_THRESHOLD_S * 2
+            return counter["t"]
+
+        monkeypatch.setattr(_content_buckets.time, "perf_counter", fake_perf_counter)
+
+        def record_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        monkeypatch.setattr(_content_buckets.time, "sleep", record_sleep)
+
+        hits = _content_buckets.match_content_via_buckets(content, buckets)
+
+        # 两条规则均命中
+        assert {h.rule_name for h in hits} == {"r_alpha", "r_beta"}
+        # 桶处理后触发至少一次让步，且让步为 sleep(0)
+        assert len(sleep_calls) >= 1
+        assert all(s == 0 for s in sleep_calls)
+
+    def test_no_yield_when_below_threshold(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """距上次让步未超阈值 → 不调用 ``time.sleep``（覆盖 else 分支）。"""
+        from fuscan.scanner import _content_buckets
+
+        buckets, content = self._build_two_bucket_content()
+        assert buckets
+
+        sleep_calls: list[float] = []
+        # perf_counter 恒定返回同值 → now - last_yield == 0 < 阈值，不让步
+        monkeypatch.setattr(_content_buckets.time, "perf_counter", lambda: 100.0)
+
+        def record_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        monkeypatch.setattr(_content_buckets.time, "sleep", record_sleep)
+
+        hits = _content_buckets.match_content_via_buckets(content, buckets)
+
+        assert {h.rule_name for h in hits} == {"r_alpha", "r_beta"}
+        assert sleep_calls == []
+
+
+class TestScannerRemainingRuleYield:
+    """措施1：``_scan_entry_uncached``/``_scan_entry_cached`` 的 remaining 规则循环
+    在 worker 线程内按时间式让步。
+
+    直接调用 ``_scan_entry_uncached``/``_scan_entry_cached`` 精准命中 remaining 循环
+    的让步代码（不经 ``_scan_sequential``，避免其自身让步干扰断言），通过 monkeypatch
+    ``scanner.time`` 强制让步条件成立/不成立，覆盖 ``if`` 两分支，不依赖真实墙钟。
+    remaining 循环由 FILENAME 规则（非 CONTENT，不入桶）驱动。
+    """
+
+    @staticmethod
+    def _make_entry(tmp_path: Path) -> FileEntry:
+        p = tmp_path / "secret.txt"
+        p.write_text("data", encoding="utf-8")
+        st = p.stat()
+        return FileEntry(
+            path=p,
+            name=p.name,
+            size=st.st_size,
+            mtime=st.st_mtime,
+            extension="txt",
+            is_dir=False,
+        )
+
+    def test_uncached_yield_triggered(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """无缓存：remaining（FILENAME）规则循环超阈值 → 触发 ``sleep(0)``。"""
+        from fuscan.scanner import scanner as scanner_mod
+
+        rs = _build_ruleset(_filename_rule("名含 secret", "secret"))
+        scanner = Scanner(rs)
+        entry = self._make_entry(tmp_path)
+
+        sleep_calls: list[float] = []
+        counter = {"t": 0.0}
+
+        def fake_perf_counter() -> float:
+            counter["t"] += scanner_mod.GIL_YIELD_THRESHOLD_S * 2
+            return counter["t"]
+
+        monkeypatch.setattr(scanner_mod.time, "perf_counter", fake_perf_counter)
+
+        def record_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        monkeypatch.setattr(scanner_mod.time, "sleep", record_sleep)
+
+        result = scanner._scan_entry_uncached(entry)
+
+        assert result.has_hit
+        assert any(s == 0 for s in sleep_calls)
+
+    def test_cached_yield_triggered(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """缓存模式：remaining（FILENAME）规则循环超阈值 → 触发 ``sleep(0)``。"""
+        from fuscan.cache import CacheStore
+        from fuscan.scanner import scanner as scanner_mod
+
+        rs = _build_ruleset(_filename_rule("名含 secret", "secret"))
+        entry = self._make_entry(tmp_path)
+
+        cache = CacheStore(tmp_path / "cache.db")
+        try:
+            scanner = Scanner(rs, cache=cache)
+
+            sleep_calls: list[float] = []
+            counter = {"t": 0.0}
+
+            def fake_perf_counter() -> float:
+                counter["t"] += scanner_mod.GIL_YIELD_THRESHOLD_S * 2
+                return counter["t"]
+
+            monkeypatch.setattr(scanner_mod.time, "perf_counter", fake_perf_counter)
+
+            def record_sleep(seconds: float) -> None:
+                sleep_calls.append(seconds)
+
+            monkeypatch.setattr(scanner_mod.time, "sleep", record_sleep)
+
+            result = scanner._scan_entry_cached(entry)
+
+            assert result.has_hit
+            assert any(s == 0 for s in sleep_calls)
+        finally:
+            cache.close()
+
+    def test_uncached_no_yield_below_threshold(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """无缓存：perf_counter 恒定 → remaining 循环不触发 ``sleep``（覆盖 else 分支）。"""
+        from fuscan.scanner import scanner as scanner_mod
+
+        rs = _build_ruleset(_filename_rule("名含 secret", "secret"))
+        scanner = Scanner(rs)
+        entry = self._make_entry(tmp_path)
+
+        sleep_calls: list[float] = []
+        monkeypatch.setattr(scanner_mod.time, "perf_counter", lambda: 42.0)
+
+        def record_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        monkeypatch.setattr(scanner_mod.time, "sleep", record_sleep)
+
+        result = scanner._scan_entry_uncached(entry)
+
+        assert result.has_hit
+        assert sleep_calls == []

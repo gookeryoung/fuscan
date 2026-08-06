@@ -34,6 +34,26 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def _tune_gil_switch_interval(interval: float = 0.001) -> None:
+    """下调 CPython GIL 线程切换间隔，缓解扫描期 GUI 卡死。
+
+    默认切换间隔为 5ms（``sys.getswitchinterval()``）——扫描时多个 worker 线程
+    执行纯 Python CPU 密集任务（正则匹配、charset-normalizer 解码），这些任务
+    持 GIL 期间只在字节码边界让出。5ms 的间隔下，多个持 GIL 的 worker 线程会
+    长时间独占 GIL，令 GUI 主线程极难抢到锁处理绘制/输入，表现为界面完全冻结。
+
+    进程级一次性下调到 1ms，让持 GIL 的纯 Python 线程更频繁在字节码边界让出，
+    主线程更易抢到 GIL。空闲主线程无额外开销（切换仅在多线程争抢时发生），
+    对吞吐影响可忽略。注意：对**单次超长 C 调用**（大文本 ``re.finditer``、
+    charset-normalizer 解码）无效——C 调用内部不检查切换间隔，故须配合
+    worker 线程内的定时让步（见 :mod:`fuscan.scanner._content_buckets`）与
+    CONTENT 正则密集场景的并发降档共同生效。
+
+    :param interval: 目标切换间隔（秒），默认 0.001（1ms）
+    """
+    sys.setswitchinterval(interval)
+
+
 def _apply_global_font(app: QGuiApplication) -> None:
     """设置全局默认字体（跨平台最佳实践 + 用户配置覆盖）。
 
@@ -102,6 +122,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     避免刷屏。发布版默认关闭、零开销。
     """
     logger.info("启动 QML GUI 应用")
+
+    # 进程级下调 GIL 切换间隔，缓解扫描期多 worker 线程持 GIL 导致的 GUI 冻结。
+    # 越早设置越好：影响后续所有线程（扫描/导出/统计/筛选/恢复 worker）。
+    _tune_gil_switch_interval()
 
     # 抑制 cryptography 对 Python 3.8 的弃用警告
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="cryptography")

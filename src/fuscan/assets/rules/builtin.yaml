@@ -11,6 +11,7 @@ ignore_paths:
   - "*/vendor/*"
   - "*/.cache/*"
   - "*/third_party/*"
+  - "*/.venv*/*"
 
 # 目录名级忽略（按目录名匹配任意层级，大小写不敏感）。
 # 默认值从历史 IGNORE_DIR_CATEGORIES 扁平化派生，涵盖：

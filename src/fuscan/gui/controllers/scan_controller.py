@@ -134,6 +134,13 @@ _MANIFESTS_DIR: Path = CONFIG_DIR / "manifests"
 # 仅展示最近解析的若干文件，避免海量文件时列表无限增长拖慢 QML 渲染。
 _RECENT_FILES_MAX: int = 50
 
+# recentParsedFiles 刷新节流阈值：明细列表刷新与高频进度回调解耦，
+# 避免明细展开时每次进度回调（~10Hz）触发 ListView 全量重建饿死扫描线程。
+# 距上次刷新 >= 该秒数才 emit（把 ~10Hz 降到 ~2Hz）。
+_RECENT_EMIT_INTERVAL: float = 0.5
+# 或累计新增 >= 该文件数即刻 emit（高速扫描时明细尽快填充；与时间阈值先到者触发）。
+_RECENT_EMIT_BATCH: int = 25
+
 
 class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     """扫描工作流控制器。
@@ -158,6 +165,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     # scan/archive 阶段独立进度信号：仅扫描进度与统计计数属性绑定，
     # walk 阶段进度回调不触发 scan 属性重算。
     scanProgressChanged = Signal()
+    # 明细列表独立刷新信号：仅 recentParsedFiles 绑定此信号，与高频进度回调
+    # （scanProgressChanged ~10Hz）解耦。recentParsedFiles 每次返回全新 QVariantList，
+    # QML ListView.model 绑定它会全量重建 delegate；若跟随 scanProgressChanged，
+    # 展开明细时每次进度回调都触发整表重建，饿死低优先级扫描线程。故独立低频节流
+    # （见 _maybe_emit_recent，~2Hz 或每 25 文件），进度条/计数照常高频刷新。
+    recentParsedFilesChanged = Signal()
     # 阶段切换信号：scanPhase/scanDone/walkDone/statusSummary 绑定，
     # 仅在阶段变更或扫描终结时 emit，避免每次进度回调触发。
     phaseChanged = Signal()
@@ -259,6 +272,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 每项为 {"path": str, "size": int, "ext": str, "elapsedMs": float}，
         # 供 GUI 在解析节点展开区以 GitHub Actions 风格列表展示具体解析信息。
         self._recent_files: deque[dict[str, object]] = deque(maxlen=_RECENT_FILES_MAX)
+        # recentParsedFiles 刷新节流状态：_recent_pending 为距上次 emit 以来
+        # 新增的文件数，_recent_emit_last 为上次 emit 的墙钟时刻（perf_counter）。
+        # 初值 -inf 保证首个待刷新文件到来时时间阈值必然满足（见 _maybe_emit_recent）。
+        self._recent_pending: int = 0
+        self._recent_emit_last: float = float("-inf")
         self._status_summary: str = STR_STATUS_READY
         self._status_text: str = STR_STATUS_READY
         self._passed_count: int = 0
@@ -456,7 +474,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return ""
         return format_elapsed(self._scan_elapsed)
 
-    @Property("QVariantList", notify=scanProgressChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
+    @Property("QVariantList", notify=recentParsedFilesChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
     def recentParsedFiles(self) -> list[dict[str, object]]:
         """最近解析文件明细列表（最新在前），供解析节点展开区展示。
 
@@ -1347,6 +1365,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 平均速度与解析明细重置（避免上次扫描残留）
         self._scan_elapsed = 0.0
         self._recent_files.clear()
+        # 节流状态归零并立即 emit，让 QML 明细列表清空为本次扫描的初始空态
+        self._recent_pending = 0
+        self._recent_emit_last = float("-inf")
+        self._maybe_emit_recent(force=True)
         # 收集阶段用时打点：walk 即将开始，记起点并清空定格值
         self._walk_start_time = time.perf_counter()
         self._walk_elapsed = 0.0
@@ -1456,6 +1478,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 平均速度与解析明细重置（避免上次扫描残留）
         self._scan_elapsed = 0.0
         self._recent_files.clear()
+        # 节流状态归零并立即 emit，让 QML 明细列表清空为本次扫描的初始空态
+        self._recent_pending = 0
+        self._recent_emit_last = float("-inf")
+        self._maybe_emit_recent(force=True)
         # 收集阶段用时打点：walk 即将开始，记起点并清空定格值
         self._walk_start_time = time.perf_counter()
         self._walk_elapsed = 0.0
@@ -1496,6 +1522,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 self._worker.pause()
             self._is_paused = True
             self._set_status(STR_STATUS_PAUSED, STR_STATUS_PAUSED)
+            # 暂停时强制刷新明细列表，让用户看到暂停瞬间的完整解析明细
+            # （不受节流延迟影响，可能有 pending 未刷新）
+            self._maybe_emit_recent(force=True)
         self.scanStateChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     @Slot()  # pyrefly: ignore [not-callable]
@@ -1595,6 +1624,35 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     "elapsedMs": info.current_file_elapsed_ms,
                 }
             )
+            # 累计待刷新计数，由 _maybe_emit_recent 按低频阈值择机 emit
+            # recentParsedFilesChanged（不在此处直接 emit，避免高频全表重建）。
+            self._recent_pending += 1
+
+    def _maybe_emit_recent(self, *, force: bool = False) -> None:
+        """按低频节流择机 emit ``recentParsedFilesChanged`` 刷新明细列表。
+
+        recentParsedFiles 每次返回全新 QVariantList，QML ListView.model 绑定它
+        会全量重建 delegate；若跟随高频进度回调（~10Hz）刷新，展开明细时主线程
+        持续重建整表，饿死低优先级扫描线程（曾致单文件墙钟耗时 700ms）。故此处
+        以「距上次刷新 >= :data:`_RECENT_EMIT_INTERVAL` 秒」或「累计新增
+        >= :data:`_RECENT_EMIT_BATCH` 文件」两条件先到者触发，把刷新压到 ~2Hz。
+
+        :param force: 为 True 时无条件 emit 并归零计数（用于扫描完成/取消/暂停
+            等终结点，确保明细定格为最新完整状态，不受节流延迟影响）。
+        """
+        if force:
+            self._recent_pending = 0
+            self._recent_emit_last = time.perf_counter()
+            self.recentParsedFilesChanged.emit()  # pyrefly: ignore [missing-attribute]
+            return
+        if self._recent_pending <= 0:
+            return
+        now = time.perf_counter()
+        if self._recent_pending < _RECENT_EMIT_BATCH and now - self._recent_emit_last < _RECENT_EMIT_INTERVAL:
+            return
+        self._recent_pending = 0
+        self._recent_emit_last = now
+        self.recentParsedFilesChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     @Slot(object)  # pyrefly: ignore [not-callable]
     def _on_scan_progress(self, info: ProgressInfo) -> None:
@@ -1664,6 +1722,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self.walkProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
         else:
             self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
+            # 明细列表低频节流刷新：与上方高频 scanProgressChanged 解耦，
+            # 未达时间/批量阈值时不 emit，避免展开明细时全表重建饿死扫描线程。
+            self._maybe_emit_recent()
 
     @Slot(object)  # pyrefly: ignore [not-callable]
     def _on_stats_finished(self, results: list[WalkResult]) -> None:
@@ -1787,6 +1848,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 细粒度信号：让统计页/进度条读取最新数值
         self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
+        # 强制刷新明细列表定格最新状态（不受节流延迟影响，可能有 pending 未刷新）
+        self._maybe_emit_recent(force=True)
 
     @Slot(str)  # pyrefly: ignore [not-callable]
     def _on_scan_failed(self, error: str) -> None:
@@ -1807,6 +1870,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._reset_scan_ui()
         self._set_status(STR_STATUS_CANCELLED, report.summary())
         self._set_scan_state(STATE_RESULTS if report.hits else STATE_SETUP)
+        # 强制刷新明细列表定格取消时最新状态（可能有 pending 未刷新）
+        self._maybe_emit_recent(force=True)
 
     # ----------------------------- 内部方法 -----------------------------
 

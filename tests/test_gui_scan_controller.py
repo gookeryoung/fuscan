@@ -2661,6 +2661,186 @@ class TestIter143CoverageGaps:
         )
         assert controller.recentParsedFiles[0]["name"] == "a.txt"
 
+    def test_recent_emit_throttled_below_thresholds(
+        self,
+        controller: ScanController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """未达时间/批量阈值时高频进度回调不 emit recentParsedFilesChanged。
+
+        进度条/计数走 scanProgressChanged 照常刷新，明细列表低频节流避免全表重建。
+        """
+        import fuscan.gui.controllers.scan_controller as sc_mod
+
+        # 冻结时钟：所有回调发生在同一瞬间（时间阈值不满足），
+        # 且回调数少于批量阈值，则明细刷新应被完全节流掉。
+        monkeypatch.setattr(sc_mod.time, "perf_counter", lambda: 100.0)
+        recent_emits: list[None] = []
+        controller.recentParsedFilesChanged.connect(lambda: recent_emits.append(None))  # pyrefly: ignore [missing-attribute]
+        # 预置 last=当前冻结时刻，避免初值 -inf 导致首个回调即满足时间阈值。
+        controller._recent_emit_last = 100.0
+        # 同一时刻且 pending<批量阈值 → 不 emit
+        n = sc_mod._RECENT_EMIT_BATCH - 1
+        for i in range(n):
+            controller._on_scan_progress(
+                ProgressInfo(phase="scan", scanned=i + 1, total=n, current_file=f"/f{i}.txt", current_file_size=10)
+            )
+        # 全部被节流：pending 累计但未达阈值、时间未推进
+        assert recent_emits == []
+        assert controller._recent_pending == n
+
+    def test_recent_emit_triggered_by_batch(
+        self,
+        controller: ScanController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """累计新增达到批量阈值时立即 emit recentParsedFilesChanged（不等时间）。"""
+        import fuscan.gui.controllers.scan_controller as sc_mod
+
+        monkeypatch.setattr(sc_mod.time, "perf_counter", lambda: 100.0)
+        recent_emits: list[None] = []
+        controller.recentParsedFilesChanged.connect(lambda: recent_emits.append(None))  # pyrefly: ignore [missing-attribute]
+        # 预置 last=当前冻结时刻，隔离时间阈值，专测批量阈值触发。
+        controller._recent_emit_last = 100.0
+        for i in range(sc_mod._RECENT_EMIT_BATCH):
+            controller._on_scan_progress(
+                ProgressInfo(
+                    phase="scan",
+                    scanned=i + 1,
+                    total=sc_mod._RECENT_EMIT_BATCH,
+                    current_file=f"/f{i}.txt",
+                    current_file_size=10,
+                )
+            )
+        # 第 _RECENT_EMIT_BATCH 条使 pending 达阈值触发一次 emit，pending 归零
+        assert len(recent_emits) == 1
+        assert controller._recent_pending == 0
+
+    def test_recent_emit_triggered_by_time(
+        self,
+        controller: ScanController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """时间跨过 _RECENT_EMIT_INTERVAL 时即使 pending 未达批量阈值也 emit。"""
+        import fuscan.gui.controllers.scan_controller as sc_mod
+
+        clock = {"t": 100.0}
+        monkeypatch.setattr(sc_mod.time, "perf_counter", lambda: clock["t"])
+        recent_emits: list[None] = []
+        controller.recentParsedFilesChanged.connect(lambda: recent_emits.append(None))  # pyrefly: ignore [missing-attribute]
+        # 第一条：last 初值 -inf，时间阈值必满足 → emit（last=100.0）
+        controller._on_scan_progress(
+            ProgressInfo(phase="scan", scanned=1, total=2, current_file="/a.txt", current_file_size=10)
+        )
+        assert len(recent_emits) == 1
+        # 时钟推进超过间隔阈值：下一条虽 pending=1（<批量）也应 emit
+        clock["t"] = 100.0 + sc_mod._RECENT_EMIT_INTERVAL + 0.01
+        controller._on_scan_progress(
+            ProgressInfo(phase="scan", scanned=2, total=2, current_file="/b.txt", current_file_size=10)
+        )
+        assert len(recent_emits) == 2
+        assert controller._recent_pending == 0
+
+    def test_recent_emit_force_ignores_thresholds(
+        self,
+        controller: ScanController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """force=True 无条件 emit 并归零 pending（不受时间/批量阈值约束）。"""
+        import fuscan.gui.controllers.scan_controller as sc_mod
+
+        monkeypatch.setattr(sc_mod.time, "perf_counter", lambda: 100.0)
+        recent_emits: list[None] = []
+        controller.recentParsedFilesChanged.connect(lambda: recent_emits.append(None))  # pyrefly: ignore [missing-attribute]
+        controller._recent_pending = 3
+        controller._maybe_emit_recent(force=True)
+        assert len(recent_emits) == 1
+        assert controller._recent_pending == 0
+
+    def test_recent_emit_skipped_when_no_pending(
+        self,
+        controller: ScanController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """无待刷新条目（pending==0）时非 force 调用早退不 emit。"""
+        import fuscan.gui.controllers.scan_controller as sc_mod
+
+        monkeypatch.setattr(sc_mod.time, "perf_counter", lambda: 100.0)
+        recent_emits: list[None] = []
+        controller.recentParsedFilesChanged.connect(lambda: recent_emits.append(None))  # pyrefly: ignore [missing-attribute]
+        controller._recent_pending = 0
+        controller._maybe_emit_recent()
+        assert recent_emits == []
+
+    def test_recent_emit_force_on_scan_finished(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """扫描完成时强制刷新明细列表，即使有未达阈值的 pending 也定格最新。"""
+        recent_emits: list[None] = []
+        controller.recentParsedFilesChanged.connect(lambda: recent_emits.append(None))  # pyrefly: ignore [missing-attribute]
+        controller._recent_pending = 2
+        controller._on_scan_finished(_make_scan_report())
+        # 完成收尾 force emit，pending 归零
+        assert len(recent_emits) >= 1
+        assert controller._recent_pending == 0
+
+    def test_recent_emit_force_on_scan_cancelled(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """扫描取消时强制刷新明细列表定格取消瞬间状态。"""
+        recent_emits: list[None] = []
+        controller.recentParsedFilesChanged.connect(lambda: recent_emits.append(None))  # pyrefly: ignore [missing-attribute]
+        controller._recent_pending = 2
+        controller._on_scan_cancelled(_make_scan_report(cancelled=True))
+        assert len(recent_emits) >= 1
+        assert controller._recent_pending == 0
+
+    def test_recent_emit_force_on_pause(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """暂停扫描时强制刷新明细列表，让用户看到暂停瞬间的完整明细。"""
+        stats_instances, _ = fake_workers
+        controller.setScanModeIndex(1)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+        stats_instances[0].emit_finished([_make_walk_result(tmp_path)])
+        recent_emits: list[None] = []
+        controller.recentParsedFilesChanged.connect(lambda: recent_emits.append(None))  # pyrefly: ignore [missing-attribute]
+        controller._recent_pending = 2
+        controller.togglePause()
+        assert controller.isPaused is True
+        assert len(recent_emits) >= 1
+        assert controller._recent_pending == 0
+
+    def test_recent_emit_reset_on_start_scan(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """startScan 归零节流状态并 force emit 清空明细列表。"""
+        # 制造残留节流状态
+        controller._recent_pending = 5
+        controller._recent_emit_last = 999.0
+        recent_emits: list[None] = []
+        controller.recentParsedFilesChanged.connect(lambda: recent_emits.append(None))  # pyrefly: ignore [missing-attribute]
+        controller.setScanModeIndex(1)
+        controller.setFolderRoot(str(tmp_path))
+        controller.startScan()
+        # reset 归零并 force emit
+        assert controller._recent_pending == 0
+        assert controller.recentParsedFiles == []
+        assert len(recent_emits) >= 1
+
     def test_walk_elapsed_text_empty_before_start(self, controller: ScanController) -> None:
         """walk 未开始（_walk_start_time==0）时 walkElapsedText 返回空串。"""
         assert controller.walkElapsedText == ""

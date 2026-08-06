@@ -322,10 +322,18 @@ Rectangle {
                 // 逐行 文件名 · [大小 · 耗时] 徽标，隔行浅底提升可读性。
                 expandContent: Component {
                     Rectangle {
+                        id: recentPanel
+                        // 单次求值缓存：recentParsedFiles 每次返回全新 QVariantList，
+                        // 若下方 6 处绑定各自直读 activeScanController.recentParsedFiles，
+                        // 一次 recentParsedFilesChanged 会触发 6 次 @Property getter（各构造
+                        // 一遍完整列表）。此处只读一次缓存到本地 property，6 处引用它——
+                        // getter 每次刷新仅执行 1 次。缓存值为 QVariantList（值类型，非 QObject），
+                        // 不经 PySide2 类型推断 null 路径，绑定安全。
+                        readonly property var recentFiles: workspaceController.activeScanController.recentParsedFiles
                         // 有明细时按内容高度撑开（上限 200），空态固定矮高。
                         // Loader 将本 Rectangle 拉伸至其宽度，故无需 Layout.fillWidth；
                         // implicitHeight 驱动 Loader 高度。
-                        implicitHeight: workspaceController.activeScanController.recentParsedFiles.length === 0
+                        implicitHeight: recentPanel.recentFiles.length === 0
                             ? 40
                             : Math.min(200, fileList.contentHeight + fileListHeader.height + 12)
                         radius: card.theme.radiusMd
@@ -345,7 +353,7 @@ Rectangle {
                                 spacing: 6
                                 Label {
                                     Layout.fillWidth: true
-                                    text: "最近解析（" + workspaceController.activeScanController.recentParsedFiles.length + "）"
+                                    text: "最近解析（" + recentPanel.recentFiles.length + "）"
                                     font.pixelSize: card.theme.fontSizeMin
                                     font.bold: true
                                     color: card.theme.isDark ? card.theme.colorTextSecondary : card.theme.colorTextSecondary
@@ -364,13 +372,13 @@ Rectangle {
                                 Layout.bottomMargin: 2
                                 height: 1
                                 color: card.theme.isDark ? card.theme.colorBorderDark : card.theme.colorBorder
-                                visible: workspaceController.activeScanController.recentParsedFiles.length > 0
+                                visible: recentPanel.recentFiles.length > 0
                             }
 
                             // 空态提示
                             Label {
                                 Layout.fillWidth: true
-                                visible: workspaceController.activeScanController.recentParsedFiles.length === 0
+                                visible: recentPanel.recentFiles.length === 0
                                 text: "暂无解析明细"
                                 horizontalAlignment: Text.AlignHCenter
                                 font.pixelSize: card.theme.fontSizeMin
@@ -382,10 +390,12 @@ Rectangle {
                                 id: fileList
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
-                                visible: workspaceController.activeScanController.recentParsedFiles.length > 0
+                                visible: recentPanel.recentFiles.length > 0
                                 clip: true
+                                // 复用滚出可视区的 delegate，减少高频刷新时的实例化开销
+                                reuseItems: true
                                 boundsBehavior: Flickable.StopAtBounds
-                                model: workspaceController.activeScanController.recentParsedFiles
+                                model: recentPanel.recentFiles
                                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                                 delegate: Rectangle {
                                     width: ListView.view ? ListView.view.width : 0

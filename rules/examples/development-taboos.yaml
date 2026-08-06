@@ -1,0 +1,336 @@
+# 开发禁忌项审查规则集
+# 场景：扫描代码中的开发禁忌写法——危险 API、反模式、调试残留、注释代码块
+# 适用：代码评审前检查、CI 门禁、技术债治理
+version: "1.0"
+
+# 路径级 glob 过滤：排除第三方依赖、构建产物与 IDE 配置目录。
+ignore_paths:
+  - "*/vendor/*"
+  - "*/third_party/*"
+  - "*/node_modules/*"
+  - "*/build/*"
+  - "*/dist/*"
+  - "*/.idea/*"
+  - "*/.vscode/*"
+
+# 目录名级忽略：测试数据目录（保留单元测试目录，仅排除生成数据）。
+ignore_dirs:
+  - "testdata"
+
+# 文件后缀白名单：仅扫描源代码文件（含 SQL 脚本）。
+# 注：以下后缀由 SourceCodeExtractor 处理，默认禁用，需在「设置 → 文件类型」启用。
+scan_extensions:
+  - "py"
+  - "js"
+  - "ts"
+  - "java"
+  - "go"
+  - "rs"
+  - "c"
+  - "cpp"
+  - "cs"
+  - "php"
+  - "rb"
+  - "sh"
+  - "sql"
+
+# 扫描参数：代码扫描 CPU 轻量，提高并发线程数。
+scan_params:
+  max_workers: 8
+  max_depth: 20  # 限制递归深度，避免扫描 node_modules 等深层目录
+
+# 误报白名单：留空，由运行时标记累积。
+whitelist: []
+
+rules:
+  # ============================= Python 禁忌项 =============================
+  - name: Python 裸 except 捕获
+    description: 检测 Python 代码中的裸 except（应捕获具体异常）
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: '^\s*except\s*:'
+      case_sensitive: false
+
+  - name: Python 可变默认参数
+    description: 检测函数定义中使用可变对象作为默认参数（list/dict/set）
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: 'def\s+\w+\(.*=\s*(\[\]|\{\}|\(\s*\)|set\(\))'
+      case_sensitive: false
+
+  - name: Python global 滥用
+    description: 检测函数内 global 声明（应避免全局可变状态）
+    severity: info
+    match:
+      type: content
+      mode: regex
+      pattern: '^\s*global\s+\w+'
+      case_sensitive: false
+
+  - name: Python 生产代码 assert 残留
+    description: 检测非测试目录中的 assert 语句（生产代码应用 raise）
+    severity: info
+    match:
+      type: and
+      children:
+        - type: content
+          mode: regex
+          pattern: '^\s*assert\s+'
+          case_sensitive: false
+        - type: not
+          child:
+            type: path
+            mode: regex
+            pattern: '(test|tests|__tests__|spec)[\\/]'
+            case_sensitive: false
+
+  - name: Python pickle 反序列化
+    description: 检测 pickle.loads/pickle.load 调用（反序列化任意对象风险）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '\bpickle\.(loads?|Unpickler)\s*\('
+      case_sensitive: false
+
+  - name: Python yaml.load 无 Loader
+    description: 检测 yaml.load 未指定 Loader（默认 FullLoader 不安全）
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: '\byaml\.load\s*\([^)]*\)\s*$'
+      case_sensitive: false
+
+  - name: Python MD5 用于密码
+    description: 检测使用 MD5 哈希密码（应使用 bcrypt/scrypt/argon2）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: 'hashlib\.md5\s*\('
+      case_sensitive: false
+
+  - name: Python SHA1 用于密码
+    description: 检测使用 SHA1 哈希密码（应使用 bcrypt/scrypt/argon2）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: 'hashlib\.sha1\s*\('
+      case_sensitive: false
+
+  - name: Python os.system 调用
+    description: 检测 os.system 调用（命令注入风险，应改用 subprocess.run + list 参数）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '\bos\.system\s*\('
+      case_sensitive: false
+
+  - name: Python random 用于安全用途
+    description: 检测 random 模块用于安全场景（应使用 secrets 模块）
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: '\brandom\.(choice|randint|random)\s*\('
+      case_sensitive: false
+
+  - name: Python eval 调用
+    description: 检测 Python 代码中的 eval() 调用（代码注入风险）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '\beval\s*\('
+      case_sensitive: false
+
+  - name: Python exec 调用
+    description: 检测 Python 代码中的 exec() 调用（代码注入风险）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '\bexec\s*\('
+      case_sensitive: false
+
+  # ============================= JavaScript 禁忌项 =============================
+  - name: JS document.write 调用
+    description: 检测 document.write 调用（XSS 风险，已废弃）
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: 'document\.write\s*\('
+      case_sensitive: false
+
+  - name: JS innerHTML 赋值
+    description: 检测 innerHTML 赋值（XSS 风险，应使用 textContent 或 DOM API）
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: '\.innerHTML\s*='
+      case_sensitive: false
+
+  - name: JS eval 调用
+    description: 检测 JS 代码中的 eval() 调用（代码注入风险）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '\beval\s*\('
+      case_sensitive: false
+
+  - name: JS new Function 动态执行
+    description: 检测 new Function() 动态构造函数（代码注入风险）
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: '\bnew\s+Function\s*\('
+      case_sensitive: false
+
+  - name: JS setTimeout 字符串参数
+    description: 检测 setTimeout/setInterval 传入字符串参数（隐式 eval）
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: '(setTimeout|setInterval)\s*\(\s*[''"]'
+      case_sensitive: false
+
+  - name: JS debugger 语句残留
+    description: 检测 debugger 语句（调试残留，应在提交前移除）
+    severity: info
+    match:
+      type: content
+      mode: regex
+      pattern: '^\s*debugger\s*;?\s*$'
+      case_sensitive: false
+
+  # ============================= Java 禁忌项 =============================
+  - name: Java System.exit 调用
+    description: 检测 System.exit 调用（应通过异常或返回值控制流程）
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: 'System\.exit\s*\('
+      case_sensitive: true
+
+  - name: Java Runtime.exec 调用
+    description: 检测 Runtime.exec 调用（命令注入风险，应使用 ProcessBuilder）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: 'Runtime\.getRuntime\(\)\.exec\s*\('
+      case_sensitive: true
+
+  - name: Java printStackTrace 残留
+    description: 检测 printStackTrace 调用（应使用日志框架记录异常）
+    severity: info
+    match:
+      type: content
+      mode: regex
+      pattern: '\.printStackTrace\s*\(\s*\)'
+      case_sensitive: false
+
+  # ============================= 通用禁忌项 =============================
+  - name: 硬编码密码
+    description: 检测代码中硬编码的密码字符串（password/passwd/pwd 赋值）
+    severity: critical
+    match:
+      type: content
+      mode: regex
+      pattern: '(?i)(password|passwd|pwd)\s*[:=]\s*[''"][^''"$\{]{4,}[''"]'
+      case_sensitive: false
+
+  - name: 硬编码内网 IP
+    description: 检测代码中硬编码的内网 IP 地址（应通过配置管理）
+    severity: info
+    match:
+      type: content
+      mode: regex
+      pattern: '(?<!\d)(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)\d{1,3}\.\d{1,3}(?!\d)'
+      case_sensitive: false
+
+  - name: 硬编码端口号
+    description: 检测代码中硬编码的端口号（应通过配置管理）
+    severity: info
+    match:
+      type: content
+      mode: regex
+      pattern: ':\d{4,5}\b'
+      case_sensitive: false
+
+  - name: TODO/FIXME/XXX/HACK 标记
+    description: 检测代码中的 TODO/FIXME/XXX/HACK 待办标记
+    severity: info
+    match:
+      type: content
+      mode: regex
+      pattern: '#\s*(TODO|FIXME|XXX|HACK)\b|//\s*(TODO|FIXME|XXX|HACK)\b|/\*\s*(TODO|FIXME|XXX|HACK)\b'
+      case_sensitive: true
+
+  - name: JS console.log 残留
+    description: 检测 JS 代码中的 console.log 调试残留
+    severity: info
+    match:
+      type: content
+      mode: regex
+      pattern: '\bconsole\.log\s*\('
+      case_sensitive: false
+
+  - name: Python print 调试残留
+    description: 检测 Python 代码中的 print 调试语句（应使用 logging）
+    severity: info
+    match:
+      type: content
+      mode: regex
+      pattern: '^\s*print\s*\('
+      case_sensitive: false
+
+  - name: 注释代码块残留
+    description: 检测连续多行注释代码块（疑似废弃代码，应直接删除）
+    severity: info
+    match:
+      type: content
+      mode: regex
+      pattern: '^\s*//\s*(if|for|while|return|var|let|const|function|def|class|import|public|private|protected)\b'
+      case_sensitive: false
+
+  - name: JS alert 调试残留
+    description: 检测 JS 代码中的 alert 调用（调试残留，应在提交前移除）
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: '\balert\s*\('
+      case_sensitive: false
+
+  # ============================= 配置禁忌项 =============================
+  - name: .env 文件入库
+    description: 检测 .env 文件被提交到仓库（应通过 .gitignore 排除）
+    severity: critical
+    match:
+      type: filename
+      mode: regex
+      pattern: '^\.env(\.\w+)?$'
+      case_sensitive: true
+
+  - name: IDE 配置文件入库
+    description: 检测 IDE 配置文件被提交到仓库（.idea/.vscode 等应通过 .gitignore 排除）
+    severity: warning
+    match:
+      type: path
+      mode: regex
+      pattern: '(\.idea|\.vscode)[\\/]'
+      case_sensitive: true

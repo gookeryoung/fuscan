@@ -12,6 +12,7 @@
 | [sensitive-data.yaml](sensitive-data.yaml) | 敏感数据检测 | 5 | PII 扫描（身份证、手机号、银行卡、邮箱） |
 | [security-audit.yaml](security-audit.yaml) | 凭证与密钥审计 | 9 | 硬编码密钥、私钥、JWT、数据库连接串 |
 | [code-security.yaml](code-security.yaml) | 代码安全扫描 | 9 | 危险函数、调试残留、SQL 拼接 |
+| [development-taboos.yaml](development-taboos.yaml) | 开发禁忌项审查 | 31 | Python/JS/Java 危险 API、调试残留、配置入库 |
 | [web-security.yaml](web-security.yaml) | Web 应用安全 | 10 | XSS、CORS、CSP、Cookie 安全 |
 | [dependency-audit.yaml](dependency-audit.yaml) | 依赖安全审计 | 8 | 风险包、版本锁定、SNAPSHOT 依赖 |
 
@@ -32,7 +33,7 @@
 | [devops-ci.yaml](devops-ci.yaml) | DevOps/CI 审计 | 8 | Dockerfile、GitHub Actions、K8s 配置 |
 | [infrastructure-as-code.yaml](infrastructure-as-code.yaml) | IaC 安全 | 10 | Terraform、K8s、Ansible、CloudFormation |
 
-**合计**：13 个文件，106 条规则（含 [example.yaml](../example.yaml) 的 5 条基础示例）。
+**合计**：14 个文件，137 条规则（含 [example.yaml](../example.yaml) 的 5 条基础示例）。
 
 ## 使用方法
 
@@ -285,6 +286,7 @@ GUI「设置 → 扫描 → 忽略目录」中维护的目录会同步到 `~/.fu
 | `sensitive-data.yaml` | 文档 + 表格 + 日志 + 邮件 | 大文件阈值 20MB |
 | `security-audit.yaml` | 源代码 + 配置 + 日志 | max_workers=8 |
 | `code-security.yaml` | 源代码 + SQL | max_workers=8, max_depth=20 |
+| `development-taboos.yaml` | 源代码（py/js/ts/java/go/rs/c/cpp 等） | max_workers=8, max_depth=20 |
 | `web-security.yaml` | 前端代码 + 模板 + 样式 | max_workers=6, max_depth=15 |
 | `dependency-audit.yaml` | 依赖清单 + 构建配置 | max_workers=4, max_depth=5 |
 | `compliance.yaml` | 配置 + 日志 + 文档 | max_workers=6 |

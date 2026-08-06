@@ -231,11 +231,14 @@ Rectangle {
             }
 
             // ----- 节点 1：收集文件（walk） -----
+            // 不传 theme: card.theme——PySide2 5.15 跨组件传递 typed QObject property 会
+            // 瞬态求值为 null，导致 PhaseNode 内 node.theme.xxx 抛 TypeError。
+            // PhaseNode 自身 property ThemeController theme: Theme 默认绑定稳定（与
+            // test_phase_node_three_states_no_errors 验证的模式一致）。
             PhaseNode {
                 Layout.fillWidth: true
-                theme: card.theme
                 nodeState: phaseTimeline.walkNodeState()
-                accentColor: theme.colorPrimary
+                accentColor: Theme.colorPrimary
                 title: "收集文件"
                 showTopLine: false
                 progressIndeterminate: workspaceController.activeScanController.walkIndeterminate
@@ -261,9 +264,8 @@ Rectangle {
             // ----- 节点 2：筛选文件（filter，剔除空/超限/不可读/符号链接） -----
             PhaseNode {
                 Layout.fillWidth: true
-                theme: card.theme
                 nodeState: phaseTimeline.filterNodeState()
-                accentColor: theme.colorWarning
+                accentColor: Theme.colorWarning
                 title: "筛选文件"
                 progressIndeterminate: true
                 progressValue: -1
@@ -287,7 +289,6 @@ Rectangle {
             // ----- 节点 3：解析文件（scan / archive） -----
             PhaseNode {
                 Layout.fillWidth: true
-                theme: card.theme
                 nodeState: phaseTimeline.scanNodeState()
                 accentColor: card.statusColor()
                 title: "解析文件"

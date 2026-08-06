@@ -471,10 +471,56 @@ class TestXlsxExtractor:
         with pytest.raises(ExtractorError, match="python-calamine 未安装"):
             XlsxExtractor().extract(path)
 
+    def test_output_format_exact(self, tmp_path: Path) -> None:
+        """R3 输出等价红线：多工作表/混合类型/空表的提取字符串逐字节固定。
 
-# ---------------------------------------------------------------------------
-# WpsExtractor
-# ---------------------------------------------------------------------------
+        构造含数值/布尔/字符串混合单元格、含空表、含前导空白与 None 的工作簿，
+        断言输出严格符合「``--- 工作表: 名称 ---`` 分隔 + 行内 ``\\t`` + 行间 ``\\n``」
+        规范，防止 R3 遍历重构改变输出。
+        """
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws1 = wb.active
+        assert ws1 is not None
+        ws1.title = "数据"
+        ws1["A1"] = "姓名"
+        ws1["B1"] = "密码"
+        ws1["C1"] = 42  # 数值 cell：calamine 返回 float，str(42.0)="42.0"
+        ws1["A2"] = "张三"
+        ws1["B2"] = "pwd123"
+        # C2 留空（None）→ 跳过；D2 前后空白 → strip
+        ws1["D2"] = "  trimmed  "
+        # 全空行（第 3 行）→ 整行跳过
+        wb.create_sheet("空表")  # 空 sheet → 不产生任何输出
+        ws3 = wb.create_sheet("布尔")
+        ws3["A1"] = True  # str(True)="True"
+        path = tmp_path / "exact.xlsx"
+        wb.save(str(path))
+
+        content = XlsxExtractor().extract(path)
+        expected = "--- 工作表: 数据 ---\n姓名\t密码\t42.0\n张三\tpwd123\ttrimmed\n--- 工作表: 布尔 ---\nTrue"
+        assert content == expected
+
+    def test_row_col_truncation_exact(self, tmp_path: Path) -> None:
+        """R3 截断等价红线：超行/超列截断输出与逐单元格计数路径一致。"""
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        assert ws is not None
+        ws.title = "T"
+        # 3 行 × 3 列，全部填值
+        for r in range(1, 4):
+            for c, col in enumerate("ABC", 0):
+                ws[f"{col}{r}"] = f"r{r}c{c}"
+        path = tmp_path / "trunc.xlsx"
+        wb.save(str(path))
+
+        # max_rows=2 max_cols=2：仅前 2 行前 2 列
+        content = XlsxExtractor(max_rows=2, max_cols=2).extract(path)
+        expected = "--- 工作表: T ---\nr1c0\tr1c1\nr2c0\tr2c1"
+        assert content == expected
 
 
 class TestWpsExtractor:

@@ -38,6 +38,12 @@ __all__ = ["run_pipeline_phase"]
 
 logger = logging.getLogger(__name__)
 
+# 无 UI 回调（CLI/benchmark 纯吞吐）时收割循环的 wait 超时。
+# 有回调时用 PRE_SCAN_EMIT_INTERVAL_S（0.5s）周期性唤醒 emit 进度；无回调时不需
+# 周期性 emit，用更长超时减少空转唤醒开销。仍保留有限超时（而非无限阻塞），
+# 以便 _check_control 能及时响应取消信号——不改并发模型与取消加速路径。
+_NO_CALLBACK_WAIT_TIMEOUT_S: float = 1.0
+
 
 def run_pipeline_phase(
     scanner: Scanner,
@@ -263,23 +269,30 @@ def _collect_concurrent_results(  # noqa: PLR0912
     # 命中结果批次缓冲，达 emit_batch 时一次性 extend 到共享列表
     batch_match_list: list[tuple[str, str]] = []
     _last_entry_path: str = ""
+    # 无 UI 回调（CLI/benchmark 纯吞吐）时，进度 emit、单文件耗时反推、命中路径
+    # 聚合均为无消费方的空转开销。一次性判定后在收割循环内跳过这些 UI-only 工作，
+    # 减少每 future 的 time.perf_counter/属性写/emit 调用。有回调（GUI）时行为不变。
+    on_progress_active = scanner._on_progress is not None
     # 用 wait(timeout) 替代 as_completed：当所有 worker 都在处理大文件时，
     # as_completed 会阻塞到首个 future 完成而无进度反馈；wait 每 0.5s 超时
     # 返回一次，让主线程能 emit 进度展示"正在扫描..."避免 UI 长时间无响应。
+    # 无 UI 回调时无需周期性唤醒，用更长超时减少空转唤醒（仍保留超时以便
+    # _check_control 能及时响应取消，不改并发模型与取消加速路径）。
+    wait_timeout = PRE_SCAN_EMIT_INTERVAL_S if on_progress_active else _NO_CALLBACK_WAIT_TIMEOUT_S
     pending: set[Future[ScanResult]] = set(future_to_entry)
     while pending:
         if scanner._check_control():
             cancel_all_futures(future_to_entry)
             pool.shutdown(wait=False)
             break
-        done, pending = wait(pending, timeout=PRE_SCAN_EMIT_INTERVAL_S, return_when=FIRST_COMPLETED)
+        done, pending = wait(pending, timeout=wait_timeout, return_when=FIRST_COMPLETED)
         if not done:
             # 超时：0.5s 内无 future 完成，emit 进度让用户看到"仍在扫描"
             # 同步设置 _current_file_* 为真实 in-flight 文件元信息（最早提交的），
             # 让 UI 显示「[大小 · ext · elapsed_ms]」与当前路径一致，
             # 修复「路径是 A、大小是上一个完成的 B」的错配假卡死观感。
             # 优先选择最早提交（最可能卡最久）的 in-flight 文件，回退到上次完成路径。
-            if scanner._on_progress is not None:
+            if on_progress_active:
                 if scanner._in_flight_meta:
                     in_flight_path, (if_size, if_ext, if_submit_time) = next(iter(scanner._in_flight_meta.items()))
                     scanner._current_file_path = in_flight_path
@@ -310,14 +323,16 @@ def _collect_concurrent_results(  # noqa: PLR0912
             scanned += 1
             try:
                 result = future.result()
-                # 用 worker 实测的单文件耗时反推起点，令 _emit_progress 得到
-                # 单文件真实解析耗时（并发下 submit_time≈扫描起点，若用
-                # now-submit_time 会呈累计增长，展示为「累计用时」而非单文件用时）
-                scanner._current_file_start_time = time.perf_counter() - result.elapsed_ms / 1000.0
+                if on_progress_active:
+                    # 用 worker 实测的单文件耗时反推起点，令 _emit_progress 得到
+                    # 单文件真实解析耗时（并发下 submit_time≈扫描起点，若用
+                    # now-submit_time 会呈累计增长，展示为「累计用时」而非单文件用时）。
+                    # 无回调时此值无消费方，跳过一次 perf_counter + 属性写。
+                    scanner._current_file_start_time = time.perf_counter() - result.elapsed_ms / 1000.0
                 if result.has_hit:
                     matched += 1
                     matches += result.total_match_count
-                    if scanner._on_progress is not None:
+                    if on_progress_active:
                         # 先累积到批次列表，后续 emit 时一次性 extend
                         for hit in result.hits:
                             batch_match_list.append((entry_path, hit.rule_name))
@@ -327,25 +342,27 @@ def _collect_concurrent_results(  # noqa: PLR0912
                 # 异常路径不更新单文件耗时（该文件不进入 recentParsedFiles）
                 errors += 1
                 logger.warning("扫描文件失败 %s", entry_path, exc_info=True)
-            # 批处理 emit，减少并发高吞吐场景下的进度回调开销
-            emit_counter += 1
-            if emit_counter >= scanner._progress_emit_batch:
-                # flush 命中批次到共享列表（extend 比多次 append 快）
-                if batch_match_list and scanner._on_progress is not None:
-                    scanner._matched_files.extend(batch_match_list)
-                    batch_match_list.clear()
-                scanner._emit_progress(_last_entry_path, scanned, matched, errors, matches)
-                emit_counter = 0
-            # GIL 让步：并发模式下 worker 在 Rust/C 层释放 GIL，主线程本就能调度，
-            # 但 wait 循环本身在 Python 层，仍需定期 sleep(0) 让出时间片。
-            # 时间式判断：距上次让步超过 5ms 才 sleep(0)，避免高吞吐下无谓系统调用
-            now = time.perf_counter()
-            if now - scanner._last_yield_time >= GIL_YIELD_THRESHOLD_S:
-                scanner._last_yield_time = now
-                time.sleep(0)
+            # 批处理 emit 与 GIL 让步仅在有 UI 回调时需要：无回调时既无进度消费方，
+            # 且 worker 在 Rust/C 层释放 GIL，wait() 阻塞本身已让出时间片，无需 sleep(0)。
+            if on_progress_active:
+                emit_counter += 1
+                if emit_counter >= scanner._progress_emit_batch:
+                    # flush 命中批次到共享列表（extend 比多次 append 快）
+                    if batch_match_list:
+                        scanner._matched_files.extend(batch_match_list)
+                        batch_match_list.clear()
+                    scanner._emit_progress(_last_entry_path, scanned, matched, errors, matches)
+                    emit_counter = 0
+                # GIL 让步：并发模式下 worker 在 Rust/C 层释放 GIL，主线程本就能调度，
+                # 但 wait 循环本身在 Python 层，仍需定期 sleep(0) 让出时间片。
+                # 时间式判断：距上次让步超过 5ms 才 sleep(0)，避免高吞吐下无谓系统调用
+                now = time.perf_counter()
+                if now - scanner._last_yield_time >= GIL_YIELD_THRESHOLD_S:
+                    scanner._last_yield_time = now
+                    time.sleep(0)
     # 批处理尾部：剩余命中与未 emit 的进度补发一次（避免最后几个文件状态丢失）
-    if batch_match_list and scanner._on_progress is not None:
+    if batch_match_list and on_progress_active:
         scanner._matched_files.extend(batch_match_list)
-    if emit_counter > 0 and scanner._on_progress is not None:
+    if emit_counter > 0 and on_progress_active:
         scanner._emit_progress(_last_entry_path, scanned, matched, errors, matches)
     return scanned, matched, errors, matches

@@ -5757,3 +5757,113 @@ class TestEngineForExtension:
         from fuscan.scanner._helpers import engine_for_extension
 
         assert engine_for_extension("") == "纯文本"
+
+
+class TestIsMinifiedContent:
+    """``is_minified_content`` 按内容特征识别压缩/打包产物。
+
+    识别与文件名无关，仅看内容形态：总长达标且存在超长单行时判定为压缩产物。
+    """
+
+    def test_long_single_line_detected(self) -> None:
+        """含超长单行（>=5000 字符）且总长达标：判定为压缩产物。"""
+        from fuscan.scanner._helpers import is_minified_content
+
+        # 模拟 min.js：单行 6000 字符无换行
+        content = "var a=1;" * 750  # 8*750 = 6000 字符，单行
+        assert is_minified_content(content) is True
+
+    def test_long_line_among_normal_lines_detected(self) -> None:
+        """普通多行中夹一条超长行（如 chunk.js 中间行）：仍判定为压缩产物。"""
+        from fuscan.scanner._helpers import is_minified_content
+
+        content = "line1\n" + ("x" * 6000) + "\nline3\n"
+        assert is_minified_content(content) is True
+
+    def test_trailing_long_line_without_newline_detected(self) -> None:
+        """末行无结尾换行且超长：判定为压缩产物（覆盖末行分支）。"""
+        from fuscan.scanner._helpers import is_minified_content
+
+        content = "short\n" + ("y" * 6000)  # 末行无 \n
+        assert is_minified_content(content) is True
+
+    def test_normal_source_not_detected(self) -> None:
+        """普通多行源码（行普遍较短）：不判定为压缩产物。"""
+        from fuscan.scanner._helpers import is_minified_content
+
+        # 2000 行，每行约 40 字符，总长达标但无超长行
+        content = "\n".join(f"def func_{i}(): return {i}" for i in range(2000))
+        assert is_minified_content(content) is False
+
+    def test_short_content_not_detected(self) -> None:
+        """内容总长低于下限：即便单行也不判定（小文件无性能问题）。"""
+        from fuscan.scanner._helpers import is_minified_content
+
+        # 单行 1000 字符，未达总长下限 2048
+        assert is_minified_content("z" * 1000) is False
+
+    def test_empty_content_not_detected(self) -> None:
+        """空内容：不判定为压缩产物。"""
+        from fuscan.scanner._helpers import is_minified_content
+
+        assert is_minified_content("") is False
+
+
+class TestMinifiedContentSkipped:
+    """压缩/打包产物在解析阶段跳过 CONTENT 匹配（保留 FILENAME/PATH 规则）。"""
+
+    def test_minified_skips_content_rule_uncached(self, tmp_path: Path) -> None:
+        """无缓存模式：压缩内容中的敏感串不触发 CONTENT 命中。"""
+        # 超长单行含 password，正常应被 CONTENT 规则命中，但因判定为压缩产物被跳过
+        minified = "var config={};" + ("a=password;" * 600)  # 单行 >5000 且含 password
+        (tmp_path / "bundle.js").write_text(minified, encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        scanner = Scanner(rs)
+        report = scanner.scan(tmp_path)
+
+        assert report.stats.matched_files == 0
+
+    def test_minified_keeps_filename_rule_uncached(self, tmp_path: Path) -> None:
+        """无缓存模式：压缩文件的 FILENAME 规则仍命中（不依赖内容）。"""
+        minified = "var config={};" + ("a=password;" * 600)
+        (tmp_path / "app.bundle.js").write_text(minified, encoding="utf-8")
+        # 同时含 CONTENT 规则（触发读内容路径）与 FILENAME 规则
+        rs = _build_ruleset(
+            _content_rule("pwd", "password"),
+            _filename_rule("js_bundle", "bundle"),
+        )
+
+        scanner = Scanner(rs)
+        report = scanner.scan(tmp_path)
+
+        assert report.stats.matched_files == 1
+        rule_names = {hit.rule_name for hit in report.hits[0].hits}
+        # FILENAME 命中保留，CONTENT 命中被跳过
+        assert rule_names == {"js_bundle"}
+
+    def test_normal_file_still_matches_content(self, tmp_path: Path) -> None:
+        """对照组：普通多行文件的 CONTENT 规则正常命中，未被误跳。"""
+        (tmp_path / "config.txt").write_text("db_password=secret123\n", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        scanner = Scanner(rs)
+        report = scanner.scan(tmp_path)
+
+        assert report.stats.matched_files == 1
+
+    def test_minified_skips_content_rule_cached(self, tmp_path: Path) -> None:
+        """缓存模式：压缩内容中的敏感串同样不触发 CONTENT 命中。"""
+        from fuscan.cache import CacheStore
+
+        minified = "var config={};" + ("a=password;" * 600)
+        (tmp_path / "vendor.js").write_text(minified, encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        cache = CacheStore(tmp_path / "cache.db")
+        try:
+            scanner = Scanner(rs, cache=cache)
+            report = scanner.scan(tmp_path)
+            assert report.stats.matched_files == 0
+        finally:
+            cache.close()

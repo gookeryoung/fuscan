@@ -62,6 +62,7 @@ from fuscan.scanner._helpers import (
     default_extract_content_with_hash,
     empty_content_provider,
     engine_for_extension,
+    is_minified_content,
     normalize_max_file_size,
     rebuild_hit_from_cache,
     spec_needs_content,
@@ -1203,7 +1204,18 @@ class Scanner:
         if skip_content:
             context = MatchContext(entry, content_provider=empty_content_provider)
         else:
-            context = MatchContext(entry, content_provider=self._content_provider)
+            # 先取一次内容并检测是否为压缩/打包产物（min.js/chunk.js/bundle 等）。
+            # 命中则以空内容做 CONTENT 匹配——超长单行的正则 finditer 是解析耗时的
+            # 根源，跳过后 CONTENT 规则对空串瞬间返回不命中；用静态 provider 复用
+            # 已读内容（或替换为空串），避免二次文件 I/O。FILENAME/PATH 规则不依赖
+            # 内容，仍正常评估。
+            raw_content = self._content_provider(entry)
+            match_content = "" if is_minified_content(raw_content) else raw_content
+
+            def _static_provider(_fe: FileEntry, _c: str = match_content) -> str:
+                return _c
+
+            context = MatchContext(entry, content_provider=_static_provider)
         hits: list[RuleHit] = []
         rule_errors = 0
 
@@ -1369,8 +1381,14 @@ class Scanner:
         # 常规路径：读文件 + 算哈希 + 查提取内容缓存 + 未命中执行提取
         content, file_hash = self._extract_with_cache(entry)
 
+        # 压缩/打包产物（min.js/chunk.js/bundle 等）检测：命中则以空内容做 CONTENT
+        # 匹配，跳过超长单行 finditer 这一解析耗时根源。file_hash 仍用真实内容计算
+        # （缓存键不变），故本次写入的「未命中」在同 file_hash 再扫时读回一致，行为
+        # 稳定；缓存已命中的路径走 _rebuild_from_full_cache 不跑 finditer，无需处理。
+        match_content = "" if is_minified_content(content) else content
+
         def _static_provider(_fe: FileEntry) -> str:
-            return content
+            return match_content
 
         context = MatchContext(entry, content_provider=_static_provider)
 

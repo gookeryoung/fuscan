@@ -14,6 +14,7 @@
 - :func:`default_extract_content_with_hash`：带哈希的内容提供器
 - :func:`empty_content_provider`：空内容提供器
 - :func:`spec_needs_content`：检查 MatchSpec 是否包含 CONTENT 目标
+- :func:`is_minified_content`：按内容特征识别压缩/打包产物（跳过 CONTENT 匹配）
 - :func:`cancel_all_futures`：取消全部 future
 - :func:`normalize_max_file_size`：规范化大文件跳过阈值
 """
@@ -53,6 +54,7 @@ __all__ = [
     "default_extract_content_with_hash",
     "empty_content_provider",
     "engine_for_extension",
+    "is_minified_content",
     "normalize_max_file_size",
     "rebuild_hit_from_cache",
     "spec_needs_content",
@@ -176,6 +178,55 @@ def engine_for_extension(extension: str) -> str:
     if extractor is None:
         return _FALLBACK_ENGINE
     return extractor.engine_info or _FALLBACK_ENGINE
+
+
+# 压缩/打包产物识别阈值（按内容特征判定，与文件名无关）。
+#
+# webpack/vite/rollup 等打包器生成的 chunk.js、bundle.js，以及 *.min.js/
+# *.min.css/source map 等构建产物，共同特征是把大量代码压进极少数超长行
+# （去掉了换行与缩进）。对这类内容跑 CONTENT 正则 finditer 会在单条超长行上
+# 产生大量回溯，成为不可中断的 C 调用拖慢扫描——正是「花很多时间去解析」的根源。
+#
+# 检测不依赖文件名（避免误跳 config.js、漏跳无 .min 后缀的压缩产物），而在
+# 内容提取后按两条内容特征判定，命中即跳过该文件的 CONTENT 匹配：
+#
+# - 存在任意一行字符数 >= _MINIFIED_MAX_LINE_LEN：压缩产物最鲜明的特征，
+#   正常手写源码极少出现 5000 字符不换行的单行。
+# - 内容总长 >= _MINIFIED_MIN_TOTAL_LEN：小文件即便单行也不构成性能问题，
+#   设总长下限避免误判短小的正常单行文件（如压缩前的小型 JSON/一行配置）。
+_MINIFIED_MAX_LINE_LEN: int = 5000
+_MINIFIED_MIN_TOTAL_LEN: int = 2048
+
+
+def is_minified_content(content: str) -> bool:
+    """按内容特征判定是否为压缩/打包产物（如 min.js/chunk.js/bundle/map）。
+
+    识别与文件名无关，仅看内容形态：内容总长达到下限
+    （:data:`_MINIFIED_MIN_TOTAL_LEN`）且存在超长单行
+    （长度 >= :data:`_MINIFIED_MAX_LINE_LEN`）时判定为压缩产物。
+
+    实现按换行位置分段扫描各行长度，命中首个超长行即短路返回，
+    避免 ``splitlines()`` 对超大内容的整体列表分配；对普通多行源码
+    （行普遍较短）则遍历到末尾返回 False，开销为一次线性扫描。
+
+    :param content: 已提取的文本内容
+    :return: True 表示压缩/打包产物，扫描器据此跳过其 CONTENT 匹配
+    """
+    if len(content) < _MINIFIED_MIN_TOTAL_LEN:
+        return False
+    start = 0
+    length = len(content)
+    while start < length:
+        nl = content.find("\n", start)
+        if nl == -1:
+            # 末行（无结尾换行）：从 start 到内容末尾
+            if length - start >= _MINIFIED_MAX_LINE_LEN:
+                return True
+            break
+        if nl - start >= _MINIFIED_MAX_LINE_LEN:
+            return True
+        start = nl + 1
+    return False
 
 
 def default_extract_content(entry: FileEntry) -> str:

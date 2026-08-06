@@ -16,6 +16,7 @@ htmlcov/
 coverage.xml
 coverage.json
 .tox/
+.benchmarks/
 
 # 工具缓存
 .ruff_cache/

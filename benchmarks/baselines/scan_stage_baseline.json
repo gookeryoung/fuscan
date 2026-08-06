@@ -1,0 +1,50 @@
+{
+  "timestamp": "2026-08-06T13:40:59",
+  "stages": {
+    "extract": {
+      "mean_ms": 4394.175
+    },
+    "cache_put_extract": {
+      "mean_ms": 1489.257
+    },
+    "read_bytes": {
+      "mean_ms": 1347.102
+    },
+    "cache_lookup_extract": {
+      "mean_ms": 316.272
+    },
+    "cache_lookup_hits": {
+      "mean_ms": 243.274
+    },
+    "hash": {
+      "mean_ms": 182.428
+    },
+    "match": {
+      "mean_ms": 153.276
+    },
+    "cache_write": {
+      "mean_ms": 152.119
+    },
+    "cache_lookup_batch": {
+      "mean_ms": 15.383
+    },
+    "walk": {
+      "mean_ms": 11.69
+    },
+    "cache_lookup": {
+      "mean_ms": 1.699
+    }
+  },
+  "meta": {
+    "rounds": 5,
+    "warmup": 1,
+    "scanned_files": 1000,
+    "mean_duration_ms": 2154.516,
+    "root": "C:\\Users\\zhou\\AppData\\Local\\Temp\\fuscan_baseline\\files",
+    "files": 1000,
+    "seed": 42,
+    "python": "3.10.20",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "machine": "AMD64"
+  }
+}

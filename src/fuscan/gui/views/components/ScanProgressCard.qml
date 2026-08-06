@@ -201,23 +201,31 @@ Rectangle {
             // walk：done=walkDone；running=phase=="walk"；否则 pending
             // filter：running=filterActive；done=walk 已完成且已进入 scan/archive/done；否则 pending
             // scan：running=phase 属 scan/archive；done=scanDone；否则 pending
-            readonly property var sc: workspaceController.activeScanController
+            //
+            // 注意：不缓存 workspaceController.activeScanController 到本地 property var——
+            // PySide2 5.15 将 @Property(ScanController) 返回的 QObject 绑定到 property var
+            // 时类型推断失败会识别为 null，且缓存后不随 scanProgressChanged/phaseChanged
+            // 等信号重算，导致节点求值读到 null 抛 TypeError。一律链式直读 activeScanController，
+            // 与 StatsPage 的 currentScanController 稳定模式一致。
             function walkNodeState() {
-                if (phaseTimeline.sc.walkDone) return "done"
-                if (phaseTimeline.sc.scanPhase === "walk") return "running"
+                var sc = workspaceController.activeScanController
+                if (sc.walkDone) return "done"
+                if (sc.scanPhase === "walk") return "running"
                 return "pending"
             }
             function filterNodeState() {
-                if (phaseTimeline.sc.filterActive) return "running"
+                var sc = workspaceController.activeScanController
+                if (sc.filterActive) return "running"
                 // walk 完成且已推进到 scan/archive/done，说明 filter 已走完
-                var p = phaseTimeline.sc.scanPhase
-                if (phaseTimeline.sc.walkDone && (p === "scan" || p === "archive" || p === "done"))
+                var p = sc.scanPhase
+                if (sc.walkDone && (p === "scan" || p === "archive" || p === "done"))
                     return "done"
                 return "pending"
             }
             function scanNodeState() {
-                if (phaseTimeline.sc.scanDone) return "done"
-                var p = phaseTimeline.sc.scanPhase
+                var sc = workspaceController.activeScanController
+                if (sc.scanDone) return "done"
+                var p = sc.scanPhase
                 if (p === "scan" || p === "archive") return "running"
                 return "pending"
             }
@@ -230,18 +238,20 @@ Rectangle {
                 accentColor: theme.colorPrimary
                 title: "收集文件"
                 showTopLine: false
-                progressIndeterminate: phaseTimeline.sc.walkIndeterminate
-                progressValue: phaseTimeline.sc.walkIndeterminate ? -1 : phaseTimeline.sc.walkProgress
+                progressIndeterminate: workspaceController.activeScanController.walkIndeterminate
+                progressValue: workspaceController.activeScanController.walkIndeterminate
+                    ? -1 : workspaceController.activeScanController.walkProgress
                 detail: {
                     if (phaseTimeline.walkNodeState() === "pending") return ""
-                    var t = phaseTimeline.sc.walkIndeterminate
+                    var sc = workspaceController.activeScanController
+                    var t = sc.walkIndeterminate
                         ? "统计中..."
-                        : (phaseTimeline.sc.walkClassified + " / " + phaseTimeline.sc.walkDiscovered
-                           + ((phaseTimeline.sc.walkSkipped > 0 || phaseTimeline.sc.walkUserSkipped > 0)
-                              ? " · 跳过 " + (phaseTimeline.sc.walkSkipped + phaseTimeline.sc.walkUserSkipped)
+                        : (sc.walkClassified + " / " + sc.walkDiscovered
+                           + ((sc.walkSkipped > 0 || sc.walkUserSkipped > 0)
+                              ? " · 跳过 " + (sc.walkSkipped + sc.walkUserSkipped)
                               : ""))
                     // 收集用时（后端 walkElapsedText 已格式化，空串表示未开始）
-                    var el = phaseTimeline.sc.walkElapsedText
+                    var el = sc.walkElapsedText
                     if (el)
                         t += " · 用时 " + el
                     return t
@@ -258,16 +268,17 @@ Rectangle {
                 progressIndeterminate: true
                 progressValue: -1
                 detail: {
-                    var removed = phaseTimeline.sc.filterRemovedEmpty
-                                  + phaseTimeline.sc.filterRemovedOversize
-                                  + phaseTimeline.sc.filterRemovedUnreadable
-                                  + phaseTimeline.sc.filterRemovedSymlink
+                    var sc = workspaceController.activeScanController
+                    var removed = sc.filterRemovedEmpty
+                                  + sc.filterRemovedOversize
+                                  + sc.filterRemovedUnreadable
+                                  + sc.filterRemovedSymlink
                     // 有剔除时展示明细，无剔除时仅展示总数（避免长串 0）
                     if (removed > 0) {
-                        return "剔除 " + removed + "（空 " + phaseTimeline.sc.filterRemovedEmpty
-                               + " · 超限 " + phaseTimeline.sc.filterRemovedOversize
-                               + " · 不可读 " + phaseTimeline.sc.filterRemovedUnreadable
-                               + " · 链接 " + phaseTimeline.sc.filterRemovedSymlink + "）"
+                        return "剔除 " + removed + "（空 " + sc.filterRemovedEmpty
+                               + " · 超限 " + sc.filterRemovedOversize
+                               + " · 不可读 " + sc.filterRemovedUnreadable
+                               + " · 链接 " + sc.filterRemovedSymlink + "）"
                     }
                     return phaseTimeline.filterNodeState() === "pending" ? "" : "剔除 0"
                 }
@@ -284,20 +295,23 @@ Rectangle {
                 // 可展开查看具体文件解析明细（GitHub Actions 风格）：
                 // 仅在解析阶段进行中或完成后可展开，pending 时无明细
                 expandable: phaseTimeline.scanNodeState() !== "pending"
-                progressIndeterminate: phaseTimeline.sc.progressIndeterminate && !phaseTimeline.sc.filterActive
-                progressValue: phaseTimeline.sc.progressIndeterminate ? -1 : phaseTimeline.sc.progress
+                progressIndeterminate: workspaceController.activeScanController.progressIndeterminate
+                    && !workspaceController.activeScanController.filterActive
+                progressValue: workspaceController.activeScanController.progressIndeterminate
+                    ? -1 : workspaceController.activeScanController.progress
                 detail: {
                     if (phaseTimeline.scanNodeState() === "pending") return ""
-                    if (phaseTimeline.sc.progressIndeterminate && !phaseTimeline.sc.scanDone) return "等待中..."
-                    var t = phaseTimeline.sc.progressScanned + " / " + phaseTimeline.sc.progressTotal
-                    if (phaseTimeline.sc.archiveEntryCount > 0)
-                        t += "（含压缩包 " + phaseTimeline.sc.archiveEntryCount + "）"
+                    var sc = workspaceController.activeScanController
+                    if (sc.progressIndeterminate && !sc.scanDone) return "等待中..."
+                    var t = sc.progressScanned + " / " + sc.progressTotal
+                    if (sc.archiveEntryCount > 0)
+                        t += "（含压缩包 " + sc.archiveEntryCount + "）"
                     // 平均速度（文件/s）便于横向性能比较
-                    var spd = phaseTimeline.sc.scanSpeed
+                    var spd = sc.scanSpeed
                     if (spd > 0)
                         t += " · 平均 " + spd.toFixed(0) + " 文件/s"
                     // 解析用时（后端 scanElapsedText 已格式化，空串表示未进入解析阶段）
-                    var el = phaseTimeline.sc.scanElapsedText
+                    var el = sc.scanElapsedText
                     if (el)
                         t += " · 用时 " + el
                     return t
@@ -311,7 +325,7 @@ Rectangle {
                         // 有明细时按内容高度撑开（上限 200），空态固定矮高。
                         // Loader 将本 Rectangle 拉伸至其宽度，故无需 Layout.fillWidth；
                         // implicitHeight 驱动 Loader 高度。
-                        implicitHeight: phaseTimeline.sc.recentParsedFiles.length === 0
+                        implicitHeight: workspaceController.activeScanController.recentParsedFiles.length === 0
                             ? 40
                             : Math.min(200, fileList.contentHeight + fileListHeader.height + 12)
                         radius: card.theme.radiusMd
@@ -331,7 +345,7 @@ Rectangle {
                                 spacing: 6
                                 Label {
                                     Layout.fillWidth: true
-                                    text: "最近解析（" + phaseTimeline.sc.recentParsedFiles.length + "）"
+                                    text: "最近解析（" + workspaceController.activeScanController.recentParsedFiles.length + "）"
                                     font.pixelSize: card.theme.fontSizeMin
                                     font.bold: true
                                     color: card.theme.isDark ? card.theme.colorTextSecondary : card.theme.colorTextSecondary
@@ -350,13 +364,13 @@ Rectangle {
                                 Layout.bottomMargin: 2
                                 height: 1
                                 color: card.theme.isDark ? card.theme.colorBorderDark : card.theme.colorBorder
-                                visible: phaseTimeline.sc.recentParsedFiles.length > 0
+                                visible: workspaceController.activeScanController.recentParsedFiles.length > 0
                             }
 
                             // 空态提示
                             Label {
                                 Layout.fillWidth: true
-                                visible: phaseTimeline.sc.recentParsedFiles.length === 0
+                                visible: workspaceController.activeScanController.recentParsedFiles.length === 0
                                 text: "暂无解析明细"
                                 horizontalAlignment: Text.AlignHCenter
                                 font.pixelSize: card.theme.fontSizeMin
@@ -368,10 +382,10 @@ Rectangle {
                                 id: fileList
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
-                                visible: phaseTimeline.sc.recentParsedFiles.length > 0
+                                visible: workspaceController.activeScanController.recentParsedFiles.length > 0
                                 clip: true
                                 boundsBehavior: Flickable.StopAtBounds
-                                model: phaseTimeline.sc.recentParsedFiles
+                                model: workspaceController.activeScanController.recentParsedFiles
                                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
                                 delegate: Rectangle {
                                     width: ListView.view ? ListView.view.width : 0

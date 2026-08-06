@@ -2625,7 +2625,7 @@ class TestIter143CoverageGaps:
         assert len(controller.recentParsedFiles) == _RECENT_FILES_MAX
 
     def test_recent_parsed_files_preformatted_fields(self, controller: ScanController) -> None:
-        """recentParsedFiles 每项含后端预格式化的 name/sizeText/elapsedText 字段。"""
+        """recentParsedFiles 每项含后端预格式化的 name/sizeText/elapsedText/engine 字段。"""
         controller._on_scan_progress(
             ProgressInfo(
                 phase="scan",
@@ -2635,6 +2635,7 @@ class TestIter143CoverageGaps:
                 current_file_size=2048,
                 current_file_ext="pdf",
                 current_file_elapsed_ms=1500.0,
+                current_file_engine="pdf_oxide",
             )
         )
         item = controller.recentParsedFiles[0]
@@ -2644,6 +2645,8 @@ class TestIter143CoverageGaps:
         assert item["size"] == 2048
         assert item["ext"] == "pdf"
         assert item["elapsedMs"] == 1500.0
+        # engine 透传 ProgressInfo.current_file_engine，供明细行标注
+        assert item["engine"] == "pdf_oxide"
         # sizeText 复用 format_size，elapsedText 复用 format_elapsed(elapsedMs/1000)
         assert item["sizeText"] == "2.0 KB"
         assert item["elapsedText"] == "1.5s"

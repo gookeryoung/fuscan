@@ -8,6 +8,7 @@
     <file alias="qml/components/ScanProgressCard.qml">views/components/ScanProgressCard.qml</file>
     <file alias="qml/components/WorkspaceCard.qml">views/components/WorkspaceCard.qml</file>
     <file alias="qml/ContentArea.qml">views/ContentArea.qml</file>
+    <file alias="qml/inline_preview.qml">views/inline_preview.qml</file>
     <file alias="qml/Main.qml">views/Main.qml</file>
     <file alias="qml/NavItem.qml">views/NavItem.qml</file>
     <file alias="qml/pages/AboutPage.qml">views/pages/AboutPage.qml</file>

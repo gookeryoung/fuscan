@@ -1017,8 +1017,8 @@ Item {
                                 Flow {
                                     Layout.fillWidth: true
                                     spacing: 6
-                                    visible: previewRulesDialog.previewData.ignoreDirs
-                                             && previewRulesDialog.previewData.ignoreDirs.length > 0
+                                    visible: !!(previewRulesDialog.previewData.ignoreDirs
+                                             && previewRulesDialog.previewData.ignoreDirs.length > 0)
                                     Repeater {
                                         model: previewRulesDialog.previewData.ignoreDirs || []
                                         delegate: Rectangle {
@@ -1054,8 +1054,8 @@ Item {
                                 }
                                 Label {
                                     Layout.fillWidth: true
-                                    visible: previewRulesDialog.previewData.whitelistEntries
-                                             && previewRulesDialog.previewData.whitelistEntries.length === 0
+                                    visible: !!(previewRulesDialog.previewData.whitelistEntries
+                                             && previewRulesDialog.previewData.whitelistEntries.length === 0)
                                     text: "（暂无白名单条目）"
                                     font.pixelSize: 11
                                     color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
@@ -1308,8 +1308,8 @@ Item {
                                 }
                                 Label {
                                     Layout.fillWidth: true
-                                    visible: previewRulesDialog.previewData.rules
-                                             && previewRulesDialog.previewData.rules.length === 0
+                                    visible: !!(previewRulesDialog.previewData.rules
+                                             && previewRulesDialog.previewData.rules.length === 0)
                                     text: "（暂无匹配规则，请检查规则文件是否启用或加载）"
                                     font.pixelSize: 11
                                     color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary

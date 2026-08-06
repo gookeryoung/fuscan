@@ -83,9 +83,11 @@ Item {
                             configController.setFontFamily(fontFamilyCombo.currentText)
                         }
                         // 监听 settingsPage.visible，首次可见时加载字体列表（仅一次）
+                        // 使用 Qt 5.15+ 新语法 function onFoo()，消除
+                        // "Implicitly defined onFoo properties in Connections are deprecated" 警告
                         Connections {
                             target: settingsPage
-                            onVisibleChanged: {
+                            function onVisibleChanged() {
                                 if (settingsPage.visible && !fontFamilyCombo._loaded) {
                                     fontFamilyCombo._loaded = true
                                     fontFamilyCombo.model = Qt.fontFamilies()

@@ -3,24 +3,24 @@
 将 :class:`ScanController` 中 ``_effective_*`` 系列方法抽离为模块级纯函数，
 便于独立测试与跨模块复用。
 
-覆盖语义：任务级覆盖值优先于 effective :class:`RuleSet`，未设置或类型不符时
-回退到规则集对应的 ``scan_params``/``ignore_dirs`` 字段，最终回退到内置默认值。
-``max_depth=0`` 归一化为 ``None``（无限深度）。
+覆盖语义分两类：
 
-- ``effective_scan_archives``/``effective_max_workers``/``effective_max_file_size``/
-  ``effective_max_depth``/``effective_ignore_dirs``：扫描参数从 ruleset 读取
-  （任务级覆盖优先，回退 ruleset.scan_params，再回退内置默认）。
-- ``effective_rules_paths``/``effective_use_builtin``/``effective_temp_rules_paths``/
-  ``effective_disabled_temp_rules_paths``：规则路径与启用开关仍从 :class:`Config`
-  读取（这些字段保留在 Config 中，未迁移到 RuleSet）。
+- 扫描参数（``scan_archives``/``max_workers``/``max_file_size``/``max_depth``/
+  ``ignore_dirs``）从 effective :class:`RuleSet` 读取，回退内置默认值。
+  ``max_depth=0`` 归一化为 ``None``（无限深度）。这些参数**不再**支持任务级覆盖
+  （任务级扫描设置功能已移除），统一由全局规则集决定。
+- 规则路径与启用开关（``rules_paths``/``use_builtin``/``temp_rules_paths``/
+  ``disabled_temp_rules_paths``）仍支持任务级覆盖：覆盖值优先于 :class:`Config`，
+  未设置或类型不符时回退到 Config 对应字段。这些是「配置规则」对话框依赖的
+  任务级临时规则机制。
 
 公共 API：
 
-- :func:`effective_scan_archives`：任务级覆盖优先的 scan_archives
-- :func:`effective_max_workers`：任务级覆盖优先的 max_workers
-- :func:`effective_max_file_size`：任务级覆盖优先的 max_file_size
-- :func:`effective_max_depth`：任务级覆盖优先的 max_depth
-- :func:`effective_ignore_dirs`：任务级覆盖优先的 ignore_dirs
+- :func:`effective_scan_archives`：从 ruleset 读取的 scan_archives
+- :func:`effective_max_workers`：从 ruleset 读取的 max_workers
+- :func:`effective_max_file_size`：从 ruleset 读取的 max_file_size
+- :func:`effective_max_depth`：从 ruleset 读取的 max_depth
+- :func:`effective_ignore_dirs`：从 ruleset 读取的 ignore_dirs
 - :func:`effective_rules_paths`：任务级覆盖优先的 rules_paths
 - :func:`effective_use_builtin`：任务级覆盖优先的 use_builtin
 - :func:`effective_temp_rules_paths`：任务级临时规则文件路径（叠加在全局规则之上）
@@ -48,74 +48,55 @@ __all__ = [
 ]
 
 
-def effective_scan_archives(overrides: dict[str, object], ruleset: RuleSet | None) -> bool:
-    """任务级覆盖优先的 scan_archives。
+def effective_scan_archives(ruleset: RuleSet | None) -> bool:
+    """从 effective ruleset 读取的 scan_archives。
 
-    :param overrides: 任务级覆盖字典
     :param ruleset: effective RuleSet（可为 None）
-    :return: 任务级覆盖为 bool 时直接返回；否则读 ruleset.scan_params.scan_archives；
-        None 回退到内置默认 True。
+    :return: ruleset.scan_params.scan_archives；None 回退到内置默认 True。
     """
-    value = overrides.get("scan_archives")
-    if isinstance(value, bool):
-        return value
     if ruleset is not None and ruleset.scan_params is not None and ruleset.scan_params.scan_archives is not None:
         return ruleset.scan_params.scan_archives
     return True  # builtin 默认
 
 
-def effective_max_workers(overrides: dict[str, object], ruleset: RuleSet | None) -> int:
-    """任务级覆盖优先的 max_workers。
+def effective_max_workers(ruleset: RuleSet | None) -> int:
+    """从 effective ruleset 读取的 max_workers。
 
-    :return: 任务级覆盖为 int 时直接返回；否则读 ruleset.scan_params.max_workers；
-        None 回退到内置默认 5。
+    :return: ruleset.scan_params.max_workers；None 回退到内置默认 5。
     """
-    value = overrides.get("max_workers")
-    if isinstance(value, int):
-        return value
     if ruleset is not None and ruleset.scan_params is not None and ruleset.scan_params.max_workers is not None:
         return ruleset.scan_params.max_workers
     return 5
 
 
-def effective_max_file_size(overrides: dict[str, object], ruleset: RuleSet | None) -> int:
-    """任务级覆盖优先的 max_file_size。
+def effective_max_file_size(ruleset: RuleSet | None) -> int:
+    """从 effective ruleset 读取的 max_file_size。
 
-    :return: 任务级覆盖为 int 时直接返回；否则读 ruleset.scan_params.max_file_size；
-        None 回退到 :data:`DEFAULT_MAX_FILE_SIZE`。
+    :return: ruleset.scan_params.max_file_size；None 回退到 :data:`DEFAULT_MAX_FILE_SIZE`。
     """
     from fuscan.config import DEFAULT_MAX_FILE_SIZE
 
-    value = overrides.get("max_file_size")
-    if isinstance(value, int):
-        return value
     if ruleset is not None and ruleset.scan_params is not None and ruleset.scan_params.max_file_size is not None:
         return ruleset.scan_params.max_file_size
     return DEFAULT_MAX_FILE_SIZE
 
 
-def effective_max_depth(overrides: dict[str, object], ruleset: RuleSet | None) -> int | None:
-    """任务级覆盖优先的 max_depth（None 表示不限深度）。
+def effective_max_depth(ruleset: RuleSet | None) -> int | None:
+    """从 effective ruleset 读取的 max_depth（None 表示不限深度）。
 
     ``0`` 归一化为 ``None``（无限深度），避免 walker 把 ``0`` 误解为「仅根目录直接子项」。
     """
-    value = overrides.get("max_depth")
-    if isinstance(value, int):
-        return value if value > 0 else None
     if ruleset is not None and ruleset.scan_params is not None and ruleset.scan_params.max_depth is not None:
-        return ruleset.scan_params.max_depth
+        depth = ruleset.scan_params.max_depth
+        return depth if depth > 0 else None
     return None
 
 
-def effective_ignore_dirs(overrides: dict[str, object], ruleset: RuleSet | None) -> tuple[str, ...]:
-    """任务级覆盖优先的 ignore_dirs。
+def effective_ignore_dirs(ruleset: RuleSet | None) -> tuple[str, ...]:
+    """从 effective ruleset 读取的 ignore_dirs。
 
-    :return: 任务级覆盖为 tuple 时直接返回；否则读 ruleset.ignore_dirs；
-        ruleset 为 None 时返回空 tuple。
+    :return: ruleset.ignore_dirs；ruleset 为 None 时返回空 tuple。
     """
-    value = overrides.get("ignore_dirs")
-    if isinstance(value, tuple):
-        return value
     if ruleset is not None:
         return ruleset.ignore_dirs
     return ()

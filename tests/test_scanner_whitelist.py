@@ -142,17 +142,19 @@ class TestScannerWhitelistFilter:
 
     def test_glob_pattern_filters_multiple_files(self, tmp_path: Path) -> None:
         """glob 模式过滤目录下所有匹配文件。"""
-        (tmp_path / "vendor").mkdir()
-        (tmp_path / "vendor" / "a.txt").write_text("x", encoding="utf-8")
-        (tmp_path / "vendor" / "b.txt").write_text("x", encoding="utf-8")
+        # 用 libs 而非 vendor：vendor 已进入 FileWalker 内置默认忽略目录，
+        # 会被目录级跳过而非走白名单过滤，会污染本用例对白名单 glob 的验证意图。
+        (tmp_path / "libs").mkdir()
+        (tmp_path / "libs" / "a.txt").write_text("x", encoding="utf-8")
+        (tmp_path / "libs" / "b.txt").write_text("x", encoding="utf-8")
         (tmp_path / "other.txt").write_text("x", encoding="utf-8")
         rs = _build_ruleset(_filename_rule("r", ".txt"))
-        # 白名单：vendor 目录下全部 *.txt
-        glob_pattern = str(tmp_path / "vendor" / "*.txt")
+        # 白名单：libs 目录下全部 *.txt
+        glob_pattern = str(tmp_path / "libs" / "*.txt")
         wl = Whitelist(entries=(WhitelistEntry(path_glob=glob_pattern, rule_name="*"),))
         scanner = Scanner(rs, whitelist=wl)
         report = scanner.scan(tmp_path)
-        # vendor 下 2 个被过滤，仅 other.txt 保留
+        # libs 下 2 个被过滤，仅 other.txt 保留
         assert report.stats.matched_files == 1
         assert len(report.hits) == 1
         assert report.hits[0].path.name == "other.txt"

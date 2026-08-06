@@ -35,7 +35,6 @@ Rectangle {
     signal viewResultsRequested(string workspaceId)
     signal viewStatsRequested(string workspaceId)
     signal editTargetRequested(string workspaceId)
-    signal taskSettingsRequested(string workspaceId)
     signal viewHistoryRequested(string workspaceId)
     signal exportCsvRequested(string workspaceId)
     signal exportJsonRequested(string workspaceId)
@@ -381,14 +380,6 @@ Rectangle {
                             onTriggered: card.exportPdfRequested(card.workspaceId)
                         }
                     }
-                }
-                // 任务级设置
-                IconButton {
-                    iconSource: "qrc:/icons/settings.svg"
-                    text: "设置"
-                    tooltip: "任务级设置（仅对该任务生效）"
-                    accent: "ghost"
-                    onClicked: card.taskSettingsRequested(card.workspaceId)
                 }
                 // 扫描历史
                 IconButton {

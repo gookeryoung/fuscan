@@ -717,47 +717,34 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def setTaskOverride(self, key: str, value: object) -> None:
         """设置任务级配置覆盖。
 
-        :param key: Config 字段名（``scan_archives``/``max_workers``/
-            ``max_file_size``/``max_depth``/``ignore_dirs``/``rules_paths``/
-            ``use_builtin``/``temp_rules_paths``/``disabled_temp_rules_paths``）
-        :param value: 覆盖值（类型须与 Config 字段一致）
+        :param key: 任务级临时规则字段名（``rules_paths``/``use_builtin``/
+            ``temp_rules_paths``/``disabled_temp_rules_paths``）
+        :param value: 覆盖值（类型须与字段一致）
 
-        覆盖值在 :meth:`_effective_scan_archives`/`_effective_max_workers` 等
-        方法中优先读取，未设置时回退到全局 :attr:`_config`。
-
-        影响 QML effective* 绑定的字段（``max_workers``/``max_file_size``/
-        ``max_depth``）变更时 emit :attr:`effectiveConfigChanged`，让
-        ``effectiveMaxWorkers``/``effectiveMaxFileSizeMB``/``effectiveMaxDepth``
-        绑定重算。
-
-        ``rules_paths``/``use_builtin``/``temp_rules_paths``/
+        任务级扫描设置功能已移除，扫描参数统一由全局规则集决定，此处仅承载
+        任务级临时规则。``rules_paths``/``use_builtin``/``temp_rules_paths``/
         ``disabled_temp_rules_paths`` 变更时重算 effective ruleset 缓存并
         emit ``canStartScanChanged``/``rulesCountChanged``，让 QML 侧
         ``canStartScan``/``rulesCount`` 绑定反映任务级规则集。
         """
         self._task_overrides[key] = value
-        if key in ("max_workers", "max_file_size", "max_depth", "scan_archives", "ignore_dirs"):
-            self.effectiveConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
-        elif key in ("rules_paths", "use_builtin", "temp_rules_paths", "disabled_temp_rules_paths"):
+        if key in ("rules_paths", "use_builtin", "temp_rules_paths", "disabled_temp_rules_paths"):
             self._ruleset = self._compute_effective_ruleset()
             self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
             self.rulesCountChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def clearTaskOverride(self, key: str) -> None:
-        """清除任务级配置覆盖的指定字段（回退到规则集/全局值）。
+        """清除任务级配置覆盖的指定字段（回退到全局值）。
 
-        :param key: Config 字段名（如 ``scan_archives``/``max_workers``）
+        :param key: 任务级临时规则字段名（``rules_paths``/``use_builtin``/
+            ``temp_rules_paths``/``disabled_temp_rules_paths``）
 
-        已迁移字段（scan_archives/max_workers 等）清除后由 ``_effective_*``
-        方法回退到 :attr:`_ruleset` 读取；``rules_paths``/``use_builtin`` 等
-        保留字段清除后回退到 :attr:`_config`。
+        清除后 :meth:`_compute_effective_ruleset` 回退到全局规则集/临时规则空集。
         """
         if key not in self._task_overrides:
             return
         self._task_overrides.pop(key, None)
-        if key in ("max_workers", "max_file_size", "max_depth", "scan_archives", "ignore_dirs"):
-            self.effectiveConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
-        elif key in ("rules_paths", "use_builtin", "temp_rules_paths", "disabled_temp_rules_paths"):
+        if key in ("rules_paths", "use_builtin", "temp_rules_paths", "disabled_temp_rules_paths"):
             self._ruleset = self._compute_effective_ruleset()
             self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
             self.rulesCountChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -784,28 +771,28 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.rulesCountChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def _effective_scan_archives(self) -> bool:
-        """任务级覆盖优先的 scan_archives。"""
-        return effective_scan_archives(self._task_overrides, self._ruleset)
+        """从 effective ruleset 读取的 scan_archives。"""
+        return effective_scan_archives(self._ruleset)
 
     def _effective_max_workers(self) -> int:
-        """任务级覆盖优先的 max_workers。"""
-        return effective_max_workers(self._task_overrides, self._ruleset)
+        """从 effective ruleset 读取的 max_workers。"""
+        return effective_max_workers(self._ruleset)
 
     def _effective_max_file_size(self) -> int:
-        """任务级覆盖优先的 max_file_size。"""
-        return effective_max_file_size(self._task_overrides, self._ruleset)
+        """从 effective ruleset 读取的 max_file_size。"""
+        return effective_max_file_size(self._ruleset)
 
     def _effective_max_depth(self) -> int | None:
-        """任务级覆盖优先的 max_depth（None 表示不限深度）。
+        """从 effective ruleset 读取的 max_depth（None 表示不限深度）。
 
         ``0`` 归一化为 ``None``（无限深度），避免 walker 把 ``0`` 误解为
         「仅根目录直接子项」。
         """
-        return effective_max_depth(self._task_overrides, self._ruleset)
+        return effective_max_depth(self._ruleset)
 
     def _effective_ignore_dirs(self) -> tuple[str, ...]:
-        """任务级覆盖优先的 ignore_dirs。"""
-        return effective_ignore_dirs(self._task_overrides, self._ruleset)
+        """从 effective ruleset 读取的 ignore_dirs。"""
+        return effective_ignore_dirs(self._ruleset)
 
     def _effective_scan_extensions(self) -> tuple[str, ...] | None:
         """effective ruleset 的 scan_extensions（None=全选默认）。

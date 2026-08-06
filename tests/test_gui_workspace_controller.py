@@ -1759,33 +1759,25 @@ class TestTaskOverrides:
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
         assert controller.taskOverridesJson(ws_id) == "{}"
 
-    def test_set_task_override_scan_archives(self, controller: WorkspaceController) -> None:
+    def test_set_task_override_use_builtin_updates_field(self, controller: WorkspaceController) -> None:
         """setTaskOverride 应更新 task_overrides 字段。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        controller.setTaskOverride(ws_id, "scan_archives", "false")
+        controller.setTaskOverride(ws_id, "use_builtin", "false")
 
         overrides = json.loads(controller.taskOverridesJson(ws_id))
-        assert overrides == {"scan_archives": False}
+        assert overrides == {"use_builtin": False}
 
-    def test_set_task_override_max_workers(self, controller: WorkspaceController) -> None:
-        """setTaskOverride 应支持 int 字段。"""
+    def test_set_task_override_temp_rules_paths_list_to_tuple(self, controller: WorkspaceController) -> None:
+        """temp_rules_paths 列表应在内部转为 tuple。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        controller.setTaskOverride(ws_id, "max_workers", "8")
-
-        overrides = json.loads(controller.taskOverridesJson(ws_id))
-        assert overrides == {"max_workers": 8}
-
-    def test_set_task_override_ignore_dirs_list_to_tuple(self, controller: WorkspaceController) -> None:
-        """ignore_dirs 列表应在内部转为 tuple。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        controller.setTaskOverride(ws_id, "ignore_dirs", '[".git", "node_modules"]')
+        controller.setTaskOverride(ws_id, "temp_rules_paths", '["/tmp/a.yaml", "/tmp/b.yaml"]')
 
         overrides = json.loads(controller.taskOverridesJson(ws_id))
         # 序列化时 tuple 转为 list
-        assert overrides == {"ignore_dirs": [".git", "node_modules"]}
+        assert overrides == {"temp_rules_paths": ["/tmp/a.yaml", "/tmp/b.yaml"]}
         # 内部存储为 tuple（通过 ScanController 同步验证）
         sc = controller._ensure_scan_controller(ws_id)  # type: ignore[attr-defined]
-        assert sc._task_overrides["ignore_dirs"] == (".git", "node_modules")  # type: ignore[attr-defined]
+        assert sc._task_overrides["temp_rules_paths"] == ("/tmp/a.yaml", "/tmp/b.yaml")  # type: ignore[attr-defined]
 
     def test_set_task_override_rules_paths_list_to_tuple(self, controller: WorkspaceController) -> None:
         """rules_paths 列表应在内部转为 tuple，并同步 WorkspaceItem 字段。"""
@@ -1848,15 +1840,15 @@ class TestTaskOverrides:
     def test_set_task_override_invalid_json_noop(self, controller: WorkspaceController) -> None:
         """无效 JSON 应被拒绝。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        controller.setTaskOverride(ws_id, "scan_archives", "not a json")
+        controller.setTaskOverride(ws_id, "use_builtin", "not a json")
 
         assert controller.taskOverridesJson(ws_id) == "{}"
 
     def test_set_task_override_wrong_type_noop(self, controller: WorkspaceController) -> None:
         """类型不符应被拒绝。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        # scan_archives 应为 bool，传字符串
-        controller.setTaskOverride(ws_id, "scan_archives", '"not_bool"')
+        # use_builtin 应为 bool，传字符串
+        controller.setTaskOverride(ws_id, "use_builtin", '"not_bool"')
 
         assert controller.taskOverridesJson(ws_id) == "{}"
 
@@ -1866,24 +1858,24 @@ class TestTaskOverrides:
     ) -> None:
         """setTaskOverride 应同步到对应 ScanController。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        controller.setTaskOverride(ws_id, "max_workers", "12")
+        controller.setTaskOverride(ws_id, "use_builtin", "false")
 
         sc = controller._ensure_scan_controller(ws_id)  # type: ignore[attr-defined]
-        assert sc._task_overrides.get("max_workers") == 12  # type: ignore[attr-defined]
-        # _effective_max_workers 应返回覆盖值
-        assert sc._effective_max_workers() == 12  # type: ignore[attr-defined]
+        assert sc._task_overrides.get("use_builtin") is False  # type: ignore[attr-defined]
+        # _effective_use_builtin 应返回覆盖值
+        assert sc._effective_use_builtin() is False  # type: ignore[attr-defined]
 
     def test_task_overrides_persisted(self, controller: WorkspaceController, config_dir: Path) -> None:
         """任务级覆盖应持久化到 workspaces.json。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        controller.setTaskOverride(ws_id, "scan_archives", "false")
-        controller.setTaskOverride(ws_id, "max_workers", "8")
+        controller.setTaskOverride(ws_id, "use_builtin", "false")
+        controller.setTaskOverride(ws_id, "rules_paths", '["/tmp/x.yaml"]')
 
         persist_file = config_dir / "workspaces.json"
         data = json.loads(persist_file.read_text(encoding="utf-8"))
         ws_data = next(w for w in data["workspaces"] if w["id"] == ws_id)
-        assert ws_data["task_overrides"]["scan_archives"] is False
-        assert ws_data["task_overrides"]["max_workers"] == 8
+        assert ws_data["task_overrides"]["use_builtin"] is False
+        assert ws_data["task_overrides"]["rules_paths"] == ["/tmp/x.yaml"]
 
     def test_task_overrides_restored_on_restart(
         self,
@@ -1896,8 +1888,8 @@ class TestTaskOverrides:
         rules1 = RulesController(cfg1)
         ctrl1 = WorkspaceController(cfg1, rules1)
         ws_id = ctrl1.addWorkspace("t", "folder", "/tmp", "[]", True)
-        ctrl1.setTaskOverride(ws_id, "scan_archives", "false")
-        ctrl1.setTaskOverride(ws_id, "max_workers", "6")
+        ctrl1.setTaskOverride(ws_id, "use_builtin", "false")
+        ctrl1.setTaskOverride(ws_id, "rules_paths", '["/tmp/y.yaml"]')
         ctrl1.cleanup()
         cfg1.save()
 
@@ -1907,44 +1899,29 @@ class TestTaskOverrides:
         ctrl2 = WorkspaceController(cfg2, rules2)
 
         overrides = json.loads(ctrl2.taskOverridesJson(ws_id))
-        assert overrides.get("scan_archives") is False
-        assert overrides.get("max_workers") == 6
+        assert overrides.get("use_builtin") is False
+        assert overrides.get("rules_paths") == ["/tmp/y.yaml"]
         # ScanController 也应同步
         sc = ctrl2._ensure_scan_controller(ws_id)  # type: ignore[attr-defined]
-        assert sc._effective_scan_archives() is False  # type: ignore[attr-defined]
-        assert sc._effective_max_workers() == 6  # type: ignore[attr-defined]
+        assert sc._effective_use_builtin() is False  # type: ignore[attr-defined]
+        assert sc._effective_rules_paths() == ("/tmp/y.yaml",)  # type: ignore[attr-defined]
         ctrl2.cleanup()
 
 
 class TestScanControllerTaskOverrides:
-    """iter-104 ScanController 任务级覆盖 _effective_* 方法测试。"""
+    """ScanController effective 扫描参数从规则集读取（不再支持任务级覆盖）。"""
 
-    def test_effective_uses_global_when_no_override(
+    def test_effective_reads_ruleset_defaults(
         self,
         controller: WorkspaceController,
     ) -> None:
-        """无覆盖时应使用全局 Config 值。"""
+        """扫描参数应从规则集读取（builtin 默认 scan_archives=True, max_workers=5）。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
 
-        # 默认无覆盖，应等于规则集值（builtin 默认 scan_archives=True, max_workers=5）
         assert sc._effective_scan_archives() is True
         assert sc._effective_max_workers() == 5
-
-    def test_effective_uses_override_when_set(
-        self,
-        controller: WorkspaceController,
-    ) -> None:
-        """有覆盖时应使用覆盖值。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        controller.setCurrentWorkspaceId(ws_id)
-        sc = controller.currentScanController
-
-        sc.setTaskOverride("scan_archives", False)
-        sc.setTaskOverride("max_workers", 7)
-        assert sc._effective_scan_archives() is False  # type: ignore[attr-defined]
-        assert sc._effective_max_workers() == 7  # type: ignore[attr-defined]
 
     def test_effective_ignore_dirs_returns_tuple(
         self,
@@ -1955,106 +1932,28 @@ class TestScanControllerTaskOverrides:
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
 
-        sc.setTaskOverride("ignore_dirs", (".git", "node_modules"))
         result = sc._effective_ignore_dirs()  # type: ignore[attr-defined]
         assert isinstance(result, tuple)
-        assert result == (".git", "node_modules")
 
-    def test_effective_max_file_size(self, controller: WorkspaceController) -> None:
-        """_effective_max_file_size 应优先用覆盖值。"""
+    def test_effective_max_file_size_reads_ruleset(self, controller: WorkspaceController) -> None:
+        """_effective_max_file_size 应从规则集读取（builtin 默认）。"""
+        from fuscan.config import DEFAULT_MAX_FILE_SIZE
+
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
 
-        sc.setTaskOverride("max_file_size", 100 * 1024 * 1024)
-        assert sc._effective_max_file_size() == 100 * 1024 * 1024  # type: ignore[attr-defined]
+        assert sc._effective_max_file_size() == DEFAULT_MAX_FILE_SIZE  # type: ignore[attr-defined]
 
-    # ---------- iter-105 修复补充测试 ----------
-
-    def test_effective_max_depth_zero_means_unlimited(
+    def test_effective_max_depth_defaults_none(
         self,
         controller: WorkspaceController,
     ) -> None:
-        """T1：max_depth=0 任务级覆盖应归一化为 None（与全局 setMaxDepth 一致）。
-
-        回归 B1 bug：未修复前 0 透传给 walker，被解释为「仅根目录直接子项」。
-        """
+        """无规则集 max_depth 配置时 _effective_max_depth 应返回 None（无限深度）。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
 
-        sc.setTaskOverride("max_depth", 0)
-        # 修复后 0 应归一化为 None（无限深度）
-        assert sc._effective_max_depth() is None  # type: ignore[attr-defined]
-
-    def test_effective_max_depth_positive_passthrough(
-        self,
-        controller: WorkspaceController,
-    ) -> None:
-        """正数 max_depth 应原样透传。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        controller.setCurrentWorkspaceId(ws_id)
-        sc = controller.currentScanController
-
-        sc.setTaskOverride("max_depth", 5)
-        assert sc._effective_max_depth() == 5  # type: ignore[attr-defined]
-
-
-class TestTaskOverrideRangeValidation:
-    """iter-105 M2 修复：任务级覆盖范围钳制测试。"""
-
-    def test_max_workers_out_of_range_rejected(self, controller: WorkspaceController) -> None:
-        """T2：max_workers 越界值（9999 / -1 / 0）应被拒绝，task_overrides 仍为空。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-
-        for bad_value in ("9999", "-1", "0", "17"):
-            controller.setTaskOverride(ws_id, "max_workers", bad_value)
-
-        overrides = json.loads(controller.taskOverridesJson(ws_id))
-        assert "max_workers" not in overrides
-
-    def test_max_workers_in_range_accepted(self, controller: WorkspaceController) -> None:
-        """max_workers 在 1-16 范围内应被接受。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-
-        controller.setTaskOverride(ws_id, "max_workers", "8")
-        overrides = json.loads(controller.taskOverridesJson(ws_id))
-        assert overrides["max_workers"] == 8
-
-    def test_max_file_size_out_of_range_rejected(self, controller: WorkspaceController) -> None:
-        """T2：max_file_size 越界值（0 / 负数 / 超 500MB）应被拒绝。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-
-        # 500MB = 500 * 1024 * 1024 = 524288000 字节，超过此值应拒绝
-        controller.setTaskOverride(ws_id, "max_file_size", str(524288001))
-        controller.setTaskOverride(ws_id, "max_file_size", "0")
-        controller.setTaskOverride(ws_id, "max_file_size", "-1")
-
-        overrides = json.loads(controller.taskOverridesJson(ws_id))
-        assert "max_file_size" not in overrides
-
-    def test_max_file_size_in_range_accepted(self, controller: WorkspaceController) -> None:
-        """max_file_size 在 1B - 500MB 范围内应被接受。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-
-        controller.setTaskOverride(ws_id, "max_file_size", str(100 * 1024 * 1024))
-        overrides = json.loads(controller.taskOverridesJson(ws_id))
-        assert overrides["max_file_size"] == 100 * 1024 * 1024
-
-    def test_max_depth_zero_accepted_but_normalized(
-        self,
-        controller: WorkspaceController,
-    ) -> None:
-        """max_depth=0 应被接受存储（在 _effective_max_depth 中归一化为 None）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        controller.setCurrentWorkspaceId(ws_id)
-        sc = controller.currentScanController
-
-        controller.setTaskOverride(ws_id, "max_depth", "0")
-        # task_overrides 中存储 0
-        overrides = json.loads(controller.taskOverridesJson(ws_id))
-        assert overrides["max_depth"] == 0
-        # _effective_max_depth 归一化为 None
         assert sc._effective_max_depth() is None  # type: ignore[attr-defined]
 
 
@@ -2092,13 +1991,13 @@ class TestTaskOverridesGlobalValueBehavior:
         这样全局值后续变化时，任务级保持用户当时的选择。
         """
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        # scan_archives 已迁移到 RuleSet，builtin 默认值为 True
-        global_value = True
+        # use_builtin 全局默认值为 True
+        global_value = controller._config_controller.config.use_builtin  # type: ignore[attr-defined]
 
-        controller.setTaskOverride(ws_id, "scan_archives", str(global_value).lower())
+        controller.setTaskOverride(ws_id, "use_builtin", str(global_value).lower())
 
         overrides = json.loads(controller.taskOverridesJson(ws_id))
-        assert overrides.get("scan_archives") == global_value
+        assert overrides.get("use_builtin") == global_value
 
 
 class TestClearTaskOverride:

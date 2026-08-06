@@ -1037,16 +1037,16 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 规则文件列表（与 rulesFileModel 一致，但仅展示当前 wsId 的临时规则）
         rule_files = self._rule_files_for_preview(overrides)
 
-        # 扫描参数（任务级覆盖优先，回退 ruleset.scan_params，再回退内置默认）
+        # 扫描参数（从 effective ruleset 读取，回退内置默认；不再支持任务级覆盖）
         if ruleset is None:
             preview: dict[str, object] = {
-                "scanArchives": effective_scan_archives(overrides, None),
-                "maxWorkers": effective_max_workers(overrides, None),
-                "maxDepth": effective_max_depth(overrides, None) or 0,
-                "maxFileSizeMB": effective_max_file_size(overrides, None) // (1024 * 1024),
+                "scanArchives": effective_scan_archives(None),
+                "maxWorkers": effective_max_workers(None),
+                "maxDepth": effective_max_depth(None) or 0,
+                "maxFileSizeMB": effective_max_file_size(None) // (1024 * 1024),
                 "cacheEnabled": True,
                 "perfLogEnabled": False,
-                "ignoreDirs": list(effective_ignore_dirs(overrides, None)),
+                "ignoreDirs": list(effective_ignore_dirs(None)),
                 "scanExtensions": list[str](),
                 "whitelistEntries": list[dict[str, object]](),
                 "rules": list[dict[str, object]](),
@@ -1056,13 +1056,13 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         else:
             sp = ruleset.scan_params
             preview = {
-                "scanArchives": effective_scan_archives(overrides, ruleset),
-                "maxWorkers": effective_max_workers(overrides, ruleset),
-                "maxDepth": effective_max_depth(overrides, ruleset) or 0,
-                "maxFileSizeMB": effective_max_file_size(overrides, ruleset) // (1024 * 1024),
+                "scanArchives": effective_scan_archives(ruleset),
+                "maxWorkers": effective_max_workers(ruleset),
+                "maxDepth": effective_max_depth(ruleset) or 0,
+                "maxFileSizeMB": effective_max_file_size(ruleset) // (1024 * 1024),
                 "cacheEnabled": sp.cache_enabled if sp is not None and sp.cache_enabled is not None else True,
                 "perfLogEnabled": sp.perf_log_enabled if sp is not None and sp.perf_log_enabled is not None else False,
-                "ignoreDirs": list(effective_ignore_dirs(overrides, ruleset)),
+                "ignoreDirs": list(effective_ignore_dirs(ruleset)),
                 "scanExtensions": list(ruleset.scan_extensions) if ruleset.scan_extensions is not None else [],
                 "whitelistEntries": [
                     {

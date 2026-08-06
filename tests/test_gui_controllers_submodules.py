@@ -208,72 +208,53 @@ class TestBuildScanRoots:
 class TestTaskOverrides:
     """测试任务级覆盖纯函数。"""
 
-    def test_effective_scan_archives_uses_override(self) -> None:
-        """覆盖值类型正确时优先使用覆盖值。"""
-        overrides: dict[str, object] = {"scan_archives": False}
-        assert effective_scan_archives(overrides, None) is False
-
-    def test_effective_scan_archives_falls_back_to_ruleset(self) -> None:
-        """无覆盖或类型不符时回退到规则集 scan_params。"""
+    def test_effective_scan_archives_reads_ruleset(self) -> None:
+        """从规则集 scan_params 读取 scan_archives。"""
         ruleset = _make_ruleset_with_scan_params(scan_archives=True)
-        assert effective_scan_archives({}, ruleset) is True
-        # 类型不符（int 而非 bool）也应回退
-        assert effective_scan_archives({"scan_archives": 1}, ruleset) is True
+        assert effective_scan_archives(ruleset) is True
 
     def test_effective_scan_archives_defaults_true(self) -> None:
         """ruleset 为 None 时回退到内置默认 True。"""
-        assert effective_scan_archives({}, None) is True
+        assert effective_scan_archives(None) is True
 
-    def test_effective_max_workers_uses_override(self) -> None:
-        """max_workers 覆盖值优先。"""
-        overrides: dict[str, object] = {"max_workers": 16}
-        assert effective_max_workers(overrides, None) == 16
-
-    def test_effective_max_workers_falls_back(self) -> None:
-        """max_workers 无覆盖回退到规则集 scan_params。"""
+    def test_effective_max_workers_reads_ruleset(self) -> None:
+        """max_workers 从规则集 scan_params 读取。"""
         ruleset = _make_ruleset_with_scan_params(max_workers=5)
-        assert effective_max_workers({}, ruleset) == 5
+        assert effective_max_workers(ruleset) == 5
 
     def test_effective_max_workers_defaults_5(self) -> None:
         """ruleset 为 None 时回退到内置默认 5。"""
-        assert effective_max_workers({}, None) == 5
+        assert effective_max_workers(None) == 5
 
-    def test_effective_max_file_size_uses_override(self) -> None:
-        """max_file_size 覆盖值优先。"""
-        overrides: dict[str, object] = {"max_file_size": 1024}
-        assert effective_max_file_size(overrides, None) == 1024
+    def test_effective_max_file_size_reads_ruleset(self) -> None:
+        """max_file_size 从规则集 scan_params 读取。"""
+        ruleset = _make_ruleset_with_scan_params(max_file_size=1024)
+        assert effective_max_file_size(ruleset) == 1024
 
-    def test_effective_max_depth_positive_override(self) -> None:
-        """正数 max_depth 覆盖值原样返回。"""
-        overrides: dict[str, object] = {"max_depth": 10}
-        assert effective_max_depth(overrides, None) == 10
+    def test_effective_max_depth_positive_reads_ruleset(self) -> None:
+        """正数 max_depth 从规则集读取并原样返回。"""
+        ruleset = _make_ruleset_with_scan_params(max_depth=10)
+        assert effective_max_depth(ruleset) == 10
 
     def test_effective_max_depth_zero_normalized_to_none(self) -> None:
-        """max_depth=0 归一化为 None（无限深度）。"""
-        overrides: dict[str, object] = {"max_depth": 0}
-        assert effective_max_depth(overrides, None) is None
+        """规则集 max_depth=0 归一化为 None（无限深度）。"""
+        ruleset = _make_ruleset_with_scan_params(max_depth=0)
+        assert effective_max_depth(ruleset) is None
 
-    def test_effective_max_depth_falls_back(self) -> None:
-        """max_depth 无覆盖回退到规则集 scan_params。"""
-        ruleset = _make_ruleset_with_scan_params(max_depth=20)
-        assert effective_max_depth({}, ruleset) == 20
+    def test_effective_max_depth_defaults_none(self) -> None:
+        """ruleset 为 None 时返回 None（无限深度）。"""
+        assert effective_max_depth(None) is None
 
-    def test_effective_ignore_dirs_tuple_override(self) -> None:
-        """ignore_dirs tuple 覆盖值优先。"""
-        custom = (".git", "node_modules")
-        overrides: dict[str, object] = {"ignore_dirs": custom}
-        assert effective_ignore_dirs(overrides, None) == custom
-
-    def test_effective_ignore_dirs_falls_back(self) -> None:
-        """ignore_dirs 无覆盖回退到规则集 ignore_dirs。"""
+    def test_effective_ignore_dirs_reads_ruleset(self) -> None:
+        """ignore_dirs 从规则集读取。"""
         ruleset = _make_ruleset_with_scan_params(ignore_dirs=(".git", "node_modules"))
-        result = effective_ignore_dirs({}, ruleset)
+        result = effective_ignore_dirs(ruleset)
         assert result == (".git", "node_modules")
         assert isinstance(result, tuple)
 
     def test_effective_ignore_dirs_defaults_empty(self) -> None:
         """ruleset 为 None 时返回空 tuple。"""
-        assert effective_ignore_dirs({}, None) == ()
+        assert effective_ignore_dirs(None) == ()
 
     def test_effective_rules_paths_tuple_override(self) -> None:
         """rules_paths tuple 覆盖值优先（不过滤不存在文件）。"""

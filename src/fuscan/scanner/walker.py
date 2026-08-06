@@ -17,6 +17,69 @@ __all__ = ["FileWalker", "list_drives"]
 
 logger = logging.getLogger(__name__)
 
+# 内置强制跳过的目录名（小写，按目录名匹配任意层级，大小写不敏感）。
+# 这些是版本控制 / 语言工具链缓存 / 依赖目录 / 构建输出 / IDE 配置 / fuscan 缓存
+# 等「几乎不应被扫描」的开发目录，无论是否加载 builtin.yaml 规则都始终跳过，
+# 避免 --no-builtin 或用户规则未声明 ignore_dirs 时深入解析 .venv/node_modules 等。
+# 与 config.IGNORE_DIR_CATEGORIES / builtin.yaml 保持一致，但刻意不含「大型软件」
+# 与「Windows 系统目录」等场景性大目录——那些仍由 builtin.yaml 数据层控制、可配置，
+# 以免用户显式扫描系统盘时被硬性剔除。
+_DEFAULT_IGNORE_DIRS: frozenset[str] = frozenset(
+    {
+        # 版本控制
+        ".git",
+        ".svn",
+        ".hg",
+        # Python
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".venv",
+        "venv",
+        "env",
+        ".tox",
+        ".eggs",
+        # Node / JavaScript
+        "node_modules",
+        ".sass-cache",
+        ".npm",
+        ".yarn",
+        ".pnpm-store",
+        ".next",
+        ".nuxt",
+        ".turbo",
+        ".parcel-cache",
+        ".svelte-kit",
+        # Rust / Cargo
+        "target",
+        ".cargo",
+        ".rustup",
+        # Java
+        ".gradle",
+        ".m2",
+        ".ivy",
+        # .NET / Visual Studio
+        ".vs",
+        ".nuget",
+        # PHP
+        "vendor",
+        # Flutter / Dart
+        ".dart_tool",
+        # 构建输出
+        "dist",
+        "build",
+        "out",
+        # IDE
+        ".idea",
+        ".vscode",
+        # 缓存
+        ".cache",
+        # fuscan 缓存
+        ".fuscan-cache",
+    }
+)
+
 
 def list_drives(include_network: bool = False) -> list[Path]:
     """枚举系统可用盘符/根路径。
@@ -119,8 +182,15 @@ class FileWalker:
         follow_symlinks: bool = False,
         on_skip_dir: Callable[[str], None] | None = None,
         scan_extensions: frozenset[str] | None = None,
+        use_default_ignore_dirs: bool = True,
     ) -> None:
-        self._ignore_dirs: set[str] = {d.lower() for d in ignore_dirs}
+        # 传入 ignore_dirs 与内置默认集合取并集：无论上游是否加载 builtin.yaml，
+        # .venv/node_modules 等开发目录都始终跳过；use_default_ignore_dirs=False
+        # 仅供测试关闭内置兜底，验证纯传入项行为。
+        merged = {d.lower() for d in ignore_dirs}
+        if use_default_ignore_dirs:
+            merged |= _DEFAULT_IGNORE_DIRS
+        self._ignore_dirs: set[str] = merged
         self._ignore_paths: list[str] = [p.lower() for p in ignore_paths]
         self._max_depth = max_depth
         self._follow_symlinks = follow_symlinks

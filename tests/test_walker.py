@@ -27,7 +27,8 @@ def _create_tree(root: Path) -> None:
 class TestFileWalker:
     def test_walk_all_files(self, tmp_path: Path) -> None:
         _create_tree(tmp_path)
-        walker = FileWalker()
+        # 关闭内置默认兜底以验证纯遍历行为（否则 .git/node_modules 会被默认跳过）
+        walker = FileWalker(use_default_ignore_dirs=False)
         entries = list(walker.walk(tmp_path))
         names = {e.name for e in entries}
         assert names == {"config", "lib.js", "app.py", "app.pyc", "README.md", "doc.TXT"}
@@ -35,7 +36,7 @@ class TestFileWalker:
     def test_walk_scan_extensions_filter(self, tmp_path: Path) -> None:
         """scan_extensions 早期过滤：仅 yield 匹配文件，跳过计数器累加。"""
         _create_tree(tmp_path)
-        walker = FileWalker(scan_extensions=frozenset({"py", "txt"}))
+        walker = FileWalker(scan_extensions=frozenset({"py", "txt"}), use_default_ignore_dirs=False)
         entries = list(walker.walk(tmp_path))
         names = {e.name for e in entries}
         # 仅 py 和 txt（大小写不敏感）文件被 yield
@@ -45,7 +46,7 @@ class TestFileWalker:
 
     def test_walk_ignore_dirs(self, tmp_path: Path) -> None:
         _create_tree(tmp_path)
-        walker = FileWalker(ignore_dirs=(".git", "node_modules"))
+        walker = FileWalker(ignore_dirs=(".git", "node_modules"), use_default_ignore_dirs=False)
         entries = list(walker.walk(tmp_path))
         names = {e.name for e in entries}
         assert "config" not in names
@@ -54,7 +55,7 @@ class TestFileWalker:
 
     def test_walk_max_depth(self, tmp_path: Path) -> None:
         _create_tree(tmp_path)
-        walker = FileWalker(max_depth=0)
+        walker = FileWalker(max_depth=0, use_default_ignore_dirs=False)
         entries = list(walker.walk(tmp_path))
         names = {e.name for e in entries}
         # depth=0 仅根目录下的文件
@@ -62,7 +63,7 @@ class TestFileWalker:
 
     def test_walk_max_depth_1(self, tmp_path: Path) -> None:
         _create_tree(tmp_path)
-        walker = FileWalker(max_depth=1)
+        walker = FileWalker(max_depth=1, use_default_ignore_dirs=False)
         entries = list(walker.walk(tmp_path))
         names = {e.name for e in entries}
         assert "app.py" in names  # src/app.py 在 depth 1
@@ -121,6 +122,78 @@ class TestFileWalker:
         entries = list(walker.walk(tmp_path))
         names = {e.name for e in entries}
         assert "config" not in names  # .git 被跳过
+
+
+class TestDefaultIgnoreDirs:
+    """内置默认忽略目录兜底测试：无论是否传入 ignore_dirs 都跳过 .venv 等开发目录。"""
+
+    def test_venv_skipped_without_explicit_ignore(self, tmp_path: Path) -> None:
+        """不传 ignore_dirs 时 .venv 仍被内置兜底跳过。"""
+        (tmp_path / ".venv").mkdir()
+        (tmp_path / ".venv" / "pyvenv.cfg").write_text("", encoding="utf-8")
+        (tmp_path / "main.py").write_text("", encoding="utf-8")
+        walker = FileWalker()
+        entries = list(walker.walk(tmp_path))
+        names = {e.name for e in entries}
+        assert "pyvenv.cfg" not in names
+        assert "main.py" in names
+
+    def test_common_dev_dirs_skipped_by_default(self, tmp_path: Path) -> None:
+        """常见开发目录（node_modules/__pycache__/.git 等）默认全部跳过。"""
+        for dir_name in ("node_modules", "__pycache__", ".git", "venv", "dist", ".idea"):
+            sub = tmp_path / dir_name
+            sub.mkdir()
+            (sub / "junk.txt").write_text("", encoding="utf-8")
+        (tmp_path / "keep.py").write_text("", encoding="utf-8")
+        walker = FileWalker()
+        entries = list(walker.walk(tmp_path))
+        names = {e.name for e in entries}
+        assert "junk.txt" not in names
+        assert "keep.py" in names
+
+    def test_default_case_insensitive(self, tmp_path: Path) -> None:
+        """内置默认目录名匹配大小写不敏感（如 Node_Modules）。"""
+        (tmp_path / "Node_Modules").mkdir()
+        (tmp_path / "Node_Modules" / "lib.js").write_text("", encoding="utf-8")
+        (tmp_path / "main.py").write_text("", encoding="utf-8")
+        walker = FileWalker()
+        entries = list(walker.walk(tmp_path))
+        names = {e.name for e in entries}
+        assert "lib.js" not in names
+        assert "main.py" in names
+
+    def test_default_ignore_reports_via_on_skip_dir(self, tmp_path: Path) -> None:
+        """内置默认跳过的目录也应触发 on_skip_dir 回调。"""
+        (tmp_path / ".venv").mkdir()
+        (tmp_path / ".venv" / "x.txt").write_text("", encoding="utf-8")
+        (tmp_path / "main.py").write_text("", encoding="utf-8")
+        skipped: list[str] = []
+        walker = FileWalker(on_skip_dir=skipped.append)
+        list(walker.walk(tmp_path))
+        assert any(".venv" in p for p in skipped)
+
+    def test_disable_default_allows_venv(self, tmp_path: Path) -> None:
+        """use_default_ignore_dirs=False 时不再兜底跳过 .venv。"""
+        (tmp_path / ".venv").mkdir()
+        (tmp_path / ".venv" / "pyvenv.cfg").write_text("", encoding="utf-8")
+        walker = FileWalker(use_default_ignore_dirs=False)
+        entries = list(walker.walk(tmp_path))
+        names = {e.name for e in entries}
+        assert "pyvenv.cfg" in names
+
+    def test_default_merges_with_explicit(self, tmp_path: Path) -> None:
+        """传入的 ignore_dirs 与内置默认集合取并集：两者都生效。"""
+        (tmp_path / ".venv").mkdir()
+        (tmp_path / ".venv" / "a.txt").write_text("", encoding="utf-8")
+        (tmp_path / "custom_skip").mkdir()
+        (tmp_path / "custom_skip" / "b.txt").write_text("", encoding="utf-8")
+        (tmp_path / "main.py").write_text("", encoding="utf-8")
+        walker = FileWalker(ignore_dirs=("custom_skip",))
+        entries = list(walker.walk(tmp_path))
+        names = {e.name for e in entries}
+        assert "a.txt" not in names  # 内置默认跳过 .venv
+        assert "b.txt" not in names  # 传入 custom_skip 跳过
+        assert "main.py" in names
 
 
 class TestIgnorePaths:
@@ -189,7 +262,8 @@ class TestIgnorePaths:
         (tmp_path / "vendor" / "lib.js").write_text("", encoding="utf-8")
         (tmp_path / "main.py").write_text("", encoding="utf-8")
 
-        walker = FileWalker(ignore_paths=())
+        # 关闭内置默认兜底：vendor 已进入默认忽略集合，否则会被目录级跳过
+        walker = FileWalker(ignore_paths=(), use_default_ignore_dirs=False)
         entries = list(walker.walk(tmp_path))
         names = {e.name for e in entries}
         assert "lib.js" in names

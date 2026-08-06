@@ -1,7 +1,7 @@
 """工作区持久化与任务级覆盖序列化纯函数。
 
 将 :class:`WorkspaceController` 中与工作区持久化（JSON 读写）、任务级覆盖
-序列化/反序列化、int 字段范围钳制相关的纯逻辑抽离到模块级，便于独立测试。
+序列化/反序列化相关的纯逻辑抽离到模块级，便于独立测试。
 
 持久化文件路径运行时由 ``config_module.CONFIG_DIR / _PERSIST_FILENAME`` 计算，
 ``config_module.CONFIG_DIR`` 受测试 monkeypatch 控制，故路径在调用时计算。
@@ -9,8 +9,7 @@
 公共 API：
 
 - :data:`PERSIST_FILENAME` / :data:`PERSIST_VERSION`：持久化文件元数据
-- :data:`TASK_OVERRIDE_KEYS` / :data:`TASK_OVERRIDE_RANGES`：任务级覆盖白名单与范围
-- :func:`clamp_task_override_int`：钳制 int 字段到合法范围
+- :data:`TASK_OVERRIDE_KEYS`：任务级覆盖白名单（仅临时规则相关字段）
 - :func:`serialize_task_overrides`：序列化 task_overrides 供 JSON 持久化
 - :func:`deserialize_task_overrides`：反序列化 task_overrides（容错）
 - :func:`serialize_workspace`：序列化单个工作区为 dict
@@ -33,8 +32,6 @@ __all__ = [
     "PERSIST_FILENAME",
     "PERSIST_VERSION",
     "TASK_OVERRIDE_KEYS",
-    "TASK_OVERRIDE_RANGES",
-    "clamp_task_override_int",
     "coerce_float",
     "coerce_int",
     "coerce_str",
@@ -127,55 +124,31 @@ PERSIST_FILENAME = "workspaces.json"
 PERSIST_VERSION = 1
 
 # 允许任务级覆盖的 Config 字段及类型校验器
-# 补充范围钳制函数，与 ConfigController.setMax* 语义一致
+# task_overrides 仅承载「任务级临时规则」相关字段（不再包含任务级扫描设置）：
 # rules_paths/use_builtin：任务级规则覆盖，覆盖时扫描使用任务专属规则集，
-# 未覆盖时回退全局 RulesController（与 scan_archives/max_workers 等同语义）
+# 未覆盖时回退全局 RulesController
 # temp_rules_paths：任务级临时规则文件路径，叠加在全局规则之上（不覆盖），
 # 仅对当前工作区生效，扫描时与全局启用的规则合并
 # disabled_temp_rules_paths：任务级禁用的临时规则文件路径（不参与扫描合并），
 # 与全局 disabled_rules_paths 同语义，仅持久化到 task_overrides（非全局 Config），
 # 配合 temp_rules_paths 实现"保留但禁用"——临时规则从列表移除前可单独禁用
+#
+# 历史上 task_overrides 还承载 scan_archives/max_workers/max_file_size/max_depth/
+# ignore_dirs 等「任务级扫描设置」，因该功能无实际配置入口已移除；扫描参数统一
+# 由 effective RuleSet（全局规则集）决定，不再支持逐任务覆盖。
 TASK_OVERRIDE_KEYS: dict[str, type] = {
-    "scan_archives": bool,
-    "max_workers": int,
-    "max_file_size": int,
-    "max_depth": int,
-    "ignore_dirs": tuple,
     "rules_paths": tuple,
     "use_builtin": bool,
     "temp_rules_paths": tuple,
     "disabled_temp_rules_paths": tuple,
 }
 
-# 任务级覆盖 int 字段范围（与 ConfigController 全局钳制一致）
-TASK_OVERRIDE_RANGES: dict[str, tuple[int, int]] = {
-    "max_workers": (1, 16),
-    "max_file_size": (1, 500 * 1024 * 1024),  # 1B - 500MB
-}
-
-
-def clamp_task_override_int(key: str, value: int) -> int | None:
-    """钳制任务级覆盖的 int 字段到合法范围。
-
-    :param key: Config 字段名
-    :param value: 待钳制的 int 值
-    :return: 钳制后的值；越界返回 ``None`` 表示拒绝；
-        无范围限制的字段（如 ``max_depth``）原样返回
-    """
-    rng = TASK_OVERRIDE_RANGES.get(key)
-    if rng is None:
-        return value  # 无范围限制的字段（如 max_depth，由 _effective_max_depth 归一化）
-    lo, hi = rng
-    if value < lo or value > hi:
-        return None
-    return value
-
 
 def serialize_task_overrides(overrides: dict[str, object]) -> dict[str, object]:
     """序列化 task_overrides 供 JSON 持久化。
 
-    ``ignore_dirs``/``rules_paths`` 的 tuple 转为 list（JSON 不支持 tuple），
-    其余字段原样返回。非白名单字段被剔除。
+    ``rules_paths``/``temp_rules_paths``/``disabled_temp_rules_paths`` 的 tuple
+    转为 list（JSON 不支持 tuple），其余字段原样返回。非白名单字段被剔除。
 
     :param overrides: 原始 task_overrides 字典
     :return: 可 JSON 序列化的 dict
@@ -184,9 +157,7 @@ def serialize_task_overrides(overrides: dict[str, object]) -> dict[str, object]:
     for key, value in overrides.items():
         if key not in TASK_OVERRIDE_KEYS:
             continue
-        if key in ("ignore_dirs", "rules_paths", "temp_rules_paths", "disabled_temp_rules_paths") and isinstance(
-            value, tuple
-        ):
+        if key in ("rules_paths", "temp_rules_paths", "disabled_temp_rules_paths") and isinstance(value, tuple):
             out[key] = list(value)
         else:
             out[key] = value
@@ -196,7 +167,8 @@ def serialize_task_overrides(overrides: dict[str, object]) -> dict[str, object]:
 def deserialize_task_overrides(raw: object) -> dict[str, object]:
     """反序列化 task_overrides（容错：跳过类型不符字段）。
 
-    ``ignore_dirs``/``rules_paths`` 的 list 转为 tuple，类型不符字段跳过并 warning。
+    ``rules_paths``/``temp_rules_paths``/``disabled_temp_rules_paths`` 的 list
+    转为 tuple，类型不符字段跳过并 warning。
 
     :param raw: 从 JSON 解析得到的原始数据
     :return: 类型安全的 task_overrides 字典
@@ -208,7 +180,7 @@ def deserialize_task_overrides(raw: object) -> dict[str, object]:
         if key not in TASK_OVERRIDE_KEYS:
             logger.warning("反序列化 task_overrides：跳过未知字段 %s", key)
             continue
-        if key in ("ignore_dirs", "rules_paths", "temp_rules_paths", "disabled_temp_rules_paths"):
+        if key in ("rules_paths", "temp_rules_paths", "disabled_temp_rules_paths"):
             if isinstance(value, list) and all(isinstance(x, str) for x in value):
                 out[key] = tuple(value)
             else:

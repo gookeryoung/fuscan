@@ -40,7 +40,6 @@ from fuscan.gui.controllers._history_view import (
 from fuscan.gui.controllers._persistence import (
     PERSIST_FILENAME,
     TASK_OVERRIDE_KEYS,
-    clamp_task_override_int,
     coerce_float,
     coerce_int,
     coerce_str,
@@ -636,21 +635,18 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str, str, str)  # pyrefly: ignore [not-callable]
     def setTaskOverride(self, ws_id: str, key: str, value_json: str) -> None:
-        """设置任务级配置覆盖。
+        """设置任务级配置覆盖（仅任务级临时规则相关字段）。
 
         :param ws_id: 工作区 ID
-        :param key: Config 字段名（如 ``"scan_archives"``/``"max_workers"``）
-        :param value_json: 值的 JSON 字符串（如 ``"false"``/``"8"``/``"["a","b"]"``）
+        :param key: 覆盖字段名（``rules_paths``/``use_builtin``/
+            ``temp_rules_paths``/``disabled_temp_rules_paths``）
+        :param value_json: 值的 JSON 字符串（如 ``"true"``/``"["a","b"]"``）
 
-        支持 9 个字段：``scan_archives``/``max_workers``/``max_file_size``/
-        ``max_depth``/``ignore_dirs``/``rules_paths``/``use_builtin``/
-        ``temp_rules_paths``/``disabled_temp_rules_paths``。
-        其他字段忽略。``ignore_dirs``/``rules_paths``/``temp_rules_paths``/
-        ``disabled_temp_rules_paths`` 接受 ``list[str]``，内部转 ``tuple[str, ...]``。
-        int 字段做范围钳制（与全局 :class:`ConfigController` 一致），越界值拒绝并 warning。
-        ``rules_paths``/``use_builtin`` 覆盖时同步刷新 :attr:`WorkspaceItem`
-        对应字段，使 :attr:`WorkspaceItem.rules_tags` 标签反映 effective 规则集。
-        修改后持久化并同步到对应 ScanController。
+        ``rules_paths``/``temp_rules_paths``/``disabled_temp_rules_paths`` 接受
+        ``list[str]``，内部转 ``tuple[str, ...]``；``use_builtin`` 接受 bool。
+        其他字段忽略。``rules_paths``/``use_builtin`` 覆盖时同步刷新
+        :attr:`WorkspaceItem` 对应字段，使 :attr:`WorkspaceItem.rules_tags`
+        标签反映 effective 规则集。修改后持久化并同步到对应 ScanController。
         """
         item = self._model.get_workspace(ws_id)
         if item is None:
@@ -667,7 +663,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return
         # 类型校验
         expected_type = TASK_OVERRIDE_KEYS[key]
-        if key in ("ignore_dirs", "rules_paths", "temp_rules_paths", "disabled_temp_rules_paths"):
+        if key in ("rules_paths", "temp_rules_paths", "disabled_temp_rules_paths"):
             # JSON 反序列化为 list，校验后转 tuple
             if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
                 logger.warning("%s 应为 list[str]", key)
@@ -676,13 +672,6 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         elif not isinstance(value, expected_type):
             logger.warning("%s 应为 %s，得到 %s", key, expected_type.__name__, type(value).__name__)
             return
-        # int 字段范围钳制（max_workers 1-16，max_file_size 1-500MB）
-        if isinstance(value, int) and not isinstance(value, bool):
-            clamped = clamp_task_override_int(key, value)
-            if clamped is None:
-                logger.warning("%s=%s 越界，拒绝任务级覆盖", key, value)
-                return
-            value = clamped
         # 更新 WorkspaceItem.task_overrides（replace 重建 frozen dataclass）
         new_overrides = dict(item.task_overrides)
         new_overrides[key] = value
@@ -708,7 +697,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         删除该字段的覆盖，使后续全局配置变更能自动生效。
 
         :param ws_id: 工作区 ID
-        :param key: Config 字段名（如 ``"scan_archives"``/``"max_workers"``）
+        :param key: 任务级临时规则字段名（如 ``"rules_paths"``/``"use_builtin"``）
         """
         item = self._model.get_workspace(ws_id)
         if item is None:
@@ -729,15 +718,15 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             if global_value is not None:
                 extra_fields[key] = global_value
         self._model.update_workspace(ws_id, task_overrides=new_overrides, **extra_fields)
-        # 同步到 ScanController：全局值非 None 时回填，否则清除覆盖使其回退到规则集
+        # 同步到 ScanController：全局值非 None 时回填，否则清除覆盖使其回退到全局
         controller = self._ensure_scan_controller(ws_id)
         if controller is not None:
             global_value = self._config_controller.get_config_value(key)
             if global_value is not None:
                 controller.setTaskOverride(key, global_value)
             else:
-                # 已迁移字段（scan_archives/max_workers 等）无全局回填值，
-                # 清除 ScanController 覆盖使其回退到规则集
+                # temp_rules_paths/disabled_temp_rules_paths 无全局回填值，
+                # 清除 ScanController 覆盖使其回退到临时规则空集
                 controller.clearTaskOverride(key)
         self._persist()
 

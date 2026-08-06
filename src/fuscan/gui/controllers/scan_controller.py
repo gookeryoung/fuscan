@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+import time
 from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -87,7 +88,7 @@ from fuscan.rules import (
 from fuscan.rules.model import Severity
 from fuscan.scanner import ScanReport
 from fuscan.scanner.manifest import IncrementalManifest
-from fuscan.scanner.result import ProgressInfo, ScanResult, WalkResult, format_size
+from fuscan.scanner.result import ProgressInfo, ScanResult, WalkResult, format_elapsed, format_size
 
 if TYPE_CHECKING:
     from fuscan.cache import CacheStore
@@ -247,6 +248,13 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 供 GUI 在解析节点展示「平均 N 文件/s」便于横向性能比较。
         # 由 _on_scan_progress 从 ProgressInfo.elapsed 更新，startScan 时重置为 0。
         self._scan_elapsed: float = 0.0
+        # 收集（walk）阶段用时（秒）：FileStatsWorker 不回传阶段总耗时，
+        # 故在 controller 层用 perf_counter 打点——walk 开始（startScan/
+        # startIncrementalScan）记 _walk_start_time，walk 完成（_on_stats_finished）
+        # 结算 _walk_elapsed。walk 进行中 walkElapsedText 实时读 now-start，
+        # 完成后读定格值。_walk_start_time 为 0.0 表示未开始。
+        self._walk_start_time: float = 0.0
+        self._walk_elapsed: float = 0.0
         # 最近解析文件明细（deque，maxlen 限制上限避免无限增长）：
         # 每项为 {"path": str, "size": int, "ext": str, "elapsedMs": float}，
         # 供 GUI 在解析节点展开区以 GitHub Actions 风格列表展示具体解析信息。
@@ -421,15 +429,65 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return 0.0
         return self._progress_scanned / self._scan_elapsed
 
+    @Property(str, notify=walkProgressChanged)  # pyrefly: ignore [not-callable]
+    def walkElapsedText(self) -> str:
+        """收集（walk）阶段用时文案（如 ``"860ms"``/``"1.2s"``）。
+
+        walk 进行中实时返回 ``now - _walk_start_time``（随 walkProgressChanged
+        回调刷新）；walk 完成后返回定格的 ``_walk_elapsed``。未开始（
+        ``_walk_start_time == 0.0`` 且 ``_walk_elapsed == 0.0``）返回空串，
+        避免 pending 态展示无意义的 ``"0ms"``。
+        """
+        if self._walk_done:
+            return format_elapsed(self._walk_elapsed)
+        if self._walk_start_time <= 0.0:
+            return ""
+        return format_elapsed(time.perf_counter() - self._walk_start_time)
+
+    @Property(str, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
+    def scanElapsedText(self) -> str:
+        """解析（scan/archive）阶段用时文案（如 ``"1.2s"``/``"1分05秒"``）。
+
+        直接复用 ``_scan_elapsed``（由 ProgressInfo.elapsed 更新，扫描完成后
+        定格为最后一次进度回调的累计耗时）。尚未进入解析阶段（``_scan_elapsed
+        <= 0``）返回空串，避免 pending 态展示 ``"0ms"``。
+        """
+        if self._scan_elapsed <= 0:
+            return ""
+        return format_elapsed(self._scan_elapsed)
+
     @Property("QVariantList", notify=scanProgressChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
     def recentParsedFiles(self) -> list[dict[str, object]]:
         """最近解析文件明细列表（最新在前），供解析节点展开区展示。
 
-        每项为 ``{"path", "size", "ext", "elapsedMs"}``，供 QML ListView 以
-        GitHub Actions 风格逐行展示具体解析信息（文件名 · 大小 · 耗时）。
+        每项为 ``{"name", "path", "size", "ext", "elapsedMs", "sizeText",
+        "elapsedText"}``——``name`` 为路径末段文件名，``sizeText``/``elapsedText``
+        为后端预格式化的大小/耗时文案（格式化逻辑下沉后端，避免 QML 层重复
+        实现）。供 QML 以 GitHub Actions 风格逐行展示（文件名 · 大小 · 耗时）。
         返回副本并倒序（最新解析的文件排在列表首位）。
         """
-        return list(reversed(self._recent_files))
+        items: list[dict[str, object]] = []
+        for entry in reversed(self._recent_files):
+            path = str(entry.get("path", ""))
+            # 路径末段作为展示文件名（正斜杠/反斜杠兼容 Windows 与 POSIX）
+            name = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            # _recent_files 值为 object 类型，isinstance 收窄为 int/float 供格式化
+            raw_size = entry.get("size", 0)
+            size = raw_size if isinstance(raw_size, int) else 0
+            raw_elapsed = entry.get("elapsedMs", 0.0)
+            elapsed_ms = raw_elapsed if isinstance(raw_elapsed, (int, float)) else 0.0
+            items.append(
+                {
+                    "name": name,
+                    "path": path,
+                    "size": size,
+                    "ext": entry.get("ext", ""),
+                    "elapsedMs": elapsed_ms,
+                    "sizeText": format_size(size),
+                    "elapsedText": format_elapsed(elapsed_ms / 1000.0),
+                }
+            )
+        return items
 
     @Property(str, notify=phaseChanged)  # pyrefly: ignore [not-callable]
     def statusSummary(self) -> str:
@@ -1289,6 +1347,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 平均速度与解析明细重置（避免上次扫描残留）
         self._scan_elapsed = 0.0
         self._recent_files.clear()
+        # 收集阶段用时打点：walk 即将开始，记起点并清空定格值
+        self._walk_start_time = time.perf_counter()
+        self._walk_elapsed = 0.0
         self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -1395,6 +1456,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 平均速度与解析明细重置（避免上次扫描残留）
         self._scan_elapsed = 0.0
         self._recent_files.clear()
+        # 收集阶段用时打点：walk 即将开始，记起点并清空定格值
+        self._walk_start_time = time.perf_counter()
+        self._walk_elapsed = 0.0
         self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -1558,6 +1622,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             if info.phase in (PHASE_FILTER, PHASE_SCAN, PHASE_ARCHIVE) and not self._walk_done:
                 self._walk_done = True
                 self._walk_indeterminate = False
+                # 防御性结算收集用时：正常流程 walk 完成走 _on_stats_finished
+                # 结算 _walk_elapsed，此处兜底避免 _walk_elapsed 停在 0.0。
+                if self._walk_elapsed <= 0.0 and self._walk_start_time > 0.0:
+                    self._walk_elapsed = time.perf_counter() - self._walk_start_time
         # walk 阶段：仅 discovered/skipped/user_skipped 增长，scanned/matched/errors 恒为 0
         if info.phase == PHASE_WALK:
             self._walk_indeterminate = False
@@ -1616,11 +1684,18 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._reused_files = total_reused
         self._walk_done = True
         self._walk_indeterminate = False
+        # 收集阶段用时结算：定格 _walk_elapsed 供 walkElapsedText 展示。
+        # _walk_start_time 为 0.0（异常路径未打点）时归零，避免负值。
+        self._walk_elapsed = time.perf_counter() - self._walk_start_time if self._walk_start_time > 0.0 else 0.0
         # scan 阶段总文件数 = walk 收集的 entries 总数（不含跳过项）
         self._progress_total = sum(len(wr.entries) for wr in results)
         self._progress_indeterminate = False
         self._scan_phase = PHASE_SCAN
         self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
+        # walk 完成后 walkElapsedText 定格为 _walk_elapsed，需 emit
+        # walkProgressChanged 触发其 QML 绑定重算（_on_stats_finished 不经过
+        # _on_scan_progress 的 walk 分支，否则收集节点用时停在最后一次回调值）。
+        self.walkProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
         cache, source_files = self._build_cache_context()
         assert self._ruleset is not None

@@ -1396,6 +1396,39 @@ class TestFormatSize:
         assert format_size(1024 * 1024 * 1024) == "1.00 GB"
 
 
+class TestFormatElapsed:
+    def test_milliseconds(self) -> None:
+        from fuscan.scanner.result import format_elapsed
+
+        # < 1s 分档：毫秒（无小数）
+        assert format_elapsed(0.86) == "860ms"
+        assert format_elapsed(0.0) == "0ms"
+        assert format_elapsed(0.0005) == "0ms"
+
+    def test_seconds(self) -> None:
+        from fuscan.scanner.result import format_elapsed
+
+        # < 60s 分档：秒保留一位小数
+        assert format_elapsed(1.0) == "1.0s"
+        assert format_elapsed(1.25) == "1.2s"
+        assert format_elapsed(59.9) == "59.9s"
+
+    def test_minutes(self) -> None:
+        from fuscan.scanner.result import format_elapsed
+
+        # >= 60s 分档：分秒（秒两位零填充）
+        assert format_elapsed(60.0) == "1分00秒"
+        assert format_elapsed(65.0) == "1分05秒"
+        assert format_elapsed(125.0) == "2分05秒"
+
+    def test_negative_and_nan(self) -> None:
+        from fuscan.scanner.result import format_elapsed
+
+        # 负数与 NaN 归零
+        assert format_elapsed(-1.0) == "0ms"
+        assert format_elapsed(float("nan")) == "0ms"
+
+
 class TestProgressInfoSummary:
     def test_summary_with_speed(self) -> None:
         from fuscan.scanner.result import ProgressInfo

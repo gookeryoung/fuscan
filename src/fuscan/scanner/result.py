@@ -26,6 +26,7 @@ import datetime
 import html
 import io
 import json
+import math
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -48,6 +49,7 @@ __all__ = [
     "ScanResult",
     "ScanStats",
     "WalkResult",
+    "format_elapsed",
     "format_size",
 ]
 
@@ -61,6 +63,29 @@ def format_size(size: int) -> str:
     if size < 1024 * 1024 * 1024:
         return f"{size / (1024 * 1024):.1f} MB"
     return f"{size / (1024 * 1024 * 1024):.2f} GB"
+
+
+def format_elapsed(seconds: float) -> str:
+    """将耗时秒数格式化为人类可读字符串。
+
+    分档以兼顾极快阶段（收集/筛选常在毫秒级）与长时扫描：
+
+    - ``< 1s``：毫秒（如 ``"860ms"``），避免长时间显示 ``"0.0s"``
+    - ``< 60s``：秒并保留一位小数（如 ``"1.2s"``）
+    - ``>= 60s``：分秒（如 ``"1分05秒"``），避免大数字秒不直观
+
+    负数或非有限值归零处理，返回 ``"0ms"``。供 GUI 在收集/解析节点
+    统一展示阶段用时，格式化逻辑下沉后端避免 QML 层重复实现。
+    """
+    if math.isnan(seconds) or seconds < 0:  # NaN 或负数
+        return "0ms"
+    if seconds < 1.0:
+        return f"{seconds * 1000:.0f}ms"
+    if seconds < 60.0:
+        return f"{seconds:.1f}s"
+    minutes = int(seconds // 60)
+    remaining = int(seconds % 60)
+    return f"{minutes}分{remaining:02d}秒"
 
 
 @dataclass(frozen=True)

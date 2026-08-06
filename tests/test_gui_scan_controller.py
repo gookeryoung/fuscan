@@ -2624,6 +2624,100 @@ class TestIter143CoverageGaps:
             )
         assert len(controller.recentParsedFiles) == _RECENT_FILES_MAX
 
+    def test_recent_parsed_files_preformatted_fields(self, controller: ScanController) -> None:
+        """recentParsedFiles 每项含后端预格式化的 name/sizeText/elapsedText 字段。"""
+        controller._on_scan_progress(
+            ProgressInfo(
+                phase="scan",
+                scanned=1,
+                total=1,
+                current_file="C:\\dir\\report.pdf",
+                current_file_size=2048,
+                current_file_ext="pdf",
+                current_file_elapsed_ms=1500.0,
+            )
+        )
+        item = controller.recentParsedFiles[0]
+        # name 取路径末段（兼容反斜杠）
+        assert item["name"] == "report.pdf"
+        assert item["path"] == "C:\\dir\\report.pdf"
+        assert item["size"] == 2048
+        assert item["ext"] == "pdf"
+        assert item["elapsedMs"] == 1500.0
+        # sizeText 复用 format_size，elapsedText 复用 format_elapsed(elapsedMs/1000)
+        assert item["sizeText"] == "2.0 KB"
+        assert item["elapsedText"] == "1.5s"
+
+    def test_recent_parsed_files_name_posix_path(self, controller: ScanController) -> None:
+        """recentParsedFiles name 兼容正斜杠路径末段提取。"""
+        controller._on_scan_progress(
+            ProgressInfo(
+                phase="scan",
+                scanned=1,
+                total=1,
+                current_file="/home/user/a.txt",
+                current_file_size=100,
+            )
+        )
+        assert controller.recentParsedFiles[0]["name"] == "a.txt"
+
+    def test_walk_elapsed_text_empty_before_start(self, controller: ScanController) -> None:
+        """walk 未开始（_walk_start_time==0）时 walkElapsedText 返回空串。"""
+        assert controller.walkElapsedText == ""
+
+    def test_walk_elapsed_text_running_realtime(self, controller: ScanController) -> None:
+        """walk 进行中 walkElapsedText 实时返回 now-start 的格式化文案（非空）。"""
+        import time as _time
+
+        controller._walk_start_time = _time.perf_counter() - 0.5
+        controller._walk_done = False
+        # 进行中：返回非空实时用时文案（约 0.5s，落在秒档）
+        assert controller.walkElapsedText != ""
+        assert controller.walkElapsedText.endswith("s")
+
+    def test_walk_elapsed_text_frozen_after_done(self, controller: ScanController) -> None:
+        """walk 完成后 walkElapsedText 返回定格的 _walk_elapsed 格式化值。"""
+        controller._walk_done = True
+        controller._walk_elapsed = 0.86
+        assert controller.walkElapsedText == "860ms"
+
+    def test_scan_elapsed_text_empty_when_no_elapsed(self, controller: ScanController) -> None:
+        """未进入解析阶段（_scan_elapsed<=0）时 scanElapsedText 返回空串。"""
+        assert controller.scanElapsedText == ""
+
+    def test_scan_elapsed_text_formatted(self, controller: ScanController) -> None:
+        """scanElapsedText 复用 _scan_elapsed 并格式化。"""
+        controller._scan_elapsed = 1.25
+        assert controller.scanElapsedText == "1.2s"
+
+    def test_walk_elapsed_settled_on_stats_finished(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """_on_stats_finished 结算 _walk_elapsed 并使 walkElapsedText 定格非空。"""
+        import time as _time
+
+        controller._ruleset = _build_ruleset()
+        controller._walk_start_time = _time.perf_counter() - 0.3
+        controller._on_stats_finished([_make_walk_result(tmp_path)])
+        assert controller._walk_done is True
+        assert controller._walk_elapsed > 0.0
+        assert controller.walkElapsedText != ""
+
+    def test_walk_elapsed_zero_when_no_start_time(
+        self,
+        controller: ScanController,
+        fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
+        tmp_path: Path,
+    ) -> None:
+        """_walk_start_time 未打点（==0）时 _on_stats_finished 结算 _walk_elapsed 归零。"""
+        controller._ruleset = _build_ruleset()
+        controller._walk_start_time = 0.0
+        controller._on_stats_finished([_make_walk_result(tmp_path)])
+        assert controller._walk_elapsed == 0.0
+
     def test_start_scan_resets_speed_and_recent_files(
         self,
         controller: ScanController,

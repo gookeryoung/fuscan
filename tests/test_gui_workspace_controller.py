@@ -723,17 +723,21 @@ class TestAddWorkspace:
         assert item.mode_str == "folder"
         assert item.target == str(folder)
 
-    def test_add_workspace_from_path_rejects_file(
+    def test_add_workspace_from_path_creates_with_file_name(
         self,
         controller: WorkspaceController,
         tmp_path: Path,
     ) -> None:
-        """拖拽入口：传入文件路径（非文件夹）应返回空串，不创建工作区。"""
-        file_path = tmp_path / "not_a_folder.txt"
+        """拖拽入口：传入文件路径应创建 file 模式工作区，任务名取文件名。"""
+        file_path = tmp_path / "report.pdf"
         file_path.write_text("hello", encoding="utf-8")
         ws_id = controller.addWorkspaceFromPath(str(file_path))
-        assert ws_id == ""
-        assert controller.workspaceModel.rowCount() == 0
+        assert ws_id != ""
+        item = controller.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+        assert item.name == "report.pdf"
+        assert item.mode_str == "file"
+        assert item.target == str(file_path)
 
     def test_add_workspace_from_path_rejects_empty(
         self,
@@ -769,14 +773,17 @@ class TestAddWorkspace:
         controller: WorkspaceController,
         tmp_path: Path,
     ) -> None:
-        """拖拽多选：混合文件夹与文件，只创建文件夹的工作区。"""
+        """拖拽多选：混合文件夹与文件，分别创建 folder/file 模式工作区。"""
         folder = tmp_path / "dir"
         file_path = tmp_path / "file.txt"
         folder.mkdir()
         file_path.write_text("x", encoding="utf-8")
         count = controller.addWorkspacesFromPaths([str(folder), str(file_path)])
-        assert count == 1
-        assert controller.workspaceModel.rowCount() == 1
+        assert count == 2
+        assert controller.workspaceModel.rowCount() == 2
+        items = controller.workspaceModel.items
+        modes = {item.mode_str for item in items}
+        assert modes == {"folder", "file"}
 
     def test_sync_all_workspaces_rules_on_global_change(
         self,
@@ -1509,6 +1516,21 @@ class TestUpdateWorkspaceTarget:
         assert item is not None
         assert item.mode_str == "drive"
         assert item.target == "C:\\"
+
+    def test_update_target_to_file_mode(self, controller: WorkspaceController) -> None:
+        """从 folder 切换到 file 模式应同步 folderRoot（file 复用 folder_root 字段）。"""
+        ws_id = controller.addWorkspace("t", "folder", "/old", "[]", True)
+        controller.updateWorkspaceTarget(ws_id, "file", "/tmp/scan/report.pdf")
+
+        item = controller.workspaceModel.get_workspace(ws_id)
+        assert item is not None
+        assert item.mode_str == "file"
+        assert item.target == "/tmp/scan/report.pdf"
+        # ScanController 同步：file 模式复用 folderRoot 字段
+        controller.setCurrentWorkspaceId(ws_id)
+        sc = controller.currentScanController
+        assert sc.folderRoot == "/tmp/scan/report.pdf"
+        assert sc.scanModeIndex == 2
 
     def test_update_target_rejected_when_scanning(
         self,

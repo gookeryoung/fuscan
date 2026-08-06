@@ -1,7 +1,7 @@
 """扫描模式常量与映射（GUI 层单一来源）。
 
 fuscan 的扫描模式在 :class:`fuscan.config.Config.scan_mode` 中以字符串存储
-（``"drive"``/``"folder"``），QML 侧用索引切换模式更直观，
+（``"drive"``/``"folder"``/``"file"``），QML 侧用索引切换模式更直观，
 故 GUI 层需要 ``索引 ↔ 字符串 ↔ 中文文本`` 三向映射。
 
 历史上 ``_SCAN_MODE_INDEX_TO_STR`` / ``_MODE_STR_TO_INDEX`` 曾在
@@ -31,8 +31,8 @@ __all__ = [
     "scan_mode_text",
 ]
 
-# 索引 → 模式字符串（顺序与 QML 切换控件一致：0=盘符 / 1=文件夹）
-SCAN_MODE_INDEX_TO_STR: tuple[str, ...] = ("drive", "folder")
+# 索引 → 模式字符串（顺序与 QML 切换控件一致：0=盘符 / 1=文件夹 / 2=单文件）
+SCAN_MODE_INDEX_TO_STR: tuple[str, ...] = ("drive", "folder", "file")
 
 # 模式字符串 → 索引（反向映射，由 SCAN_MODE_INDEX_TO_STR 派生）
 SCAN_MODE_STR_TO_INDEX: dict[str, int] = {s: i for i, s in enumerate(SCAN_MODE_INDEX_TO_STR)}
@@ -41,6 +41,7 @@ SCAN_MODE_STR_TO_INDEX: dict[str, int] = {s: i for i, s in enumerate(SCAN_MODE_I
 SCAN_MODE_STR_TO_TEXT: dict[str, str] = {
     "drive": "盘符扫描",
     "folder": "文件夹扫描",
+    "file": "文件扫描",
 }
 
 # 默认索引：文件夹模式（与 Config.scan_mode 默认值 "folder" 对齐）
@@ -59,7 +60,7 @@ def scan_mode_text(mode_str: str) -> str:
 def scan_mode_index_to_str(index: int) -> str | None:
     """按索引取模式字符串。
 
-    :param index: 索引（0/1）
+    :param index: 索引（0/1/2）
     :return: 模式字符串；越界返回 ``None``
     """
     if 0 <= index < len(SCAN_MODE_INDEX_TO_STR):
@@ -71,6 +72,6 @@ def scan_mode_str_to_index(mode_str: str) -> int:
     """按模式字符串取索引，未知模式回退到默认索引。
 
     :param mode_str: 模式字符串
-    :return: 索引（0/1）
+    :return: 索引（0/1/2）
     """
     return SCAN_MODE_STR_TO_INDEX.get(mode_str, SCAN_MODE_DEFAULT_INDEX)

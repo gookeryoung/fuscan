@@ -294,8 +294,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """新建工作区。
 
         :param name: 工作区名称（空串时自动生成）
-        :param mode_str: 扫描模式字符串（``"drive"``/``"folder"``）
-        :param target: 扫描目标（盘符或文件夹路径）
+        :param mode_str: 扫描模式字符串（``"drive"``/``"folder"``/``"file"``）
+        :param target: 扫描目标（盘符、文件夹或文件路径）
         :param rules_paths_json: 已废弃（规则全局化），保留向后兼容
         :param use_builtin: 已废弃（规则全局化），保留向后兼容
         :return: 新工作区 ID（``"ws-<8位hex>"`` 格式）
@@ -324,29 +324,33 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str, result=str)  # pyrefly: ignore [not-callable]
     def addWorkspaceFromPath(self, path_str: str) -> str:
-        """从文件夹路径创建工作区（拖拽入口）。
+        """从文件或文件夹路径创建工作区（拖拽入口）。
 
-        验证路径是文件夹后创建工作区，任务名默认取文件夹名。
-        非文件夹或空路径返回空串，不创建。
+        路径为文件夹时创建 ``folder`` 模式工作区，路径为文件时创建 ``file``
+        模式工作区，任务名默认取末段文件名。非文件/文件夹或空路径返回空串。
 
-        :param path_str: 文件夹路径（QML DropArea 已剥离 ``file:///`` 前缀）
-        :return: 新工作区 ID；非文件夹或空路径返回空串
+        :param path_str: 文件或文件夹路径（QML DropArea 已剥离 ``file:///`` 前缀）
+        :return: 新工作区 ID；非文件/文件夹或空路径返回空串
         """
         if not path_str:
             return ""
         path = Path(path_str)
-        if not path.is_dir():
-            logger.warning("拖拽目标不是文件夹: %s", path_str)
+        if path.is_dir():
+            mode_str = "folder"
+        elif path.is_file():
+            mode_str = "file"
+        else:
+            logger.warning("拖拽目标不是文件或文件夹: %s", path_str)
             return ""
-        # 任务名取文件夹名；根目录等无 name 时由 addWorkspace 内部回退为「任务 N」
+        # 任务名取末段名；根目录等无 name 时由 addWorkspace 内部回退为「任务 N」
         name = path.name or ""
-        return self.addWorkspace(name, "folder", str(path), "[]", True)
+        return self.addWorkspace(name, mode_str, str(path), "[]", True)
 
     @Slot("QVariantList", result=int)  # pyrefly: ignore [not-callable]
     def addWorkspacesFromPaths(self, paths: list[object]) -> int:
-        """批量从文件夹路径创建工作区（拖拽多选）。
+        """批量从文件或文件夹路径创建工作区（拖拽多选）。
 
-        :param paths: 文件夹路径列表（QML 端已剥离 ``file:///`` 前缀）
+        :param paths: 文件/文件夹路径列表（QML 端已剥离 ``file:///`` 前缀）
         :return: 成功创建的工作区数
         """
         count = 0
@@ -439,7 +443,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             scan_controller.setScanModeIndex(mode_index)
             if item.mode_str == "drive" and item.target:
                 scan_controller.setSelectedDrive(item.target)
-            elif item.mode_str == "folder" and item.target:
+            elif item.mode_str in ("folder", "file") and item.target:
+                # file 模式复用 folderRoot 字段，由 walker 内部 root.is_file() 分支处理
                 scan_controller.setFolderRoot(item.target)
             # 同步任务级配置覆盖到 ScanController
             for key, value in item.task_overrides.items():
@@ -564,8 +569,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """更新工作区扫描目标（任务切换扫描目标）。
 
         :param ws_id: 工作区 ID
-        :param mode_str: 新的扫描模式（``"drive"``/``"folder"``）
-        :param target: 新的目标（盘符或文件夹路径）
+        :param mode_str: 新的扫描模式（``"drive"``/``"folder"``/``"file"``）
+        :param target: 新的目标（盘符、文件夹或文件路径）
 
         更新 :class:`WorkspaceItem` 的 mode_str/target 字段并同步到对应
         :class:`ScanController`；仅当工作区处于 ``就绪``/``已完成`` 状态时
@@ -592,7 +597,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             controller.setScanModeIndex(mode_index)
             if mode_str == "drive" and target:
                 controller.setSelectedDrive(target)
-            elif mode_str == "folder" and target:
+            elif mode_str in ("folder", "file") and target:
+                # file 模式复用 folderRoot 字段，由 walker 内部 root.is_file() 分支处理
                 controller.setFolderRoot(target)
         self._persist()
         self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]

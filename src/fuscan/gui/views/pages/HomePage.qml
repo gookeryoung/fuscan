@@ -400,7 +400,7 @@ Item {
             if (paths.length > 0) {
                 var count = workspaceController.addWorkspacesFromPaths(paths)
                 if (count === 0) {
-                    dropToast.show("选择的目标不是文件夹", false)
+                    dropToast.show("选择的目标不是文件或文件夹", false)
                 } else {
                     dropToast.show("已添加 " + count + " 个扫描任务", true)
                 }
@@ -1466,7 +1466,7 @@ Item {
                 if (paths.length > 0) {
                     var count = workspaceController.addWorkspacesFromPaths(paths)
                     if (count === 0) {
-                        dropToast.show("拖拽的目标不是文件夹", false)
+                        dropToast.show("拖拽的目标不是文件或文件夹", false)
                     } else {
                         dropToast.show("已添加 " + count + " 个扫描任务", true)
                     }

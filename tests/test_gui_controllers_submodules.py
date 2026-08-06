@@ -180,6 +180,14 @@ class TestCanBuildRoots:
         """folder 模式无根路径返回 False。"""
         assert can_build_roots(1, "", "") is False
 
+    def test_file_mode_with_root(self) -> None:
+        """file 模式有文件路径返回 True（复用 folder_root 字段）。"""
+        assert can_build_roots(2, "", "/tmp/a.txt") is True
+
+    def test_file_mode_no_root(self) -> None:
+        """file 模式空路径返回 False。"""
+        assert can_build_roots(2, "", "") is False
+
 
 class TestBuildScanRoots:
     """测试 build_scan_roots 构建扫描根路径列表。"""
@@ -202,6 +210,16 @@ class TestBuildScanRoots:
     def test_folder_mode_empty_returns_empty(self) -> None:
         """folder 模式空路径应返回空列表。"""
         roots = build_scan_roots(1, "", "", _make_config())
+        assert roots == []
+
+    def test_file_mode_returns_root(self) -> None:
+        """file 模式应返回单文件根路径列表（复用 folder_root 字段）。"""
+        roots = build_scan_roots(2, "", "/tmp/scan/a.txt", _make_config())
+        assert roots == [Path("/tmp/scan/a.txt")]
+
+    def test_file_mode_empty_returns_empty(self) -> None:
+        """file 模式空路径应返回空列表。"""
+        roots = build_scan_roots(2, "", "", _make_config())
         assert roots == []
 
 

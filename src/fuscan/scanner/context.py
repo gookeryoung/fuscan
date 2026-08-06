@@ -127,7 +127,7 @@ class MatchContext:
     只有需要内容匹配的 Matcher 才会触发内容读取，避免不必要的 I/O。
     """
 
-    __slots__ = ("_content", "_content_loaded", "_content_provider", "entry")
+    __slots__ = ("_content", "_content_loaded", "_content_lower", "_content_lower_loaded", "_content_provider", "entry")
 
     def __init__(
         self,
@@ -138,6 +138,8 @@ class MatchContext:
         self._content: str = ""
         self._content_provider: ContentProvider = content_provider or default_content_provider
         self._content_loaded: bool = False
+        self._content_lower: str = ""
+        self._content_lower_loaded: bool = False
 
     @property
     def content(self) -> str:
@@ -147,7 +149,23 @@ class MatchContext:
             self._content_loaded = True
         return self._content
 
+    @property
+    def content_lower(self) -> str:
+        """懒加载小写化文件内容；供大小写不敏感预筛复用，避免每个 Matcher 重复 ``lower()``。
+
+        首次访问时基于 :attr:`content` 计算（触发内容懒加载），后续访问直接返回缓存。
+        组合规则复合组（:class:`fuscan.scanner.matchers._ContentCompositeGroup`）的
+        预筛在 50+ 条 AND 规则场景下原先每条规则各调一次 ``content.lower()``，
+        集中缓存后每文件仅计算一次。
+        """
+        if not self._content_lower_loaded:
+            self._content_lower = self.content.lower()
+            self._content_lower_loaded = True
+        return self._content_lower
+
     def reset(self) -> None:
         """重置内容缓存，强制下次重新读取。"""
         self._content = ""
         self._content_loaded = False
+        self._content_lower = ""
+        self._content_lower_loaded = False

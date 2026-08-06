@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from functools import lru_cache
 from re import Pattern
 
@@ -32,6 +33,12 @@ from fuscan.rules.model import (
     MatchTarget,
     NotMatch,
     OrMatch,
+)
+from fuscan.scanner._helpers import (
+    _dedup_substrings,
+    _extract_inline_flags,
+    _extract_literals,
+    _flags_to_chars,
 )
 from fuscan.scanner.context import MatchContext
 from fuscan.scanner.result import MatchResult
@@ -169,30 +176,278 @@ class PathMatcher(LeafMatcher):
         return str(context.entry.path)
 
 
+# ---------------------------------------------------------------------------
+# 组合规则共享扫描：复合 CONTENT REGEX 子项组
+#
+# AndMatcher/OrMatcher 的 CONTENT REGEX 子项原本各自独立 finditer 全文扫描，
+# 50 条 AND 规则 × 2~3 子项 = 100~150 次独立 finditer（S3 基准 11010 次调用）。
+# 把同 case_sensitive 的 CONTENT REGEX 子项合并为命名捕获组 OR 复合正则
+# (?P<_c0>pat0)|(?P<_c1>pat1)|...，一次 finditer 收集所有子项命中状态，
+# 按 AND/OR 语义求值，减少 80~90% 的 Python→C re 调用开销。
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _ContentCompositeGroup:
+    """复合 CONTENT REGEX 子项组（同 case_sensitive）。
+
+    在 :class:`AndMatcher` / :class:`OrMatcher` 构造期把同 ``case_sensitive`` 的
+    CONTENT REGEX 子项合并为命名捕获组 OR 复合正则
+    ``(?P<_c0>pat0)|(?P<_c1>pat1)|...``，``matches()`` 时一次 ``finditer`` 收集
+    所有子项命中状态，按 AND/OR 语义求值，相比逐子项独立 ``finditer`` 减少约
+    80~90% 的 Python→C re 调用开销。
+
+    仅合并 ``mode=REGEX`` 的 CONTENT 子项（CONTAINS/EQUALS/STARTSWITH/ENDSWITH
+    为简单字符串操作，无需合并）。
+
+    预筛两级短路（与 :class:`fuscan.scanner._content_buckets._ContentRuleBucket`
+    一致）：
+
+    - 桶级：``prefilter_keywords`` 为组内所有子项字面量片段的并集；若全部不在
+      内容中则组内所有子项必不命中，可直接跳过 ``finditer``。
+    - 逐子项：``per_child_keywords[child_idx]`` 为该子项的字面量片段；若该子项
+      的关键字均不出现则该子项必不命中（AND 下整体不命中，OR 下跳过该子项）。
+    """
+
+    case_sensitive: bool
+    # 组内子项在父 children 中的下标（保持原顺序）
+    child_indices: tuple[int, ...]
+    # 组名 "_c{i}" -> 子项在父 children 中的下标
+    group_to_idx: dict[str, int] = field(default_factory=dict)
+    compiled: Pattern[str] | None = None
+    # child_idx -> spec（仅含组内子项）
+    specs_by_idx: dict[int, LeafMatch] = field(default_factory=dict)
+    # 桶级预筛关键字（已按大小写规则处理）
+    prefilter_keywords: list[str] = field(default_factory=list)
+    # 逐子项预筛关键字: child_idx -> keywords
+    per_child_keywords: dict[int, list[str]] = field(default_factory=dict)
+    # 预筛是否大小写不敏感（组 case_sensitive=False 或任一子项含 (?i) 内联标志）
+    prefilter_case_insensitive: bool = False
+
+
+def _build_content_composite_groups(
+    children: tuple[Matcher, ...],
+) -> list[_ContentCompositeGroup]:
+    """扫描 children 中的 ContentMatcher(REGEX) 子项，按 case_sensitive 分组构建复合组。
+
+    仅合并 ``mode=REGEX`` 的 CONTENT 子项；单 ``case_sensitive`` 组内至少 2 个
+    子项才创建复合组（单子项无合并收益，独立 ``matches()`` 即可）。
+
+    复合正则编译失败时安全降级：放弃该组，组内子项回退到独立 ``matches()`` 路径
+    （由 ``AndMatcher.matches`` / ``OrMatcher.matches`` 中 ``composite_child_indices``
+    不含这些子项来保证）。
+
+    :param children: AndMatcher/OrMatcher 的子匹配器元组
+    :return: 复合组列表；空列表表示无可合并子项（行为与原逻辑完全一致）
+    """
+    # 按 case_sensitive 分组收集 (child_idx, ContentMatcher) 对
+    grouped: dict[bool, list[tuple[int, ContentMatcher]]] = {}
+    for idx, child in enumerate(children):
+        if not isinstance(child, ContentMatcher):
+            continue
+        spec = child.spec
+        if spec.target != MatchTarget.CONTENT or spec.mode != MatchMode.REGEX:
+            continue
+        grouped.setdefault(spec.case_sensitive, []).append((idx, child))
+
+    groups: list[_ContentCompositeGroup] = []
+    for case_sensitive, items in grouped.items():
+        if len(items) < 2:
+            # 单子项无合并收益，独立 matches() 即可
+            continue
+        group = _ContentCompositeGroup(
+            case_sensitive=case_sensitive,
+            child_indices=tuple(idx for idx, _ in items),
+        )
+        parts: list[str] = []
+        prefilter_keywords: list[str] = []
+        per_child_kw_by_idx: dict[int, list[str]] = {}
+        specs_by_idx: dict[int, LeafMatch] = {}
+        has_inline_ignorecase = False
+        for i, (idx, child) in enumerate(items):
+            spec = child.spec
+            assert isinstance(spec, LeafMatch)
+            grp_name = f"_c{i}"
+            sub = spec.pattern
+            # 提取内联标志（如 (?i)），用 (?flag:...) 非捕获组包装
+            # 避免内联标志在命名组内部时影响后续分支（Python 3.11+ DeprecationWarning）
+            sub_clean, sub_flags = _extract_inline_flags(sub)
+            if sub_flags & re.IGNORECASE:
+                has_inline_ignorecase = True
+            if sub_flags:
+                flag_str = _flags_to_chars(sub_flags)
+                part = rf"(?{flag_str}:(?P<{grp_name}>{sub_clean}))"
+            else:
+                part = rf"(?P<{grp_name}>{sub})"
+            parts.append(part)
+            group.group_to_idx[grp_name] = idx
+            specs_by_idx[idx] = spec
+            rule_literals = _extract_literals(sub_clean)
+            prefilter_keywords.extend(rule_literals)
+            per_child_kw_by_idx[idx] = rule_literals
+        flags = 0 if case_sensitive else re.IGNORECASE
+        try:
+            compiled = re.compile("|".join(parts), flags)
+        except re.error:
+            # 复合正则编译失败（理论不会发生——子项均已独立编译成功，
+            # OR 复合仅因命名组唯一性，使用 _c{i} 保证唯一）；
+            # 安全降级：放弃该组，子项回退到独立 matches() 路径
+            continue
+        group.compiled = compiled
+        group.specs_by_idx = specs_by_idx
+        # 预筛关键字：组 case_sensitive=False 或任一子项含 (?i) 时按大小写不敏感处理
+        prefilter_ci = (not case_sensitive) or has_inline_ignorecase
+        if prefilter_ci:
+            group.prefilter_keywords = _dedup_substrings([k.lower() for k in prefilter_keywords])
+            group.per_child_keywords = {
+                idx: _dedup_substrings([k.lower() for k in kws]) for idx, kws in per_child_kw_by_idx.items()
+            }
+        else:
+            group.prefilter_keywords = _dedup_substrings(prefilter_keywords)
+            group.per_child_keywords = {idx: _dedup_substrings(kws) for idx, kws in per_child_kw_by_idx.items()}
+        group.prefilter_case_insensitive = prefilter_ci
+        groups.append(group)
+    return groups
+
+
+def _evaluate_composite_group(  # noqa: PLR0912
+    group: _ContentCompositeGroup,
+    context: MatchContext,
+) -> dict[int, MatchResult]:
+    """对复合组跑一次 ``finditer``，返回命中的子项的 MatchResult 字典。
+
+    两级预筛（与 :func:`fuscan.scanner._content_buckets.match_content_via_buckets`
+    一致）：
+
+    - 桶级：``prefilter_keywords`` 全部不在 haystack 中 → 组内所有子项必不命中，
+      返回空字典。
+    - 逐子项：``per_child_keywords[child_idx]`` 全部不在 haystack 中 → 该子项必不
+      命中，不参与 ``finditer`` 分派（保守不漏：无关键字的子项始终活跃）。
+
+    大小写不敏感组（``prefilter_case_insensitive=True``）的预筛 haystack 为
+    :attr:`MatchContext.content_lower`（跨 Matcher 共享的缓存小写化内容）；
+    否则为 :attr:`MatchContext.content`。
+
+    :param group: 复合组
+    :param context: 匹配上下文（提供 ``content`` 与 ``content_lower`` 懒加载缓存）
+    :return: ``{child_idx: MatchResult}``，仅含命中的子项
+    """
+    if group.compiled is None:
+        return {}
+    # 选择预筛 haystack：不敏感组用小写化 content（context 缓存，跨 Matcher 复用），
+    # 否则用原 content
+    if group.prefilter_case_insensitive:
+        haystack = context.content_lower
+    else:
+        haystack = context.content
+    # 桶级快速短路：组内所有子项关键字均不在 content 中 → 全部子项必不命中
+    if group.prefilter_keywords and not any(kw in haystack for kw in group.prefilter_keywords):
+        return {}
+    # 逐子项预筛：计算活跃子项集合（无关键字的子项始终活跃）
+    active: set[int] = set()
+    for child_idx in group.child_indices:
+        kws = group.per_child_keywords.get(child_idx, [])
+        if not kws or any(kw in haystack for kw in kws):
+            active.add(child_idx)
+    if not active:
+        return {}
+    # 跑一次 finditer，按 lastgroup 分派到各子项
+    content = context.content
+    per_child: dict[int, tuple[str, int]] = {}
+    for m in group.compiled.finditer(content):
+        last = m.lastgroup
+        if last is None:
+            continue
+        child_idx = group.group_to_idx.get(last)
+        if child_idx is None or child_idx not in active:
+            continue
+        txt = m.group(0)
+        prev = per_child.get(child_idx)
+        if prev is None:
+            per_child[child_idx] = (txt, 1)
+        else:
+            per_child[child_idx] = (prev[0], prev[1] + 1)
+    # 构造 MatchResult（detail 与 _apply_regex 一致：f"正则命中: {first_txt!r}"）
+    results: dict[int, MatchResult] = {}
+    for child_idx, (first_txt, total_cnt) in per_child.items():
+        spec = group.specs_by_idx[child_idx]
+        results[child_idx] = MatchResult(
+            matched=True,
+            detail=f"正则命中: {first_txt!r}",
+            match_text=first_txt,
+            match_count=total_cnt,
+            target=MatchTarget.CONTENT.value,
+            match_texts=(first_txt,) if first_txt else (),
+            match_description=spec.description,
+        )
+    return results
+
+
 class AndMatcher(Matcher):
     """逻辑与：所有子匹配器均命中才算命中。
 
     持有 :class:`AndMatch` spec 以读取 ``description``，并收集所有子匹配器
     命中的文本到 ``match_texts``，便于 GUI 标记每个命中的内容（需求3）。
+
+    性能优化：构造期把同 ``case_sensitive`` 的 CONTENT REGEX 子项合并为复合 OR
+    正则（:class:`_ContentCompositeGroup`），``matches()`` 时一次 ``finditer``
+    收集组内所有子项命中状态。无复合组时（无 CONTENT REGEX 子项或组内仅 1 个
+    子项）走原逐子项路径，行为完全一致。
     """
 
     def __init__(self, spec: AndMatch) -> None:
         self.spec = spec
         self.children: tuple[Matcher, ...] = tuple(build_matcher(c) for c in spec.children)
+        self._composite_groups: list[_ContentCompositeGroup] = _build_content_composite_groups(self.children)
+        # 复合组覆盖的子项下标集合 + 子项下标 -> 所属组的映射（matches 时 O(1) 查找）
+        self._composite_child_indices: set[int] = set()
+        self._group_by_child_idx: dict[int, _ContentCompositeGroup] = {}
+        for group in self._composite_groups:
+            self._composite_child_indices.update(group.child_indices)
+            for child_idx in group.child_indices:
+                self._group_by_child_idx[child_idx] = group
 
     @override
     def matches(self, context: MatchContext) -> MatchResult:
         details: list[str] = []
         match_texts: list[str] = []
         total_count = 0
-        for child in self.children:
-            result = child.matches(context)
-            if not result.matched:
-                return MatchResult(matched=False, match_description=self.spec.description)
-            if result.detail:
-                details.append(result.detail)
-            match_texts.extend(result.match_texts)
-            total_count += result.match_count
+        if not self._composite_groups:
+            # 无复合组：走原逻辑（保持完全一致）
+            for child in self.children:
+                result = child.matches(context)
+                if not result.matched:
+                    return MatchResult(matched=False, match_description=self.spec.description)
+                if result.detail:
+                    details.append(result.detail)
+                match_texts.extend(result.match_texts)
+                total_count += result.match_count
+        else:
+            # 有复合组：按原顺序评估，复合子项从缓存的组评估结果中取。
+            # 保持原短路语义——任一子项未命中立即返回 False；
+            # 保持原 detail/match_texts 顺序——按 children 下标迭代。
+            group_results_cache: dict[int, dict[int, MatchResult]] = {}
+            for i, child in enumerate(self.children):
+                if i in self._composite_child_indices:
+                    group = self._group_by_child_idx[i]
+                    group_key = id(group)
+                    if group_key not in group_results_cache:
+                        # 首次访问该组：跑一次 finditer，结果缓存供同组其他子项复用
+                        results = _evaluate_composite_group(group, context)
+                        group_results_cache[group_key] = results
+                    results = group_results_cache[group_key]
+                    if i not in results:
+                        # AND 语义：组内该子项未命中 → 整体不命中
+                        return MatchResult(matched=False, match_description=self.spec.description)
+                    result = results[i]
+                else:
+                    result = child.matches(context)
+                if not result.matched:
+                    return MatchResult(matched=False, match_description=self.spec.description)
+                if result.detail:
+                    details.append(result.detail)
+                match_texts.extend(result.match_texts)
+                total_count += result.match_count
         # 去重保序，避免相同关键词在多个子匹配器中重复出现
         unique_texts = _dedup_preserve_order(match_texts)
         return MatchResult(
@@ -220,29 +475,75 @@ class OrMatcher(Matcher):
     收集命中的文本到 ``match_texts``（不止首个命中），便于 GUI 标记每个命中
     的内容（需求3）。``match_count`` 为所有命中子匹配器的匹配条数之和。
     ``target`` 透传首个命中子匹配器的目标类型，供 GUI 判断是否在内容预览中高亮。
+
+    性能优化：构造期把同 ``case_sensitive`` 的 CONTENT REGEX 子项合并为复合 OR
+    正则（:class:`_ContentCompositeGroup`），``matches()`` 时一次 ``finditer``
+    收集组内所有子项命中状态。无复合组时走原逐子项路径，行为完全一致。
     """
 
     def __init__(self, spec: OrMatch) -> None:
         self.spec = spec
         self.children: tuple[Matcher, ...] = tuple(build_matcher(c) for c in spec.children)
+        self._composite_groups: list[_ContentCompositeGroup] = _build_content_composite_groups(self.children)
+        self._composite_child_indices: set[int] = set()
+        self._group_by_child_idx: dict[int, _ContentCompositeGroup] = {}
+        for group in self._composite_groups:
+            self._composite_child_indices.update(group.child_indices)
+            for child_idx in group.child_indices:
+                self._group_by_child_idx[child_idx] = group
 
     @override
-    def matches(self, context: MatchContext) -> MatchResult:
+    def matches(self, context: MatchContext) -> MatchResult:  # noqa: PLR0912
         details: list[str] = []
         match_texts: list[str] = []
         total_count = 0
         first_target = ""
         any_matched = False
-        for child in self.children:
-            result = child.matches(context)
-            if result.matched:
-                any_matched = True
-                if result.detail:
-                    details.append(result.detail)
-                match_texts.extend(result.match_texts)
-                total_count += result.match_count
-                if not first_target:
-                    first_target = result.target
+        if not self._composite_groups:
+            # 无复合组：走原逻辑（保持完全一致，不短路以收集所有命中）
+            for child in self.children:
+                result = child.matches(context)
+                if result.matched:
+                    any_matched = True
+                    if result.detail:
+                        details.append(result.detail)
+                    match_texts.extend(result.match_texts)
+                    total_count += result.match_count
+                    if not first_target:
+                        first_target = result.target
+        else:
+            # 有复合组：按原顺序评估，复合子项从缓存的组评估结果中取。
+            # 保持原 OR 语义——不短路，收集所有命中子项；
+            # 保持原 detail/match_texts/first_target 顺序——按 children 下标迭代。
+            group_results_cache: dict[int, dict[int, MatchResult]] = {}
+            for i, child in enumerate(self.children):
+                if i in self._composite_child_indices:
+                    group = self._group_by_child_idx[i]
+                    group_key = id(group)
+                    if group_key not in group_results_cache:
+                        results = _evaluate_composite_group(group, context)
+                        group_results_cache[group_key] = results
+                    results = group_results_cache[group_key]
+                    if i in results:
+                        # OR 语义：任一子项命中即 any_matched=True，但仍继续收集所有命中
+                        result = results[i]
+                        any_matched = True
+                        if result.detail:
+                            details.append(result.detail)
+                        match_texts.extend(result.match_texts)
+                        total_count += result.match_count
+                        if not first_target:
+                            first_target = result.target
+                else:
+                    result = child.matches(context)
+                    if result.matched:
+                        any_matched = True
+                        if result.detail:
+                            details.append(result.detail)
+                        match_texts.extend(result.match_texts)
+                        total_count += result.match_count
+                        if not first_target:
+                            first_target = result.target
         if not any_matched:
             return MatchResult(matched=False, match_description=self.spec.description)
         unique_texts = _dedup_preserve_order(match_texts)

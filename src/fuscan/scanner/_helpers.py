@@ -22,6 +22,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import warnings
 from collections.abc import Iterable
 from concurrent.futures import Future
 from typing import TYPE_CHECKING, Any
@@ -38,6 +40,16 @@ from fuscan.scanner.result import MatchResult, RuleHit
 
 if TYPE_CHECKING:
     from fuscan.scanner.context import FileEntry
+
+# sre_parse / re._parser：正则 AST 解析（用于 CONTENT 桶与组合规则字面量提取）。
+# Python 3.11+ 从 ``re._parser`` 暴露，3.10 仍为废弃的 ``sre_parse``。
+try:
+    from re import _parser as _sre_parse  # type: ignore[missing-module-attribute]  # Python 3.11+
+except ImportError:
+    # Python 3.10：sre_parse 仍可用但已废弃，屏蔽 DeprecationWarning
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        import sre_parse as _sre_parse  # type: ignore[no-redef,import-not-found]
 
 __all__ = [
     "BATCH_THRESHOLD",
@@ -360,3 +372,156 @@ def normalize_max_file_size(value: int | None) -> int:
     if value is None or value < 0:
         return DEFAULT_MAX_FILE_SIZE
     return value
+
+
+# ---------------------------------------------------------------------------
+# 正则字面量提取与预筛工具
+#
+# 以下工具函数最初服务于 :mod:`fuscan.scanner._content_buckets` 的 CONTENT 桶
+# 预筛；现共享给 :mod:`fuscan.scanner.matchers` 的组合规则复合正则构造。
+# ---------------------------------------------------------------------------
+
+_INLINE_FLAG_MAP: dict[str, int] = {
+    "i": re.IGNORECASE,
+    "m": re.MULTILINE,
+    "s": re.DOTALL,
+    "x": re.VERBOSE,
+}
+
+
+def _extract_inline_flags(pattern: str) -> tuple[str, int]:
+    """提取正则模式开头的内联标志（如 ``(?i)``、``(?im)``）。
+
+    Python 3.11+ 对内联标志不在表达式开头的情况发出 DeprecationWarning，
+    因为 ``(?i)`` 等在命名组内部时会影响后续所有内容而非仅当前组。
+    本函数将其提取出来，供调用方用 ``(?flag:...)`` 非捕获组语法包装，
+    使标志仅作用于目标子模式，避免污染同一 OR 复合正则中的其他分支。
+
+    :param pattern: 原始正则模式
+    :return: ``(清理后的模式, 提取的标志位组合)``
+    """
+    extracted = 0
+    pos = 0
+    while pos < len(pattern) and pattern[pos] == "(":
+        m = re.match(r"\(\?([imsx]+)\)", pattern[pos:])
+        if not m:
+            break
+        for ch in m.group(1):
+            extracted |= _INLINE_FLAG_MAP.get(ch, 0)
+        pos += m.end()
+    return pattern[pos:], extracted
+
+
+def _flags_to_chars(flags: int) -> str:
+    """将标志位组合转换为内联标志字符串（如 ``re.IGNORECASE | re.DOTALL`` → ``is``）。"""
+    chars: list[str] = []
+    for ch, bit in _INLINE_FLAG_MAP.items():
+        if flags & bit:
+            chars.append(ch)
+    return "".join(chars)
+
+
+def _walk_sre_ast(nodes: Any, min_len: int, prefix: str = "") -> list[str]:
+    """递归遍历 sre_parse AST 节点，提取长度 >= ``min_len`` 的字面量片段。
+
+    用于 CONTENT 桶与组合规则复合正则的预筛：从正则 AST 中提取所有"必然出现在
+    匹配文本中"的字面量。若这些字面量均不在内容中，则正则必然不命中，可安全
+    跳过 ``finditer``，避免大文本上的不可中断 C 调用阻塞主线程。
+
+    处理的节点类型：
+
+    - ``LITERAL``：累积到当前字面串。
+    - ``BRANCH``（``|``）：各分支独立递归，前缀继承（sre_parse 会把公共前缀
+      提到 BRANCH 之外，例如 ``(password|passwd|pwd)`` 解析为 ``p`` + BRANCH。
+      前缀递归确保正确还原 ``password``/``passwd``/``pwd``）。
+    - ``SUBPATTERN``（捕获组）：递归内部，前缀继承。
+    - ``MAX_REPEAT``（量词 ``*+?{n,m}``）：内部字面量可能不出现（如 ``a?``），
+      前缀不传递，但内部仍递归以提取可保证出现的字面量。
+    - ``IN``（字符类）：若全部为单字面量（如 ``[abc]``）则展开为各候选前缀组合；
+      含 ``RANGE``/``CATEGORY``（如 ``[A-Z]``）的字符类无法提取确定字面量。
+
+    :param nodes: sre_parse 解析后的节点列表（``list[(op, args), ...]``，运行期为
+        ``SubPattern``，duck-type 为可迭代的 ``(op, args)`` 元组序列）
+    :param min_len: 字面量最小长度
+    :param prefix: 当前累积的字面前缀（用于 BRANCH/SUBPATTERN 共享前缀）
+    :return: 字面量片段列表（可能含重复，由调用方去重）
+    """
+    literals: list[str] = []
+    current = prefix
+    for op, args in nodes:
+        s = str(op)
+        if s == "LITERAL":
+            current += chr(args)
+            continue
+        # 非字面量操作：终结当前字面串
+        prefix_for_recurse = current
+        if current and len(current) >= min_len:
+            literals.append(current)
+        current = ""
+        if s == "BRANCH":
+            # | 分支：各分支独立，共享前缀
+            for branch in args[1]:
+                literals.extend(_walk_sre_ast(branch, min_len, prefix=prefix_for_recurse))
+        elif s == "SUBPATTERN":
+            # 捕获组：递归内部，前缀继承
+            literals.extend(_walk_sre_ast(args[3], min_len, prefix=prefix_for_recurse))
+        elif s == "MAX_REPEAT":
+            # 量词：内部字面量可能不出现，前缀不传递
+            literals.extend(_walk_sre_ast(args[2], min_len, prefix=""))
+        elif s == "IN":
+            # 字符类：若全为单字面量则展开为候选前缀组合
+            sub = list(args)
+            if sub and all(str(so) == "LITERAL" for so, _ in sub):
+                for _so, sa in sub:
+                    candidate = prefix_for_recurse + chr(sa)
+                    if len(candidate) >= min_len:
+                        literals.append(candidate)
+            # 含 RANGE/CATEGORY（如 [A-Z]）的字符类不提取
+    if current and len(current) >= min_len:
+        literals.append(current)
+    return literals
+
+
+def _extract_literals(pattern: str, min_len: int = 3) -> list[str]:
+    """从正则模式中提取字面量片段（长度 >= ``min_len``）。
+
+    解析 sre_parse AST，提取所有"必然出现在匹配文本中"的字面量。
+    内联标志（如 ``(?i)``）先剥离——它们不影响字面量提取，仅影响匹配大小写。
+
+    用途：CONTENT 桶与组合规则复合正则的预筛关键字。若所有提取的字面量均不在
+    内容中，则正则必然不命中，可安全跳过 ``finditer``。
+
+    :param pattern: 正则模式（可能含内联标志 ``(?i)`` 等）
+    :param min_len: 字面量最小长度（默认 3，避免过短关键字如单字母导致高误报率）
+    :return: 去重后的字面量列表（保留首次出现顺序）
+    """
+    cleaned, _ignored = _extract_inline_flags(pattern)
+    try:
+        ast: Any = _sre_parse.parse(cleaned)
+    except Exception:
+        # 非法正则或解析失败：保守返回空列表（不预筛，仍走 finditer）
+        return []
+    seen: set[str] = set()
+    result: list[str] = []
+    for lit in _walk_sre_ast(ast, min_len):
+        if lit not in seen:
+            seen.add(lit)
+            result.append(lit)
+    return result
+
+
+def _dedup_substrings(keywords: list[str]) -> list[str]:
+    """去重并去子串：若 kw1 是 kw2 的子串，仅保留 kw2（kw2 命中时 kw1 必命中）。
+
+    先按插入顺序去重，再按长度降序检查——若某关键字是已保留关键字的子串则丢弃。
+    用于桶级与逐规则预筛关键字精简，避免冗余的 ``in`` 检查。
+
+    :param keywords: 原始关键字列表（可能含重复与子串关系）
+    :return: 精简后的关键字列表
+    """
+    unique = list(dict.fromkeys(keywords))
+    kept: list[str] = []
+    for kw in sorted(unique, key=len, reverse=True):
+        if not any(kw in other for other in kept):
+            kept.append(kw)
+    return kept

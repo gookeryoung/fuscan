@@ -23,6 +23,8 @@ from fuscan.scanner.matchers import (
     NotMatcherImpl,
     OrMatcher,
     PathMatcher,
+    _build_content_composite_groups,
+    _evaluate_composite_group,
     build_matcher,
 )
 
@@ -1173,3 +1175,556 @@ class TestContainsOptimization:
         result = matcher.matches(ctx)
         assert result.matched is True
         assert result.match_count == 1000
+
+
+class TestCompositeGroupOptimization:
+    """组合规则复合 CONTENT REGEX 子项组优化测试。
+
+    覆盖 :class:`AndMatcher` / :class:`OrMatcher` 构造期把同 case_sensitive 的
+    CONTENT REGEX 子项合并为复合 OR 正则的路径（:class:`_ContentCompositeGroup`），
+    以及无复合组时回退到原逐子项路径的行为一致性。
+    """
+
+    def test_and_two_content_regex_all_match(self, tmp_path: Path) -> None:
+        """AND 含 2 个同 case_sensitive 的 CONTENT REGEX 子项 → 复合组，全部命中。"""
+        path = tmp_path / "file.txt"
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"password\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"api_key\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        assert isinstance(matcher, AndMatcher)
+        assert len(matcher._composite_groups) == 1
+        ctx = _make_context(path, content="password=abc\napi_key=xyz")
+        result = matcher.matches(ctx)
+        assert result.matched is True
+        assert "password=abc" in result.match_texts
+        assert "api_key=xyz" in result.match_texts
+
+    def test_and_two_content_regex_partial_fail(self, tmp_path: Path) -> None:
+        """AND 含 2 个 CONTENT REGEX 子项，其中一个不命中 → 复合组短路返回 False。"""
+        path = tmp_path / "file.txt"
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"password\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"api_key\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        ctx = _make_context(path, content="password=abc but no api key here")
+        result = matcher.matches(ctx)
+        assert result.matched is False
+
+    def test_and_mixed_filename_content_regex(self, tmp_path: Path) -> None:
+        """AND 含 FILENAME + 2 个 CONTENT REGEX → 仅 CONTENT REGEX 进复合组。"""
+        path = tmp_path / "config.conf"
+        path.write_text("", encoding="utf-8")
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.FILENAME,
+                    mode=MatchMode.ENDSWITH,
+                    pattern=".conf",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"password\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"api_key\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        assert isinstance(matcher, AndMatcher)
+        assert len(matcher._composite_groups) == 1
+        # FILENAME 子项（下标 0）不在复合组中
+        assert 0 not in matcher._composite_child_indices
+        assert 1 in matcher._composite_child_indices
+        assert 2 in matcher._composite_child_indices
+        ctx = _make_context(path, content="password=abc\napi_key=xyz")
+        result = matcher.matches(ctx)
+        assert result.matched is True
+
+    def test_and_single_content_regex_no_composite(self, tmp_path: Path) -> None:
+        """AND 含 1 个 CONTENT REGEX → 无复合组（单子项无合并收益），走原路径。"""
+        path = tmp_path / "file.txt"
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.FILENAME,
+                    mode=MatchMode.EQUALS,
+                    pattern="file.txt",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"password\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        assert isinstance(matcher, AndMatcher)
+        assert len(matcher._composite_groups) == 0
+        ctx = _make_context(path, content="password=abc")
+        result = matcher.matches(ctx)
+        assert result.matched is True
+
+    def test_and_different_case_sensitive_separate_groups(self, tmp_path: Path) -> None:
+        """AND 含 case_sensitive=True 和 =False 各 2 个 → 2 个复合组。"""
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"password\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"api_key\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"Password\s*=\s*\S+",
+                    case_sensitive=True,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"Api_key\s*=\s*\S+",
+                    case_sensitive=True,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        assert isinstance(matcher, AndMatcher)
+        assert len(matcher._composite_groups) == 2
+
+    def test_and_content_regex_case_sensitive(self, tmp_path: Path) -> None:
+        """case_sensitive=True 的复合组：大小写不匹配时不命中。"""
+        path = tmp_path / "file.txt"
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"Password\s*=\s*\S+",
+                    case_sensitive=True,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"Api_key\s*=\s*\S+",
+                    case_sensitive=True,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        ctx = _make_context(path, content="password=abc\napi_key=xyz")
+        result = matcher.matches(ctx)
+        # case_sensitive=True，内容为小写，模式首字母大写 → 不命中
+        assert result.matched is False
+        # 大小写匹配时命中
+        ctx2 = _make_context(path, content="Password=abc\nApi_key=xyz")
+        result2 = matcher.matches(ctx2)
+        assert result2.matched is True
+
+    def test_and_content_regex_inline_ignorecase(self, tmp_path: Path) -> None:
+        """含 (?i) 内联标志的复合组：case_sensitive=True 但内联 (?i) → 大小写不敏感。"""
+        path = tmp_path / "file.txt"
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"(?i)password\s*=\s*\S+",
+                    case_sensitive=True,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"(?i)api_key\s*=\s*\S+",
+                    case_sensitive=True,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        assert isinstance(matcher, AndMatcher)
+        group = matcher._composite_groups[0]
+        # 内联 (?i) → prefilter_case_insensitive=True
+        assert group.prefilter_case_insensitive is True
+        ctx = _make_context(path, content="PASSWORD=abc\nAPI_KEY=xyz")
+        result = matcher.matches(ctx)
+        assert result.matched is True
+
+    def test_and_prefilter_short_circuit(self, tmp_path: Path) -> None:
+        """复合组预筛短路：内容中无任何关键字 → 整组不命中。"""
+        path = tmp_path / "file.txt"
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"password\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"api_key\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        ctx = _make_context(path, content="nothing relevant here at all")
+        result = matcher.matches(ctx)
+        assert result.matched is False
+
+    def test_or_two_content_regex_some_match(self, tmp_path: Path) -> None:
+        """OR 含 2 个 CONTENT REGEX 子项，其中一个命中 → 复合组，OR 命中。"""
+        path = tmp_path / "file.txt"
+        spec = OrMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"password\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"api_key\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        assert isinstance(matcher, OrMatcher)
+        assert len(matcher._composite_groups) == 1
+        ctx = _make_context(path, content="password=abc but no api key")
+        result = matcher.matches(ctx)
+        assert result.matched is True
+        assert "password=abc" in result.match_texts
+
+    def test_or_two_content_regex_none_match(self, tmp_path: Path) -> None:
+        """OR 含 2 个 CONTENT REGEX 子项，均不命中 → 复合组返回 False。"""
+        path = tmp_path / "file.txt"
+        spec = OrMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"password\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"api_key\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        ctx = _make_context(path, content="nothing relevant here")
+        result = matcher.matches(ctx)
+        assert result.matched is False
+
+    def test_or_mixed_filename_content_regex(self, tmp_path: Path) -> None:
+        """OR 含 FILENAME + 2 个 CONTENT REGEX → 仅 CONTENT REGEX 进复合组。"""
+        path = tmp_path / "config.conf"
+        path.write_text("", encoding="utf-8")
+        spec = OrMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.FILENAME,
+                    mode=MatchMode.ENDSWITH,
+                    pattern=".txt",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"password\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"api_key\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        assert isinstance(matcher, OrMatcher)
+        assert len(matcher._composite_groups) == 1
+        # FILENAME 子项（下标 0）不在复合组中
+        assert 0 not in matcher._composite_child_indices
+        ctx = _make_context(path, content="password=abc")
+        result = matcher.matches(ctx)
+        # FILENAME 不匹配（.conf != .txt）但 CONTENT 匹配 → OR 命中
+        assert result.matched is True
+        assert result.target == "content"
+
+    def test_or_collects_all_matched_children(self, tmp_path: Path) -> None:
+        """OR 复合组中多个子项命中时收集所有命中文本。"""
+        path = tmp_path / "file.txt"
+        spec = OrMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"password\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"api_key\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        ctx = _make_context(path, content="password=abc\napi_key=xyz")
+        result = matcher.matches(ctx)
+        assert result.matched is True
+        assert "password=abc" in result.match_texts
+        assert "api_key=xyz" in result.match_texts
+
+    def test_composite_group_detail_format(self, tmp_path: Path) -> None:
+        """复合组命中的 detail 格式与 _apply_regex 一致。"""
+        path = tmp_path / "file.txt"
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"password\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"api_key\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        ctx = _make_context(path, content="password=abc\napi_key=xyz")
+        result = matcher.matches(ctx)
+        assert result.matched is True
+        # detail 由 " AND ".join 各子项的 "正则命中: {first_txt!r}" 组成
+        assert "正则命中:" in result.detail
+        assert " AND " in result.detail
+
+    def test_composite_group_match_count(self, tmp_path: Path) -> None:
+        """复合组命中时 match_count 为各子项非重叠出现次数之和。"""
+        path = tmp_path / "file.txt"
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"password\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"api_key\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        ctx = _make_context(path, content="password=a\npassword=b\napi_key=x")
+        result = matcher.matches(ctx)
+        assert result.matched is True
+        # password 出现 2 次 + api_key 出现 1 次 = 3
+        assert result.match_count == 3
+
+    def test_build_composite_groups_no_regex_children(self) -> None:
+        """无 REGEX 子项时返回空列表。"""
+        children = (
+            build_matcher(LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="abc")),
+            build_matcher(LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.EQUALS, pattern="x.txt")),
+        )
+        assert _build_content_composite_groups(children) == []
+
+    def test_build_composite_groups_single_regex_child(self) -> None:
+        """仅 1 个 REGEX 子项时不创建复合组（单子项无合并收益）。"""
+        children = (
+            build_matcher(
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"abc",
+                    case_sensitive=False,
+                )
+            ),
+            build_matcher(LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.EQUALS, pattern="x.txt")),
+        )
+        assert _build_content_composite_groups(children) == []
+
+    def test_build_composite_groups_non_content_target(self) -> None:
+        """FILENAME/PATH 目标的 REGEX 子项不进复合组。"""
+        children = (
+            build_matcher(
+                LeafMatch(
+                    target=MatchTarget.FILENAME,
+                    mode=MatchMode.REGEX,
+                    pattern=r"abc\d+",
+                    case_sensitive=False,
+                )
+            ),
+            build_matcher(
+                LeafMatch(
+                    target=MatchTarget.PATH,
+                    mode=MatchMode.REGEX,
+                    pattern=r"def\d+",
+                    case_sensitive=False,
+                )
+            ),
+        )
+        assert _build_content_composite_groups(children) == []
+
+    def test_evaluate_composite_group_no_compiled(self, tmp_path: Path) -> None:
+        """compiled 为 None 时返回空字典（安全降级）。"""
+        path = tmp_path / "file.txt"
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"password\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"api_key\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        assert isinstance(matcher, AndMatcher)
+        group = matcher._composite_groups[0]
+        group.compiled = None  # 模拟编译失败
+        ctx = _make_context(path, content="password=abc\napi_key=xyz")
+        results = _evaluate_composite_group(group, ctx)
+        assert results == {}
+
+    def test_evaluate_composite_group_no_active_children(self, tmp_path: Path) -> None:
+        """所有子项关键字均不在内容中 → 无活跃子项 → 返回空字典。"""
+        path = tmp_path / "file.txt"
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"password\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"api_key\s*=\s*\S+",
+                    case_sensitive=False,
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        assert isinstance(matcher, AndMatcher)
+        group = matcher._composite_groups[0]
+        ctx = _make_context(path, content="nothing relevant here")
+        results = _evaluate_composite_group(group, ctx)
+        assert results == {}
+
+    def test_content_lower_cached(self, tmp_path: Path) -> None:
+        """MatchContext.content_lower 懒加载并缓存，多次访问返回同一对象。"""
+        path = tmp_path / "file.txt"
+        ctx = _make_context(path, content="Hello World")
+        # 首次访问触发计算
+        lower1 = ctx.content_lower
+        assert lower1 == "hello world"
+        # 再次访问返回缓存（同一对象）
+        lower2 = ctx.content_lower
+        assert lower2 is lower1
+
+    def test_content_lower_reset(self, tmp_path: Path) -> None:
+        """reset() 后 content_lower 缓存失效，重新计算。"""
+        path = tmp_path / "file.txt"
+        ctx = _make_context(path, content="Hello")
+        assert ctx.content_lower == "hello"
+        ctx.reset()
+        # reset 后 _content_lower_loaded 为 False
+        assert ctx._content_lower_loaded is False
+
+    def test_and_preserves_child_order_in_detail(self, tmp_path: Path) -> None:
+        """AND 复合组命中的 detail 按 children 原顺序拼接。"""
+        path = tmp_path / "file.txt"
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"password\s*=\s*\S+",
+                    case_sensitive=False,
+                    description="密码赋值",
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT,
+                    mode=MatchMode.REGEX,
+                    pattern=r"api_key\s*=\s*\S+",
+                    case_sensitive=False,
+                    description="API 密钥",
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        ctx = _make_context(path, content="password=abc\napi_key=xyz")
+        result = matcher.matches(ctx)
+        assert result.matched is True
+        # detail 顺序：password 在前，api_key 在后
+        detail_lower = result.detail.lower()
+        assert detail_lower.index("password") < detail_lower.index("api_key")

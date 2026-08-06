@@ -478,10 +478,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def recentParsedFiles(self) -> list[dict[str, object]]:
         """最近解析文件明细列表（最新在前），供解析节点展开区展示。
 
-        每项为 ``{"name", "path", "size", "ext", "elapsedMs", "sizeText",
-        "elapsedText"}``——``name`` 为路径末段文件名，``sizeText``/``elapsedText``
-        为后端预格式化的大小/耗时文案（格式化逻辑下沉后端，避免 QML 层重复
-        实现）。供 QML 以 GitHub Actions 风格逐行展示（文件名 · 大小 · 耗时）。
+        每项为 ``{"name", "path", "size", "ext", "elapsedMs", "engine",
+        "sizeText", "elapsedText"}``——``name`` 为路径末段文件名，``sizeText``/
+        ``elapsedText`` 为后端预格式化的大小/耗时文案（格式化逻辑下沉后端，避免
+        QML 层重复实现），``engine`` 为该文件解析引擎名（供明细行标注）。供 QML
+        以 GitHub Actions 风格逐行展示（文件名 · 大小 · 耗时 · 引擎）。
         返回副本并倒序（最新解析的文件排在列表首位）。
         """
         items: list[dict[str, object]] = []
@@ -501,6 +502,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     "size": size,
                     "ext": entry.get("ext", ""),
                     "elapsedMs": elapsed_ms,
+                    "engine": entry.get("engine", ""),
                     "sizeText": format_size(size),
                     "elapsedText": format_elapsed(elapsed_ms / 1000.0),
                 }
@@ -1609,6 +1611,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     "size": info.current_file_size,
                     "ext": info.current_file_ext,
                     "elapsedMs": info.current_file_elapsed_ms,
+                    "engine": info.current_file_engine,
                 }
             )
             # 累计待刷新计数，由 _maybe_emit_recent 按低频阈值择机 emit

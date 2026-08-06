@@ -5625,6 +5625,16 @@ class TestPerFileElapsedMs:
         result = scanner._scan_entry(_plain_entry(p))
         assert result.elapsed_ms >= 0.0
 
+    def test_scan_result_carries_engine(self, tmp_path: Path) -> None:
+        """_scan_entry 应按扩展名回填解析引擎名（纯文本 → 「纯文本」）。"""
+        p = tmp_path / "a.txt"
+        p.write_text("hello world content", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, max_workers=1, cache=None)
+        result = scanner._scan_entry(_plain_entry(p))
+        # .txt 由 PlainTextExtractor 处理，引擎为 charset-normalizer
+        assert result.engine == "charset-normalizer"
+
     def test_concurrent_elapsed_not_cumulative(self, tmp_path: Path) -> None:
         """并发模式下单文件耗时不应随队列位置单调递增（不是累计耗时）。
 
@@ -5708,3 +5718,42 @@ class TestPerFileElapsedMs:
         cumulative_ceiling_ms = per_file_sleep * file_count * 1000 * 0.9
         for sample in elapsed_samples:
             assert sample < cumulative_ceiling_ms
+
+
+class TestEngineForExtension:
+    """``engine_for_extension`` 按扩展名反查解析引擎名。
+
+    引擎名由扩展名静态决定，供 GUI 明细行标注每个文件的解析路径。
+    """
+
+    def test_registered_extension_returns_engine_info(self) -> None:
+        """已注册扩展名返回其提取器 engine_info。"""
+        from fuscan.scanner._helpers import engine_for_extension
+
+        # .txt → PlainTextExtractor.engine_info == "charset-normalizer"
+        assert engine_for_extension("txt") == "charset-normalizer"
+
+    def test_extension_case_insensitive(self) -> None:
+        """扩展名大小写不敏感（注册表内部归一化为小写）。"""
+        from fuscan.scanner._helpers import engine_for_extension
+
+        assert engine_for_extension("TXT") == engine_for_extension("txt")
+
+    def test_leading_dot_stripped(self) -> None:
+        """带前导点的扩展名与不带点结果一致。"""
+        from fuscan.scanner._helpers import engine_for_extension
+
+        assert engine_for_extension(".txt") == engine_for_extension("txt")
+
+    def test_unregistered_extension_returns_fallback(self) -> None:
+        """无注册提取器的扩展名回退到「纯文本」引擎名。"""
+        from fuscan.scanner._helpers import engine_for_extension
+
+        # 极不可能被注册的扩展名，走纯文本读取回退
+        assert engine_for_extension("no_such_ext_xyz") == "纯文本"
+
+    def test_empty_extension_returns_fallback(self) -> None:
+        """空扩展名（无扩展名文件）回退到「纯文本」引擎名。"""
+        from fuscan.scanner._helpers import engine_for_extension
+
+        assert engine_for_extension("") == "纯文本"

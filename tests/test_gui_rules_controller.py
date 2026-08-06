@@ -792,7 +792,7 @@ class _FakeWorkspaceController:
         if item is None:
             return
         value = json.loads(value_json)
-        if key in ("ignore_dirs", "rules_paths", "temp_rules_paths", "disabled_temp_rules_paths"):
+        if key in ("rules_paths", "temp_rules_paths", "disabled_temp_rules_paths"):
             value = tuple(value)
         item.task_overrides[key] = value
 

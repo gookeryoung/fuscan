@@ -30,6 +30,7 @@ from fuscan.config import DEFAULT_MAX_FILE_SIZE
 from fuscan.extractors import (
     extract_content_from_bytes_with_retry,
     extract_content_with_fallback,
+    get_extractor,
 )
 from fuscan.rules.model import MatchSpec, MatchTarget, Rule
 from fuscan.scanner.result import MatchResult, RuleHit
@@ -51,6 +52,7 @@ __all__ = [
     "default_extract_content",
     "default_extract_content_with_hash",
     "empty_content_provider",
+    "engine_for_extension",
     "normalize_max_file_size",
     "rebuild_hit_from_cache",
     "spec_needs_content",
@@ -149,6 +151,31 @@ def rebuild_hit_from_cache(rule: Rule, cached: RuleHit) -> RuleHit:
         match_texts=cached.match_texts,
         match_description=cached.match_description,
     )
+
+
+# 无注册提取器时的回退引擎名：extract_content_with_fallback 对未注册扩展名
+# 直接 read_text 纯文本读取，故引擎标注为「纯文本」，与提取器的 engine_info 区分。
+_FALLBACK_ENGINE: str = "纯文本"
+
+
+def engine_for_extension(extension: str) -> str:
+    """按扩展名反查解析引擎名，供 GUI 明细行标注。
+
+    引擎名由扩展名静态决定（同一扩展名固定映射到同一提取器），故无需在
+    提取流程中传递，扫描完成后按 ``entry.extension`` 反查即可：
+
+    - 已注册提取器：返回其 ``engine_info``（如 ``"pdf_oxide"``/``"lxml"``/
+      ``"python-calamine"``/``"olefile+ole"``）；``engine_info`` 为空串时
+      回退到 :data:`_FALLBACK_ENGINE`（提取器未覆盖该属性的兜底）。
+    - 无注册提取器：内容提供器走纯文本读取回退，返回 :data:`_FALLBACK_ENGINE`。
+
+    :param extension: 扩展名（不含点，大小写不敏感；空串表示无扩展名）
+    :return: 引擎名字符串，始终非空
+    """
+    extractor = get_extractor(extension)
+    if extractor is None:
+        return _FALLBACK_ENGINE
+    return extractor.engine_info or _FALLBACK_ENGINE
 
 
 def default_extract_content(entry: FileEntry) -> str:

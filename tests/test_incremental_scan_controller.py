@@ -1145,8 +1145,8 @@ class TestScanControllerPropertiesCoverage:
 
     def test_set_task_override(self, controller: ScanController) -> None:
         """setTaskOverride 应写入 _task_overrides。"""
-        controller.setTaskOverride("scan_archives", False)
-        assert controller._task_overrides["scan_archives"] is False
+        controller.setTaskOverride("use_builtin", False)
+        assert controller._task_overrides["use_builtin"] is False
 
     def test_rules_count_property(self, controller: ScanController) -> None:
         """rulesCount Property 应返回规则数。"""

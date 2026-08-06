@@ -419,7 +419,7 @@ Rectangle {
                                             elide: Text.ElideMiddle
                                             verticalAlignment: Text.AlignVCenter
                                         }
-                                        // 大小 · 耗时徽标（后端预格式化）
+                                        // 大小 · 耗时 · 引擎徽标（后端预格式化）
                                         Rectangle {
                                             Layout.preferredHeight: 18
                                             Layout.preferredWidth: metaLabel.implicitWidth + 12
@@ -428,7 +428,9 @@ Rectangle {
                                             Label {
                                                 id: metaLabel
                                                 anchors.centerIn: parent
+                                                // 引擎名可能为空（如极端边界），空时不追加分隔符
                                                 text: (modelData.sizeText || "") + " · " + (modelData.elapsedText || "")
+                                                    + (modelData.engine ? " · " + modelData.engine : "")
                                                 font.pixelSize: card.theme.fontSizeMin
                                                 color: card.theme.isDark ? card.theme.colorTextSecondary : card.theme.colorTextSecondary
                                             }

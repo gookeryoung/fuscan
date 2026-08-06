@@ -61,6 +61,7 @@ from fuscan.scanner._helpers import (
     default_extract_content,
     default_extract_content_with_hash,
     empty_content_provider,
+    engine_for_extension,
     normalize_max_file_size,
     rebuild_hit_from_cache,
     spec_needs_content,
@@ -926,12 +927,14 @@ class Scanner:
         if phase == "scan" and current_file:
             current_file_size = self._current_file_size
             current_file_ext = self._current_file_ext
+            current_file_engine = engine_for_extension(current_file_ext)
             current_file_elapsed_ms = (
                 (now - self._current_file_start_time) * 1000.0 if self._current_file_start_time > 0 else 0.0
             )
         else:
             current_file_size = 0
             current_file_ext = ""
+            current_file_engine = ""
             current_file_elapsed_ms = 0.0
         # filter 阶段填充四类剔除字段；其他阶段恒为 0（ProgressInfo 默认值）
         if phase == "filter" and filter_stats is not None:
@@ -964,6 +967,7 @@ class Scanner:
                 current_file_size=current_file_size,
                 current_file_ext=current_file_ext,
                 current_file_elapsed_ms=current_file_elapsed_ms,
+                current_file_engine=current_file_engine,
                 filter_removed_empty=filter_removed_empty,
                 filter_removed_oversize=filter_removed_oversize,
                 filter_removed_unreadable=filter_removed_unreadable,
@@ -1175,7 +1179,8 @@ class Scanner:
                 total_ms=total_ms,
                 hit_count=len(result.hits),
             )
-        return replace(result, elapsed_ms=total_ms)
+        # 回填单文件耗时与解析引擎名（引擎按扩展名静态反查，供 GUI 明细行标注）。
+        return replace(result, elapsed_ms=total_ms, engine=engine_for_extension(entry.extension))
 
     def _scan_entry_uncached(self, entry: FileEntry) -> ScanResult:
         """对单个文件应用所有规则（无缓存）。

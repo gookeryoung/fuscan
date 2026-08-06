@@ -1051,36 +1051,27 @@ class TestSerializeTaskOverridesRoundtrip:
     """iter-113：serialize/deserialize task_overrides 往返一致性。"""
 
     def test_roundtrip_basic(self) -> None:
-        """基本字段往返保持一致（ignore_dirs/rules_paths tuple <-> list）。"""
+        """基本字段往返保持一致（rules_paths tuple <-> list）。"""
         original: dict[str, object] = {
-            "scan_archives": True,
-            "max_workers": 5,
-            "max_file_size": 1024,
-            "max_depth": 10,
-            "ignore_dirs": ("/path/a", "/path/b"),
             "rules_paths": ("/rules/x.yaml", "/rules/y.yaml"),
             "use_builtin": False,
         }
         serialized = serialize_task_overrides(original)
-        # ignore_dirs/rules_paths 应转为 list
-        assert serialized["ignore_dirs"] == ["/path/a", "/path/b"]
+        # rules_paths 应转为 list
         assert serialized["rules_paths"] == ["/rules/x.yaml", "/rules/y.yaml"]
         # use_builtin 原样
         assert serialized["use_builtin"] is False
         # 反序列化后应回到 tuple
         restored = deserialize_task_overrides(serialized)
-        assert restored["ignore_dirs"] == ("/path/a", "/path/b")
         assert restored["rules_paths"] == ("/rules/x.yaml", "/rules/y.yaml")
         assert restored["use_builtin"] is False
-        assert restored["max_workers"] == 5
-        assert restored["scan_archives"] is True
 
     def test_roundtrip_drops_unknown_keys(self) -> None:
         """非白名单字段在序列化时被剔除。"""
-        original: dict[str, object] = {"max_workers": 3, "unknown_field": "should be dropped"}
+        original: dict[str, object] = {"use_builtin": True, "unknown_field": "should be dropped"}
         serialized = serialize_task_overrides(original)
         assert "unknown_field" not in serialized
-        assert serialized == {"max_workers": 3}
+        assert serialized == {"use_builtin": True}
 
     def test_roundtrip_temp_rules_paths_and_disabled(self) -> None:
         """temp_rules_paths 与 disabled_temp_rules_paths tuple <-> list 往返一致。"""
@@ -1109,22 +1100,22 @@ class TestDeserializeTaskOverridesFaultTolerance:
 
     def test_unknown_key_skipped(self) -> None:
         """未知字段被跳过（不写入输出）。"""
-        raw: dict[str, object] = {"unknown_field": "value", "max_workers": 5}
+        raw: dict[str, object] = {"unknown_field": "value", "use_builtin": True}
         result = deserialize_task_overrides(raw)
         assert "unknown_field" not in result
-        assert result == {"max_workers": 5}
+        assert result == {"use_builtin": True}
 
-    def test_ignore_dirs_wrong_element_type_skipped(self) -> None:
-        """ignore_dirs 含非 str 元素 → 跳过该字段。"""
-        raw: dict[str, object] = {"ignore_dirs": [1, 2, 3]}
+    def test_temp_rules_paths_wrong_element_type_skipped(self) -> None:
+        """temp_rules_paths 含非 str 元素 → 跳过该字段。"""
+        raw: dict[str, object] = {"temp_rules_paths": [1, 2, 3]}
         result = deserialize_task_overrides(raw)
-        assert "ignore_dirs" not in result
+        assert "temp_rules_paths" not in result
 
-    def test_ignore_dirs_not_list_skipped(self) -> None:
-        """ignore_dirs 非 list → 跳过该字段。"""
-        raw: dict[str, object] = {"ignore_dirs": "not a list"}
+    def test_temp_rules_paths_not_list_skipped(self) -> None:
+        """temp_rules_paths 非 list → 跳过该字段。"""
+        raw: dict[str, object] = {"temp_rules_paths": "not a list"}
         result = deserialize_task_overrides(raw)
-        assert "ignore_dirs" not in result
+        assert "temp_rules_paths" not in result
 
     def test_rules_paths_wrong_element_type_skipped(self) -> None:
         """rules_paths 含非 str 元素 → 跳过该字段。"""
@@ -1138,17 +1129,11 @@ class TestDeserializeTaskOverridesFaultTolerance:
         result = deserialize_task_overrides(raw)
         assert "rules_paths" not in result
 
-    def test_int_field_wrong_type_skipped(self) -> None:
-        """int 字段传入 str → 跳过该字段。"""
-        raw: dict[str, object] = {"max_workers": "not a number"}
-        result = deserialize_task_overrides(raw)
-        assert "max_workers" not in result
-
     def test_bool_field_wrong_type_skipped(self) -> None:
         """bool 字段传入 str → 跳过该字段。"""
-        raw: dict[str, object] = {"scan_archives": "yes"}
+        raw: dict[str, object] = {"use_builtin": "yes"}
         result = deserialize_task_overrides(raw)
-        assert "scan_archives" not in result
+        assert "use_builtin" not in result
 
 
 class TestSavePersistedWorkspacesFaultTolerance:

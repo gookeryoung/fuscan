@@ -534,7 +534,7 @@ class TestWorkspaceListModel:
         mock = MagicMock()
         model.dataChanged.connect(mock)
 
-        model.update_workspace("ws-1", task_overrides={"max_workers": 8})
+        model.update_workspace("ws-1", task_overrides={"use_builtin": False})
 
         # task_overrides 变化 → emit rulesTags role（Qt.UserRole + 13）
         assert mock.call_count == 1
@@ -544,7 +544,7 @@ class TestWorkspaceListModel:
         assert Qt.UserRole + 13 in emitted_roles
         item = model.get_workspace("ws-1")
         assert item is not None
-        assert item.task_overrides == {"max_workers": 8}
+        assert item.task_overrides == {"use_builtin": False}
 
     def test_update_workspace_derived_role_emitted(self) -> None:
         """iter-105 P1：更新 rules_paths 时应 emit rulesText 与 rulesTags 两个派生 role。"""
@@ -2009,24 +2009,24 @@ class TestClearTaskOverride:
     def test_clear_nonexistent_workspace_noop(self, controller: WorkspaceController) -> None:
         """工作区不存在时记录 warning 并返回，不抛异常。"""
         # 不应抛异常
-        controller.clearTaskOverride("nonexistent-ws", "scan_archives")
+        controller.clearTaskOverride("nonexistent-ws", "use_builtin")
 
     def test_clear_invalid_key_noop(self, controller: WorkspaceController) -> None:
         """非法 key（不在 TASK_OVERRIDE_KEYS 中）应被拒绝。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        controller.setTaskOverride(ws_id, "scan_archives", "false")
+        controller.setTaskOverride(ws_id, "use_builtin", "false")
 
         controller.clearTaskOverride(ws_id, "backup_dir")  # backup_dir 不在允许列表
 
         # 原有覆盖应保留
         overrides = json.loads(controller.taskOverridesJson(ws_id))
-        assert overrides == {"scan_archives": False}
+        assert overrides == {"use_builtin": False}
 
     def test_clear_non_existing_override_noop(self, controller: WorkspaceController) -> None:
         """key 在 task_overrides 中不存在时无操作返回。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        # 未设置过任何覆盖，清除 scan_archives 应无操作
-        controller.clearTaskOverride(ws_id, "scan_archives")
+        # 未设置过任何覆盖，清除 use_builtin 应无操作
+        controller.clearTaskOverride(ws_id, "use_builtin")
         assert controller.taskOverridesJson(ws_id) == "{}"
 
     def test_clear_existing_override_removes_and_backfills_global(
@@ -2035,21 +2035,20 @@ class TestClearTaskOverride:
     ) -> None:
         """清除已有覆盖时应删除字段并用全局值回填 ScanController。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        controller.setTaskOverride(ws_id, "scan_archives", "false")
+        controller.setTaskOverride(ws_id, "use_builtin", "false")
         # 确认覆盖已设置
-        assert json.loads(controller.taskOverridesJson(ws_id)) == {"scan_archives": False}
+        assert json.loads(controller.taskOverridesJson(ws_id)) == {"use_builtin": False}
 
         # 清除覆盖
-        controller.clearTaskOverride(ws_id, "scan_archives")
+        controller.clearTaskOverride(ws_id, "use_builtin")
 
-        # task_overrides 中应不再包含 scan_archives
+        # task_overrides 中应不再包含 use_builtin
         overrides = json.loads(controller.taskOverridesJson(ws_id))
-        assert "scan_archives" not in overrides
+        assert "use_builtin" not in overrides
 
-        # ScanController 覆盖已清除，effective 值回退到规则集（builtin 默认 True）
+        # ScanController 覆盖已回填全局值（全局默认 True）
         sc = controller._ensure_scan_controller(ws_id)  # type: ignore[attr-defined]
-        assert "scan_archives" not in sc._task_overrides  # type: ignore[attr-defined]
-        assert sc._effective_scan_archives() is True  # type: ignore[attr-defined]
+        assert sc._effective_use_builtin() is True  # type: ignore[attr-defined]
 
     def test_clear_persisted_after_restart(
         self,
@@ -2060,8 +2059,8 @@ class TestClearTaskOverride:
         rules1 = RulesController(cfg1)
         ctrl1 = WorkspaceController(cfg1, rules1)
         ws_id = ctrl1.addWorkspace("t", "folder", "/tmp", "[]", True)
-        ctrl1.setTaskOverride(ws_id, "max_workers", "8")
-        ctrl1.clearTaskOverride(ws_id, "max_workers")
+        ctrl1.setTaskOverride(ws_id, "use_builtin", "false")
+        ctrl1.clearTaskOverride(ws_id, "use_builtin")
 
         # 重新创建控制器，验证清除已持久化
         cfg2 = ConfigController()
@@ -2126,7 +2125,7 @@ class TestNonexistentWorkspaceEdgeCases:
     ) -> None:
         """setTaskOverride 对不存在的工作区应记录 warning 并返回。"""
         # 不应抛异常
-        controller.setTaskOverride("nonexistent-ws", "scan_archives", "false")
+        controller.setTaskOverride("nonexistent-ws", "use_builtin", "false")
 
 
 class TestLegacyPersistFileCompat:
@@ -2194,12 +2193,12 @@ class TestScanControllerOverrideSyncContract:
         assert item is not None
 
         # 直接调 ScanController.setTaskOverride
-        sc.setTaskOverride("max_workers", 7)  # type: ignore[attr-defined]
+        sc.setTaskOverride("use_builtin", False)  # type: ignore[attr-defined]
 
         # ScanController 运行时已生效
-        assert sc._effective_max_workers() == 7  # type: ignore[attr-defined]
+        assert sc._effective_use_builtin() is False  # type: ignore[attr-defined]
         # 但 WorkspaceItem.task_overrides 不应被回写
-        assert "max_workers" not in item.task_overrides
+        assert "use_builtin" not in item.task_overrides
 
 
 # ============================= iter-115 扫描历史 =============================
@@ -2858,18 +2857,6 @@ class TestIter143CoverageGaps:
         ws_id = controller.addWorkspace("我的任务", "folder", "/tmp", "[]", True)
         assert controller.workspaceName(ws_id) == "我的任务"
 
-    def test_set_task_override_ignore_dirs_invalid_type(
-        self,
-        controller: WorkspaceController,
-    ) -> None:
-        """setTaskOverride ignore_dirs 非 list[str] 应记录 warning 并返回（iter-143 覆盖 621-622）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        # ignore_dirs 为非 list（数字）应被拒绝
-        controller.setTaskOverride(ws_id, "ignore_dirs", "123")  # JSON 123 是 int 不是 list
-        # task_overrides 未变更
-        overrides = json.loads(controller.taskOverridesJson(ws_id))
-        assert "ignore_dirs" not in overrides
-
     def test_set_task_override_when_controller_not_created(
         self,
         controller: WorkspaceController,
@@ -2883,10 +2870,10 @@ class TestIter143CoverageGaps:
             existing.deleteLater()
         assert ws_id not in controller._scan_controllers  # type: ignore[attr-defined]
         # 不应抛异常
-        controller.setTaskOverride(ws_id, "scan_archives", "false")
+        controller.setTaskOverride(ws_id, "use_builtin", "false")
         # task_overrides 已更新
         overrides = json.loads(controller.taskOverridesJson(ws_id))
-        assert overrides.get("scan_archives") is False
+        assert overrides.get("use_builtin") is False
 
     def test_clear_task_override_when_controller_not_created(
         self,
@@ -2895,7 +2882,7 @@ class TestIter143CoverageGaps:
         """clearTaskOverride 时 ScanController 未创建应安全跳过（iter-143 覆盖 668->672）。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
         # 先设置覆盖（会创建 ScanController）
-        controller.setTaskOverride(ws_id, "scan_archives", "false")
+        controller.setTaskOverride(ws_id, "use_builtin", "false")
         # 手动移除 ScanController 模拟"未创建"场景
         existing = controller._scan_controllers.pop(ws_id, None)  # type: ignore[attr-defined]
         if existing is not None:
@@ -2903,9 +2890,9 @@ class TestIter143CoverageGaps:
             existing.deleteLater()
         assert ws_id not in controller._scan_controllers  # type: ignore[attr-defined]
         # 清除不应抛异常
-        controller.clearTaskOverride(ws_id, "scan_archives")
+        controller.clearTaskOverride(ws_id, "use_builtin")
         overrides = json.loads(controller.taskOverridesJson(ws_id))
-        assert "scan_archives" not in overrides
+        assert "use_builtin" not in overrides
 
     def test_clear_task_override_global_value_is_none(
         self,
@@ -2914,7 +2901,7 @@ class TestIter143CoverageGaps:
     ) -> None:
         """clearTaskOverride 时 global_value is None 应跳过 setTaskOverride（iter-143 覆盖 670->672）。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        controller.setTaskOverride(ws_id, "scan_archives", "false")
+        controller.setTaskOverride(ws_id, "use_builtin", "false")
         # 创建 ScanController（通过访问 currentScanController 触发延迟构造）
         _ = controller.currentScanController
 
@@ -2922,9 +2909,9 @@ class TestIter143CoverageGaps:
         monkeypatch.setattr(controller._config_controller, "get_config_value", lambda _key: None)
 
         # 不应抛异常
-        controller.clearTaskOverride(ws_id, "scan_archives")
+        controller.clearTaskOverride(ws_id, "use_builtin")
         overrides = json.loads(controller.taskOverridesJson(ws_id))
-        assert "scan_archives" not in overrides
+        assert "use_builtin" not in overrides
 
     def test_clear_all_workspaces_empty_list_with_current_id(
         self,

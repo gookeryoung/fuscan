@@ -2358,8 +2358,8 @@ class TestIter143CoverageGaps:
         controller: ScanController,
     ) -> None:
         """effectiveMaxDepth 设非零值时返回该值（iter-143 覆盖行 592-593 depth or 0 分支）。"""
-        # max_depth 已迁移到 RuleSet.scan_params，通过任务级覆盖设置
-        controller._task_overrides["max_depth"] = 5
+        # max_depth 已迁移到 RuleSet.scan_params，从规则集读取
+        controller._ruleset = RuleSet(version="1.0", scan_params=ScanParams(max_depth=5))
         assert controller.effectiveMaxDepth == 5
 
     def test_filter_severities_resets_selected_index_when_out_of_range(

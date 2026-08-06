@@ -1758,18 +1758,6 @@ class TestPreviewRuleset:
         # scanExtensions 为列表（空列表表示未限制后缀）
         assert isinstance(data["scanExtensions"], list)
 
-    def test_preview_reflects_task_override(
-        self,
-        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
-    ) -> None:
-        """任务级 max_workers 覆盖反映在预览中。"""
-        controller, wc = controller_with_workspace
-
-        # 设置任务级 max_workers 覆盖
-        wc.setTaskOverride("ws1", "max_workers", "8")
-        data = json.loads(controller.previewRuleset("ws1"))
-        assert data["maxWorkers"] == 8
-
     def test_preview_reflects_temp_rules(
         self,
         controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
@@ -1866,17 +1854,6 @@ class TestPreviewRuleset:
         for preview_item, model_item in zip(data["ruleFiles"], model, strict=True):
             for key in ("fileName", "path", "exists", "scope", "isBuiltin", "enabled", "canRemove"):
                 assert preview_item[key] == model_item[key], f"字段 {key} 不一致"
-
-    def test_preview_reflects_task_ignore_dirs_override(
-        self,
-        controller_with_workspace: tuple[RulesController, _FakeWorkspaceController],
-    ) -> None:
-        """任务级 ignore_dirs 覆盖反映在预览中。"""
-        controller, wc = controller_with_workspace
-
-        wc.setTaskOverride("ws1", "ignore_dirs", json.dumps(["custom_dir"]))
-        data = json.loads(controller.previewRuleset("ws1"))
-        assert "custom_dir" in data["ignoreDirs"]
 
     def test_preview_reflects_whitelist_entries(
         self,

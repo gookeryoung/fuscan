@@ -68,6 +68,31 @@ def parse_match(data: Any, dedup: dict[int, MatchSpec] | None = None) -> MatchSp
     raise RuleParseError(f"未知匹配类型: {match_type!r}")
 
 
+def _dedup_get_or_store(
+    dedup: dict[int, MatchSpec] | None,
+    key_parts: tuple[object, ...],
+    spec: MatchSpec,
+) -> MatchSpec:
+    """从 dedup 字典按 key_parts 取或存 spec。
+
+    :param dedup: 去重字典；``None`` 时不启用去重，直接返回 spec
+    :param key_parts: 用于计算 hash 的键元组（调用方保证元素可哈希）
+    :param spec: 待存储的新 MatchSpec 实例
+    :return: 若 dedup 中已存在同键实例则返回缓存，否则存入并返回 spec
+
+    统一 LeafMatch / AndMatch / OrMatch / NotMatch 的去重逻辑：
+    先按 key_parts 计算 hash，再查/存 dedup 字典。
+    """
+    if dedup is None:
+        return spec
+    key = hash(key_parts)
+    cached = dedup.get(key)
+    if cached is not None:
+        return cached
+    dedup[key] = spec
+    return spec
+
+
 def _parse_leaf(
     match_type: str,
     data: Mapping[str, Any],
@@ -98,26 +123,15 @@ def _parse_leaf(
         case_sensitive=case_sensitive,
         description=description,
     )
-    if dedup is None:
-        return spec
     # hashable_key: LeafMatch 作为 MatchSpec 是 frozen dataclass，可直接 id()/hash()
     # 为了避免"不同 description 但其他字段相同"被错误合并（description 可能在 UI
     # 展示时会被用户看到），用完整 dataclass 的 hash 做 key 更安全。
-    key = hash(
-        (
-            0,  # 0 = LeafMatch 类型哨兵，避免与组合器 key 碰撞
-            target.value,
-            mode.value,
-            spec.pattern,
-            case_sensitive,
-            description,
-        )
+    # 0 = LeafMatch 类型哨兵，避免与组合器 key 碰撞。
+    return _dedup_get_or_store(  # type: ignore[return-value]
+        dedup,
+        (0, target.value, mode.value, spec.pattern, case_sensitive, description),
+        spec,
     )
-    cached = dedup.get(key)
-    if cached is not None:
-        return cached  # type: ignore[return-value]
-    dedup[key] = spec
-    return spec
 
 
 def _parse_composite(
@@ -135,20 +149,21 @@ def _parse_composite(
         children = tuple(parse_match(child, dedup=dedup) for child in children_raw)
         if not children:
             raise RuleParseError(f"{match_type} 匹配的 children 不能为空")
-        type_tag = 1 if match_type == "and" else 2
+        # 单次分支同时决定 spec 类型与 type_tag（避免重复条件判断）
         if match_type == "and":
             spec: MatchSpec = AndMatch(children=children, description=description)
+            type_tag = 1
         else:
             spec = OrMatch(children=children, description=description)
-        if dedup is None:
-            return spec
+            type_tag = 2
         # key: (type_tag, tuple[id(child) for child in children], description)
-        key = hash((type_tag, tuple(id(c) for c in children), description))
-        cached = dedup.get(key)
-        if cached is not None:
-            return cached
-        dedup[key] = spec
-        return spec
+        # 用 id(child) 而非 hash(child)：子节点已由 _parse_leaf 去重为同实例，
+        # id 比较比递归 hash 更快；不同结构的子节点 id 不同，自然不会误合并。
+        return _dedup_get_or_store(
+            dedup,
+            (type_tag, tuple(id(c) for c in children), description),
+            spec,
+        )
 
     # not
     child_raw = data.get("child")
@@ -156,14 +171,7 @@ def _parse_composite(
         raise RuleParseError("not 匹配缺少 child 字段")
     child = parse_match(child_raw, dedup=dedup)
     spec = NotMatch(child=child, description=description)
-    if dedup is None:
-        return spec
-    key = hash((3, id(child), description))
-    cached = dedup.get(key)
-    if cached is not None:
-        return cached
-    dedup[key] = spec
-    return spec
+    return _dedup_get_or_store(dedup, (3, id(child), description), spec)
 
 
 def parse_rule(data: Any, *, dedup: dict[int, MatchSpec] | None = None) -> Rule:

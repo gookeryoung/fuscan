@@ -32,6 +32,26 @@ def _strip_html(html: str) -> str:
     return _WS_RE.sub(" ", text).strip()
 
 
+def _decode_part_payload(part: Message) -> str:
+    """从邮件部分解码 payload 为字符串。
+
+    统一处理 text/plain 与 text/html 部分的字符集检测与解码失败回退：
+    优先用 Content-Type 头声明的 charset，无效或解码失败时回退到 UTF-8
+    （``errors="ignore"`` 容错）。
+
+    :param part: email.message.Message 部分
+    :return: 解码后的文本；payload 为空或 None 返回空字符串
+    """
+    payload = part.get_payload(decode=True)
+    if not payload:
+        return ""
+    charset = part.get_content_charset() or "utf-8"
+    try:
+        return payload.decode(charset, errors="ignore")  # pyrefly: ignore [missing-attribute]
+    except (LookupError, UnicodeDecodeError):
+        return payload.decode("utf-8", errors="ignore")  # pyrefly: ignore [missing-attribute]
+
+
 class EmlExtractor(Extractor):
     """EML 邮件文件文本提取器。"""
 
@@ -105,22 +125,13 @@ class EmlExtractor(Extractor):
             if disposition == "attachment":
                 continue
             if content_type == "text/plain" and plain is None:
-                payload = part.get_payload(decode=True)
-                if payload:
-                    charset = part.get_content_charset() or "utf-8"
-                    try:
-                        plain = payload.decode(charset, errors="ignore")  # pyrefly: ignore [missing-attribute]
-                    except (LookupError, UnicodeDecodeError):
-                        plain = payload.decode("utf-8", errors="ignore")  # pyrefly: ignore [missing-attribute]
+                text = _decode_part_payload(part)
+                if text:
+                    plain = text
             elif content_type == "text/html" and html is None:
-                payload = part.get_payload(decode=True)
-                if payload:
-                    charset = part.get_content_charset() or "utf-8"
-                    try:
-                        html_text = payload.decode(charset, errors="ignore")  # pyrefly: ignore [missing-attribute]
-                    except (LookupError, UnicodeDecodeError):
-                        html_text = payload.decode("utf-8", errors="ignore")  # pyrefly: ignore [missing-attribute]
-                    html = _strip_html(html_text)
+                text = _decode_part_payload(part)
+                if text:
+                    html = _strip_html(text)
 
         if plain:
             return plain.strip()

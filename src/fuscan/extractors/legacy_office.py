@@ -56,6 +56,39 @@ def _extract_utf16le_text(data: bytes) -> str:
     return "\n".join(parts)
 
 
+def _extract_ole_text(data: bytes, stream_name: str, error_label: str) -> str:
+    """从 OLE 复合文档中提取指定流的 UTF-16LE 文本。
+
+    统一 :class:`DocExtractor` 与 :class:`PptExtractor` 的 OLE 解析逻辑：
+    打开 OLE 复合文档 → 检查指定流是否存在 → 读取流内容 → UTF-16LE 正则扫描。
+    无指定流时返回空字符串（部分老版本文档结构差异）。
+
+    :param data: OLE 复合文档字节内容
+    :param stream_name: 流名称（如 ``"WordDocument"`` / ``"PowerPoint Document"``）
+    :param error_label: 错误信息前缀（如 ``"DOC"`` / ``"PPT"``）
+    :return: 提取的文本；无指定流返回空字符串
+    :raises ExtractorError: olefile 未安装或 OLE 解析失败
+    """
+    try:
+        import olefile
+    except ImportError as exc:
+        raise ExtractorError(f"olefile 未安装，无法提取 {error_label}") from exc
+
+    try:
+        ole = olefile.OleFileIO(io.BytesIO(data))
+    except Exception as exc:
+        raise ExtractorError(f"{error_label} 解析失败: {exc}") from exc
+
+    try:
+        if ole.exists(stream_name):
+            stream = ole.openstream(stream_name)
+            return _extract_utf16le_text(stream.read())
+        logger.debug("%s 文件无 %s 流", error_label, stream_name)
+        return ""
+    finally:
+        ole.close()
+
+
 class XlsExtractor(Extractor):
     """XLS (Excel 97-2003) 工作簿文本提取器。
 
@@ -147,24 +180,7 @@ class DocExtractor(Extractor):
     @override
     def extract_from_bytes(self, data: bytes) -> str:
         """从内存字节解析 DOC 文档（olefile + UTF-16LE 正则扫描）。"""
-        try:
-            import olefile
-        except ImportError as exc:
-            raise ExtractorError("olefile 未安装，无法提取 DOC") from exc
-
-        try:
-            ole = olefile.OleFileIO(io.BytesIO(data))
-        except Exception as exc:
-            raise ExtractorError(f"DOC 解析失败: {exc}") from exc
-
-        try:
-            if ole.exists("WordDocument"):
-                stream = ole.openstream("WordDocument")
-                return _extract_utf16le_text(stream.read())
-            logger.debug("DOC 文件无 WordDocument 流")
-            return ""
-        finally:
-            ole.close()
+        return _extract_ole_text(data, stream_name="WordDocument", error_label="DOC")
 
 
 class PptExtractor(Extractor):
@@ -210,21 +226,4 @@ class PptExtractor(Extractor):
     @override
     def extract_from_bytes(self, data: bytes) -> str:
         """从内存字节解析 PPT 演示文稿（olefile + UTF-16LE 正则扫描）。"""
-        try:
-            import olefile
-        except ImportError as exc:
-            raise ExtractorError("olefile 未安装，无法提取 PPT") from exc
-
-        try:
-            ole = olefile.OleFileIO(io.BytesIO(data))
-        except Exception as exc:
-            raise ExtractorError(f"PPT 解析失败: {exc}") from exc
-
-        try:
-            if ole.exists("PowerPoint Document"):
-                stream = ole.openstream("PowerPoint Document")
-                return _extract_utf16le_text(stream.read())
-            logger.debug("PPT 文件无 PowerPoint Document 流")
-            return ""
-        finally:
-            ole.close()
+        return _extract_ole_text(data, stream_name="PowerPoint Document", error_label="PPT")

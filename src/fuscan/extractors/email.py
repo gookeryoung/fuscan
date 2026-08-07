@@ -10,7 +10,6 @@ import email.policy
 import logging
 import re
 from email.message import Message
-from pathlib import Path
 
 from typing_extensions import override
 
@@ -78,15 +77,6 @@ class EmlExtractor(Extractor):
     def engine_info(self) -> str:
         """标准库 email 模块。"""
         return "email（标准库）"
-
-    @override
-    def extract(self, path: Path) -> str:
-        """提取 EML 邮件主题、发件人与正文。"""
-        try:
-            data = path.read_bytes()
-        except OSError as exc:
-            raise ExtractorError(f"文件读取失败: {path}: {exc}") from exc
-        return self.extract_from_bytes(data)
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:

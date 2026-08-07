@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import zipfile
-from pathlib import Path
 
 from typing_extensions import override
 
@@ -54,15 +53,6 @@ class DocxExtractor(Extractor):
         return "lxml"
 
     @override
-    def extract(self, path: Path) -> str:
-        """提取 DOCX 段落、表格与页眉页脚文本。"""
-        try:
-            data = path.read_bytes()
-        except OSError as exc:
-            raise ExtractorError(f"文件读取失败: {path}: {exc}") from exc
-        return self.extract_from_bytes(data)
-
-    @override
     def extract_from_bytes(self, data: bytes) -> str:
         """从内存字节提取 DOCX 文本。"""
         try:
@@ -100,15 +90,6 @@ class PptxExtractor(Extractor):
     def engine_info(self) -> str:
         """PPTX 固定使用 lxml 解析引擎。"""
         return "lxml"
-
-    @override
-    def extract(self, path: Path) -> str:
-        """提取 PPTX 幻灯片文本框、表格与备注文本。"""
-        try:
-            data = path.read_bytes()
-        except OSError as exc:
-            raise ExtractorError(f"文件读取失败: {path}: {exc}") from exc
-        return self.extract_from_bytes(data)
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:

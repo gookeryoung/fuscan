@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import io
 import logging
-from pathlib import Path
 from typing import Any
 
 from typing_extensions import override
@@ -128,15 +127,6 @@ class XlsxExtractor(Extractor):
         return "python-calamine"
 
     @override
-    def extract(self, path: Path) -> str:
-        """提取 XLSX 工作簿所有工作表的单元格文本。"""
-        try:
-            data = path.read_bytes()
-        except OSError as exc:
-            raise ExtractorError(f"文件读取失败: {path}: {exc}") from exc
-        return self.extract_from_bytes(data)
-
-    @override
     def extract_from_bytes(self, data: bytes) -> str:
         """从内存字节提取 XLSX 工作簿文本。"""
         return _extract_calamine_workbook(
@@ -184,15 +174,6 @@ class OdsExtractor(Extractor):
         from fuscan.extractors._odf_xml import _LXML_AVAILABLE
 
         return "lxml" if _LXML_AVAILABLE else "ElementTree"
-
-    @override
-    def extract(self, path: Path) -> str:
-        """提取 ODS 表格所有行的单元格文本。"""
-        try:
-            data = path.read_bytes()
-        except OSError as exc:
-            raise ExtractorError(f"文件读取失败: {path}: {exc}") from exc
-        return self.extract_from_bytes(data)
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:

@@ -162,9 +162,13 @@ def is_retriable_error(exc: Exception) -> bool:
 class Extractor(ABC):
     """文件内容提取器抽象基类。
 
-    子类须实现 :meth:`extract`（从路径提取）与 :meth:`extract_from_bytes`
-    （从内存字节提取）。后者用于缓存模式：调用方一次 ``read_bytes`` 既算哈希
-    又提取内容，避免双重磁盘 I/O。
+    子类须实现 :meth:`extract_from_bytes`（从内存字节提取），用于缓存模式：
+    调用方一次 ``read_bytes`` 既算哈希又提取内容，避免双重磁盘 I/O。
+
+    :meth:`extract` 提供默认实现：``read_bytes`` → ``OSError`` 包装为
+    :class:`ExtractorError` → 调用 :meth:`extract_from_bytes`。子类仅当需要
+    自定义读取逻辑（如大文件流式读取、文件大小预检）时才覆盖 ``extract``，
+    否则直接复用基类实现以消除样板代码。
 
     子类还须声明 :attr:`speed_tier` 标识解析速度档次，
     供 GUI 勾选树展示。档次依据实现复杂度划分，详见 :class:`SpeedTier`。
@@ -202,14 +206,24 @@ class Extractor(ABC):
         """
         return ""
 
-    @abstractmethod
     def extract(self, path: Path) -> str:
-        """提取文件文本内容。
+        """提取文件文本内容（默认实现：读字节 + 调用 ``extract_from_bytes``）。
+
+        默认实现用 :meth:`pathlib.Path.read_bytes` 读取文件全部字节，
+        将 ``OSError`` 包装为 :class:`ExtractorError`（保留原始异常链），
+        再委托 :meth:`extract_from_bytes`。子类仅当需要自定义读取逻辑
+        （如 :class:`fuscan.extractors.text.TextExtractor` 的大小预检
+        与大文件流式读取）时才覆盖此方法。
 
         :param path: 文件路径
         :return: 提取的文本内容
-        :raises ExtractorError: 提取失败（依赖缺失、文件损坏、加密等）
+        :raises ExtractorError: 文件读取失败或提取失败（依赖缺失、文件损坏、加密等）
         """
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            raise ExtractorError(f"文件读取失败: {path}: {exc}") from exc
+        return self.extract_from_bytes(data)
 
     @abstractmethod
     def extract_from_bytes(self, data: bytes) -> str:

@@ -13,7 +13,6 @@ from __future__ import annotations
 import io
 import logging
 import re
-from pathlib import Path
 
 from typing_extensions import override
 
@@ -121,15 +120,6 @@ class XlsExtractor(Extractor):
         return "python-calamine"
 
     @override
-    def extract(self, path: Path) -> str:
-        """提取 XLS 工作表单元格文本。"""
-        try:
-            data = path.read_bytes()
-        except OSError as exc:
-            raise ExtractorError(f"文件读取失败: {path}: {exc}") from exc
-        return self.extract_from_bytes(data)
-
-    @override
     def extract_from_bytes(self, data: bytes) -> str:
         """从内存字节解析 XLS 工作簿。"""
         from fuscan.extractors.spreadsheet import _extract_calamine_workbook
@@ -169,15 +159,6 @@ class DocExtractor(Extractor):
         return "olefile"
 
     @override
-    def extract(self, path: Path) -> str:
-        """提取 DOC 文档文本（olefile + UTF-16LE 正则扫描）。"""
-        try:
-            data = path.read_bytes()
-        except OSError as exc:
-            raise ExtractorError(f"文件读取失败: {path}: {exc}") from exc
-        return self.extract_from_bytes(data)
-
-    @override
     def extract_from_bytes(self, data: bytes) -> str:
         """从内存字节解析 DOC 文档（olefile + UTF-16LE 正则扫描）。"""
         return _extract_ole_text(data, stream_name="WordDocument", error_label="DOC")
@@ -213,15 +194,6 @@ class PptExtractor(Extractor):
     def engine_info(self) -> str:
         """PPT 固定使用 olefile 解析引擎。"""
         return "olefile"
-
-    @override
-    def extract(self, path: Path) -> str:
-        """提取 PPT 演示文稿文本（olefile + UTF-16LE 正则扫描）。"""
-        try:
-            data = path.read_bytes()
-        except OSError as exc:
-            raise ExtractorError(f"文件读取失败: {path}: {exc}") from exc
-        return self.extract_from_bytes(data)
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:

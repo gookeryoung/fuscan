@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from typing_extensions import override
 
@@ -56,15 +55,6 @@ class OdtExtractor(Extractor):
         from fuscan.extractors._odf_xml import _LXML_AVAILABLE
 
         return "lxml" if _LXML_AVAILABLE else "ElementTree"
-
-    @override
-    def extract(self, path: Path) -> str:
-        """提取 ODT 文档的段落与标题文本。"""
-        try:
-            data = path.read_bytes()
-        except OSError as exc:
-            raise ExtractorError(f"文件读取失败: {path}: {exc}") from exc
-        return self.extract_from_bytes(data)
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:

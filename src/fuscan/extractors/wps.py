@@ -16,7 +16,6 @@ from __future__ import annotations
 import io
 import logging
 import zipfile
-from pathlib import Path
 
 from typing_extensions import override
 
@@ -55,15 +54,6 @@ class WpsExtractor(Extractor):
     def engine_info(self) -> str:
         """委托到 DOCX/XLSX/PPTX 提取器。"""
         return "委托 DOCX/XLSX/PPTX"
-
-    @override
-    def extract(self, path: Path) -> str:
-        """提取 WPS 文档文本，按 OOXML 子类型分发到对应提取逻辑。"""
-        try:
-            data = path.read_bytes()
-        except OSError as exc:
-            raise ExtractorError(f"文件读取失败: {path}: {exc}") from exc
-        return self.extract_from_bytes(data)
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:

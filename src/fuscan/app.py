@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import sys
@@ -21,6 +22,15 @@ except ImportError:  # pragma: no cover
     from PySide6.QtGui import QFont, QGuiApplication  # pyrefly: ignore [missing-import]
     from PySide6.QtQml import QQmlApplicationEngine  # pyrefly: ignore [missing-import]
     from PySide6.QtQuickControls2 import QQuickStyle  # pyrefly: ignore [missing-import]
+
+# 显式 import QtSvg：触发 fspack 打包 Qt5Svg.dll/Qt6Svg.dll（qsvg imageformat plugin 依赖）。
+# fspack 的 imageformats plugin 始终保留 qsvg.dll，但未标明其对 Svg 子模块的依赖，
+# 故需代码侧显式 import 让 AST 分析发现 Svg。运行时若 Qt5Svg.dll 仍缺失（旧 dist 未重新打包），
+# import 失败但不阻塞启动——仅 SVG 图标解码回退为空，应用仍可用，便于用户升级过渡。
+with contextlib.suppress(ImportError):
+    from PySide2 import QtSvg
+with contextlib.suppress(ImportError):
+    from PySide6 import QtSvg  # noqa: F401  # pyrefly: ignore [missing-import]
 
 from fuscan.config import migrate_config_to_rules
 from fuscan.gui import resources_rc  # noqa: F401  注册 qrc 资源

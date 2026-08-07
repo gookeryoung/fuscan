@@ -235,10 +235,13 @@ Rectangle {
             // 瞬态求值为 null，导致 PhaseNode 内 node.theme.xxx 抛 TypeError。
             // PhaseNode 自身 property ThemeController theme: Theme 默认绑定稳定（与
             // test_phase_node_three_states_no_errors 验证的模式一致）。
+            // accentColor 用 card.theme.colorXxx 而非 Theme.colorXxx——context property
+            // 在 PySide2 5.15 打包运行时瞬态为 null，card.theme 本地 property 稳定
+            // （与节点 3 card.statusColor() 内部访问 theme.colorXxx 同模式）。
             PhaseNode {
                 Layout.fillWidth: true
                 nodeState: phaseTimeline.walkNodeState()
-                accentColor: Theme.colorPrimary
+                accentColor: card.theme.colorPrimary
                 title: "收集文件"
                 showTopLine: false
                 progressIndeterminate: workspaceController.activeScanController.walkIndeterminate
@@ -265,7 +268,7 @@ Rectangle {
             PhaseNode {
                 Layout.fillWidth: true
                 nodeState: phaseTimeline.filterNodeState()
-                accentColor: Theme.colorWarning
+                accentColor: card.theme.colorWarning
                 title: "筛选文件"
                 progressIndeterminate: true
                 progressValue: -1

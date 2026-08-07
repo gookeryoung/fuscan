@@ -1,0 +1,194 @@
+# ==============================================================================
+# fuscan Release 流水线（云效 Flow YAML）
+# ------------------------------------------------------------------------------
+# 作用：tag v*.*.* 触发，执行 PyPI 发布 + Linux 原生打包（fspack），产物上传到流水线公共制品。
+#       对应 .github/workflows/release.yml 中可由 Linux runner 承担的部分。
+#
+# 使用步骤：
+#   1. 在云效 Flow 控制台「新建流水线」→「YAML 化编排」→ 代码源 Codeup → fuscan 仓库 → 默认分支 main。
+#   2. 在 YAML 编辑器粘贴本文件（或从代码库 .workflow/fuscan-release.yml 加载）。
+#   3. 在「触发设置」里为 tagPush 事件配置「标签过滤」：v*.*.*（只匹配版本号 tag）。
+#   4. 在「变量和缓存」→「变量组」新建变量组 fuscan-secrets，添加变量：
+#        PYPI_TOKEN   PyPI API Token（以 pypi- 开头，需在 pypi.org 账号设置生成）
+#      将该变量组关联到本流水线。
+#   5. 在「变量和缓存」→「缓存」页添加缓存目录：
+#        - ~/.local/bin/uv
+#        - ~/.cache/uv
+#        - ~/.fspack/cache/        （fspack 预制 wheel 缓存，等价 GitHub Actions actions/cache）
+#   6. 保存。push v*.*.* tag 即可触发。
+#
+# 与 GitHub Actions release.yml 的差异：
+#   - 不做 Windows NSIS 打包（makensis 是 Windows 二进制，Linux runner 无法运行；
+#     Windows 安装包继续由 GitHub Actions 在 tag 触发时构建，用户从 GitHub Release 拉取）。
+#   - 不发布到 GitHub Release（云效无对应能力），产物归档在云效流水线公共制品，保留 30 天。
+#   - PyPI 发布凭证由 OIDC 改为 API Token（云效不支持 OIDC）。
+#   - Python 锁定 3.10（PySide2 兼容上限，与 fspack 打包要求一致）。
+# ==============================================================================
+
+name: fuscan Release
+
+sources:
+  fuscan_repo:
+    type: codeup
+    name: fuscan 代码源
+    endpoint: <your-codeup-repository-url>           # 控制台绑定代码源时自动填充
+    branch: main
+    triggerEvents:
+      - tagPush                                       # Tag 创建触发
+    certificate:
+      type: serviceConnection
+      serviceConnection: <your-service-connection-id>   # 控制台绑定代码源时自动填充
+
+stages:
+  # ============================================================================
+  # 阶段 1：PyPI 发布 + Linux 打包并行执行（互不依赖）
+  # ============================================================================
+  publish_stage:
+    name: Publish & Pack
+    jobs:
+
+      # ----------------------------------------------------------------------------
+      # Job 1：PyPI 发布（uv build → uv publish --token）
+      # ----------------------------------------------------------------------------
+      pypi_publish_job:
+        name: Build & Publish PyPI
+        runsOn: public/cn-beijing
+        steps:
+          install_uv:
+            step: Command
+            name: 安装 uv
+            with:
+              run: |
+                set -e
+                curl -LsSf https://astral.sh/install-uv.sh | sh
+                export PATH="$HOME/.local/bin:$PATH"
+                uv --version
+
+          build_dist:
+            step: Command
+            name: 构建 sdist & wheel
+            with:
+              run: |
+                set -e
+                export PATH="$HOME/.local/bin:$PATH"
+                uv build
+
+          publish_pypi:
+            step: Command
+            name: 发布到 PyPI
+            with:
+              # PYPI_TOKEN 来自变量组 fuscan-secrets（控制台「变量和缓存」配置）
+              # uv publish --token 等价 twine upload --username __token__ --password <token>
+              run: |
+                set -e
+                export PATH="$HOME/.local/bin:$PATH"
+                uv publish --token "${PYPI_TOKEN}"
+
+          upload_dist_artifact:
+            step: ArtifactUpload
+            name: 上传 PyPI 产物（whl + sdist）
+            with:
+              uploadType: flowPublic
+              artifact: pypi-dist
+              filePath:
+                - dist/
+              if-no-files-found: error
+
+      # ----------------------------------------------------------------------------
+      # Job 2：Linux 原生打包（fspack build → fspack package，生成 deb/tar.gz/zip）
+      # ----------------------------------------------------------------------------
+      pack_linux_job:
+        name: Pack (Linux native, fspack)
+        runsOn: public/cn-beijing
+        steps:
+          install_uv:
+            step: Command
+            name: 安装 uv
+            with:
+              run: |
+                set -e
+                curl -LsSf https://astral.sh/install-uv.sh | sh
+                export PATH="$HOME/.local/bin:$PATH"
+                uv --version
+
+          install_toolchain:
+            step: Command
+            name: 安装系统工具链 (gcc + dpkg-dev)
+            with:
+              # fspack 打包 Linux deb 需要 dpkg-dev；gcc 用于编译本地扩展（lxml 等）
+              run: |
+                set -e
+                sudo apt-get update
+                sudo apt-get install -y gcc dpkg-dev
+
+          setup_python:
+            step: Command
+            name: 安装 Python 3.10
+            with:
+              run: |
+                set -e
+                export PATH="$HOME/.local/bin:$PATH"
+                uv python install 3.10
+
+          sync_deps:
+            step: Command
+            name: 同步项目依赖
+            with:
+              run: |
+                set -e
+                export PATH="$HOME/.local/bin:$PATH"
+                uv sync --frozen --python 3.10
+
+          install_fspack:
+            step: Command
+            name: 安装 fspack & pip
+            with:
+              # fspack 不在 fuscan 依赖中，需单独安装到 venv
+              # fspack 的 download_wheels 用 pip download 拉 wheel，uv venv 默认不含 pip，显式安装
+              run: |
+                set -e
+                export PATH="$HOME/.local/bin:$PATH"
+                uv pip install fspack pip
+
+          build_fuscan:
+            step: Command
+            name: fspack build (Linux)
+            with:
+              run: |
+                set -e
+                export PATH="$HOME/.local/bin:$PATH"
+                uv run fspack b . --target linux
+
+          package_fuscan:
+            step: Command
+            name: fspack package (Linux deb/tar.gz/zip)
+            with:
+              run: |
+                set -e
+                export PATH="$HOME/.local/bin:$PATH"
+                uv run fspack p . --target linux --format all --no-build
+
+          assert_artifacts:
+            step: Command
+            name: 校验产物存在
+            with:
+              # fuscan 是 GUI 应用，CI 无显示器无法做运行时 smoke test，仅校验产物存在
+              run: |
+                set -e
+                test -f dist/release/fuscan-*-linux-*.tar.gz
+                test -f dist/release/fuscan_*-slim_amd64.deb
+                test -f dist/release/fuscan-*-linux-*.zip
+                echo "All Linux artifacts present:"
+                ls -la dist/release/
+
+          upload_release_artifact:
+            step: ArtifactUpload
+            name: 上传 Linux Release 产物
+            with:
+              uploadType: flowPublic
+              artifact: release-linux
+              filePath:
+                - dist/release/
+              if-no-files-found: error
+            # 云效默认行为：前置 step 失败则跳过后续 step，故此 step 仅在打包成功时执行。
+            # 失败现场可在云效控制台日志查看（dist/ 目录已留在工作区，日志输出 ls -la 结果）。

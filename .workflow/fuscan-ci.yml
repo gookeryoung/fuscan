@@ -1,0 +1,110 @@
+# ==============================================================================
+# fuscan CI 流水线（云效 Flow YAML）
+# ------------------------------------------------------------------------------
+# 作用：push / 合并请求 触发，执行 lint(ruff) + typecheck(pyrefly) + pytest(覆盖率≥95%)
+#       与 .github/workflows/ci.yml 行为对等（单版本 Python 3.10）。
+#
+# 使用步骤：
+#   1. 在云效 Flow 控制台「新建流水线」→ 选择「YAML 化编排」→ 选择代码源为 Codeup
+#      → 选择 fuscan 仓库 → 默认分支 main。
+#   2. 在 YAML 编辑器中粘贴本文件内容（或从代码库 .workflow/fuscan-ci.yml 加载），
+#      云效会自动填充 endpoint / serviceConnection 字段。
+#   3. 在「变量和缓存」→「缓存」页添加以下缓存目录以加速 uv 依赖安装：
+#        - ~/.local/bin/uv       （uv 二进制）
+#        - ~/.cache/uv            （uv 包缓存）
+#        - .venv                  （项目虚拟环境）
+#   4. 保存并运行。
+#
+# 与 GitHub Actions ci.yml 的差异：
+#   - 仅测 Python 3.10（PySide2 兼容上限，与 release.yml 打包版本一致），
+#     3.14 矩阵仍由 GitHub Actions 覆盖。
+#   - benchmark 回归测试不迁移（默认 slow 测试 CI 跳过，仅在 GitHub Actions 手动触发）。
+#   - 触发事件用云效的 push + mergeRequestMerged（对应 GitHub Actions 的 push + pull_request）。
+# ==============================================================================
+
+name: fuscan CI
+
+sources:
+  fuscan_repo:
+    type: codeup
+    name: fuscan 代码源
+    endpoint: <your-codeup-repository-url>       # 在云效控制台绑定代码源时自动填充
+    branch: main
+    triggerEvents:
+      - push
+      - mergeRequestMerged
+    certificate:
+      type: serviceConnection
+      serviceConnection: <your-service-connection-id>   # 控制台绑定代码源时自动填充
+
+stages:
+  lint_and_test_stage:
+    name: Lint & Test
+    jobs:
+      lint_and_test_job:
+        name: Lint Typecheck Test (Python 3.10)
+        runsOn: public/cn-beijing          # 云效公共 Linux 构建集群（cn-beijing 区域）
+
+        steps:
+          # --------------------------------------------------------------------
+          # 安装 uv（astral-sh 官方脚本，默认装到 ~/.local/bin）
+          # --------------------------------------------------------------------
+          install_uv:
+            step: Command
+            name: 安装 uv
+            with:
+              run: |
+                set -e
+                # 云效公共集群基础镜像通常未预装 uv，用官方脚本安装
+                curl -LsSf https://astral.sh/install-uv.sh | sh
+                # 校验
+                export PATH="$HOME/.local/bin:$PATH"
+                uv --version
+
+          # --------------------------------------------------------------------
+          # Lint & Typecheck：与 Makefile lint/typecheck 目标一致
+          # ruff check + ruff format --check + pyrefly check
+          # --------------------------------------------------------------------
+          lint_and_typecheck:
+            step: Command
+            name: Lint & Typecheck (ruff + pyrefly)
+            with:
+              run: |
+                set -e
+                export PATH="$HOME/.local/bin:$PATH"
+                uv sync --frozen --extra lint
+                uv run ruff check src tests
+                uv run ruff format --check src tests
+                uv run pyrefly check
+
+          # --------------------------------------------------------------------
+          # 测试：Python 3.10 + pytest，覆盖率门禁 95%
+          # 标记排除 slow（benchmark 用）与 gui_qml（headless 无 Qt 环境跑不了）
+          # --------------------------------------------------------------------
+          run_tests:
+            step: Command
+            name: Pytest with coverage (Python 3.10, ≥95%)
+            with:
+              run: |
+                set -e
+                export PATH="$HOME/.local/bin:$PATH"
+                # 安装并锁定 Python 3.10（与 release.yml 打包版本一致）
+                uv python install 3.10
+                uv sync --frozen --extra test --python 3.10
+                uv run pytest -m "not slow and not gui_qml" \
+                  --cov=fuscan \
+                  --cov-fail-under=95 \
+                  --cov-report=term-missing \
+                  --cov-report=xml:coverage.xml
+
+          # --------------------------------------------------------------------
+          # 上传 coverage.xml 作为流水线公共制品（保留 14 天，等价 GitHub Actions artifact）
+          # --------------------------------------------------------------------
+          upload_coverage:
+            step: ArtifactUpload
+            name: 上传 coverage 报告
+            with:
+              uploadType: flowPublic
+              artifact: coverage
+              filePath:
+                - coverage.xml

@@ -5,8 +5,11 @@ PACKAGE := fuscan
 COV_THRESHOLD := 95
 # 与 CI 一致：排除 slow 与需 QML 引擎的 gui_qml 测试（headless 环境跑不了）
 TEST_MARKERS := "not slow and not gui_qml"
+# 性能回归门禁：iter-1 ContentRegexPool 优化成果保护
+PERF_TEST := tests/test_perf_regression.py
+PERF_THRESHOLD := 10
 
-.PHONY: help sync build b clean c test test-qml cov lint typecheck check doc tox bump patch minor major push
+.PHONY: help sync build b clean c test test-qml cov lint typecheck check doc tox bump patch minor major push perf perf-compare perf-list
 
 help: ## 显示帮助信息
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z].*:.*##/ {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -40,6 +43,17 @@ typecheck: ## 类型检查 (pyrefly)
 	uv run pyrefly check
 
 check: lint typecheck cov ## 运行全套门禁 (lint + typecheck + cov)
+
+perf: ## 运行性能基准并保存为基线（首次建立或刷新基线用）
+	uv run pytest -m slow $(PERF_TEST) --benchmark-save=baseline --benchmark-disable-gc --benchmark-warmup=on
+
+perf-compare: ## 与基线对比性能，mean 退化 >$(PERF_THRESHOLD)% 失败
+	uv run pytest -m slow $(PERF_TEST) --benchmark-compare \
+		--benchmark-compare-fail=mean:$(PERF_THRESHOLD)% \
+		--benchmark-disable-gc --benchmark-warmup=on
+
+perf-list: ## 列出已保存的性能基线
+	uv run pytest --benchmark-list
 
 doc: ## 构建 Sphinx 文档
 	uv run sphinx-build -b html docs docs/_build/html

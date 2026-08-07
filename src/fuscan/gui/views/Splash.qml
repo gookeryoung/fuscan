@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtQuick.Window 2.15
 import fuscan.controllers 1.0
 
 // 启动画面：无边框、居中、圆角背景，显示 logo + 应用名 + 阶段文本 + 进度条
@@ -79,17 +80,18 @@ ApplicationWindow {
             Layout.preferredHeight: 6
             // 自定义进度条样式：圆角 + 主色
             contentItem: Rectangle {
+                id: progressTrack
                 color: "#E1E4E8"
                 radius: 3
                 Rectangle {
-                    width: parent.width * 0.3
-                    height: parent.height
+                    width: progressTrack.width * 0.3
+                    height: progressTrack.height
                     color: "#0366D6"
                     radius: 3
                     // 进度条左右往返动画
                     XAnimator on x {
-                        from: -parent.width * 0.3
-                        to: parent.width
+                        from: -progressTrack.width * 0.3
+                        to: progressTrack.width
                         duration: 1200
                         loops: Animation.Infinite
                         running: true

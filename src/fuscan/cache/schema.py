@@ -29,7 +29,8 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from datetime import datetime, timezone
+
+from fuscan.cache._helpers import now_iso
 
 __all__ = ["CACHE_COMPAT_VERSION", "CURRENT_VERSION", "SCHEMA_SQL", "migrate"]
 
@@ -143,11 +144,6 @@ CREATE TABLE IF NOT EXISTS extracted_contents (
 """
 
 
-def _now_iso() -> str:
-    """当前 UTC 时间的 ISO 8601 字符串（含时区后缀 ``Z``）。"""
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-
-
 def _read_meta(conn: sqlite3.Connection, key: str) -> str | None:
     """读取 ``meta`` 表的指定键值（已持锁）。表不存在时返回 None。"""
     try:
@@ -258,6 +254,6 @@ def migrate(conn: sqlite3.Connection) -> int:
     # 同步 meta 中的版本号（首次写入或清空后重建都会到达此处）
     _write_meta(conn, "cache_compat_version", str(CACHE_COMPAT_VERSION))
     _write_meta(conn, "schema_version", str(CURRENT_VERSION))
-    _write_meta(conn, "migrated_at", _now_iso())
+    _write_meta(conn, "migrated_at", now_iso())
 
     return current

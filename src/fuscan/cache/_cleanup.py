@@ -30,6 +30,20 @@ __all__ = ["prune_orphan_rules", "prune_stale_files", "stats"]
 logger = logging.getLogger(__name__)
 
 
+def _invalidate_all_lru(store: CacheStore) -> None:
+    """失效全部进程内 LRU 条目（已持 ``_lock``）。
+
+    规则集合或文件集合整体变化时调用：LRU 条目可能引用已删除的 rule_hash
+    或 file_hash，整体清空避免脏读。内部获取 ``_lru_lock`` 完成清空。
+
+    :param store: 所属 CacheStore 实例
+    """
+    with store._lru_lock:
+        store._hit_cache.clear()
+        store._path_cache.clear()
+        store._extract_cache.clear()
+
+
 def prune_orphan_rules(store: CacheStore, active_rule_hashes: Collection[str]) -> int:
     """清理不在当前规则集中的旧规则及其缓存。
 
@@ -56,10 +70,7 @@ def prune_orphan_rules(store: CacheStore, active_rule_hashes: Collection[str]) -
         if deleted > 0:
             logger.info("清理孤立规则: %d 条", deleted)
             # 规则集合变化：全部 LRU 条目可能引用了已删除规则，整体失效
-            with store._lru_lock:
-                store._hit_cache.clear()
-                store._path_cache.clear()
-                store._extract_cache.clear()
+            _invalidate_all_lru(store)
         return deleted
 
 
@@ -86,10 +97,7 @@ def prune_stale_files(store: CacheStore, max_age_days: int = 30) -> int:
         deleted = before - after
         if deleted > 0:
             logger.info("清理过期文件缓存: %d 条（>=%d 天）", deleted, max_age_days)
-            with store._lru_lock:
-                store._hit_cache.clear()
-                store._path_cache.clear()
-                store._extract_cache.clear()
+            _invalidate_all_lru(store)
         return deleted
 
 

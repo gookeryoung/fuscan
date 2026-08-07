@@ -45,6 +45,23 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+# scan_results 的 UPSERT SQL：全参数化形式，供 put_result（单条）与
+# batch_put_results（executemany）复用。未命中场景传入 (0, None, None,
+# None, None, "", 0, "") 参数即可，等价于原字面量 SQL 的 NULL/0/'' 赋值。
+_SCAN_RESULTS_UPSERT_SQL = (
+    "INSERT INTO scan_results "
+    "(file_hash, rule_hash, matched, severity, detail, match_text, "
+    " match_texts, match_description, match_count, target, cached_at) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+    "ON CONFLICT(file_hash, rule_hash) DO UPDATE SET "
+    "  matched = excluded.matched, severity = excluded.severity, "
+    "  detail = excluded.detail, match_text = excluded.match_text, "
+    "  match_texts = excluded.match_texts, "
+    "  match_description = excluded.match_description, "
+    "  match_count = excluded.match_count, target = excluded.target, "
+    "  cached_at = excluded.cached_at"
+)
+
 
 def register_ruleset(
     store: CacheStore,
@@ -152,44 +169,26 @@ def put_result(
             (file_hash, now, now),
         )
         if hit is None:
-            store._conn.execute(
-                "INSERT INTO scan_results "
-                "(file_hash, rule_hash, matched, severity, detail, match_text, "
-                " match_texts, match_description, match_count, target, cached_at) "
-                "VALUES (?, ?, 0, NULL, NULL, NULL, NULL, '', 0, '', ?) "
-                "ON CONFLICT(file_hash, rule_hash) DO UPDATE SET "
-                "  matched = 0, severity = NULL, detail = NULL, match_text = NULL, "
-                "  match_texts = NULL, match_description = '', "
-                "  match_count = 0, target = '', cached_at = excluded.cached_at",
-                (file_hash, rule_hash, now),
-            )
+            # 未命中：传入 (0, None, None, None, None, "", 0, "") 占位参数，
+            # 等价于原字面量 SQL 的 NULL/0/'' 赋值
+            params: tuple[Any, ...] = (file_hash, rule_hash, 0, None, None, None, None, "", 0, "", now)
         else:
             # match_texts 以 JSON 数组形式序列化，便于跨行解析且保持顺序
             texts_json = json.dumps(list(hit.match_texts), ensure_ascii=False) if hit.match_texts else None
-            store._conn.execute(
-                "INSERT INTO scan_results "
-                "(file_hash, rule_hash, matched, severity, detail, match_text, "
-                " match_texts, match_description, match_count, target, cached_at) "
-                "VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(file_hash, rule_hash) DO UPDATE SET "
-                "  matched = 1, severity = excluded.severity, detail = excluded.detail, "
-                "  match_text = excluded.match_text, match_texts = excluded.match_texts, "
-                "  match_description = excluded.match_description, "
-                "  match_count = excluded.match_count, target = excluded.target, "
-                "  cached_at = excluded.cached_at",
-                (
-                    file_hash,
-                    rule_hash,
-                    hit.severity.value,
-                    hit.detail,
-                    hit.match_text,
-                    texts_json,
-                    hit.match_description,
-                    hit.match_count,
-                    hit.target,
-                    now,
-                ),
+            params = (
+                file_hash,
+                rule_hash,
+                1,
+                hit.severity.value,
+                hit.detail,
+                hit.match_text,
+                texts_json,
+                hit.match_description,
+                hit.match_count,
+                hit.target,
+                now,
             )
+        store._conn.execute(_SCAN_RESULTS_UPSERT_SQL, params)
         # 失效 LRU 条目：调用方下次查询时会从 SQLite 取最新数据并回填 LRU
         with store._lru_lock:
             store._hit_cache_invalidate(file_hash)
@@ -334,20 +333,7 @@ def batch_put_results(store: CacheStore, items: list[BatchWriteItem]) -> None:
                             )
                         )
             if result_rows:
-                store._conn.executemany(
-                    "INSERT INTO scan_results "
-                    "(file_hash, rule_hash, matched, severity, detail, match_text, "
-                    " match_texts, match_description, match_count, target, cached_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                    "ON CONFLICT(file_hash, rule_hash) DO UPDATE SET "
-                    "  matched = excluded.matched, severity = excluded.severity, "
-                    "  detail = excluded.detail, match_text = excluded.match_text, "
-                    "  match_texts = excluded.match_texts, "
-                    "  match_description = excluded.match_description, "
-                    "  match_count = excluded.match_count, target = excluded.target, "
-                    "  cached_at = excluded.cached_at",
-                    result_rows,
-                )
+                store._conn.executemany(_SCAN_RESULTS_UPSERT_SQL, result_rows)
             store._conn.execute("COMMIT")
         except Exception:
             try:

@@ -46,9 +46,13 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 # 上下文提取：匹配行前后各保留的行数
-_CONTEXT_LINES = 2
+# 取 5 行（前后共 11 行）以提供足够的代码/配置上下文——多数源码一个
+# 逻辑块约 5-10 行，过窄（如 2 行）会让用户无法判断命中在文件中的位置
+# 与意图；过宽（如 10 行）则占据详情面板过多纵向空间。5 行兼顾可读性与
+# 信息密度。DetailWorker 在后台线程读文件，扩范围不影响 UI 响应。
+_CONTEXT_LINES = 5
 # 上下文读取的文件大小上限（1MB），超过则跳过上下文提取。
-# context 仅取匹配行前后各 2 行，超 1MB 的文件多为日志/数据转储，
+# context 仅取匹配行前后各 5 行，超 1MB 的文件多为日志/数据转储，
 # 读全文收益低而代价高，故用阈值控制单文件读盘/分行开销。
 # DetailWorker 在后台线程执行，1MB 读盘+分行不影响 UI 响应。
 _MAX_CONTEXT_FILE_SIZE = 1024 * 1024
@@ -155,8 +159,9 @@ def build_detail_hits_full(result: ScanResult | None) -> list[dict[str, object]]
     """构造选中结果的命中详情列表（读文件补齐上下文，供后台 worker 调用）。
 
     每条命中包含：规则名、严重度文本/色值、上下文（文件内容
-    上下文，前后各 2 行，匹配行用 ``>>>`` 标记）、匹配文本、匹配条数、
-    匹配目标（filename/content/path）、规则描述（供详情面板展示）。
+    上下文，前后各 :data:`_CONTEXT_LINES` 行，匹配行用 ``>>>`` 标记）、
+    匹配文本、匹配条数、匹配目标（filename/content/path）、规则描述
+    （供详情面板展示）。
 
     压缩包内部条目无法读取文件内容，context 取 ``hit.detail`` 兜底（等价
     :func:`build_detail_hits_light`）；非压缩包条目对同一文件的所有命中

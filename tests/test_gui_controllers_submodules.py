@@ -706,17 +706,19 @@ class TestExtractContext:
     """iter-124：测试 build_detail_hits_model 实时读取文件上下文。"""
 
     def test_context_from_file_content(self, tmp_path: Path) -> None:
-        """命中详情应从文件内容提取上下文（前后各 2 行，匹配行用 >>> 标记）。"""
+        """命中详情应从文件内容提取上下文（前后各 5 行，匹配行用 >>> 标记）。"""
         src = tmp_path / "a.txt"
+        # 13 行：match 在第 6 行（索引 6），前后各 5 行恰好覆盖 line1-line5 与 line7-line11，
+        # line0 与 line12 落在 _CONTEXT_LINES=5 窗口之外用于边界断言
         src.write_text(
-            "line0\nline1\nline2\npassword=secret\nline4\nline5\nline6\n",
+            "line0\nline1\nline2\nline3\nline4\nline5\npassword=secret\nline7\nline8\nline9\nline10\nline11\nline12\n",
             encoding="utf-8",
         )
 
         hit = RuleHit(
             rule_name="敏感内容",
             severity=Severity.CRITICAL,
-            detail="line 3: password=secret",
+            detail="line 6: password=secret",
             match_text="password",
             match_texts=("password",),
         )
@@ -725,15 +727,15 @@ class TestExtractContext:
         model = build_detail_hits_model(result)
         assert len(model) == 1
         context: str = str(model[0]["context"])
-        # 应包含前后各 2 行 + 匹配行（共 5 行）：line1, line2, password=secret, line4, line5
+        # 应包含前后各 5 行 + 匹配行（共 11 行）
         assert ">>> password=secret" in context
-        assert "    line1" in context
-        assert "    line2" in context
-        assert "    line4" in context
-        assert "    line5" in context
-        # 应不包含 line0 和 line6（超出 _CONTEXT_LINES=2 范围）
+        for n in (1, 2, 3, 4, 5):
+            assert f"    line{n}" in context
+        for n in (7, 8, 9, 10, 11):
+            assert f"    line{n}" in context
+        # 应不包含 line0 和 line12（超出 _CONTEXT_LINES=5 范围）
         assert "line0" not in context
-        assert "line6" not in context
+        assert "line12" not in context
 
     def test_context_falls_back_to_detail_when_file_missing(
         self,
@@ -865,7 +867,7 @@ class TestExtractContext:
 
         model = build_detail_hits_model(result)
         context: str = str(model[0]["context"])
-        # 匹配行在开头，start=max(0, -2)=0，end=min(3, 3)=3
+        # 匹配行在开头，start=max(0, -5)=0，end=min(3, 6)=3
         assert ">>> password=123" in context
         assert "    line2" in context
         assert "    line3" in context

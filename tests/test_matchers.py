@@ -18,6 +18,7 @@ from fuscan.scanner.context import FileEntry, MatchContext
 from fuscan.scanner.matchers import (
     AndMatcher,
     ContentMatcher,
+    ContentRegexPool,
     FileNameMatcher,
     Matcher,
     NotMatcherImpl,
@@ -1728,3 +1729,319 @@ class TestCompositeGroupOptimization:
         # detail 顺序：password 在前，api_key 在后
         detail_lower = result.detail.lower()
         assert detail_lower.index("password") < detail_lower.index("api_key")
+
+
+class TestContentRegexPool:
+    """跨规则 CONTENT REGEX 子项共享池测试。
+
+    覆盖 :class:`ContentRegexPool` 的注册去重、编译、求值，以及
+    :class:`AndMatcher` / :class:`OrMatcher` 注入池后 ``matches()`` 行为
+    与未注入时的一致性。
+    """
+
+    def test_register_dedup_same_pattern_case(self) -> None:
+        """相同 (pattern, case_sensitive) 注册返回同一 child_id。"""
+        pool = ContentRegexPool()
+        spec = LeafMatch(
+            target=MatchTarget.CONTENT,
+            mode=MatchMode.REGEX,
+            pattern=r"password\s*=\s*\S+",
+            case_sensitive=False,
+        )
+        id1 = pool.register(spec)
+        id2 = pool.register(spec)
+        assert id1 == id2
+
+    def test_register_distinct_pattern_different_id(self) -> None:
+        """不同 pattern 注册返回不同 child_id。"""
+        pool = ContentRegexPool()
+        id1 = pool.register(
+            LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"password", case_sensitive=False)
+        )
+        id2 = pool.register(
+            LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"api_key", case_sensitive=False)
+        )
+        assert id1 != id2
+
+    def test_register_after_compile_raises(self) -> None:
+        """compile 后再 register 触发断言。"""
+        pool = ContentRegexPool()
+        pool.compile()
+        with pytest.raises(AssertionError):
+            pool.register(
+                LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"x", case_sensitive=False)
+            )
+
+    def test_evaluate_returns_matched_children(self, tmp_path: Path) -> None:
+        """evaluate 对命中子项返回 MatchResult，未命中不在结果中。"""
+        pool = ContentRegexPool()
+        id_pwd = pool.register(
+            LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"password=\S+", case_sensitive=False)
+        )
+        id_api = pool.register(
+            LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"api_key=\S+", case_sensitive=False)
+        )
+        pool.compile()
+        ctx = _make_context(tmp_path / "f.txt", content="password=abc")
+        results = pool.evaluate(ctx)
+        assert id_pwd in results
+        assert results[id_pwd].matched is True
+        assert "password=abc" in results[id_pwd].match_texts
+        assert id_api not in results
+
+    def test_evaluate_caches_per_context(self, tmp_path: Path) -> None:
+        """同 context 多次 evaluate 只跑一次 finditer（结果缓存）。"""
+        pool = ContentRegexPool()
+        pool.register(
+            LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"password=\S+", case_sensitive=False)
+        )
+        pool.compile()
+        ctx = _make_context(tmp_path / "f.txt", content="password=abc")
+        r1 = pool.evaluate(ctx)
+        r2 = pool.evaluate(ctx)
+        assert r1 is r2  # 同一缓存字典对象
+
+    def test_evaluate_prefilter_skips(self, tmp_path: Path) -> None:
+        """预筛关键字均不出现时返回空结果（短路）。"""
+        pool = ContentRegexPool()
+        pool.register(
+            LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"password=\S+", case_sensitive=False)
+        )
+        pool.register(
+            LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"api_key=\S+", case_sensitive=False)
+        )
+        pool.compile()
+        ctx = _make_context(tmp_path / "f.txt", content="nothing relevant here")
+        assert pool.evaluate(ctx) == {}
+
+    def test_and_pool_matches_consistent_with_no_pool(self, tmp_path: Path) -> None:
+        """AND 注入池后 matches() 与未注入结果一致（命中场景）。"""
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"password=\S+", case_sensitive=False
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"api_key=\S+", case_sensitive=False
+                ),
+            )
+        )
+        matcher_no_pool = build_matcher(spec)
+        matcher_pool = build_matcher(spec)
+        assert isinstance(matcher_pool, AndMatcher)
+        pool = ContentRegexPool()
+        matcher_pool.attach_pool(pool)
+        pool.compile()
+        ctx1 = _make_context(tmp_path / "f.txt", content="password=abc\napi_key=xyz")
+        ctx2 = _make_context(tmp_path / "f.txt", content="password=abc\napi_key=xyz")
+        r1 = matcher_no_pool.matches(ctx1)
+        r2 = matcher_pool.matches(ctx2)
+        assert r1.matched == r2.matched is True
+        assert set(r1.match_texts) == set(r2.match_texts)
+
+    def test_and_pool_partial_fail(self, tmp_path: Path) -> None:
+        """AND 注入池后部分子项未命中 → 整体不命中。"""
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"password=\S+", case_sensitive=False
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"api_key=\S+", case_sensitive=False
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        assert isinstance(matcher, AndMatcher)
+        pool = ContentRegexPool()
+        matcher.attach_pool(pool)
+        pool.compile()
+        ctx = _make_context(tmp_path / "f.txt", content="password=abc")
+        assert matcher.matches(ctx).matched is False
+
+    def test_or_pool_matches_all_hits(self, tmp_path: Path) -> None:
+        """OR 注入池后收集所有命中子项（不短路）。"""
+        spec = OrMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"password=\S+", case_sensitive=False
+                ),
+                LeafMatch(
+                    target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"api_key=\S+", case_sensitive=False
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        assert isinstance(matcher, OrMatcher)
+        pool = ContentRegexPool()
+        matcher.attach_pool(pool)
+        pool.compile()
+        ctx = _make_context(tmp_path / "f.txt", content="password=abc\napi_key=xyz")
+        result = matcher.matches(ctx)
+        assert result.matched is True
+        assert "password=abc" in result.match_texts
+        assert "api_key=xyz" in result.match_texts
+
+    def test_or_pool_no_hit(self, tmp_path: Path) -> None:
+        """OR 注入池后无任何子项命中 → 不命中。"""
+        spec = OrMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"password=\S+", case_sensitive=False
+                ),
+            )
+        )
+        matcher = build_matcher(spec)
+        assert isinstance(matcher, OrMatcher)
+        pool = ContentRegexPool()
+        matcher.attach_pool(pool)
+        pool.compile()
+        ctx = _make_context(tmp_path / "f.txt", content="nothing here")
+        assert matcher.matches(ctx).matched is False
+
+    def test_pool_shares_subitem_across_rules(self, tmp_path: Path) -> None:
+        """多条 AND 规则引用同一子项 → 池去重，evaluate 只跑一次。"""
+        shared = LeafMatch(
+            target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"password=\S+", case_sensitive=False
+        )
+        spec1 = AndMatch(
+            children=(
+                shared,
+                LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"token=\S+", case_sensitive=False),
+            )
+        )
+        spec2 = AndMatch(
+            children=(
+                shared,
+                LeafMatch(
+                    target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"secret=\S+", case_sensitive=False
+                ),
+            )
+        )
+        m1 = build_matcher(spec1)
+        m2 = build_matcher(spec2)
+        assert isinstance(m1, AndMatcher)
+        assert isinstance(m2, AndMatcher)
+        pool = ContentRegexPool()
+        m1.attach_pool(pool)
+        m2.attach_pool(pool)
+        pool.compile()
+        # shared 子项应去重为同一 child_id（_pool_child_ids 中两 matcher 的对应项相同）
+        shared_id_m1 = m1._pool_child_ids[0]
+        shared_id_m2 = m2._pool_child_ids[0]
+        assert shared_id_m1 == shared_id_m2
+        ctx = _make_context(tmp_path / "f.txt", content="password=abc\ntoken=xyz\nsecret=def")
+        r1 = m1.matches(ctx)
+        r2 = m2.matches(ctx)
+        assert r1.matched is True
+        assert r2.matched is True
+
+    def test_and_pool_with_non_pooled_child(self, tmp_path: Path) -> None:
+        """AND 含非 CONTENT REGEX 子项（如 FILENAME）时混合求值。"""
+        spec = AndMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"password=\S+", case_sensitive=False
+                ),
+                LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.CONTAINS, pattern=".env", case_sensitive=False),
+            )
+        )
+        matcher = build_matcher(spec)
+        assert isinstance(matcher, AndMatcher)
+        pool = ContentRegexPool()
+        matcher.attach_pool(pool)
+        pool.compile()
+        # 只有 CONTENT REGEX 子项入池
+        assert 0 in matcher._pool_child_ids
+        assert 1 not in matcher._pool_child_ids
+        ctx = _make_context(tmp_path / ".env", content="password=abc")
+        assert matcher.matches(ctx).matched is True
+
+    def test_pool_case_sensitive_group(self, tmp_path: Path) -> None:
+        """case_sensitive=True 的子项独立成组并正确命中。"""
+        pool = ContentRegexPool()
+        id1 = pool.register(
+            LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"Password", case_sensitive=True)
+        )
+        id2 = pool.register(
+            LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"APIKey", case_sensitive=True)
+        )
+        pool.compile()
+        ctx = _make_context(tmp_path / "f.txt", content="Password field\nAPIKey here")
+        results = pool.evaluate(ctx)
+        assert id1 in results and id2 in results
+        # case_sensitive=True → 不匹配小写
+        ctx_lower = _make_context(tmp_path / "f.txt", content="password field")
+        assert pool.evaluate(ctx_lower) == {}
+
+    def test_pool_compile_failure_fallback(self, tmp_path: Path) -> None:
+        """复合正则编译失败时组丢弃，is_compiled 返回 False。
+
+        直接在 pool 层面注入无效 pattern（绕过 build_matcher 的编译检查），
+        验证 compile 不抛异常且组被标记为未编译。
+        """
+        pool = ContentRegexPool()
+        id1 = pool.register(
+            LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"password", case_sensitive=False)
+        )
+        id2 = pool.register(
+            LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"api_key", case_sensitive=False)
+        )
+        # 破坏 specs 使复合正则编译失败：注入未闭合的分组
+        for group in pool._groups.values():
+            group.specs_by_child_id[id1] = LeafMatch(
+                target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"(?P<bad", case_sensitive=False
+            )
+        pool.compile()
+        # 编译失败 → is_compiled 返回 False
+        assert pool.is_compiled(id1) is False
+        assert pool.is_compiled(id2) is False
+        # evaluate 返回空（组被丢弃）
+        ctx = _make_context(tmp_path / "f.txt", content="password=abc")
+        assert pool.evaluate(ctx) == {}
+
+    def test_pool_single_child_group_not_compiled(self) -> None:
+        """单子项组（len < 2）跳过编译，is_compiled 返回 False。"""
+        pool = ContentRegexPool()
+        id1 = pool.register(
+            LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"password", case_sensitive=False)
+        )
+        pool.compile()
+        # 单子项组 → 未编译 → is_compiled=False
+        assert pool.is_compiled(id1) is False
+
+    def test_or_pool_with_non_pooled_child_sets_target(self, tmp_path: Path) -> None:
+        """OR 含非池化 FILENAME 子项命中时设置 first_target。"""
+        spec = OrMatch(
+            children=(
+                LeafMatch(
+                    target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"password=\S+", case_sensitive=False
+                ),
+                LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.CONTAINS, pattern=".env", case_sensitive=False),
+            )
+        )
+        matcher = build_matcher(spec)
+        assert isinstance(matcher, OrMatcher)
+        pool = ContentRegexPool()
+        matcher.attach_pool(pool)
+        pool.compile()
+        ctx = _make_context(tmp_path / ".env", content="nothing")
+        result = matcher.matches(ctx)
+        assert result.matched is True
+        # FILENAME 子项命中 → first_target 为 filename
+        assert result.target == "filename"
+
+    def test_pool_inline_ignorecase_flag(self, tmp_path: Path) -> None:
+        """内联 (?i) 标志的子项 → prefilter_case_insensitive=True。"""
+        pool = ContentRegexPool()
+        pool.register(
+            LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"(?i)Password", case_sensitive=True)
+        )
+        pool.register(
+            LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.REGEX, pattern=r"(?i)APIKey", case_sensitive=True)
+        )
+        pool.compile()
+        # case_sensitive=True 但内联 (?i) → 大小写不敏感匹配
+        ctx = _make_context(tmp_path / "f.txt", content="password here")
+        results = pool.evaluate(ctx)
+        assert len(results) == 1

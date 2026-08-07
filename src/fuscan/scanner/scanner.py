@@ -72,7 +72,13 @@ from fuscan.scanner._helpers import (
 from fuscan.scanner._pipeline_phase import run_pipeline_phase
 from fuscan.scanner.context import ContentProvider, FileEntry, MatchContext
 from fuscan.scanner.manifest import FileFingerprint, IncrementalManifest
-from fuscan.scanner.matchers import Matcher, build_matcher
+from fuscan.scanner.matchers import (
+    AndMatcher,
+    ContentRegexPool,
+    Matcher,
+    OrMatcher,
+    build_matcher,
+)
 from fuscan.scanner.result import (
     FilterStats,
     ProgressInfo,
@@ -106,6 +112,7 @@ class _CompiledRuleset:
     __slots__ = (
         "bucketed_rule_names",
         "compiled",
+        "content_regex_pool",
         "content_rule_names",
         "ext_content_buckets",
         "ext_remaining_rules",
@@ -122,6 +129,7 @@ class _CompiledRuleset:
         ext_remaining_rules: dict[str, list[tuple[Rule, Matcher]]],
         bucketed_rule_names: frozenset[str],
         content_rule_names: frozenset[str],
+        content_regex_pool: ContentRegexPool,
     ) -> None:
         self.compiled = compiled
         self.global_content_buckets = global_content_buckets
@@ -130,6 +138,7 @@ class _CompiledRuleset:
         self.ext_remaining_rules = ext_remaining_rules
         self.bucketed_rule_names = bucketed_rule_names
         self.content_rule_names = content_rule_names
+        self.content_regex_pool = content_regex_pool
 
 
 # 模块级编译缓存：id(ruleset) → (weakref, _CompiledRuleset)
@@ -221,9 +230,20 @@ class Scanner:
             self._ext_remaining_rules = compiled_rs.ext_remaining_rules
             self._bucketed_rule_names = compiled_rs.bucketed_rule_names
             self._content_rule_names = compiled_rs.content_rule_names
+            self._content_regex_pool = compiled_rs.content_regex_pool
         else:
-            # 缓存未命中：编译规则 + 构建 CONTENT 桶
+            # 缓存未命中：编译规则 + 构建 CONTENT 桶 + 跨规则子项池
             self._compiled = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
+            # 跨规则 CONTENT REGEX 子项池：扫描所有 AND/OR 规则的 CONTENT REGEX
+            # 子项，按 (pattern, case_sensitive) 去重后合并为复合 OR 正则。
+            # matches() 时从 pool.evaluate(context) 查询命中状态，消除跨规则重复
+            # finditer（S3 场景 50 条 AND × 2~3 子项，finditer 次数降 97%+）。
+            # 必须在 pool.compile() 前完成所有 attach_pool 注册。
+            self._content_regex_pool = ContentRegexPool()
+            for _rule, matcher in self._compiled:
+                if isinstance(matcher, (AndMatcher, OrMatcher)):
+                    matcher.attach_pool(self._content_regex_pool)
+            self._content_regex_pool.compile()
             # 规则按 required_exts 分组 + 分别 CONTENT 桶合并
             #
             # - 无扩展名约束（纯 CONTENT / NOT / OR 混合）的规则 → global pairs
@@ -262,6 +282,7 @@ class Scanner:
                 ext_remaining_rules=self._ext_remaining_rules,
                 bucketed_rule_names=self._bucketed_rule_names,
                 content_rule_names=self._content_rule_names,
+                content_regex_pool=self._content_regex_pool,
             )
             with _compiled_cache_lock:
                 if len(_compiled_cache) >= _COMPILED_CACHE_MAX:

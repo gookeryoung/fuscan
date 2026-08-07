@@ -46,6 +46,7 @@ from fuscan.scanner.result import MatchResult
 __all__ = [
     "AndMatcher",
     "ContentMatcher",
+    "ContentRegexPool",
     "FileNameMatcher",
     "Matcher",
     "NotMatcherImpl",
@@ -383,16 +384,233 @@ def _evaluate_composite_group(  # noqa: PLR0912
     return results
 
 
+@dataclass
+class _PoolGroup:
+    """池内同 case_sensitive 的子项组。
+
+    与 :class:`_ContentCompositeGroup` 结构对齐，但跨所有 AND/OR 规则收集子项，
+    按 ``(pattern, case_sensitive)`` 去重——相同子项（如多条 AND 规则共有的
+    ``password=`` 子模式）只注册一次，全局共享一次 ``finditer`` 结果。
+    """
+
+    case_sensitive: bool
+    # 本组所有 child_id（保持注册顺序）
+    child_ids: list[int] = field(default_factory=list)
+    # 命名组名 "_p{child_id}" -> child_id
+    group_to_child_id: dict[str, int] = field(default_factory=dict)
+    # child_id -> spec（仅含组内子项）
+    specs_by_child_id: dict[int, LeafMatch] = field(default_factory=dict)
+    # 命名组子正则片段，下标对齐 child_ids
+    sub_parts: list[str] = field(default_factory=list)
+    compiled: Pattern[str] | None = None
+    # 预筛（与 _ContentCompositeGroup 一致）
+    prefilter_keywords: list[str] = field(default_factory=list)
+    per_child_keywords: dict[int, list[str]] = field(default_factory=dict)
+    prefilter_case_insensitive: bool = False
+
+
+class ContentRegexPool:
+    """跨规则共享的 CONTENT REGEX 子项池。
+
+    收集所有 AND/OR 组合规则的 CONTENT REGEX 子项，按 ``case_sensitive`` 合并为
+    复合 OR 正则。``evaluate(context)`` 一次 ``finditer`` 收集所有子项命中状态，
+    各组合规则从池查询，消除跨规则重复 ``finditer``（S3 场景 50 条 AND × 2~3 子项，
+    子项去重后仅 ~30 个，``finditer`` 次数从 125+ 降至 1-2 次）。
+
+    相同 ``(pattern, case_sensitive)`` 的子项去重共享同一 ``child_id``，
+    多个 AND/OR 规则可引用同一 ``child_id``。
+
+    求值结果按 ``id(context)`` 缓存：同一文件的多个 AND/OR 规则共享一次
+    ``evaluate``，避免重复 ``finditer``。
+
+    两级预筛（桶级 + 逐子项）与 :func:`match_content_via_buckets` /
+    :func:`_evaluate_composite_group` 一致，保证不产生 false negative。
+    """
+
+    def __init__(self) -> None:
+        self._groups: dict[bool, _PoolGroup] = {}
+        # (pattern, case_sensitive) -> child_id（去重键）
+        self._pattern_to_child_id: dict[tuple[str, bool], int] = {}
+        self._next_child_id: int = 0
+        self._compiled: bool = False
+        # 已编译组覆盖的 child_id 集合（单子项组跳过编译，其 child_id 不在此集合）
+        # matches() 据此区分"池化但未命中"与"未入池（走独立 matches()）"
+        self._compiled_child_ids: frozenset[int] = frozenset()
+        # evaluate 结果缓存：同 context 只跑一次
+        self._cached_context_id: int | None = None
+        self._cached_results: dict[int, MatchResult] | None = None
+
+    def register(self, spec: LeafMatch) -> int:
+        """注册 CONTENT REGEX 子项，返回 ``child_id``。
+
+        相同 ``(pattern, case_sensitive)`` 去重共享同一 ``child_id``。
+        必须在 :meth:`compile` 之前调用。
+
+        :param spec: 子项规格（须为 ``target=CONTENT, mode=REGEX``）
+        :return: 全局唯一 ``child_id``
+        """
+        assert not self._compiled, "register 必须在 compile() 之前调用"
+        key = (spec.pattern, spec.case_sensitive)
+        existing = self._pattern_to_child_id.get(key)
+        if existing is not None:
+            return existing
+        child_id = self._next_child_id
+        self._next_child_id += 1
+        self._pattern_to_child_id[key] = child_id
+        group = self._groups.setdefault(spec.case_sensitive, _PoolGroup(case_sensitive=spec.case_sensitive))
+        group.child_ids.append(child_id)
+        group.specs_by_child_id[child_id] = spec
+        return child_id
+
+    def compile(self) -> None:
+        """构建各组的复合 OR 正则与预筛关键字。
+
+        编译后不可再 :meth:`register`。复合正则编译失败的组整体丢弃
+        （组内子项回退到独立 ``matches()`` 路径——由 ``AndMatcher`` /
+        ``OrMatcher`` 中 ``_pool_child_ids`` 不含这些子项保证）。
+        """
+        for case_sensitive, group in self._groups.items():
+            if len(group.child_ids) < 2:
+                # 单子项组无合并收益，跳过（子项走独立 matches() 路径）
+                continue
+            parts: list[str] = []
+            prefilter_keywords: list[str] = []
+            per_child_kw: dict[int, list[str]] = {}
+            has_inline_ignorecase = False
+            for child_id in group.child_ids:
+                spec = group.specs_by_child_id[child_id]
+                assert isinstance(spec, LeafMatch)
+                grp_name = f"_p{child_id}"
+                sub = spec.pattern
+                sub_clean, sub_flags = _extract_inline_flags(sub)
+                if sub_flags & re.IGNORECASE:
+                    has_inline_ignorecase = True
+                if sub_flags:
+                    flag_str = _flags_to_chars(sub_flags)
+                    part = rf"(?{flag_str}:(?P<{grp_name}>{sub_clean}))"
+                else:
+                    part = rf"(?P<{grp_name}>{sub})"
+                parts.append(part)
+                group.sub_parts.append(part)
+                group.group_to_child_id[grp_name] = child_id
+                rule_literals = _extract_literals(sub_clean)
+                prefilter_keywords.extend(rule_literals)
+                per_child_kw[child_id] = rule_literals
+            flags = 0 if case_sensitive else re.IGNORECASE
+            try:
+                group.compiled = re.compile("|".join(parts), flags)
+            except re.error:
+                # 编译失败：放弃该组，子项回退独立 matches()
+                group.compiled = None
+                group.group_to_child_id.clear()
+                group.sub_parts.clear()
+                continue
+            prefilter_ci = (not case_sensitive) or has_inline_ignorecase
+            if prefilter_ci:
+                group.prefilter_keywords = _dedup_substrings([k.lower() for k in prefilter_keywords])
+                group.per_child_keywords = {
+                    cid: _dedup_substrings([k.lower() for k in kws]) for cid, kws in per_child_kw.items()
+                }
+            else:
+                group.prefilter_keywords = _dedup_substrings(prefilter_keywords)
+                group.per_child_keywords = {cid: _dedup_substrings(kws) for cid, kws in per_child_kw.items()}
+            group.prefilter_case_insensitive = prefilter_ci
+        # 收集已编译组覆盖的 child_id（单子项组跳过编译，不在此集合）
+        compiled_ids: set[int] = set()
+        for group in self._groups.values():
+            if group.compiled is not None:
+                compiled_ids.update(group.child_ids)
+        self._compiled_child_ids = frozenset(compiled_ids)
+        self._compiled = True
+
+    def is_compiled(self, child_id: int) -> bool:
+        """判断 child_id 是否属于已编译组（可走池路径求值）。
+
+        单子项组（``len < 2``）跳过编译，其 child_id 返回 False——
+        调用方应走独立 ``matches()`` 路径。
+
+        :param child_id: :meth:`register` 返回的子项 ID
+        :return: 已编译组覆盖返回 True，否则 False
+        """
+        return child_id in self._compiled_child_ids
+
+    def _evaluate_group(self, group: _PoolGroup, context: MatchContext) -> dict[int, MatchResult]:  # noqa: PLR0912
+        """对单组跑一次 finditer，返回命中的 child_id -> MatchResult。"""
+        if group.compiled is None:
+            return {}
+        if group.prefilter_case_insensitive:
+            haystack = context.content_lower
+        else:
+            haystack = context.content
+        if group.prefilter_keywords and not any(kw in haystack for kw in group.prefilter_keywords):
+            return {}
+        active: set[int] = set()
+        for child_id in group.child_ids:
+            kws = group.per_child_keywords.get(child_id, [])
+            if not kws or any(kw in haystack for kw in kws):
+                active.add(child_id)
+        if not active:
+            return {}
+        content = context.content
+        per_child: dict[int, tuple[str, int]] = {}
+        for m in group.compiled.finditer(content):
+            last = m.lastgroup
+            if last is None:
+                continue
+            child_id = group.group_to_child_id.get(last)
+            if child_id is None or child_id not in active:
+                continue
+            txt = m.group(0)
+            prev = per_child.get(child_id)
+            if prev is None:
+                per_child[child_id] = (txt, 1)
+            else:
+                per_child[child_id] = (prev[0], prev[1] + 1)
+        results: dict[int, MatchResult] = {}
+        for child_id, (first_txt, total_cnt) in per_child.items():
+            spec = group.specs_by_child_id[child_id]
+            results[child_id] = MatchResult(
+                matched=True,
+                detail=f"正则命中: {first_txt!r}",
+                match_text=first_txt,
+                match_count=total_cnt,
+                target=MatchTarget.CONTENT.value,
+                match_texts=(first_txt,) if first_txt else (),
+                match_description=spec.description,
+            )
+        return results
+
+    def evaluate(self, context: MatchContext) -> dict[int, MatchResult]:
+        """对所有池化子项跑一次 finditer，返回命中的 child_id -> MatchResult。
+
+        结果按 ``id(context)`` 缓存：同一文件的多个 AND/OR 规则共享一次 evaluate。
+        """
+        ctx_id = id(context)
+        if self._cached_context_id == ctx_id and self._cached_results is not None:
+            return self._cached_results
+        results: dict[int, MatchResult] = {}
+        for group in self._groups.values():
+            results.update(self._evaluate_group(group, context))
+        self._cached_context_id = ctx_id
+        self._cached_results = results
+        return results
+
+
 class AndMatcher(Matcher):
     """逻辑与：所有子匹配器均命中才算命中。
 
     持有 :class:`AndMatch` spec 以读取 ``description``，并收集所有子匹配器
     命中的文本到 ``match_texts``，便于 GUI 标记每个命中的内容（需求3）。
 
-    性能优化：构造期把同 ``case_sensitive`` 的 CONTENT REGEX 子项合并为复合 OR
-    正则（:class:`_ContentCompositeGroup`），``matches()`` 时一次 ``finditer``
-    收集组内所有子项命中状态。无复合组时（无 CONTENT REGEX 子项或组内仅 1 个
-    子项）走原逐子项路径，行为完全一致。
+    性能优化（双层）：
+
+    1. **池化**（:class:`ContentRegexPool`）：Scanner 构造期把所有 AND/OR 规则的
+       CONTENT REGEX 子项跨规则去重合并为复合 OR 正则。``matches()`` 时若已注入
+       池，从 ``pool.evaluate(context)`` 查询池化子项命中状态，消除跨规则重复
+       ``finditer``。S3 场景 50 条 AND × 2~3 子项，``finditer`` 次数降 97%+。
+    2. **单条规则复合组**（:class:`_ContentCompositeGroup`）：无池注入时（独立
+       构造的 AndMatcher，如单元测试）仍走单条规则内同 ``case_sensitive`` 子项
+       合并的复合组路径，行为与池化前完全一致。
     """
 
     def __init__(self, spec: AndMatch) -> None:
@@ -406,13 +624,55 @@ class AndMatcher(Matcher):
             self._composite_child_indices.update(group.child_indices)
             for child_idx in group.child_indices:
                 self._group_by_child_idx[child_idx] = group
+        # 池化注入（由 Scanner 构造期 attach_pool 设置）；None 时走复合组路径
+        self._pool: ContentRegexPool | None = None
+        self._pool_child_ids: dict[int, int] = {}
+
+    def attach_pool(self, pool: ContentRegexPool) -> None:
+        """注入跨规则共享池，注册本 matcher 的 CONTENT REGEX 子项。
+
+        由 :class:`fuscan.scanner.scanner.Scanner` 构造期在 ``pool.compile()`` 前
+        调用。注册后 ``matches()`` 走池路径；未注册则走 ``_composite_groups`` 路径。
+
+        :param pool: 全局共享池（须尚未 compile）
+        """
+        self._pool = pool
+        for i, child in enumerate(self.children):
+            if not isinstance(child, ContentMatcher):
+                continue
+            spec = child.spec
+            if spec.target != MatchTarget.CONTENT or spec.mode != MatchMode.REGEX:
+                continue
+            child_id = pool.register(spec)
+            self._pool_child_ids[i] = child_id
 
     @override
-    def matches(self, context: MatchContext) -> MatchResult:
+    def matches(self, context: MatchContext) -> MatchResult:  # noqa: PLR0912
         details: list[str] = []
         match_texts: list[str] = []
         total_count = 0
-        if not self._composite_groups:
+        if self._pool is not None:
+            # 池化路径：池化子项从 pool.evaluate(context) 查询（跨规则共享一次
+            # finditer），非池化子项走原 matches()。保持 AND 短路语义与
+            # detail/match_texts 顺序（按 children 下标迭代）。
+            # 单子项组（pool.is_compiled=False）回退独立 matches()，避免误判未命中。
+            pool_results = self._pool.evaluate(context)
+            for i, child in enumerate(self.children):
+                child_id = self._pool_child_ids.get(i)
+                if child_id is not None and self._pool.is_compiled(child_id):
+                    result = pool_results.get(child_id)
+                    if result is None:
+                        # AND 语义：池中该子项未命中 → 整体不命中
+                        return MatchResult(matched=False, match_description=self.spec.description)
+                else:
+                    result = child.matches(context)
+                    if not result.matched:
+                        return MatchResult(matched=False, match_description=self.spec.description)
+                if result.detail:
+                    details.append(result.detail)
+                match_texts.extend(result.match_texts)
+                total_count += result.match_count
+        elif not self._composite_groups:
             # 无复合组：走原逻辑（保持完全一致）
             for child in self.children:
                 result = child.matches(context)
@@ -476,9 +736,12 @@ class OrMatcher(Matcher):
     的内容（需求3）。``match_count`` 为所有命中子匹配器的匹配条数之和。
     ``target`` 透传首个命中子匹配器的目标类型，供 GUI 判断是否在内容预览中高亮。
 
-    性能优化：构造期把同 ``case_sensitive`` 的 CONTENT REGEX 子项合并为复合 OR
-    正则（:class:`_ContentCompositeGroup`），``matches()`` 时一次 ``finditer``
-    收集组内所有子项命中状态。无复合组时走原逐子项路径，行为完全一致。
+    性能优化（双层，与 :class:`AndMatcher` 一致）：
+
+    1. **池化**（:class:`ContentRegexPool`）：Scanner 构造期跨规则去重合并
+       CONTENT REGEX 子项为复合 OR 正则，``matches()`` 从池查询命中状态。
+    2. **单条规则复合组**（:class:`_ContentCompositeGroup`）：无池注入时走单条
+       规则内合并路径，行为与池化前完全一致。
     """
 
     def __init__(self, spec: OrMatch) -> None:
@@ -491,6 +754,27 @@ class OrMatcher(Matcher):
             self._composite_child_indices.update(group.child_indices)
             for child_idx in group.child_indices:
                 self._group_by_child_idx[child_idx] = group
+        # 池化注入（由 Scanner 构造期 attach_pool 设置）；None 时走复合组路径
+        self._pool: ContentRegexPool | None = None
+        self._pool_child_ids: dict[int, int] = {}
+
+    def attach_pool(self, pool: ContentRegexPool) -> None:
+        """注入跨规则共享池，注册本 matcher 的 CONTENT REGEX 子项。
+
+        与 :meth:`AndMatcher.attach_pool` 语义一致，由 Scanner 构造期在
+        ``pool.compile()`` 前调用。
+
+        :param pool: 全局共享池（须尚未 compile）
+        """
+        self._pool = pool
+        for i, child in enumerate(self.children):
+            if not isinstance(child, ContentMatcher):
+                continue
+            spec = child.spec
+            if spec.target != MatchTarget.CONTENT or spec.mode != MatchMode.REGEX:
+                continue
+            child_id = pool.register(spec)
+            self._pool_child_ids[i] = child_id
 
     @override
     def matches(self, context: MatchContext) -> MatchResult:  # noqa: PLR0912
@@ -499,7 +783,31 @@ class OrMatcher(Matcher):
         total_count = 0
         first_target = ""
         any_matched = False
-        if not self._composite_groups:
+        if self._pool is not None:
+            # 池化路径：池化子项从 pool.evaluate(context) 查询（跨规则共享一次
+            # finditer），非池化子项走原 matches()。保持 OR 不短路语义——
+            # 收集所有命中子项；保持 detail/match_texts/first_target 顺序。
+            # 单子项组（pool.is_compiled=False）回退独立 matches()。
+            pool_results = self._pool.evaluate(context)
+            for i, child in enumerate(self.children):
+                child_id = self._pool_child_ids.get(i)
+                if child_id is not None and self._pool.is_compiled(child_id):
+                    result = pool_results.get(child_id)
+                    if result is None:
+                        # OR 语义：该子项未命中，跳过
+                        continue
+                else:
+                    result = child.matches(context)
+                    if not result.matched:
+                        continue
+                any_matched = True
+                if result.detail:
+                    details.append(result.detail)
+                match_texts.extend(result.match_texts)
+                total_count += result.match_count
+                if not first_target:
+                    first_target = result.target
+        elif not self._composite_groups:
             # 无复合组：走原逻辑（保持完全一致，不短路以收集所有命中）
             for child in self.children:
                 result = child.matches(context)

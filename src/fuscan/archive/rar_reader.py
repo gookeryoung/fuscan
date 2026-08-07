@@ -30,7 +30,7 @@ class RarReader(ArchiveReader):
         except ImportError as exc:
             raise ArchiveError("rarfile 库未安装，无法读取 RAR 文件") from exc
 
-        self._path = path
+        super().__init__(path)
         self._password = password
         try:
             self._rar = rarfile.RarFile(str(path))

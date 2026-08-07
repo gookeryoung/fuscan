@@ -49,7 +49,17 @@ class ArchiveEntry:
 
     @property
     def extension(self) -> str:
-        """条目扩展名（不含点，小写），正确处理 dotfile 如 ``.env``。"""
+        """条目扩展名（不含点，小写）。
+
+        行为约定（与 :attr:`pathlib.PurePath.suffix` 一致，取最后一段 suffix）：
+
+        - 普通文件取 ``Path.suffix``：``file.txt`` → ``txt``、``archive.tar.gz`` → ``gz``
+        - dotfile 单点（``.env``、``.bashrc``）：``Path.suffix`` 为空，取点后全部
+          （``.env`` → ``env``）
+        - dotfile 多点（``.env.local``）：``Path.suffix`` 非空（``.local``），
+          取最后一段（``.env.local`` → ``local``），与普通多段扩展名一致
+        - 无扩展名（``README``、``Makefile``）：返回空串
+        """
         p = Path(self.entry_name)
         suffix = p.suffix
         if suffix:
@@ -72,7 +82,22 @@ class ArchiveReader(ABC):
     子类须实现 :meth:`_close_resource` 关闭底层句柄；:meth:`close` 与
     :meth:`__enter__`/:meth:`__exit__` 由基类统一提供，避免 3 个子类重复
     try/except 包装与上下文管理器样板。
+
+    子类 ``__init__`` 须调用 ``super().__init__(path)`` 由基类统一存储
+    ``self._path``，供 :meth:`close` 异常日志标识来源压缩包；password 由
+    子类按需自行存储（编码/原值），基类不存储以避免与子类编码逻辑冲突。
     """
+
+    def __init__(self, path: Path, password: str | None = None) -> None:  # noqa: ARG002
+        """初始化读取器。
+
+        :param path: 压缩包路径，存入 ``self._path`` 供 :meth:`close` 日志标识。
+        :param password: 加密条目密码；子类按需自行存储，基类不使用。
+            参数本身是 ABC 契约的一部分（确保 :meth:`ArchiveReaderFactory.create`
+            可统一以 ``reader_cls(path, password=password)`` 构造所有子类），
+            故保留签名而非下划线前缀。
+        """
+        self._path = path
 
     @property
     @abstractmethod
@@ -108,7 +133,7 @@ class ArchiveReader(ABC):
         try:
             self._close_resource()
         except Exception:  # pragma: no cover - 关闭异常无需上报
-            logger.debug("关闭压缩文件句柄失败: %s", getattr(self, "_path", "<unknown>"), exc_info=True)
+            logger.debug("关闭压缩文件句柄失败: %s", self._path, exc_info=True)
 
     def __enter__(self: _T) -> _T:
         return self
@@ -129,11 +154,19 @@ class ArchiveReaderFactory:
         self._factories: dict[str, type[ArchiveReader]] = {}
 
     def register(self, extension: str, reader_cls: type[ArchiveReader]) -> None:
-        """注册指定扩展名的读取器类。"""
+        """注册指定扩展名的读取器类。
+
+        :param extension: 扩展名，可带或不带前导点，大小写不敏感（内部归一化为
+            小写无点形式）。
+        """
         self._factories[extension.lower().lstrip(".")] = reader_cls
 
     def get(self, extension: str) -> type[ArchiveReader] | None:
-        """按扩展名查询已注册的读取器类，未注册返回 None。"""
+        """按扩展名查询已注册的读取器类，未注册返回 None。
+
+        :param extension: 扩展名，可带或不带前导点，大小写不敏感（内部归一化）。
+            调用方亦可预先归一化后传入，行为等价。
+        """
         return self._factories.get(extension.lower().lstrip("."))
 
     @property
@@ -142,15 +175,18 @@ class ArchiveReaderFactory:
         return frozenset(self._factories.keys())
 
     def create(self, path: Path, password: str | None = None) -> ArchiveReader | None:
-        """按扩展名创建读取器实例。"""
+        """按扩展名创建读取器实例。
+
+        所有 :class:`ArchiveReader` 子类须以 ``__init__(self, path, password=None)``
+        签名构造（ABC 契约）。此处不再以 ``try/except TypeError`` 兜底「子类缺
+        password 参数」——该写法会吞掉 ``__init__`` 内部真实的 ``TypeError``，
+        掩盖缺陷。子类签名不符合契约时让异常显式抛出。
+        """
         ext = path.suffix.lower().lstrip(".")
         reader_cls = self._factories.get(ext)
         if reader_cls is None:
             return None
-        try:
-            return reader_cls(path, password=password)  # type: ignore[call-arg]
-        except TypeError:
-            return reader_cls(path)  # type: ignore[call-arg]
+        return reader_cls(path, password=password)
 
 
 default_factory = ArchiveReaderFactory()
@@ -166,5 +202,9 @@ def is_archive(path: Path) -> bool:
 
     用于避免对非压缩文件启动并行扫描任务；损坏的压缩文件仍返回 True，
     交由 :meth:`ArchiveScanner.scan_archive` 捕获并返回错误结果。
+
+    调用方显式归一化扩展名后查询，避免依赖 :meth:`ArchiveReaderFactory.get`
+    内部归一化导致职责重叠（``path.suffix`` 带前导点）。
     """
-    return default_factory.get(path.suffix) is not None
+    ext = path.suffix.lower().lstrip(".")
+    return default_factory.get(ext) is not None

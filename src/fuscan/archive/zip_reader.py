@@ -26,7 +26,7 @@ class ZipReader(ArchiveReader):
     """
 
     def __init__(self, path: Path, password: str | None = None) -> None:
-        self._path = path
+        super().__init__(path)
         self._password = password.encode("utf-8") if password else None
         try:
             self._zip = zipfile.ZipFile(str(path), mode="r")

@@ -53,7 +53,7 @@ class SevenZReader(ArchiveReader):
         except ImportError as exc:
             raise ArchiveError("py7zr 库未安装，无法读取 7Z 文件") from exc
 
-        self._path = path
+        super().__init__(path)
         self._password = password
         try:
             self._sevenz: py7zr.SevenZipFile = py7zr.SevenZipFile(str(path), mode="r", password=password)

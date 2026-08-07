@@ -184,6 +184,57 @@ class TestArchiveEntry:
         # Path("subdir/").name 在不同平台返回 "subdir" 或 ""
         assert entry.name in ("subdir", "")
 
+    def test_entry_extension_dotfile_single_dot(self, tmp_path: Path) -> None:
+        """dotfile 单点（.env）：suffix 为空，取点后全部作为扩展名。"""
+        entry = ArchiveEntry(
+            archive_path=tmp_path / "a.zip",
+            entry_name=".env",
+            size=10,
+            compressed_size=10,
+        )
+        assert entry.extension == "env"
+
+    def test_entry_extension_dotfile_bashrc(self, tmp_path: Path) -> None:
+        """dotfile 单点（.bashrc）：取点后全部。"""
+        entry = ArchiveEntry(
+            archive_path=tmp_path / "a.zip",
+            entry_name=".bashrc",
+            size=10,
+            compressed_size=10,
+        )
+        assert entry.extension == "bashrc"
+
+    def test_entry_extension_dotfile_multi_dot(self, tmp_path: Path) -> None:
+        """dotfile 多点（.env.local）：suffix 非空，取最后一段（与普通多段一致）。"""
+        entry = ArchiveEntry(
+            archive_path=tmp_path / "a.zip",
+            entry_name=".env.local",
+            size=10,
+            compressed_size=10,
+        )
+        # Path(".env.local").suffix == ".local"，走第一分支返回 "local"
+        assert entry.extension == "local"
+
+    def test_entry_extension_multi_suffix(self, tmp_path: Path) -> None:
+        """普通多段扩展名（archive.tar.gz）：取最后一段。"""
+        entry = ArchiveEntry(
+            archive_path=tmp_path / "a.zip",
+            entry_name="archive.tar.gz",
+            size=10,
+            compressed_size=10,
+        )
+        assert entry.extension == "gz"
+
+    def test_entry_extension_uppercase_normalized(self, tmp_path: Path) -> None:
+        """扩展名大写归一化为小写。"""
+        entry = ArchiveEntry(
+            archive_path=tmp_path / "a.zip",
+            entry_name="README.MD",
+            size=10,
+            compressed_size=10,
+        )
+        assert entry.extension == "md"
+
 
 # ----------------------------- ZipReader -----------------------------
 
@@ -1166,9 +1217,86 @@ class TestArchiveEdgeCases:
             def read_entry(self, entry_name: str) -> bytes:
                 return b""
 
+            @override
+            def _close_resource(self) -> None:
+                return None
+
         factory = ArchiveReaderFactory()
         factory.register("fake", FakeReader)
         assert factory.get("fake") is FakeReader
+
+    def test_factory_create_subclass_missing_password_raises_type_error(self, tmp_path: Path) -> None:
+        """子类 __init__ 不接受 password 参数时 create 应显式抛 TypeError。
+
+        回归：旧实现以 ``try/except TypeError`` 兜底「子类缺 password 参数」，
+        会吞掉 ``__init__`` 内部真实 TypeError；移除兜底后契约违反应显式失败。
+        """
+        from fuscan.archive.base import ArchiveReaderFactory
+
+        class PasswordlessReader(ArchiveReader):
+            def __init__(self, path: Path) -> None:  # 故意不接受 password
+                self._path = path
+
+            @property
+            @override
+            def supported_extensions(self) -> tuple[str, ...]:
+                return ("pwdless",)
+
+            @override
+            def list_entries(self) -> list[ArchiveEntry]:
+                return []
+
+            @override
+            def read_entry(self, entry_name: str) -> bytes:
+                return b""
+
+            @override
+            def _close_resource(self) -> None:
+                return None
+
+        factory = ArchiveReaderFactory()
+        factory.register("pwdless", PasswordlessReader)
+        path = tmp_path / "a.pwdless"
+        path.write_text("", encoding="utf-8")
+        with pytest.raises(TypeError):
+            factory.create(path, password="x")
+
+    def test_factory_create_subclass_internal_type_error_propagates(self, tmp_path: Path) -> None:
+        """子类 __init__ 内部真实 TypeError 不应被 create 吞掉。
+
+        回归：旧实现的 ``except TypeError`` 会捕获子类内部抛出的 TypeError
+        并静默回退到无密码构造，掩盖缺陷。移除兜底后内部 TypeError 应显式抛出。
+        """
+        from fuscan.archive.base import ArchiveReaderFactory
+
+        class BrokenInitReader(ArchiveReader):
+            def __init__(self, path: Path, password: str | None = None) -> None:
+                # 模拟内部逻辑误抛 TypeError（如把 Path 传给期望 str 的库）
+                raise TypeError("模拟内部 TypeError，不应被 create 吞掉")
+
+            @property
+            @override
+            def supported_extensions(self) -> tuple[str, ...]:
+                return ("broken",)
+
+            @override
+            def list_entries(self) -> list[ArchiveEntry]:
+                return []
+
+            @override
+            def read_entry(self, entry_name: str) -> bytes:
+                return b""
+
+            @override
+            def _close_resource(self) -> None:
+                return None
+
+        factory = ArchiveReaderFactory()
+        factory.register("broken", BrokenInitReader)
+        path = tmp_path / "a.broken"
+        path.write_text("", encoding="utf-8")
+        with pytest.raises(TypeError, match="模拟内部 TypeError"):
+            factory.create(path, password="x")
 
 
 # ----------------------------- 内容提取分支 -----------------------------

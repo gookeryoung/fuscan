@@ -202,13 +202,15 @@ Rectangle {
                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                 }
                 Item { Layout.fillWidth: true }
-                Button {
-                    text: panel.detailsExpanded ? "收起 ▲" : "展开 ▼"
-                    font.pixelSize: 10
-                    flat: true
+                IconButton {
+                    iconSource: panel.detailsExpanded
+                        ? "qrc:/icons/up_arrow.svg"
+                        : "qrc:/icons/down_arrow.svg"
+                    text: panel.detailsExpanded ? "收起" : "展开"
+                    tooltip: panel.detailsExpanded ? "收起命中详情" : "展开命中详情"
+                    accent: "ghost"
+                    compact: true
                     onClicked: panel.detailsExpanded = !panel.detailsExpanded
-                    ToolTip.visible: hovered
-                    ToolTip.text: panel.detailsExpanded ? "收起命中详情" : "展开命中详情"
                 }
             }
 
@@ -384,7 +386,8 @@ Rectangle {
             spacing: 8
 
             IconButton {
-                text: "◀ 上一条"
+                iconSource: "qrc:/icons/back.svg"
+                text: "上一条"
                 tooltip: "查看上一条命中结果"
                 accent: "secondary"
                 compact: true
@@ -395,7 +398,8 @@ Rectangle {
                 }
             }
             IconButton {
-                text: "下一条 ▶"
+                iconSource: "qrc:/icons/forward.svg"
+                text: "下一条"
                 tooltip: "查看下一条命中结果"
                 accent: "secondary"
                 compact: true

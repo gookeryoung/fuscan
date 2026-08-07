@@ -38,6 +38,7 @@
     <file alias="icons/favicon.svg">../assets/icons/favicon.svg</file>
     <file alias="icons/file.svg">../assets/icons/file.svg</file>
     <file alias="icons/folder.svg">../assets/icons/folder.svg</file>
+    <file alias="icons/forward.svg">../assets/icons/forward.svg</file>
     <file alias="icons/hard_disk.svg">../assets/icons/hard_disk.svg</file>
     <file alias="icons/history.svg">../assets/icons/history.svg</file>
     <file alias="icons/home.svg">../assets/icons/home.svg</file>

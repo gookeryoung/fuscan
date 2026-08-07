@@ -1192,8 +1192,7 @@ class Scanner:
                 # 桶匹配异常：fallback 到逐条 remaining 处理
                 errors += 1
                 logger.warning("CONTENT 合并桶(缓存模式)匹配失败 %s", bucket_applicable[0][0].name, exc_info=True)
-                matched_empty: list[RuleHit] = []
-                matched = matched_empty
+                matched: list[RuleHit] = []
             for hit in matched:
                 bucket_hits_by_name.setdefault(hit.rule_name, []).append(hit)
         # ----------- 3 阶段：分发桶结果到未处理的 rule_hash --------------------

@@ -60,9 +60,15 @@ ApplicationWindow {
             font.pixelSize: 13
             color: "#586069"
             Layout.alignment: Qt.AlignHCenter
-            // 文本变化时淡入动画
-            Behavior on text {
-                FadeAnimation { duration: 150 }
+            // 文本变化时淡入：对 opacity 应用 NumberAnimation，
+            // onTextChanged 触发 0→1 过渡（FadeAnimation 非标准 QML 类型，
+            // 且 Behavior on text 对字符串属性无法实现淡入）
+            Behavior on opacity {
+                NumberAnimation { duration: 150 }
+            }
+            onTextChanged: {
+                opacity = 0
+                opacity = 1
             }
         }
 

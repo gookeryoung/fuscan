@@ -783,9 +783,9 @@ class TestExtractContext:
         self,
         tmp_path: Path,
     ) -> None:
-        """文件超过 _MAX_CONTEXT_FILE_SIZE 时跳过上下文提取（1.5MB 远超 256KB）。"""
+        """文件超过 _MAX_CONTEXT_FILE_SIZE 时跳过上下文提取（略超 1MB 阈值）。"""
         src = tmp_path / "large.txt"
-        # 写入 1.5MB 内容（远超 256KB 限制）
+        # 写入略超 1MB 内容（_MAX_CONTEXT_FILE_SIZE = 1024*1024）
         src.write_text("a" * (1024 * 1024 + 512), encoding="utf-8")
 
         hit = RuleHit(
@@ -822,12 +822,19 @@ class TestExtractContext:
         # match_text 不在文件中 → context 回退到 hit.detail
         assert model[0]["context"] == "detail fallback"
 
-    def test_context_skipped_for_non_text_file(
+    def test_binary_file_still_extracts_context_if_match_found(
         self,
         tmp_path: Path,
     ) -> None:
-        """非文本文件扩展名 → 跳过上下文提取。"""
+        """二进制文件扩展名也能提取上下文（上下文提取只读不写，不受替换白名单限制）。
+
+        回归测试：``_extract_contexts_batch`` 曾用 ``is_text_file``（替换白名单）
+        过滤，导致 PDF/DOCX 等二进制文件的上下文不被提取。移除该过滤后，
+        二进制文件经 ``errors="replace"`` 解码，若 match_text 在解码内容中
+        仍可定位上下文。真正纯二进制流（match_text 不在内容中）自然返回空。
+        """
         src = tmp_path / "a.pdf"
+        # PDF 头部含 ASCII 文本，match_text 在其中可定位
         src.write_bytes(b"%PDF-1.4 password")
 
         hit = RuleHit(
@@ -840,8 +847,8 @@ class TestExtractContext:
 
         model = build_detail_hits_model(result)
         assert len(model) == 1
-        # PDF 不是文本文件 → context 回退到 hit.detail
-        assert model[0]["context"] == "detail fallback"
+        # 二进制文件头部 ASCII 区可定位上下文（带 >>> 标记）
+        assert ">>> %PDF-1.4 password" in str(model[0]["context"])
 
     def test_context_at_file_start(self, tmp_path: Path) -> None:
         """匹配行在文件开头时上下文仅包含后续行。"""
@@ -995,15 +1002,15 @@ class TestBuildDetailHitsFull:
         assert full == light
         assert full[0]["context"] == "内部条目: pw"
 
-    def test_threshold_is_256kb(self) -> None:
-        """_MAX_CONTEXT_FILE_SIZE 锁定为 256KB。"""
-        assert _MAX_CONTEXT_FILE_SIZE == 256 * 1024
+    def test_threshold_is_1mb(self) -> None:
+        """_MAX_CONTEXT_FILE_SIZE 锁定为 1MB。"""
+        assert _MAX_CONTEXT_FILE_SIZE == 1024 * 1024
 
-    def test_context_falls_back_when_over_256kb(self, tmp_path: Path) -> None:
-        """300KB 文件超过 256KB 阈值 → context 回退 detail。"""
+    def test_context_falls_back_when_over_1mb(self, tmp_path: Path) -> None:
+        """1.5MB 文件超过 1MB 阈值 → context 回退 detail。"""
         src = tmp_path / "big.txt"
-        # 300KB，首行含 match_text（若读文件会命中，但因超限不读）
-        src.write_text("password=x\n" + ("a" * (300 * 1024)), encoding="utf-8")
+        # 1.5MB，首行含 match_text（若读文件会命中，但因超限不读）
+        src.write_text("password=x\n" + ("a" * (1536 * 1024)), encoding="utf-8")
         hit = RuleHit(
             rule_name="规则",
             severity=Severity.CRITICAL,
@@ -1013,6 +1020,31 @@ class TestBuildDetailHitsFull:
         result = _make_result(src, hits=(hit,))
         model = build_detail_hits_full(result)
         assert model[0]["context"] == "detail兜底"
+
+    def test_non_whitelisted_extension_still_extracts_context(self, tmp_path: Path) -> None:
+        """扩展名不在替换白名单（如 LICENSE 无扩展名）也能提取上下文。
+
+        回归测试：``_extract_contexts_batch`` 曾误用 ``is_text_file``
+        （替换功能的扩展名白名单）过滤上下文提取，导致 LICENSE/Dockerfile/
+        .gitignore/.config 等纯文本文件的上下文不被提取，context 回退到
+        ``hit.detail`` 描述性文本而非文件定位上下文。上下文提取只读不写，
+        不应受替换白名单限制。
+        """
+        src = tmp_path / "LICENSE"
+        src.write_text("line1\npassword=secret\nline3\n", encoding="utf-8")
+        hit = RuleHit(
+            rule_name="敏感内容",
+            severity=Severity.CRITICAL,
+            detail="正则命中: 'secret'",
+            match_text="secret",
+        )
+        result = _make_result(src, hits=(hit,))
+        model = build_detail_hits_full(result)
+        context = str(model[0]["context"])
+        # 应提取文件上下文（带 >>> 标记），而非回退到 detail 描述性文本
+        assert ">>> password=secret" in context
+        assert "    line1" in context
+        assert "    line3" in context
 
     def test_empty_match_text_uses_detail(self, tmp_path: Path) -> None:
         """空 match_text 不定位上下文，直接用 detail。"""

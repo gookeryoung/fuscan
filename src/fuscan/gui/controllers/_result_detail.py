@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fuscan.gui.severity_utils import severity_color_hex, severity_text
-from fuscan.processing.replacer import ReplaceStatus, is_text_file, replace_in_file
+from fuscan.processing.replacer import ReplaceStatus, replace_in_file
 from fuscan.processing.storage import default_backup_dir, detect_default_staging_dir
 
 if TYPE_CHECKING:
@@ -47,10 +47,11 @@ logger = logging.getLogger(__name__)
 
 # 上下文提取：匹配行前后各保留的行数
 _CONTEXT_LINES = 2
-# 上下文读取的文件大小上限（256KB），超过则跳过上下文提取。
-# context 仅取匹配行前后各 2 行，超 256KB 的文本文件多为日志/数据转储，
-# 读全文收益低而代价高，故下调阈值控制单文件读盘/分行开销。
-_MAX_CONTEXT_FILE_SIZE = 256 * 1024
+# 上下文读取的文件大小上限（1MB），超过则跳过上下文提取。
+# context 仅取匹配行前后各 2 行，超 1MB 的文件多为日志/数据转储，
+# 读全文收益低而代价高，故用阈值控制单文件读盘/分行开销。
+# DetailWorker 在后台线程执行，1MB 读盘+分行不影响 UI 响应。
+_MAX_CONTEXT_FILE_SIZE = 1024 * 1024
 
 
 def _extract_contexts_batch(path: Path, match_texts: list[str]) -> dict[str, str]:
@@ -61,8 +62,10 @@ def _extract_contexts_batch(path: Path, match_texts: list[str]) -> dict[str, str
     带 ``>>> `` 前缀标记的上下文文本。相比逐条 :func:`_extract_context`
     重复读盘/分行/搜索，复杂度从 O(命中数 × 行数) 降至 O(行数)。
 
-    文件不存在、超过 :data:`_MAX_CONTEXT_FILE_SIZE`、非文本文件或读取失败时
-    返回空 dict（调用方回退 ``hit.detail``）。
+    文件不存在、超过 :data:`_MAX_CONTEXT_FILE_SIZE`、读取失败时返回空 dict
+    （调用方回退 ``hit.detail``）。不按扩展名白名单过滤——上下文提取只读
+    不写，不会破坏文件；二进制文件经 ``errors="replace"`` 解码后
+    ``match_text in line`` 通常找不到匹配，自然返回空。
 
     :param path: 文件路径
     :param match_texts: 待定位的匹配文本列表（可含空串/重复，内部去空去重）
@@ -74,12 +77,9 @@ def _extract_contexts_batch(path: Path, match_texts: list[str]) -> dict[str, str
     try:
         if not path.exists():
             return {}
-        # 先 stat 检查大小（O(1)），再 is_text_file（可能读内容），
-        # 避免对超大文件先触发 is_text_file 的内容读取
+        # stat 检查大小（O(1)），超过阈值则跳过，避免读大文件
         size = path.stat().st_size
         if size > _MAX_CONTEXT_FILE_SIZE:
-            return {}
-        if not is_text_file(path):
             return {}
         content = path.read_text(encoding="utf-8", errors="replace")
     except OSError:

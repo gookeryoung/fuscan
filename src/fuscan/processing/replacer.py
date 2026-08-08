@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING
 
 from fuscan.rules.model import LeafMatch, MatchMode, MatchTarget, Rule, RuleSet
 from fuscan.scanner.result import RuleHit
+from fuscan.utils.io import atomic_write_bytes, atomic_write_text
 
 if TYPE_CHECKING:
     from fuscan.scanner.result import ScanResult
@@ -287,7 +288,7 @@ def replace_in_file(  # noqa: PLR0912
                     replaced_count=0,
                     message="未找到可替换的命中内容（备份已保留）",
                 )
-            _atomic_write_bytes(src, new_raw)
+            atomic_write_bytes(src, new_raw)
             logger.info("已替换 %s 中 %d 条规则命中（二进制模式）", src, count)
             return ReplaceResult(
                 status=ReplaceStatus.SUCCESS,
@@ -305,7 +306,7 @@ def replace_in_file(  # noqa: PLR0912
     # 文本模式替换
     new_content, count = _apply_replace_text(content, replace_specs)
     try:
-        _atomic_write_text(src, new_content)
+        atomic_write_text(src, new_content)
     except OSError as exc:
         logger.error("写回文件失败: %s", src, exc_info=True)
         return ReplaceResult(
@@ -565,17 +566,3 @@ def _apply_replace_bytes(
             new_raw = new_raw.replace(kw_bytes, replace_bytes)
             replaced_rule_indices.add(rule_idx)
     return new_raw, len(replaced_rule_indices)
-
-
-def _atomic_write_text(path: Path, content: str) -> None:
-    """原子写入文本文件：写入临时文件后 ``Path.replace`` 覆盖。"""
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(path)
-
-
-def _atomic_write_bytes(path: Path, raw: bytes) -> None:
-    """原子写入二进制文件：写入临时文件后 ``Path.replace`` 覆盖。"""
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_bytes(raw)
-    tmp.replace(path)

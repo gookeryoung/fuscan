@@ -22,6 +22,8 @@ import logging
 import threading
 from pathlib import Path
 
+from fuscan.utils.io import atomic_write_text
+
 __all__ = ["SkipStore", "default_skip_store_path"]
 
 logger = logging.getLogger(__name__)
@@ -115,10 +117,7 @@ class SkipStore:
         父目录不存在时自动创建。写失败时记录错误但不抛异常，保留内存态正确性。
         """
         try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self._path.with_suffix(self._path.suffix + ".tmp")
             payload = sorted(self._paths)
-            tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-            tmp.replace(self._path)
+            atomic_write_text(self._path, json.dumps(payload, ensure_ascii=False, indent=2))
         except OSError:
             logger.error("写入跳过存储失败: %s", self._path, exc_info=True)

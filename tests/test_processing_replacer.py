@@ -325,13 +325,13 @@ class TestReplaceInFile:
         hit = _make_hit(rule, ("token",))
         ruleset = RuleSet(version="1.0", rules=(rule,))
 
-        # 拦截 _atomic_write_text 抛 OSError
+        # 拦截 atomic_write_text 抛 OSError
         from fuscan.processing import replacer as replacer_module
 
         def _raise_oserror(path: Path, content: str) -> None:
             raise OSError("disk full")
 
-        monkeypatch.setattr(replacer_module, "_atomic_write_text", _raise_oserror)
+        monkeypatch.setattr(replacer_module, "atomic_write_text", _raise_oserror)
 
         result = replace_in_file(src, (hit,), ruleset, tmp_path / "backup", tmp_path)
 
@@ -426,7 +426,7 @@ class TestReplaceInFileNonUtf8:
         def _raise_oserror(path: Path, raw: bytes) -> None:
             raise OSError("write error")
 
-        monkeypatch.setattr(replacer_module, "_atomic_write_bytes", _raise_oserror)
+        monkeypatch.setattr(replacer_module, "atomic_write_bytes", _raise_oserror)
 
         result = replace_in_file(src, (hit,), ruleset, tmp_path / "backup", tmp_path)
 

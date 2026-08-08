@@ -32,6 +32,7 @@ from pathlib import Path
 
 from fuscan import config as config_module
 from fuscan.history.model import ScanHistoryEntry
+from fuscan.utils.io import atomic_write_text
 
 __all__ = ["DEFAULT_MAX_ENTRIES_PER_WORKSPACE", "HistoryStore", "default_history_store_path"]
 
@@ -200,13 +201,10 @@ class HistoryStore:
     def _save(self) -> None:
         """原子写回磁盘：写入临时文件后 ``Path.replace`` 覆盖。"""
         try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self._path.with_suffix(self._path.suffix + ".tmp")
             payload = {
                 "version": HISTORY_VERSION,
                 "entries": [e.to_dict() for e in self._entries],
             }
-            tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-            tmp.replace(self._path)
+            atomic_write_text(self._path, json.dumps(payload, ensure_ascii=False, indent=2))
         except OSError as exc:
             logger.error("写入历史存储失败: %s", exc)

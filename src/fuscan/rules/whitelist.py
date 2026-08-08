@@ -58,6 +58,8 @@ except ImportError:  # pragma: no cover
         return result
 
 
+from fuscan.utils.io import atomic_write_text
+
 __all__ = [
     "Whitelist",
     "WhitelistEntry",
@@ -339,10 +341,7 @@ class WhitelistStore:
         父目录不存在时自动创建。写失败时记录错误但不抛异常，保留内存态正确性。
         """
         try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self._path.with_suffix(self._path.suffix + ".tmp")
             payload = [entry.to_dict() for entry in self._entries]
-            tmp.write_text(_json_dumps(payload), encoding="utf-8")
-            tmp.replace(self._path)
+            atomic_write_text(self._path, _json_dumps(payload))
         except OSError:
             logger.error("写入白名单失败: %s", self._path, exc_info=True)

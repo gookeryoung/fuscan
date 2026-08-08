@@ -5,12 +5,13 @@
 公共 API：
 
 - :func:`now_iso` / :func:`iso_days_ago`：UTC ISO 8601 时间字符串生成
+- :func:`now_iso_local`：本地时间 ISO 8601 字符串（面向用户展示）
 - :func:`atomic_write_text` / :func:`atomic_write_bytes`：原子写入文件
 """
 
 from __future__ import annotations
 
 from fuscan.utils.io import atomic_write_bytes, atomic_write_text
-from fuscan.utils.time import iso_days_ago, now_iso
+from fuscan.utils.time import iso_days_ago, now_iso, now_iso_local
 
-__all__ = ["atomic_write_bytes", "atomic_write_text", "iso_days_ago", "now_iso"]
+__all__ = ["atomic_write_bytes", "atomic_write_text", "iso_days_ago", "now_iso", "now_iso_local"]

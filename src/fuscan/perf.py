@@ -52,9 +52,10 @@ import time
 from collections.abc import Callable, Generator
 from contextlib import ContextDecorator, contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from types import TracebackType
+
+from fuscan.utils.time import now_iso_local
 
 __all__ = [
     "PERF_ENABLED",
@@ -544,7 +545,7 @@ class PerfStats:
         """
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "timestamp": now_iso_local(),
             "stages": self.to_dict(),
             "meta": meta or {},
         }
@@ -789,7 +790,7 @@ class FilePerfRecorder:
                 for r in self._records
             ]
         payload = {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "timestamp": now_iso_local(),
             "records": records,
             "meta": meta or {},
         }

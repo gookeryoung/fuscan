@@ -31,10 +31,10 @@ import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 
 from fuscan.scanner import Scanner
+from fuscan.utils.time import now_iso_local
 
 __all__ = [
     "BaselineComparison",
@@ -90,7 +90,7 @@ class BenchmarkResult:
     scanned_files: int
     mean_duration_ms: float
     root: str
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
+    timestamp: str = field(default_factory=now_iso_local)
 
     def to_baseline_dict(self) -> dict[str, object]:
         """导出为基准线 JSON 结构（``{timestamp, stages, meta}``）。

@@ -28,7 +28,6 @@ ruleset 的白名单条目，确保扫描过滤与 UI 展示覆盖全部来源�
 
 from __future__ import annotations
 
-import datetime
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -39,6 +38,7 @@ except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
 
 from fuscan.rules.whitelist import Whitelist, WhitelistEntry, WhitelistStore
+from fuscan.utils.time import now_iso_local
 
 if TYPE_CHECKING:
     from fuscan.gui.controllers.rules_controller import RulesController
@@ -167,7 +167,7 @@ class WhitelistController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if not path_glob:
             return "路径模式不能为空"
         rule_name = rule_name.strip() or "*"
-        created_at = datetime.datetime.now().isoformat(timespec="seconds")
+        created_at = now_iso_local()
         try:
             entry = WhitelistEntry(
                 path_glob=path_glob,

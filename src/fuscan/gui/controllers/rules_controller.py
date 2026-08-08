@@ -33,7 +33,6 @@
 
 from __future__ import annotations
 
-import datetime
 import json
 import logging
 from dataclasses import replace
@@ -68,6 +67,7 @@ from fuscan.rules import (
 )
 from fuscan.rules.model import RuleSet
 from fuscan.rules.whitelist import WhitelistEntry
+from fuscan.utils.time import now_iso_local
 
 __all__ = ["RulesController"]
 
@@ -873,7 +873,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 new_entry = WhitelistEntry(
                     path_glob=path_glob,
                     rule_name=rule_name,
-                    created_at=datetime.datetime.now().isoformat(timespec="seconds"),
+                    created_at=now_iso_local(),
                     note=note,
                     source="runtime",
                 )
@@ -885,7 +885,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 new_entry = WhitelistEntry(
                     path_glob=path_glob,
                     rule_name=rule_name,
-                    created_at=datetime.datetime.now().isoformat(timespec="seconds"),
+                    created_at=now_iso_local(),
                     note=note,
                     source="runtime",
                 )

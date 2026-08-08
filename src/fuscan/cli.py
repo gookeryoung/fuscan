@@ -214,19 +214,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     _configure_logging(getattr(args, "verbose", 0))
 
+    command_handlers = {
+        "scan": _cmd_scan,
+        "benchmark": _cmd_benchmark,
+        "bench": _cmd_benchmark,
+        "rules": _cmd_rules,
+        "gui": _cmd_gui,
+        "bp": _cmd_bp,
+        "cache": _cmd_cache,
+    }
+
     try:
-        if args.command == "scan":
-            return _cmd_scan(args)
-        if args.command in ("benchmark", "bench"):
-            return _cmd_benchmark(args)
-        if args.command == "rules":
-            return _cmd_rules(args)
-        if args.command == "gui":
-            return _cmd_gui(args)
-        if args.command == "bp":
-            return _cmd_bp(args)
-        if args.command == "cache":
-            return _cmd_cache(args)
+        handler = command_handlers.get(args.command)
+        if handler is not None:
+            return handler(args)
         if args.command == "version":
             print(f"fuscan {__version__}")
             return 0

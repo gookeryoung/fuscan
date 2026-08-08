@@ -30,7 +30,6 @@ from fuscan.cache import (
     serialize_match,
     serialize_rule,
 )
-from fuscan.cache._helpers import iso_days_ago, now_iso
 from fuscan.cache.schema import CURRENT_VERSION, migrate
 from fuscan.paths import BUILTIN_RULES_PATH
 from fuscan.rules.model import (
@@ -45,6 +44,7 @@ from fuscan.rules.model import (
     Severity,
 )
 from fuscan.scanner.result import RuleHit
+from fuscan.utils.time import iso_days_ago, now_iso
 
 # ---------------------------------------------------------------- 哈希与序列化
 

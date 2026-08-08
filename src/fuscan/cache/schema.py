@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 
-from fuscan.cache._helpers import now_iso
+from fuscan.utils.time import now_iso
 
 __all__ = ["CACHE_COMPAT_VERSION", "CURRENT_VERSION", "SCHEMA_SQL", "migrate"]
 

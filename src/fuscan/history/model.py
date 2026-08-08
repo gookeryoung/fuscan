@@ -18,17 +18,14 @@ import datetime as _dt
 import secrets
 from dataclasses import dataclass, field
 
+from fuscan.utils.time import now_iso
+
 __all__ = ["STATUS_CANCELLED", "STATUS_COMPLETED", "STATUS_FAILED", "ScanHistoryEntry"]
 
 # 扫描状态字符串常量
 STATUS_COMPLETED: str = "completed"
 STATUS_CANCELLED: str = "cancelled"
 STATUS_FAILED: str = "failed"
-
-
-def _now_iso() -> str:
-    """返回当前 UTC 时间的 ISO 格式字符串（含时区后缀 ``Z``）。"""
-    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _new_scan_id() -> str:
@@ -61,8 +58,8 @@ class ScanHistoryEntry:
     scan_id: str = field(default_factory=_new_scan_id)
     workspace_id: str = ""
     workspace_name: str = ""
-    started_at: str = field(default_factory=_now_iso)
-    finished_at: str = field(default_factory=_now_iso)
+    started_at: str = field(default_factory=now_iso)
+    finished_at: str = field(default_factory=now_iso)
     status: str = STATUS_COMPLETED
     total_files: int = 0
     scanned_files: int = 0

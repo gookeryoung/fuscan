@@ -8,15 +8,17 @@
 - :class:`CacheStats`：缓存统计快照（不可变）
 - :class:`BatchWriteItem`：批量写入项数据类
 - :func:`default_cache_path`：默认缓存路径 ``~/.fuscan/cache.db``
-- :func:`now_iso`：当前 UTC 时间的 ISO 8601 字符串
-- :func:`iso_days_ago`：N 天前的 UTC ISO 时间字符串
 - :data:`HIT_CACHE_MAX`：进程内 LRU 命中缓存容量上限
+
+.. note::
+
+    时间工具函数（``now_iso`` / ``iso_days_ago``）已迁移到
+    :mod:`fuscan.utils.time` 通用模块，供 cache 与 history 等子包共享。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,8 +31,6 @@ __all__ = [
     "BatchWriteItem",
     "CacheStats",
     "default_cache_path",
-    "iso_days_ago",
-    "now_iso",
 ]
 
 # 进程内 LRU 命中缓存容量上限（条目数）。
@@ -47,16 +47,6 @@ EXTRACT_CACHE_MAX: int = 512
 def default_cache_path() -> Path:
     """返回默认缓存路径：``~/.fuscan/cache.db``。"""
     return Path.home() / ".fuscan" / "cache.db"
-
-
-def now_iso() -> str:
-    """当前 UTC 时间的 ISO 8601 字符串（含时区后缀 ``Z``）。"""
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-
-
-def iso_days_ago(days: int) -> str:
-    """返回 ``days`` 天前的 UTC ISO 时间字符串。"""
-    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 @dataclass(frozen=True)

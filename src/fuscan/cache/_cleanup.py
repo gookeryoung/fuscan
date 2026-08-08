@@ -19,8 +19,9 @@ import logging
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 
-from fuscan.cache._helpers import CacheStats, iso_days_ago
+from fuscan.cache._helpers import CacheStats
 from fuscan.cache.schema import CURRENT_VERSION
+from fuscan.utils.time import iso_days_ago
 
 if TYPE_CHECKING:
     from fuscan.cache.store import CacheStore

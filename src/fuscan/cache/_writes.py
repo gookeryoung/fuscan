@@ -26,9 +26,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fuscan.cache._helpers import BatchWriteItem, now_iso
+from fuscan.cache._helpers import BatchWriteItem
 from fuscan.cache.hashes import compute_rule_hash, hash_bytes, serialize_rule
 from fuscan.rules.model import Rule, RuleSet
+from fuscan.utils.time import now_iso
 
 if TYPE_CHECKING:
     from fuscan.cache.store import CacheStore

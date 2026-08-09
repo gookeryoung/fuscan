@@ -5175,7 +5175,7 @@ class TestIter166StreamSave:
         report = self._build_report(tmp_path)
         out = tmp_path / "report.json"
         report.save_json_file(out, chunk_size=2)
-        restored = ScanReport.from_json(out.read_text())
+        restored = ScanReport.from_json(out.read_text(encoding="utf-8"))
         assert restored.root == report.root
         assert len(restored.hits) == len(report.hits)
         assert restored.stats.total_matches == report.stats.total_matches

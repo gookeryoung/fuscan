@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from importlib.metadata import PackageNotFoundError, version
 
 try:
     from PySide2.QtCore import Property, QObject, QUrl, Signal, Slot
@@ -67,6 +68,19 @@ _DEPENDENCIES: tuple[str, ...] = (
 )
 
 
+def _detect_native_matcher_status() -> str:
+    """检测 fuscan-re 原生匹配引擎状态。
+
+    fuscan-re 是可选依赖（Rust + PyO3 实现，缺失时回退纯 Python），
+    在依赖列表中显示其安装状态与版本，便于用户判断是否启用原生加速。
+    """
+    try:
+        v = version("fuscan-re")
+    except PackageNotFoundError:
+        return "fuscan-re - 原生匹配引擎（未安装，使用纯 Python）"
+    return f"fuscan-re {v} - 原生匹配引擎（已启用）"
+
+
 class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
     """关于页控制器。"""
 
@@ -101,8 +115,8 @@ class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property("QVariantList", notify=infoChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
     def dependencies(self) -> list[str]:
-        """第三方依赖列表。"""
-        return list(_DEPENDENCIES)
+        """第三方依赖列表（含 fuscan-re 原生引擎状态）。"""
+        return [*list(_DEPENDENCIES), _detect_native_matcher_status()]
 
     @Slot()  # pyrefly: ignore [not-callable]
     def openManual(self) -> None:

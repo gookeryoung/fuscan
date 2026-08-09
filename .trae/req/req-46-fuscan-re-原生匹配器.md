@@ -20,7 +20,7 @@ fuscan 当前扫描引擎受 Python GIL 限制，`re.finditer` 在大文本复�
 
 - [x] 1. monorepo 结构：`packages/fuscan-re/` 独立 crate，maturin 构建
 - [x] 2. Rust API：`ContentBucketEngine` 替代 `match_content_via_buckets`
-- [ ] 3. Rust API：`ContentRegexPool` 替代 Python ContentRegexPool（待评估，MVP 先做 BucketEngine，留 iter-02）
+- [x] 3. Rust API：`ContentRegexPool` 替代 Python ContentRegexPool（iter-02 完成）
 - [x] 4. 辅助函数：`extract_literals` / `extract_inline_flags` / `dedup_substrings` Rust 移植
 - [x] 5. PyO3 `allow_threads` 释放 GIL：匹配期间不持 Python 锁
 - [x] 6. 语义等价：与 Python 实现完全一致的命中结果（first_match_text / total_count / detail）

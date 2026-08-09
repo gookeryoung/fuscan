@@ -767,6 +767,341 @@ fn build_buckets(specs: Vec<RuleSpec>) -> PyResult<Vec<Bucket>> {
 }
 
 // ============================================================================
+// ContentRegexPoolEngine：跨规则 CONTENT REGEX 子项池原生引擎
+// ============================================================================
+
+/// 从 Python 传入的池子项规格。
+///
+/// 与 `RuleSpec` 不同：池子项仅处理 REGEX 模式，按 `case_sensitive` 分组，
+/// 且需要全局唯一的 `child_id`（多个 AND/OR 规则可引用同一子项）。
+#[derive(FromPyObject)]
+struct PoolGroupSpec {
+    child_id: usize,
+    pattern: String,
+    case_sensitive: bool,
+    description: String,
+}
+
+/// 池命中结果（返回给 Python）。
+///
+/// Python 侧通过 `child_id` 查回对应的 `MatchResult`。
+#[pyclass]
+struct PoolHitData {
+    #[pyo3(get)]
+    child_id: usize,
+    #[pyo3(get)]
+    first_match_text: String,
+    #[pyo3(get)]
+    match_count: usize,
+    #[pyo3(get)]
+    detail: String,
+    #[pyo3(get)]
+    match_description: String,
+}
+
+/// 池内同 case_sensitive 的子项组。
+///
+/// 与 Python `_PoolGroup` 结构对齐：跨所有 AND/OR 规则收集子项，
+/// 按 (pattern, case_sensitive) 去重——相同子项只注册一次。
+struct PoolGroup {
+    case_sensitive: bool,
+    /// 本组所有 child_id（保持注册顺序）。
+    child_ids: Vec<usize>,
+    /// 命名组名 "_p{child_id}" -> child_id。
+    group_to_child_id: HashMap<String, usize>,
+    /// child_id -> description（用于构造 detail/match_description）。
+    descriptions: HashMap<usize, String>,
+    /// 复合 OR 正则。None 表示编译失败（组内子项回退独立 matches()）。
+    compiled: Option<Regex>,
+    /// 桶级预筛关键字（已去子串/去重）。
+    prefilter_keywords: Vec<String>,
+    /// 逐子项预筛关键字。空列表表示该子项无可提取字面量（始终活跃）。
+    per_child_keywords: HashMap<usize, Vec<String>>,
+    /// 预筛是否大小写不敏感。
+    prefilter_case_insensitive: bool,
+}
+
+/// 跨规则共享的 CONTENT REGEX 子项池原生引擎。
+///
+/// 替代 Python `ContentRegexPool._evaluate_group`，核心改进：
+/// - `regex` crate（DFA + aho-corasick）替代 Python `re`
+/// - PyO3 `allow_threads` 释放 GIL
+/// - 两级预筛与 Python 实现语义一致
+#[pyclass]
+struct ContentRegexPoolEngine {
+    groups: Vec<PoolGroup>,
+    /// 已编译组覆盖的 child_id 集合（单子项组跳过，其 child_id 不在此集合）。
+    compiled_child_ids: HashSet<usize>,
+}
+
+#[pymethods]
+impl ContentRegexPoolEngine {
+    /// 从子项规格列表构建池引擎。
+    ///
+    /// 自动按 case_sensitive 分组，构建复合 OR 正则与预筛关键字。
+    /// 单子项组（无合并收益）跳过编译，其 child_id 不在 `compiled_child_ids` 中。
+    #[new]
+    fn new(specs: Vec<PoolGroupSpec>) -> PyResult<Self> {
+        let (groups, compiled_child_ids) = build_pool_groups(specs)?;
+        Ok(ContentRegexPoolEngine {
+            groups,
+            compiled_child_ids,
+        })
+    }
+
+    /// 对内容执行匹配，返回命中的子项列表。
+    ///
+    /// 匹配期间通过 `py.detach` 释放 GIL。
+    /// 结果与 Python `ContentRegexPool.evaluate` 完全一致。
+    fn evaluate<'py>(
+        &self,
+        py: Python<'py>,
+        content: &str,
+    ) -> PyResult<Vec<Bound<'py, PoolHitData>>> {
+        let content_owned = content.to_string();
+        let rust_results: Vec<PoolHitData> =
+            py.detach(move || self.evaluate_inner(&content_owned));
+        let mut py_results = Vec::with_capacity(rust_results.len());
+        for hit in rust_results {
+            let py_hit = Py::new(py, hit)?;
+            py_results.push(py_hit.into_bound(py));
+        }
+        Ok(py_results)
+    }
+
+    /// 返回已编译组覆盖的 child_id 列表（供 Python 侧维护 `_compiled_child_ids`）。
+    #[getter]
+    fn compiled_child_ids(&self) -> Vec<usize> {
+        self.compiled_child_ids.iter().copied().collect()
+    }
+
+    /// 返回组数量（供诊断/测试）。
+    #[getter]
+    fn group_count(&self) -> usize {
+        self.groups.len()
+    }
+}
+
+impl ContentRegexPoolEngine {
+    /// 核心匹配逻辑（纯 Rust，不持 GIL）。
+    ///
+    /// 与 Python `ContentRegexPool._evaluate_group` 语义一致：
+    /// 1. 桶级预筛：整组关键字均不在 content 中 → 跳过
+    /// 2. 逐子项预筛：计算活跃 child_id 集合
+    /// 3. finditer + lastgroup 分派到各子项
+    fn evaluate_inner(&self, content: &str) -> Vec<PoolHitData> {
+        let needs_lower = self.groups.iter().any(|g| g.prefilter_case_insensitive);
+        let content_lower: Option<String> = if needs_lower {
+            Some(content.to_lowercase())
+        } else {
+            None
+        };
+
+        let mut hits: Vec<PoolHitData> = Vec::new();
+
+        for group in &self.groups {
+            let compiled = match &group.compiled {
+                Some(c) => c,
+                None => continue,
+            };
+
+            // 选择预筛 haystack
+            let haystack: &str = if group.prefilter_case_insensitive {
+                content_lower.as_ref().unwrap().as_str()
+            } else {
+                content
+            };
+
+            // 桶级快速短路：整组关键字均不在 content 中 → 全部子项必不命中
+            if !group.prefilter_keywords.is_empty()
+                && !group
+                    .prefilter_keywords
+                    .iter()
+                    .any(|kw| haystack.contains(kw.as_str()))
+            {
+                continue;
+            }
+
+            // 逐子项预筛：计算活跃 child_id 集合（无关键字的子项始终活跃）
+            let active: HashSet<usize> = group
+                .child_ids
+                .iter()
+                .copied()
+                .filter(|cid| match group.per_child_keywords.get(cid) {
+                    None => true,
+                    Some(kws) if kws.is_empty() => true,
+                    Some(kws) => kws.iter().any(|kw| haystack.contains(kw.as_str())),
+                })
+                .collect();
+
+            if active.is_empty() {
+                continue;
+            }
+
+            // finditer + lastgroup 分派
+            // per_child: child_id -> (first_match_text, total_count)
+            let mut per_child: HashMap<usize, (String, usize)> = HashMap::new();
+            for caps in compiled.captures_iter(content) {
+                for (group_idx, name) in compiled.capture_names().enumerate() {
+                    if group_idx == 0 {
+                        continue; // 跳过 group 0（整体匹配）
+                    }
+                    if let Some(name) = name {
+                        if let Some(child_id) = parse_pool_group_name(name) {
+                            if !active.contains(&child_id) {
+                                continue;
+                            }
+                            if let Some(m) = caps.get(group_idx) {
+                                let txt = m.as_str().to_string();
+                                let entry = per_child
+                                    .entry(child_id)
+                                    .or_insert_with(|| (txt.clone(), 0usize));
+                                entry.1 += 1;
+                                break; // 每个 capture 只有一个命名组匹配
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 构造 PoolHitData
+            for (child_id, (first_txt, total_cnt)) in per_child {
+                let description = group
+                    .descriptions
+                    .get(&child_id)
+                    .cloned()
+                    .unwrap_or_default();
+                hits.push(PoolHitData {
+                    child_id,
+                    first_match_text: first_txt.clone(),
+                    match_count: total_cnt,
+                    detail: format!("正则命中: {}", py_repr(&first_txt)),
+                    match_description: description,
+                });
+            }
+        }
+        hits
+    }
+}
+
+/// 解析池命名组名 `_p{child_id}` 得到 child_id。
+fn parse_pool_group_name(name: &str) -> Option<usize> {
+    name.strip_prefix("_p").and_then(|s| s.parse::<usize>().ok())
+}
+
+/// 从子项规格列表构建池组。
+///
+/// 与 Python `ContentRegexPool.compile` 语义一致：
+/// 1. 按 case_sensitive 分组
+/// 2. 单子项组跳过（无合并收益）
+/// 3. 构建 OR 复合正则 `(?P<_p{child_id}>pat)|...`
+/// 4. 提取预筛关键字（桶级 + 逐子项）
+fn build_pool_groups(specs: Vec<PoolGroupSpec>) -> PyResult<(Vec<PoolGroup>, HashSet<usize>)> {
+    // 按 case_sensitive 分组
+    let mut grouped: HashMap<bool, Vec<PoolGroupSpec>> = HashMap::new();
+    for spec in specs {
+        grouped.entry(spec.case_sensitive).or_default().push(spec);
+    }
+
+    let mut groups: Vec<PoolGroup> = Vec::new();
+    let mut compiled_child_ids: HashSet<usize> = HashSet::new();
+
+    for (case_sensitive, mut group_specs) in grouped {
+        if group_specs.len() < 2 {
+            // 单子项组无合并收益，跳过（子项走独立 matches() 路径）
+            continue;
+        }
+        // 按 child_id 排序保证稳定性
+        group_specs.sort_by(|a, b| a.child_id.cmp(&b.child_id));
+
+        let mut child_ids: Vec<usize> = Vec::with_capacity(group_specs.len());
+        let mut group_to_child_id: HashMap<String, usize> = HashMap::new();
+        let mut descriptions: HashMap<usize, String> = HashMap::new();
+        let mut all_prefilter_keywords: Vec<String> = Vec::new();
+        let mut per_child_keywords: HashMap<usize, Vec<String>> = HashMap::new();
+        let mut has_inline_ignorecase = false;
+        let mut parts: Vec<String> = Vec::with_capacity(group_specs.len());
+
+        for spec in &group_specs {
+            let (sub_clean, sub_flags) = extract_inline_flags(&spec.pattern);
+            if sub_flags & RE_IGNORECASE != 0 {
+                has_inline_ignorecase = true;
+            }
+            let grp_name = format!("_p{}", spec.child_id);
+            let part = if sub_flags != 0 {
+                let flag_str = flags_to_chars(sub_flags);
+                format!("(?{}:(?P<{}>{}))", flag_str, grp_name, sub_clean)
+            } else {
+                format!("(?P<{}>{})", grp_name, sub_clean)
+            };
+            parts.push(part);
+            child_ids.push(spec.child_id);
+            group_to_child_id.insert(grp_name, spec.child_id);
+            descriptions.insert(spec.child_id, spec.description.clone());
+
+            let literals = extract_literals(&sub_clean, MIN_LITERAL_LEN);
+            all_prefilter_keywords.extend(literals.clone());
+            per_child_keywords.insert(spec.child_id, literals);
+        }
+
+        // 编译复合 OR 正则
+        let flags_str = if case_sensitive { "" } else { "(?i)" };
+        let full_pattern = format!("{}{}", flags_str, parts.join("|"));
+        let compiled = match Regex::new(&full_pattern) {
+            Ok(r) => Some(r),
+            Err(_) => {
+                // 编译失败：放弃该组，子项回退独立 matches()
+                continue;
+            }
+        };
+
+        // 设置预筛关键字大小写规则
+        let prefilter_ci = !case_sensitive || has_inline_ignorecase;
+        let prefilter_keywords: Vec<String> = if prefilter_ci {
+            let lower_all: Vec<String> = all_prefilter_keywords
+                .into_iter()
+                .map(|kw| kw.to_lowercase())
+                .collect();
+            dedup_substrings(lower_all)
+        } else {
+            dedup_substrings(all_prefilter_keywords)
+        };
+        let per_child_keywords_final: HashMap<usize, Vec<String>> = if prefilter_ci {
+            per_child_keywords
+                .into_iter()
+                .map(|(cid, kws)| {
+                    let lower: Vec<String> = kws.into_iter().map(|kw| kw.to_lowercase()).collect();
+                    (cid, dedup_substrings(lower))
+                })
+                .collect()
+        } else {
+            per_child_keywords
+                .into_iter()
+                .map(|(cid, kws)| (cid, dedup_substrings(kws)))
+                .collect()
+        };
+
+        // 收集已编译组覆盖的 child_id
+        for cid in &child_ids {
+            compiled_child_ids.insert(*cid);
+        }
+
+        groups.push(PoolGroup {
+            case_sensitive,
+            child_ids,
+            group_to_child_id,
+            descriptions,
+            compiled,
+            prefilter_keywords,
+            per_child_keywords: per_child_keywords_final,
+            prefilter_case_insensitive: prefilter_ci,
+        });
+    }
+
+    Ok((groups, compiled_child_ids))
+}
+
+// ============================================================================
 // PyO3 模块定义
 // ============================================================================
 
@@ -796,6 +1131,8 @@ fn dedup_substrings_py(keywords: Vec<String>) -> Vec<String> {
 fn fuscan_re(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ContentBucketEngine>()?;
     m.add_class::<RuleHitData>()?;
+    m.add_class::<ContentRegexPoolEngine>()?;
+    m.add_class::<PoolHitData>()?;
     m.add_function(wrap_pyfunction!(extract_literals_py, m)?)?;
     m.add_function(wrap_pyfunction!(extract_inline_flags_py, m)?)?;
     m.add_function(wrap_pyfunction!(dedup_substrings_py, m)?)?;

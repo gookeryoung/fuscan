@@ -22,6 +22,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from functools import lru_cache
 from re import Pattern
+from typing import TYPE_CHECKING
 
 from typing_extensions import override
 
@@ -42,6 +43,10 @@ from fuscan.scanner._helpers import (
 )
 from fuscan.scanner.context import MatchContext
 from fuscan.scanner.result import MatchResult
+
+if TYPE_CHECKING:
+    # fuscan_re 是 PyO3 编译扩展，无 Python stub；仅用于类型检查提示
+    from fuscan_re import ContentRegexPoolEngine  # pyrefly: ignore [missing-module-attribute]
 
 __all__ = [
     "AndMatcher",
@@ -439,6 +444,8 @@ class ContentRegexPool:
         # evaluate 结果缓存：同 context 只跑一次
         self._cached_context_id: int | None = None
         self._cached_results: dict[int, MatchResult] | None = None
+        # 原生正则池引擎（fuscan_re 可用时构建），None 时走 Python 路径
+        self._native_engine: ContentRegexPoolEngine | None = None
 
     def register(self, spec: LeafMatch) -> int:
         """注册 CONTENT REGEX 子项，返回 ``child_id``。
@@ -462,7 +469,7 @@ class ContentRegexPool:
         group.specs_by_child_id[child_id] = spec
         return child_id
 
-    def compile(self) -> None:
+    def compile(self) -> None:  # noqa: PLR0912
         """构建各组的复合 OR 正则与预筛关键字。
 
         编译后不可再 :meth:`register`。复合正则编译失败的组整体丢弃
@@ -521,6 +528,30 @@ class ContentRegexPool:
             if group.compiled is not None:
                 compiled_ids.update(group.child_ids)
         self._compiled_child_ids = frozenset(compiled_ids)
+        # 原生正则池引擎：fuscan_re 可用时构建，与 Python 池同源（所有已注册
+        # 子项）。evaluate() 优先走原生路径（释放 GIL），失败回退 Python 路径。
+        # 原生引擎按 case_sensitive 重新分组并编译复合 OR 正则，单子项组自动
+        # 跳过（与 Python 一致）。用原生引擎的 compiled_child_ids 替换 Python 侧
+        # 以保持一致性（原生引擎可能因编译失败丢弃某些组）。
+        # 延迟导入打破循环依赖：_native_matchers -> _content_buckets -> ...
+        from fuscan.scanner._native_matchers import PoolGroupSpecData, build_native_regex_pool
+
+        native_specs: list[PoolGroupSpecData] = []
+        for case_sensitive, group in self._groups.items():
+            for child_id in group.child_ids:
+                spec = group.specs_by_child_id[child_id]
+                assert isinstance(spec, LeafMatch)
+                native_specs.append(
+                    PoolGroupSpecData(
+                        child_id=child_id,
+                        pattern=spec.pattern,
+                        case_sensitive=case_sensitive,
+                        description=spec.description,
+                    )
+                )
+        self._native_engine = build_native_regex_pool(native_specs)
+        if self._native_engine is not None:
+            self._compiled_child_ids = frozenset(self._native_engine.compiled_child_ids)
         self._compiled = True
 
     def is_compiled(self, child_id: int) -> bool:
@@ -584,13 +615,20 @@ class ContentRegexPool:
         """对所有池化子项跑一次 finditer，返回命中的 child_id -> MatchResult。
 
         结果按 ``id(context)`` 缓存：同一文件的多个 AND/OR 规则共享一次 evaluate。
+        原生引擎可用时优先走原生路径（释放 GIL），失败回退 Python 路径。
         """
         ctx_id = id(context)
         if self._cached_context_id == ctx_id and self._cached_results is not None:
             return self._cached_results
         results: dict[int, MatchResult] = {}
-        for group in self._groups.values():
-            results.update(self._evaluate_group(group, context))
+        if self._native_engine is not None:
+            # 原生路径：释放 GIL 执行纯 Rust 匹配
+            from fuscan.scanner._native_matchers import evaluate_regex_pool_via_native
+
+            results = evaluate_regex_pool_via_native(self._native_engine, context.content)
+        else:
+            for group in self._groups.values():
+                results.update(self._evaluate_group(group, context))
         self._cached_context_id = ctx_id
         self._cached_results = results
         return results

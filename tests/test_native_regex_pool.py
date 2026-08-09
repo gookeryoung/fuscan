@@ -130,6 +130,25 @@ class TestNativeRegexPoolEquivalence:
         aws_id = [cid for cid in native_results if native_results[cid].match_count >= 2]
         assert len(aws_id) == 1
 
+    def test_match_text_with_single_quote(self) -> None:
+        """match_text 含单引号时 detail 引号选择一致（iter-03 修复回归保护）。
+
+        Python repr() 对含单引号但不含双引号的字符串用双引号包裹，
+        Rust py_repr 需复刻此逻辑，否则 detail 字段不一致。
+        """
+        specs = [
+            _content_regex_spec(r"SECRET_KEY\s*=\s*'[^']+'", description="Django Secret"),
+            _content_regex_spec(r"password=\S+", description="密码"),
+        ]
+        pool = _build_pool(specs)
+        content = "SECRET_KEY = 'django-insecure-abc123' password=xyz"
+        native_results = pool.evaluate(_make_context(content))
+        _force_python(pool)
+        py_results = pool.evaluate(_make_context(content))
+        assert _results_to_dict(native_results) == _results_to_dict(py_results), (
+            "match_text 含单引号时 detail 应一致（Python repr 用双引号，Rust py_repr 须复刻）"
+        )
+
     def test_prefilter_no_hit(self) -> None:
         """预筛未命中：返回空字典。"""
         specs = [
@@ -264,3 +283,100 @@ class TestNativeRegexPoolEquivalence:
         assert results == {}  # 异常时返回空字典
         # 恢复原生引擎
         pool._native_engine = original_engine
+
+
+# ---------------------------------------------------------------------------
+# iter-03：S3 AND 组合场景 PoolEngine 性能基准
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+class TestPoolEnginePerformance:
+    """PoolEngine（原生）vs Python ContentRegexPool 性能基准对比。
+
+    iter-03 佐证：验证 S3 AND 组合场景下原生引擎的加速比。
+    iter-01 BucketEngine 已验证 S2 场景 4.15x 加速（50 条 CONTENT REGEX，48KB 文本），
+    PoolEngine 预期类似加速比（同源 regex crate + py.detach 释放 GIL）。
+
+    测试方式：手动计时对比原生路径（释放 GIL）与 Python 路径（finditer）延迟，
+    阈值保守（2x），CI 环境波动不影响结论。语义等价作为前置断言。
+    """
+
+    def test_s3_and_combo_speedup_at_least_2x(self) -> None:
+        """S3 AND 组合场景 PoolEngine 应比 Python 快至少 2x。
+
+        构造 50 条 AND 规则 × 2~3 CONTENT REGEX 子项（子项去重后约 30 个），
+        对 48KB 文本重复评估，对比原生路径与 Python 路径延迟中位数。
+        """
+        import time
+
+        from benchmarks.multi_rule_profile import build_and_combo_ruleset
+
+        rs = build_and_combo_ruleset(50)
+        # 提取所有 CONTENT REGEX 子项（去重由 ContentRegexPool.register 处理）
+        specs: list[LeafMatch] = []
+        for rule in rs.rules:
+            assert isinstance(rule.match, AndMatch)
+            for child in rule.match.children:
+                assert isinstance(child, LeafMatch)
+                specs.append(child)
+        assert len(specs) >= 100, f"S3 场景应至少 100 个子项，实际 {len(specs)}"
+
+        # 构建池（compile 构建原生引擎）
+        pool = _build_pool(specs)
+        native_engine = pool._native_engine
+        assert native_engine is not None, "fuscan_re 可用时原生引擎应构建成功"
+
+        # 构造约 48KB 测试文本：命中样本 + 噪声（与 iter-01 BucketEngine 基准一致）
+        hit_block = (
+            "password=admin123456\n"
+            "api_key=AKIAIOSFODNN7EXAMPLE\n"
+            "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n"
+            "ghp_abcdefghijklmnopqrstuvwxyz0123456789AB\n"
+            "mysql://root:secret@localhost:3306/db\n"
+            "-----BEGIN RSA PRIVATE KEY-----\n"
+            "xoxb-1234567890-abcdef\n"
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c\n"
+            "secret_key=abcdefghijklmnopqrstuvwxyz0123456789\n"
+            "bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\n"
+            "eval('malicious_code')\n"
+            "SECRET_KEY = 'django-insecure-abcdefghijklmnopqrstuvwxyz0123456789'\n"
+        )
+        noise = "the quick brown fox jumps over the lazy dog\n" * 80
+        content = (hit_block + noise) * 12  # 约 48KB
+
+        # 1. 语义等价前置断言
+        native_results = pool.evaluate(_make_context(content))
+        _force_python(pool)
+        py_results = pool.evaluate(_make_context(content))
+        assert _results_to_dict(native_results) == _results_to_dict(py_results), "原生与 Python 路径结果应语义等价"
+        # 恢复原生引擎用于性能测量
+        pool._native_engine = native_engine
+
+        # 2. 手动计时对比（每次用新 context 避免evaluate 的 id(context) 缓存）
+        iterations = 30
+
+        # 测原生路径
+        native_times: list[float] = []
+        for _ in range(iterations):
+            ctx_fresh = _make_context(content)
+            start = time.perf_counter()
+            pool.evaluate(ctx_fresh)
+            native_times.append(time.perf_counter() - start)
+        native_median = sorted(native_times)[iterations // 2]
+
+        # 测 Python 路径
+        _force_python(pool)
+        py_times: list[float] = []
+        for _ in range(iterations):
+            ctx_fresh = _make_context(content)
+            start = time.perf_counter()
+            pool.evaluate(ctx_fresh)
+            py_times.append(time.perf_counter() - start)
+        py_median = sorted(py_times)[iterations // 2]
+
+        speedup = py_median / native_median if native_median > 0 else float("inf")
+        assert speedup >= 2.0, (
+            f"PoolEngine 加速比 {speedup:.2f}x 低于 2x 阈值"
+            f"（Python {py_median * 1e6:.0f}μs vs 原生 {native_median * 1e6:.0f}μs）"
+        )

@@ -1,0 +1,142 @@
+name: fuscan-re wheels
+
+# 构建 fuscan-re（Rust + PyO3 原生匹配引擎）的多平台 wheel。
+#
+# 触发：
+#   - push 到 main/develop：构建验证（仅上传 artifact，不发布）
+#   - PR 到 main/develop：构建验证
+#   - tag fuscan-re-v*.*.*：构建 + 发布到 PyPI（OIDC trusted publisher）
+#   - workflow_dispatch：手动触发构建验证
+#
+# fuscan-re 是独立 PyPI 包（版本独立于 fuscan 主包），位于 packages/fuscan-re/。
+# monorepo 布局：用 maturin-action 的 working-directory 在子目录运行 maturin。
+#
+# 发布前置条件（仅 tag 触发时需要）：
+#   - PyPI 项目 fuscan-re 配置 GitHub Actions OIDC trusted publisher
+#     （owner=gookeryoung/fuscan, workflow=fuscan-re-wheels.yml, environment=pypi）
+#   - 或在 repository secrets 配置 PYPI_API_TOKEN，改用 token 发布
+#
+# iter-03：替代 packages/fuscan-re/.github/workflows/CI.yml（maturin 自动生成，
+# 但位于子目录不会被 GitHub Actions 识别）。
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['fuscan-re-v*.*.*']
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: fuscan-re-wheels-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform.os }} ${{ matrix.platform.target }}
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          # Linux：manylinux auto 覆盖 glibc 主流发行版
+          - os: linux
+            runner: ubuntu-22.04
+            target: x86_64
+          - os: linux
+            runner: ubuntu-22.04
+            target: aarch64
+          # Windows：仅 x64（x86 已弃用，ARM 生态不成熟）
+          - os: windows
+            runner: windows-latest
+            target: x64
+          # macOS：Intel + Apple Silicon
+          - os: macos
+            runner: macos-13
+            target: x86_64
+          - os: macos
+            runner: macos-14
+            target: aarch64
+    steps:
+      - uses: actions/checkout@v5
+
+      # 安装多个 Python 版本，maturin --find-interpreter 为每个版本构建一个 wheel
+      # （pyo3 非 abi3 模式，每个 CPython ABI 版本需独立 wheel）
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: |
+            3.10
+            3.12
+            3.14
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          # monorepo：在子目录运行 maturin
+          working-directory: packages/fuscan-re
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist --find-interpreter
+          # manylinux auto 让 maturin 选择最低兼容的 manylinux 标签
+          manylinux: auto
+          # sccache 加速重复编译（tag 发布时禁用以避免缓存污染）
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuscan-re-wheels-${{ matrix.platform.os }}-${{ matrix.platform.target }}
+          path: packages/fuscan-re/dist
+          retention-days: 7
+          if-no-files-found: error
+
+  sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: packages/fuscan-re
+          command: sdist
+          args: --out dist
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuscan-re-sdist
+          path: packages/fuscan-re/dist
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/fuscan-re-v')
+    needs: [build, sdist]
+    environment: pypi
+    timeout-minutes: 10
+    permissions:
+      # OIDC trusted publisher 发布需要 id-token: write
+      id-token: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la dist/
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.3.2
+
+      # OIDC trusted publisher：无需 API token，由 PyPI 验证 GitHub OIDC
+      # 前置：在 PyPI 项目 fuscan-re 配置 trusted publisher
+      - name: Publish to PyPI (OIDC)
+        run: uv publish dist/

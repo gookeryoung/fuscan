@@ -284,23 +284,34 @@ fn dedup_substrings(keywords: Vec<String>) -> Vec<String> {
     kept
 }
 
-/// Python 风格的字符串 repr（单引号，转义特殊字符）。
+/// Python 风格的字符串 repr（复刻 CPython `unicode_repr` 引号选择逻辑）。
 ///
 /// 用于构造与 Python `f"...{text!r}"` 一致的 detail 字符串。
+///
+/// 引号选择规则（与 CPython 一致）：
+/// - 含单引号但不含双引号 → 改用双引号（避免转义单引号）
+/// - 其他情况（不含单引号 / 同时含单双引号 / 仅含双引号）→ 单引号
 fn py_repr(s: &str) -> String {
+    let has_single = s.contains('\'');
+    let has_double = s.contains('"');
+    let quote = if has_single && !has_double { '"' } else { '\'' };
+
     let mut result = String::with_capacity(s.len() + 2);
-    result.push('\'');
+    result.push(quote);
     for c in s.chars() {
         match c {
-            '\'' => result.push_str("\\'"),
             '\\' => result.push_str("\\\\"),
             '\n' => result.push_str("\\n"),
             '\r' => result.push_str("\\r"),
             '\t' => result.push_str("\\t"),
+            c if c == quote => {
+                result.push('\\');
+                result.push(c);
+            }
             _ => result.push(c),
         }
     }
-    result.push('\'');
+    result.push(quote);
     result
 }
 
@@ -804,11 +815,8 @@ struct PoolHitData {
 /// 与 Python `_PoolGroup` 结构对齐：跨所有 AND/OR 规则收集子项，
 /// 按 (pattern, case_sensitive) 去重——相同子项只注册一次。
 struct PoolGroup {
-    case_sensitive: bool,
     /// 本组所有 child_id（保持注册顺序）。
     child_ids: Vec<usize>,
-    /// 命名组名 "_p{child_id}" -> child_id。
-    group_to_child_id: HashMap<String, usize>,
     /// child_id -> description（用于构造 detail/match_description）。
     descriptions: HashMap<usize, String>,
     /// 复合 OR 正则。None 表示编译失败（组内子项回退独立 matches()）。
@@ -1015,7 +1023,6 @@ fn build_pool_groups(specs: Vec<PoolGroupSpec>) -> PyResult<(Vec<PoolGroup>, Has
         group_specs.sort_by(|a, b| a.child_id.cmp(&b.child_id));
 
         let mut child_ids: Vec<usize> = Vec::with_capacity(group_specs.len());
-        let mut group_to_child_id: HashMap<String, usize> = HashMap::new();
         let mut descriptions: HashMap<usize, String> = HashMap::new();
         let mut all_prefilter_keywords: Vec<String> = Vec::new();
         let mut per_child_keywords: HashMap<usize, Vec<String>> = HashMap::new();
@@ -1036,7 +1043,6 @@ fn build_pool_groups(specs: Vec<PoolGroupSpec>) -> PyResult<(Vec<PoolGroup>, Has
             };
             parts.push(part);
             child_ids.push(spec.child_id);
-            group_to_child_id.insert(grp_name, spec.child_id);
             descriptions.insert(spec.child_id, spec.description.clone());
 
             let literals = extract_literals(&sub_clean, MIN_LITERAL_LEN);
@@ -1087,9 +1093,7 @@ fn build_pool_groups(specs: Vec<PoolGroupSpec>) -> PyResult<(Vec<PoolGroup>, Has
         }
 
         groups.push(PoolGroup {
-            case_sensitive,
             child_ids,
-            group_to_child_id,
             descriptions,
             compiled,
             prefilter_keywords,
@@ -1201,6 +1205,14 @@ mod tests {
         assert_eq!(py_repr("hello"), "'hello'");
         assert_eq!(py_repr("a\\b"), "'a\\\\b'");
         assert_eq!(py_repr("a\nb"), "'a\\nb'");
+        // Python repr 引号选择：含单引号但不含双引号 → 改用双引号
+        assert_eq!(py_repr("it's"), "\"it's\"");
+        // 含双引号但不含单引号 → 单引号（不转义双引号）
+        assert_eq!(py_repr("say \"hi\""), "'say \"hi\"'");
+        // 同时含单双引号 → 单引号（转义内部单引号）
+        assert_eq!(py_repr("it's \"hi\""), "'it\\'s \"hi\"'");
+        // 含反斜杠和单引号：用双引号，反斜杠转义，单引号不转义
+        assert_eq!(py_repr("it\\'s"), "\"it\\\\'s\"");
     }
 
     #[test]

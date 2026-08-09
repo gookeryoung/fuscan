@@ -114,9 +114,18 @@ class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
         return __license__
 
     @Property("QVariantList", notify=infoChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
+    def nativeEngines(self) -> list[str]:
+        """项目原生引擎列表（与第三方依赖并列展示）。
+
+        fuscan-re 是 Rust + PyO3 实现的可选原生匹配引擎，
+        缺失时回退纯 Python，行为一致但性能较低。
+        """
+        return [_detect_native_matcher_status()]
+
+    @Property("QVariantList", notify=infoChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
     def dependencies(self) -> list[str]:
-        """第三方依赖列表（含 fuscan-re 原生引擎状态）。"""
-        return [*list(_DEPENDENCIES), _detect_native_matcher_status()]
+        """第三方依赖列表。"""
+        return list(_DEPENDENCIES)
 
     @Slot()  # pyrefly: ignore [not-callable]
     def openManual(self) -> None:

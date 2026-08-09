@@ -135,6 +135,24 @@ Item {
                 }
             }
 
+            // 原生引擎（项目自身组件，与第三方依赖并列）
+            GroupBox {
+                Layout.fillWidth: true
+                title: "原生引擎"
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 4
+                    Repeater {
+                        model: aboutController.nativeEngines
+                        Label {
+                            text: modelData
+                            font.pixelSize: 11
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+                    }
+                }
+            }
+
             // 第三方依赖
             GroupBox {
                 Layout.fillWidth: true

@@ -70,14 +70,19 @@ class TestDependencies:
         deps2 = about.dependencies
         assert "test-lib" not in deps2
 
-    def test_dependencies_includes_native_matcher_status(self, about: AboutController) -> None:
-        """依赖列表应包含 fuscan-re 原生匹配引擎状态项。"""
+    def test_dependencies_excludes_native_engine(self, about: AboutController) -> None:
+        """第三方依赖列表不应包含 fuscan-re（自身引擎独立展示）。"""
         deps = about.dependencies
-        native_entries = [d for d in deps if "fuscan-re" in d]
+        assert not any("fuscan-re" in d for d in deps), "fuscan-re 应在原生引擎列表，非第三方依赖"
+
+    def test_native_engines_includes_fuscan_re(self, about: AboutController) -> None:
+        """原生引擎列表应包含 fuscan-re 状态项。"""
+        engines = about.nativeEngines
+        native_entries = [e for e in engines if "fuscan-re" in e]
         assert len(native_entries) == 1, "应恰好有一项 fuscan-re 状态"
         assert "原生匹配引擎" in native_entries[0]
 
-    def test_native_matcher_status_when_available(self, about: AboutController) -> None:
+    def test_native_engine_status_when_available(self, about: AboutController) -> None:
         """fuscan-re 可用时显示版本与'已启用'。"""
         try:
             from importlib.metadata import version
@@ -85,11 +90,11 @@ class TestDependencies:
             version("fuscan-re")
         except PackageNotFoundError:
             pytest.skip("fuscan-re 未安装，跳过可用状态测试")
-        deps = about.dependencies
-        native_entry = next(d for d in deps if "fuscan-re" in d)
+        engines = about.nativeEngines
+        native_entry = next(e for e in engines if "fuscan-re" in e)
         assert "已启用" in native_entry
 
-    def test_native_matcher_status_when_not_installed(
+    def test_native_engine_status_when_not_installed(
         self,
         about: AboutController,
         monkeypatch: pytest.MonkeyPatch,
@@ -102,8 +107,8 @@ class TestDependencies:
         from fuscan.gui.controllers import about_controller
 
         monkeypatch.setattr(about_controller, "version", fake_version)
-        deps = about.dependencies
-        native_entry = next(d for d in deps if "fuscan-re" in d)
+        engines = about.nativeEngines
+        native_entry = next(e for e in engines if "fuscan-re" in e)
         assert "未安装" in native_entry
         assert "纯 Python" in native_entry
 

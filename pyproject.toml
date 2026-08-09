@@ -69,6 +69,16 @@ requires      = ["hatchling"]
 url = "https://mirrors.aliyun.com/pypi/simple/"
 default = true
 
+# uv workspace：fuscan-re 作为本地 workspace 成员，uv sync 自动从源码构建
+# （需 Rust 工具链）。避免 maturin develop 安装的 editable 包被 uv sync 移除。
+# fuscan-re 是可选运行时依赖（缺失时回退纯 Python），dev group 声明用于本地开发
+# 与测试；CI test job 用 --extra test 不含 dev，native 测试自动 skipif 跳过。
+[tool.uv.workspace]
+members = ["packages/fuscan-re"]
+
+[tool.uv.sources]
+fuscan-re = { workspace = true }
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/fuscan"]
 
@@ -89,4 +99,4 @@ no_site = true
 fuscan = "src/fuscan/app.py"
 
 [dependency-groups]
-dev = ["fuscan[dev]"]
+dev = ["fuscan[dev]", "fuscan-re"]

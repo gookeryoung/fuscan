@@ -1,0 +1,27 @@
+[package]
+name = "fuscan-re"
+version = "0.1.0"
+edition = "2021"
+description = "Rust + PyO3 原生匹配引擎，释放 GIL 加速 fuscan 正则扫描"
+license = "MIT"
+repository = "https://github.com/gooker_young/fuscan"
+keywords = ["regex", "pyo3", "scanner", "gil"]
+categories = ["text-processing"]
+
+[lib]
+name = "fuscan_re"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.28.2", features = ["extension-module"] }
+regex = "1.11"
+regex-syntax = "0.8"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 1

@@ -69,6 +69,7 @@ from fuscan.scanner._helpers import (
     rebuild_hit_from_cache,
     spec_needs_content,
 )
+from fuscan.scanner._native_matchers import build_native_engine
 from fuscan.scanner._pipeline_phase import run_pipeline_phase
 from fuscan.scanner.context import ContentProvider, FileEntry, MatchContext
 from fuscan.scanner.manifest import FileFingerprint, IncrementalManifest
@@ -91,6 +92,9 @@ from fuscan.scanner.result import (
 from fuscan.scanner.walker import FileWalker
 
 if TYPE_CHECKING:
+    # fuscan_re 是 PyO3 编译扩展，无 Python stub；仅用于类型检查提示
+    from fuscan_re import ContentBucketEngine  # pyrefly: ignore [missing-module-attribute]
+
     from fuscan.archive import ArchiveScanner
     from fuscan.cache import CacheStore
     from fuscan.rules.whitelist import Whitelist
@@ -115,8 +119,10 @@ class _CompiledRuleset:
         "content_regex_pool",
         "content_rule_names",
         "ext_content_buckets",
+        "ext_native_engines",
         "ext_remaining_rules",
         "global_content_buckets",
+        "global_native_engine",
         "global_remaining_rules",
     )
 
@@ -130,6 +136,8 @@ class _CompiledRuleset:
         bucketed_rule_names: frozenset[str],
         content_rule_names: frozenset[str],
         content_regex_pool: ContentRegexPool,
+        global_native_engine: ContentBucketEngine | None,
+        ext_native_engines: dict[str, ContentBucketEngine],
     ) -> None:
         self.compiled = compiled
         self.global_content_buckets = global_content_buckets
@@ -139,6 +147,8 @@ class _CompiledRuleset:
         self.bucketed_rule_names = bucketed_rule_names
         self.content_rule_names = content_rule_names
         self.content_regex_pool = content_regex_pool
+        self.global_native_engine = global_native_engine
+        self.ext_native_engines = ext_native_engines
 
 
 # 模块级编译缓存：id(ruleset) → (weakref, _CompiledRuleset)
@@ -206,6 +216,8 @@ class Scanner:
         self._ext_remaining_rules: dict[str, list[tuple[Rule, Matcher]]]
         self._bucketed_rule_names: frozenset[str]
         self._content_rule_names: frozenset[str]
+        self._global_native_engine: ContentBucketEngine | None
+        self._ext_native_engines: dict[str, ContentBucketEngine]
 
         # 规则编译缓存：ruleset 未变时复用已编译的 Matcher 列表与 CONTENT 桶，
         # 避免每次 Scanner 构造都重新编译所有规则（~112ms → ~0ms 命中）。
@@ -231,6 +243,8 @@ class Scanner:
             self._bucketed_rule_names = compiled_rs.bucketed_rule_names
             self._content_rule_names = compiled_rs.content_rule_names
             self._content_regex_pool = compiled_rs.content_regex_pool
+            self._global_native_engine = compiled_rs.global_native_engine
+            self._ext_native_engines = compiled_rs.ext_native_engines
         else:
             # 缓存未命中：编译规则 + 构建 CONTENT 桶 + 跨规则子项池
             self._compiled = [(rule, build_matcher(rule.match)) for rule in ruleset.rules]
@@ -273,6 +287,16 @@ class Scanner:
                         all_bucketed_names.add(r.name)
             self._bucketed_rule_names = frozenset(all_bucketed_names)
             self._content_rule_names = frozenset(rule.name for rule in ruleset.rules if spec_needs_content(rule.match))
+            # 原生匹配引擎：仅在 fuscan_re 可用时构建；与 Python 桶同源（global + 各 ext
+            # 全局+专属桶），由 _match_content_via_buckets_impl 透传到
+            # match_content_via_buckets。原生引擎不可用或构建失败时返回 None，
+            # 自动回退到 Python 路径（语义完全等价）。
+            self._global_native_engine = build_native_engine(self._global_content_buckets)
+            self._ext_native_engines = {
+                ext: build_native_engine(self._global_content_buckets + ext_buckets)
+                for ext, ext_buckets in self._ext_content_buckets.items()
+                if ext_buckets
+            }
             # 写入缓存供后续 Scanner 复用
             compiled_rs = _CompiledRuleset(
                 compiled=self._compiled,
@@ -283,6 +307,8 @@ class Scanner:
                 bucketed_rule_names=self._bucketed_rule_names,
                 content_rule_names=self._content_rule_names,
                 content_regex_pool=self._content_regex_pool,
+                global_native_engine=self._global_native_engine,
+                ext_native_engines=self._ext_native_engines,
             )
             with _compiled_cache_lock:
                 if len(_compiled_cache) >= _COMPILED_CACHE_MAX:
@@ -1134,13 +1160,15 @@ class Scanner:
         self,
         content: str,
         buckets: list[_ContentRuleBucket],
+        native_engine: ContentBucketEngine | None = None,
     ) -> list[RuleHit]:
         """对指定的 CONTENT 桶执行一次 finditer 分派并返回命中列表。
 
         薄包装：委托 :func:`fuscan.scanner._content_buckets.match_content_via_buckets`，
-        可接受任意 buckets 列表（global + ext 专属）。
+        可接受任意 buckets 列表（global + ext 专属）。``native_engine`` 非 None 时
+        优先走原生路径（须与 ``buckets`` 同源构建），异常时返回空列表。
         """
-        return match_content_via_buckets(content, buckets)
+        return match_content_via_buckets(content, buckets, native_engine)
 
     def _match_content_via_buckets(self, content: str) -> list[RuleHit]:
         """通过合并的 CONTENT 桶对 content 执行一次 finditer 分派。
@@ -1153,7 +1181,11 @@ class Scanner:
           ``text.count(pattern)`` 统计非重叠次数，避免正则 ``finditer`` 重叠
           语义差异导致的 match_count 与旧实现不一致。
         """
-        return self._match_content_via_buckets_impl(content, self._content_buckets)
+        return self._match_content_via_buckets_impl(
+            content,
+            self._content_buckets,
+            self._global_native_engine,
+        )
 
     def _run_cached_applicable_bucket_pass(
         self,
@@ -1299,9 +1331,18 @@ class Scanner:
         # 对不 skip_content 且有桶的情况，先走合并 CONTENT 桶匹配
         # （一次 finditer + 分派取代 N 次独立 re 调用）
         if not skip_content and effective_buckets:
+            # 原生引擎查找：优先按 ext 取专属引擎（覆盖 global + ext 桶），
+            # 否则回退到 global 引擎；引擎为 None 时 match_content_via_buckets
+            # 自动走 Python 路径
+            ext = entry.extension
+            native_engine = (self._ext_native_engines.get(ext) if ext else None) or self._global_native_engine
             try:
                 with self._perf.measure("match"):
-                    bucket_hits = self._match_content_via_buckets_impl(context.content, effective_buckets)
+                    bucket_hits = self._match_content_via_buckets_impl(
+                        context.content,
+                        effective_buckets,
+                        native_engine,
+                    )
                 hits.extend(bucket_hits)
             except Exception:
                 # 桶匹配失败：记录为规则错误，但不要阻断后续 remaining 规则。

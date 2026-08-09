@@ -31,6 +31,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from re import Pattern
+from typing import TYPE_CHECKING
 
 from fuscan.rules.model import (
     AndMatch,
@@ -51,6 +52,10 @@ from fuscan.scanner._helpers import (
 )
 from fuscan.scanner.matchers import Matcher
 from fuscan.scanner.result import MatchResult, RuleHit
+
+if TYPE_CHECKING:
+    # fuscan_re 是 PyO3 编译扩展，无 Python stub；仅用于类型检查提示
+    from fuscan_re import ContentBucketEngine  # pyrefly: ignore [missing-module-attribute]
 
 __all__ = [
     "build_content_buckets",
@@ -346,8 +351,16 @@ def _get_active_compiled(bucket: _ContentRuleBucket, active_idx: list[int]) -> P
 def match_content_via_buckets(  # noqa: PLR0912
     content: str,
     buckets: list[_ContentRuleBucket],
+    native_engine: ContentBucketEngine | None = None,
 ) -> list[RuleHit]:
     """对指定的 CONTENT 桶执行**逐规则预筛 + 活跃子集匹配**并返回命中列表。
+
+    若 ``native_engine`` 非 None，优先调用原生引擎（Rust + PyO3，释放 GIL），
+    与本函数 Python 实现语义完全等价。原生引擎异常时返回空列表，调用方应回退到
+    Python 路径重试（典型用法：catch ``match_content_via_buckets`` 异常后再以
+    ``native_engine=None`` 调用一次）。当 ``buckets`` 与构造 ``native_engine``
+    时的桶集不一致时，结果可能包含/缺失部分规则命中——调用方需保证二者一致
+    （Scanner 在 ``_CompiledRuleset`` 缓存层维护 global + 各 ext 对应引擎）。
 
     两级预筛：先用桶级关键字 ``any()`` 快速短路整桶（0 关键字命中直接跳过），
     再用 per-rule 关键字精确筛出**活跃规则子集**，仅对该子集动态编译复合正则并
@@ -364,8 +377,15 @@ def match_content_via_buckets(  # noqa: PLR0912
 
     :param content: 文件文本内容
     :param buckets: 已编译的 CONTENT 桶列表（global + ext 专属可合并传入）
+    :param native_engine: 可选的原生引擎（须与 ``buckets`` 同源构建）；非 None 时
+        优先走原生路径，异常时返回空列表
     :return: 命中的 RuleHit 列表（每个桶内每条规则最多产出一条聚合命中）
     """
+    if native_engine is not None:
+        # 延迟导入打破循环依赖：_native_matchers -> _content_buckets -> _native_matchers
+        from fuscan.scanner._native_matchers import match_content_via_native
+
+        return match_content_via_native(native_engine, content)
     hits: list[RuleHit] = []
     # 大小写不敏感预筛时复用同一份小写化 content（lazy 计算）
     content_lower: str | None = None

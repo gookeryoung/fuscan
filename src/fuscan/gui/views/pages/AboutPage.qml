@@ -54,7 +54,7 @@ Item {
         anchors.fill: parent
         clip: true
         ColumnLayout {
-            width: aboutPage.width
+            width: parent.width
             spacing: 20
 
             // 标题
@@ -135,37 +135,49 @@ Item {
                 }
             }
 
-            // 原生引擎（项目自身组件，与第三方依赖并列）
-            GroupBox {
+            // 原生引擎 + 第三方依赖 左右并列
+            RowLayout {
                 Layout.fillWidth: true
-                title: "原生引擎"
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 4
-                    Repeater {
-                        model: aboutController.nativeEngines
-                        Label {
-                            text: modelData
-                            font.pixelSize: 11
-                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                spacing: 12
+
+                // 原生引擎（项目自身组件）
+                GroupBox {
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignTop
+                    title: "原生引擎"
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 4
+                        Repeater {
+                            model: aboutController.nativeEngines
+                            Label {
+                                text: modelData
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                Layout.fillWidth: true
+                                wrapMode: Text.WordWrap
+                            }
                         }
                     }
                 }
-            }
 
-            // 第三方依赖
-            GroupBox {
-                Layout.fillWidth: true
-                title: "第三方依赖"
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 4
-                    Repeater {
-                        model: aboutController.dependencies
-                        Label {
-                            text: modelData
-                            font.pixelSize: 11
-                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                // 第三方依赖
+                GroupBox {
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignTop
+                    title: "第三方依赖"
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 4
+                        Repeater {
+                            model: aboutController.dependencies
+                            Label {
+                                text: modelData
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                Layout.fillWidth: true
+                                wrapMode: Text.WordWrap
+                            }
                         }
                     }
                 }

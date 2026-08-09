@@ -51,10 +51,12 @@ Item {
     }
 
     ScrollView {
+        id: scrollView
         anchors.fill: parent
         clip: true
+        ScrollBar.vertical.policy: ScrollBar.AsNeeded
         ColumnLayout {
-            width: parent.width
+            width: scrollView.width - (scrollView.ScrollBar.vertical.visible ? scrollView.ScrollBar.vertical.width : 0)
             spacing: 20
 
             // 标题
@@ -143,6 +145,7 @@ Item {
                 // 原生引擎（项目自身组件）
                 GroupBox {
                     Layout.fillWidth: true
+                    Layout.preferredWidth: 0
                     Layout.alignment: Qt.AlignTop
                     title: "原生引擎"
                     ColumnLayout {
@@ -164,6 +167,7 @@ Item {
                 // 第三方依赖
                 GroupBox {
                     Layout.fillWidth: true
+                    Layout.preferredWidth: 0
                     Layout.alignment: Qt.AlignTop
                     title: "第三方依赖"
                     ColumnLayout {

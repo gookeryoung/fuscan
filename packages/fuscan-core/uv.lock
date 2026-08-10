@@ -3,5 +3,5 @@ revision = 3
 requires-python = ">=3.10"
 
 [[package]]
-name = "fuscan-re"
+name = "fuscan-core"
 source = { editable = "." }

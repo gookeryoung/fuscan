@@ -47,10 +47,13 @@ jobs:
           - os: linux
             runner: ubuntu-22.04
             target: aarch64
-          # Windows：仅 x64（x86 已弃用，ARM 生态不成熟）
+          # Windows：x64，用 win7 target + nightly -Z build-std 重建 std，
+          # 使 .pyd 在 Win7 SP1 及更新版本均可加载（stable std 硬引用 Win8+ API）。
+          # 跨编译器兼容：win7 target 构建物在 Win8/10/11 同样运行，无功能损失。
           - os: windows
             runner: windows-latest
-            target: x64
+            target: x86_64-win7-windows-msvc
+            toolchain: nightly
           # macOS：Intel + Apple Silicon
           - os: macos
             runner: macos-13
@@ -77,11 +80,19 @@ jobs:
           # monorepo：在子目录运行 maturin
           working-directory: packages/fuscan-re
           target: ${{ matrix.platform.target }}
+          # Windows win7 target 需 nightly 工具链；其他平台用默认 stable
+          toolchain: ${{ matrix.platform.toolchain || 'stable' }}
           args: --release --out dist --find-interpreter
           # manylinux auto 让 maturin 选择最低兼容的 manylinux 标签
           manylinux: auto
           # sccache 加速重复编译（tag 发布时禁用以避免缓存污染）
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        env:
+          # win7 target 是 Tier-3，无预编译 std，需 nightly -Z build-std 重建。
+          # cargo 的 unstable feature 通过 CARGO_UNSTABLE_<NAME> 环境变量启用，
+          # 等效于命令行 -Z build-std=std,panic_abort。maturin 内部调用 cargo
+          # 时继承此环境变量。仅 Windows win7 target 启用，避免 stable cargo 报错。
+          CARGO_UNSTABLE_BUILD_STD: ${{ matrix.platform.os == 'windows' && 'std,panic_abort' || '' }}
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4

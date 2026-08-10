@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from fuscan.rules.builtin import BUILTIN_RULES_PATH, load_builtin_ruleset, load_with_builtin
+from fuscan.rules.builtin import BUILTIN_PATTERNS_PATH, BUILTIN_RULES_PATH, load_builtin_ruleset, load_with_builtin
 from fuscan.rules.errors import RuleError, RuleLoadError, RuleParseError
 from fuscan.rules.merge import merge_multiple_rulesets, merge_rulesets
 from fuscan.rules.model import (
@@ -36,6 +36,7 @@ from fuscan.rules.serializer import save_ruleset, serialize_match, serialize_rul
 from fuscan.rules.templates import get_template_descriptions, get_template_metadata, get_template_names, load_template
 
 __all__ = [
+    "BUILTIN_PATTERNS_PATH",
     "BUILTIN_RULES_PATH",
     "AndMatch",
     "LeafMatch",

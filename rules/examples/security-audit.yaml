@@ -2,9 +2,9 @@
 # 场景：扫描代码与配置中的硬编码密钥、凭证、私钥等敏感信息
 # 适用：上线前安全检查、CI/CD 集成、代码审计
 #
-# 注：AWS Access Key / PEM 私钥 / 通用私钥头 / JWT / GitHub Token / 硬编码密码赋值 /
-# 数据库连接串密码已由内置 builtin.yaml（P0101 / P0102 / P0201-P0205）与
-# templates（database_connection_strings / common_credentials）覆盖。
+# 注：通用密码赋值 / 敏感配置文件名（.env/.pem/.key 等）/ 邮件敏感词已由内置
+# builtin-patterns.yaml（P0101 / P0102 / P0103）与 templates
+# （database_connection_strings / common_credentials）覆盖。
 # 本文件聚焦：AND + NOT path 组合的教学演示——在非测试目录中检测特定模式的凭证。
 version: "1.0"
 

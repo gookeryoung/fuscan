@@ -29,11 +29,11 @@ EXAMPLE_RULES = [
 
 # ── Mock 文件清单：(相对路径, 内容) ──
 MOCK_FILES: list[tuple[str, str | bytes]] = [
-    # 内置 P0102：硬编码密码赋值
+    # 内置 P0101：通用密码赋值 + P0102：敏感配置文件名（.env）
     ("config/.env", "DATABASE_URL=postgres://localhost:5432\ndb_password = s3cretP@ss\napi_key=AKIAEXAMPLE\n"),
-    # 内置 P0201：AWS Access Key ID + 内置 P0203：GitHub Token
+    # 内置 P0101：通用密码赋值（password = "hardcoded123"）
     ("src/app.py", 'AKIAIOSFODNN7EXAMPLE\nghp_1234567890abcdefghijklmnopqrstuvwxyz\npassword = "hardcoded123"\n'),
-    # 内置 P0101：PEM 私钥文件头
+    # 内置 P0102：敏感配置文件名（.pem 后缀）
     ("keys/server.pem", "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----\n"),
     # 示例 sensitive-data：日志文件中的手机号（AND: FILENAME + CONTENT）+ 银行卡号泄露
     ("logs/app.log", "用户 13812345678 登录成功\n银行卡号: 6222020200011111111\n警告: 13987654321 异常\n"),

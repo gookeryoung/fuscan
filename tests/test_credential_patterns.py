@@ -1,7 +1,11 @@
-"""内置凭证模式单元测试（iter-134）。
+"""内置匹配规则单元测试。
 
-验证 builtin.yaml 中新增的 10+ 类凭证模式正确匹配对应格式的密钥样本，
-且不误匹配无关文本。覆盖 AWS/Azure/GCP/GitHub/Slack/JWT/RSA/SSH/PGP/Stripe。
+验证 ``builtin-patterns.yaml`` 中 3 条规则正确匹配对应敏感信息样本，
+且不误匹配无关文本。覆盖：
+
+- P0101-通用密码赋值（content regex）：``password``/``passwd``/``pwd`` 赋值语句
+- P0102-敏感配置文件名（filename regex）：``.env``/``.pem``/``.key`` 等敏感文件名
+- P0103-邮件信息包含敏感词（AND: filename ``.eml`` + content 敏感词）
 """
 
 from __future__ import annotations
@@ -11,265 +15,203 @@ from pathlib import Path
 import pytest
 
 from fuscan.rules import load_builtin_ruleset
-from fuscan.rules.model import LeafMatch, MatchTarget, Severity
+from fuscan.rules.model import AndMatch, LeafMatch, MatchTarget, Severity
 from fuscan.scanner.context import FileEntry, MatchContext
 from fuscan.scanner.matchers import Matcher, build_matcher
 
 
-def _make_content_context(content: str) -> MatchContext:
-    """构造内容匹配上下文（路径不存在，仅用于 content 匹配）。"""
-    path = Path("/tmp/test_sample.txt")
+def _make_context(name: str, content: str = "") -> MatchContext:
+    """构造匹配上下文（路径不存在，仅用于 filename/content 匹配）。
+
+    :param name: 文件名（用于 filename 匹配与扩展名推导）
+    :param content: 文件内容（用于 content 匹配）
+    """
+    path = Path("/tmp") / name
     entry = FileEntry(
         path=path,
-        name=path.name,
+        name=name,
         size=len(content),
         mtime=0.0,
-        extension="txt",
+        extension=_extract_extension(name),
     )
     return MatchContext(entry, content_provider=lambda e: content)
 
 
-def _all_content_rules() -> list[tuple[str, Severity, Matcher]]:
-    """返回内置规则集中所有 CONTENT 类型的 (name, severity, matcher) 列表。"""
+def _extract_extension(name: str) -> str:
+    """与 :func:`fuscan.scanner.context._extract_extension` 一致的扩展名推导。"""
+    suffix = Path(name).suffix
+    if suffix:
+        return suffix.lower().lstrip(".")
+    if name.startswith(".") and len(name) > 1:
+        return name[1:].lower()
+    return ""
+
+
+def _build_matcher_by_name(rule_name: str) -> tuple[str, Severity, Matcher]:
+    """按规则名从内置规则集构造 (name, severity, matcher)。"""
     rs = load_builtin_ruleset()
-    rules: list[tuple[str, Severity, Matcher]] = []
-    for rule in rs.rules:
-        # 仅取叶子匹配为 content 的规则（跳过 and/or/not 组合与 filename/path 规则）
-        if isinstance(rule.match, LeafMatch) and rule.match.target == MatchTarget.CONTENT:
-            rules.append((rule.name, rule.severity, build_matcher(rule.match)))
-    return rules
+    rule = next(r for r in rs.rules if r.name == rule_name)
+    return rule.name, rule.severity, build_matcher(rule.match)
 
 
-class TestBuiltinCredentialRulesetStructure:
+class TestBuiltinRulesetStructure:
     """内置规则集结构验证。"""
 
-    def test_builtin_ruleset_has_10_plus_credential_rules(self) -> None:
-        """内置规则集应包含 10+ 类凭证模式（P02xx 系列）。"""
+    def test_builtin_ruleset_has_3_rules(self) -> None:
+        """内置规则集应包含 P0101/P0102/P0103 三条规则。"""
         rs = load_builtin_ruleset()
-        credential_rules = [r for r in rs.rules if r.name.startswith("P02")]
-        assert len(credential_rules) >= 10, f"凭证模式仅 {len(credential_rules)} 条，期望 >= 10 条"
+        names = [r.name for r in rs.rules]
+        assert names == [
+            "P0101-通用密码赋值",
+            "P0102-敏感配置文件名",
+            "P0103-邮件信息包含敏感词",
+        ]
 
-    def test_builtin_includes_all_required_vendors(self) -> None:
-        """应覆盖 AWS/Azure/GCP/GitHub/Slack/JWT/Stripe 等主流厂商。"""
+    def test_builtin_includes_password_filename_email_categories(self) -> None:
+        """应覆盖密码赋值/敏感文件名/邮件敏感词三类。"""
         rs = load_builtin_ruleset()
         names = " ".join(r.name for r in rs.rules)
-        required_vendors = ["AWS", "GitHub", "Slack", "JWT", "Stripe", "GCP", "Azure"]
-        missing = [v for v in required_vendors if v not in names]
-        assert not missing, f"缺少厂商模式: {missing}"
+        assert "密码赋值" in names
+        assert "配置文件名" in names
+        assert "邮件" in names
 
 
-class TestAwsAccessKeyId:
-    """AWS Access Key ID 模式（P0201）。"""
+class TestP0101PasswordAssignment:
+    """通用密码赋值模式（P0101，content regex）。"""
 
-    def test_matches_akia_prefix(self) -> None:
-        """AKIA 前缀 + 17 位字母数字应命中。"""
-        content = "aws_access_key_id = AKIAIOSFODNN7EXAMPLE"
-        ctx = _make_content_context(content)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0201-AWS-Access-Key-ID")
-        matcher = build_matcher(rule.match)
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "password=S3cr3t!",
+            "passwd: abc123",
+            "pwd = xxx",
+            "PASSWORD=test",
+            "db_password = hardcoded123",
+            "user_passwd=secret",
+        ],
+    )
+    def test_matches_password_assignments(self, content: str) -> None:
+        """password/passwd/pwd 赋值语句应命中（大小写不敏感）。"""
+        ctx = _make_context("config.txt", content)
+        _name, _sev, matcher = _build_matcher_by_name("P0101-通用密码赋值")
         assert matcher.matches(ctx).matched
 
-    def test_matches_asia_prefix(self) -> None:
-        """ASIA 前缀（临时凭证）应命中。"""
-        content = "ASIAIOSFODNN7EXAMPLE"
-        ctx = _make_content_context(content)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0201-AWS-Access-Key-ID")
-        matcher = build_matcher(rule.match)
+    def test_matches_password_in_yaml_like_content(self) -> None:
+        """YAML 风格的 password: value 应命中。"""
+        content = "development:\n  database_password: S3cr3t!\n"
+        ctx = _make_context("app.yaml", content)
+        _name, _sev, matcher = _build_matcher_by_name("P0101-通用密码赋值")
         assert matcher.matches(ctx).matched
 
-    def test_does_not_match_random_text(self) -> None:
+    def test_does_not_match_plain_text(self) -> None:
         """普通文本不应命中。"""
-        content = "The quick brown fox jumps over the lazy dog."
-        ctx = _make_content_context(content)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0201-AWS-Access-Key-ID")
-        matcher = build_matcher(rule.match)
+        ctx = _make_context("readme.txt", "The quick brown fox jumps over the lazy dog.")
+        _name, _sev, matcher = _build_matcher_by_name("P0101-通用密码赋值")
+        assert not matcher.matches(ctx).matched
+
+    def test_does_not_match_password_word_alone(self) -> None:
+        """仅出现 password 单词而无赋值符不应命中。"""
+        ctx = _make_context("doc.txt", "Please reset your password regularly.")
+        _name, _sev, matcher = _build_matcher_by_name("P0101-通用密码赋值")
         assert not matcher.matches(ctx).matched
 
 
-class TestAwsSecretAccessKey:
-    """AWS Secret Access Key 模式（P0202）。"""
-
-    def test_matches_aws_secret_assignment(self) -> None:
-        """aws_secret_access_key= 后跟 40 字符 base64 应命中。"""
-        content = "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-        ctx = _make_content_context(content)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0202-AWS-Secret-Access-Key")
-        matcher = build_matcher(rule.match)
-        assert matcher.matches(ctx).matched
-
-
-class TestGitHubToken:
-    """GitHub Token 模式（P0203）。"""
-
-    def test_matches_ghp_prefix(self) -> None:
-        """ghp_ 前缀 + 36 字符应命中。"""
-        content = "GITHUB_TOKEN=ghp_1234567890abcdefghijklmnopqrstuvwxyz1234"
-        ctx = _make_content_context(content)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0203-GitHub-Token")
-        matcher = build_matcher(rule.match)
-        assert matcher.matches(ctx).matched
-
-    def test_matches_github_pat_prefix(self) -> None:
-        """github_pat_ 前缀应命中。"""
-        content = "github_pat_" + "A" * 82
-        ctx = _make_content_context(content)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0203-GitHub-Token")
-        matcher = build_matcher(rule.match)
-        assert matcher.matches(ctx).matched
-
-
-class TestSlackToken:
-    """Slack Token 模式（P0204）。"""
-
-    def test_matches_xoxb_prefix(self) -> None:
-        """xoxb- 前缀应命中。"""
-        # 变量拼接避免密钥扫描器误判为真实凭证（运行时拼接出完整样本）
-        slack_body = "1234567890-1234567890123-abcdefghij1234567890abcdef"
-        content = f"SLACK_TOKEN=xoxb-{slack_body}"
-        ctx = _make_content_context(content)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0204-Slack-Token")
-        matcher = build_matcher(rule.match)
-        assert matcher.matches(ctx).matched
-
-
-class TestJwt:
-    """JWT 模式（P0205）。"""
-
-    def test_matches_jwt_format(self) -> None:
-        """eyJ 开头的三段式 base64url 应命中。"""
-        content = "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyIjoxMjN9.signaturepart123"
-        ctx = _make_content_context(content)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0205-JWT")
-        matcher = build_matcher(rule.match)
-        assert matcher.matches(ctx).matched
-
-
-class TestStripeKey:
-    """Stripe Key 模式（P0206）。"""
-
-    def test_matches_sk_live_prefix(self) -> None:
-        """sk_live_ 前缀应命中。"""
-        # 变量拼接避免密钥扫描器误判为真实凭证（运行时拼接出完整样本）
-        stripe_body = "1234567890abcdefghijklmnopqrstuvwxyz"
-        content = f"STRIPE_KEY=sk_live_{stripe_body}"
-        ctx = _make_content_context(content)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0206-Stripe-Key")
-        matcher = build_matcher(rule.match)
-        assert matcher.matches(ctx).matched
-
-    def test_matches_rk_test_prefix(self) -> None:
-        """rk_test_ 前缀应命中。"""
-        content = "rk_test_1234567890abcdefghijklmnopqrstuvwxyz"
-        ctx = _make_content_context(content)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0206-Stripe-Key")
-        matcher = build_matcher(rule.match)
-        assert matcher.matches(ctx).matched
-
-
-class TestGcpApiKey:
-    """GCP API Key 模式（P0207）。"""
-
-    def test_matches_aiza_prefix(self) -> None:
-        """AIza 前缀 + 35 字符应命中。"""
-        content = "GOOGLE_API_KEY=AIzaSyA1234567890abcdefghijklmnopqrstuv"
-        ctx = _make_content_context(content)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0207-GCP-API-Key")
-        matcher = build_matcher(rule.match)
-        assert matcher.matches(ctx).matched
-
-
-class TestAzureSasToken:
-    """Azure SAS Token 模式（P0208）。"""
-
-    def test_matches_sas_token(self) -> None:
-        """含 sig= 与 sv= 等参数的 SAS Token 应命中。"""
-        # sig 值需 >= 20 字符（含 % 编码）
-        content = "?sig=ssMfFGHiRsleGbciSignature123%3D&sv=2019-12-12&ss=b&srt=o&sp=r"
-        ctx = _make_content_context(content)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0208-Azure-SAS-Token")
-        matcher = build_matcher(rule.match)
-        assert matcher.matches(ctx).matched
-
-
-class TestAzureConnectionString:
-    """Azure Connection String 模式（P0209）。"""
-
-    def test_matches_account_key(self) -> None:
-        """AccountKey= 后跟 50+ 字符 base64 应命中。"""
-        content = (
-            "DefaultEndpointsProtocol=https;AccountName=myaccount;"
-            "AccountKey=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/ABCDEF==;"
-            "EndpointSuffix=core.windows.net"
-        )
-        ctx = _make_content_context(content)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0209-Azure-Connection-String")
-        matcher = build_matcher(rule.match)
-        assert matcher.matches(ctx).matched
-
-
-class TestGenericApiKey:
-    """通用 API Key 模式（P0210）。"""
-
-    def test_matches_api_key_assignment(self) -> None:
-        """api_key= 后跟 20+ 字符应命中。"""
-        content = "api_key=abcdefghijklmnopqrstuvwxyz123456"
-        ctx = _make_content_context(content)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0210-Generic-API-Key")
-        matcher = build_matcher(rule.match)
-        assert matcher.matches(ctx).matched
-
-    def test_matches_bearer_token(self) -> None:
-        """Bearer 后跟 20+ 字符应命中。"""
-        content = "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456"
-        ctx = _make_content_context(content)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0210-Generic-API-Key")
-        matcher = build_matcher(rule.match)
-        assert matcher.matches(ctx).matched
-
-
-class TestPrivateKeyHeader:
-    """私钥文件头模式（P0101，覆盖 RSA/EC/DSA/OPENSSH/PGP）。"""
+class TestP0102SensitiveFilename:
+    """敏感配置文件名模式（P0102，filename regex）。"""
 
     @pytest.mark.parametrize(
-        "header",
+        "filename",
         [
-            "-----BEGIN RSA PRIVATE KEY-----",
-            "-----BEGIN EC PRIVATE KEY-----",
-            "-----BEGIN DSA PRIVATE KEY-----",
-            "-----BEGIN OPENSSH PRIVATE KEY-----",
-            "-----BEGIN PGP PRIVATE KEY-----",
-            "-----BEGIN PRIVATE KEY-----",
+            ".env",
+            ".env.local",
+            ".env.production",
+            "credentials",
+            "secrets.yaml",
+            "server.pem",
+            "private.key",
+            "cert.pfx",
+            "app.keystore",
         ],
     )
-    def test_matches_pem_headers(self, header: str) -> None:
-        """PEM 私钥文件头应命中。"""
-        ctx = _make_content_context(header)
-        rs = load_builtin_ruleset()
-        rule = next(r for r in rs.rules if r.name == "P0101-私钥文件头")
-        matcher = build_matcher(rule.match)
+    def test_matches_sensitive_filenames(self, filename: str) -> None:
+        """敏感文件名应命中。"""
+        ctx = _make_context(filename)
+        _name, _sev, matcher = _build_matcher_by_name("P0102-敏感配置文件名")
         assert matcher.matches(ctx).matched
+
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            "readme.txt",
+            "app.py",
+            "config.yaml",
+            "environment_variable.md",
+            "Makefile",
+        ],
+    )
+    def test_does_not_match_normal_filenames(self, filename: str) -> None:
+        """普通文件名不应命中。"""
+        ctx = _make_context(filename)
+        _name, _sev, matcher = _build_matcher_by_name("P0102-敏感配置文件名")
+        assert not matcher.matches(ctx).matched
+
+    def test_matches_case_insensitive(self) -> None:
+        """文件名匹配应大小写不敏感（regex 含 (?i) 标志）。"""
+        ctx = _make_context("SERVER.PEM")
+        _name, _sev, matcher = _build_matcher_by_name("P0102-敏感配置文件名")
+        assert matcher.matches(ctx).matched
+
+
+class TestP0103EmailSensitiveWords:
+    """邮件敏感词组合模式（P0103，AND: filename .eml + content 敏感词）。
+
+    P0103 的 filename 正则为 ``^\\.eml$``，仅匹配文件名恰好为 ``.eml`` 的 dotfile
+    （与 ``.env`` 同语义：隐藏邮件文件），不匹配 ``message.eml`` 等普通 .eml 文件。
+    """
+
+    @pytest.mark.parametrize("keyword", ["价格", "内部", "商业", "薪酬"])
+    def test_matches_eml_with_sensitive_word(self, keyword: str) -> None:
+        """文件名为 .eml 且内容含敏感词应命中。"""
+        ctx = _make_context(".eml", f"邮件正文包含{keyword}信息")
+        _name, _sev, matcher = _build_matcher_by_name("P0103-邮件信息包含敏感词")
+        assert matcher.matches(ctx).matched
+
+    def test_does_not_match_eml_without_sensitive_word(self) -> None:
+        """文件名为 .eml 但内容不含敏感词不应命中。"""
+        ctx = _make_context(".eml", "这是一封普通的工作邮件，没有敏感内容。")
+        _name, _sev, matcher = _build_matcher_by_name("P0103-邮件信息包含敏感词")
+        assert not matcher.matches(ctx).matched
+
+    def test_does_not_match_txt_with_sensitive_word(self) -> None:
+        """非 .eml 文件即使包含敏感词也不应命中（filename 子条件不满足）。"""
+        ctx = _make_context("notes.txt", "价格 内部 商业 薪酬")
+        _name, _sev, matcher = _build_matcher_by_name("P0103-邮件信息包含敏感词")
+        assert not matcher.matches(ctx).matched
+
+    def test_does_not_match_message_eml(self) -> None:
+        """文件名为 message.eml 不应命中（P0103 仅匹配文件名恰好为 .eml 的 dotfile）。"""
+        ctx = _make_context("message.eml", "价格 内部 商业 薪酬")
+        _name, _sev, matcher = _build_matcher_by_name("P0103-邮件信息包含敏感词")
+        assert not matcher.matches(ctx).matched
+
+    def test_rule_uses_and_combination(self) -> None:
+        """P0103 应使用 AndMatch 组合 filename + content 两个叶子条件。"""
+        rs = load_builtin_ruleset()
+        rule = next(r for r in rs.rules if r.name == "P0103-邮件信息包含敏感词")
+        assert isinstance(rule.match, AndMatch)
+        assert len(rule.match.children) == 2
+        filename_child, content_child = rule.match.children
+        assert isinstance(filename_child, LeafMatch)
+        assert filename_child.target == MatchTarget.FILENAME
+        assert isinstance(content_child, LeafMatch)
+        assert content_child.target == MatchTarget.CONTENT
 
 
 class TestNoFalsePositivesOnNaturalText:
-    """凭证模式不应误匹配自然语言文本。"""
+    """P0101 内容规则不应误匹配自然语言文本。"""
 
     def test_natural_text_no_matches(self) -> None:
-        """自然语言文本不应触发任何凭证规则。"""
+        """自然语言文本不应触发 P0101 通用密码赋值规则。"""
         natural_samples = [
             "The quick brown fox jumps over the lazy dog.",
             "Hello world, this is a test message.",
@@ -282,9 +224,8 @@ class TestNoFalsePositivesOnNaturalText:
             "import os\nfrom pathlib import Path",
             "# This is a comment\n# Another comment\n",
         ]
-        rules = _all_content_rules()
+        _name, _sev, matcher = _build_matcher_by_name("P0101-通用密码赋值")
         for sample in natural_samples:
-            ctx = _make_content_context(sample)
-            for rule_name, _severity, matcher in rules:
-                result = matcher.matches(ctx)
-                assert not result.matched, f"规则 {rule_name} 误匹配自然文本: {sample[:50]!r}"
+            ctx = _make_context("sample.txt", sample)
+            result = matcher.matches(ctx)
+            assert not result.matched, f"P0101 误匹配自然文本: {sample[:50]!r}"

@@ -30,9 +30,8 @@ _DB_CONN_WITH_BACKSLASH = r"mongodb://user:pass\123@host"
 _DB_CONN_WITH_QUOTE = "mongodb://user:pa'ss@host"
 _BEARER_CROSS_LINE = "Bearer\n  eyJhbGci.token"
 
-# 内置规则集端到端测试样本（对应 assets/rules/builtin.yaml 中的 P0101/P0102 规则）
+# 内置规则集端到端测试样本（对应 assets/rules/builtin-patterns.yaml 中的 P0101 规则）
 _PASSWORD_SAMPLE = "password=S3cr3t!"
-_PRIVATE_KEY_SAMPLE = "-----BEGIN RSA PRIVATE KEY-----"
 
 
 def _db_rule() -> Rule:
@@ -439,23 +438,31 @@ class TestBinaryAndUnsupportedFormats:
 class TestBuiltinRulesetIntegration:
     """使用完整内置规则集的端到端扫描验证。"""
 
-    def test_builtin_ruleset_scans_txt_password_and_key(self, tmp_path: Path) -> None:
-        """内置规则集应同时扫描到 txt 中的密码赋值和私钥文件头。"""
+    def test_builtin_ruleset_scans_txt_password(self, tmp_path: Path) -> None:
+        """内置规则集应扫描到 txt 中的密码赋值。"""
         path = tmp_path / "secrets.txt"
         path.write_text(
-            f"{_PASSWORD_SAMPLE}\n{_PRIVATE_KEY_SAMPLE}\n",
+            f"{_PASSWORD_SAMPLE}\n",
             encoding="utf-8",
         )
         ruleset = load_builtin_ruleset()
         scanner = Scanner(ruleset)
         report = scanner.scan(tmp_path)
 
-        pwd_hit = _find_hit(report.results, "P0102-通用密码赋值")
-        key_hit = _find_hit(report.results, "P0101-私钥文件头")
+        pwd_hit = _find_hit(report.results, "P0101-通用密码赋值")
         assert pwd_hit is not None
-        assert key_hit is not None
         assert pwd_hit.match_text == _PASSWORD_SAMPLE
-        assert key_hit.match_text == _PRIVATE_KEY_SAMPLE
+
+    def test_builtin_ruleset_scans_sensitive_filename(self, tmp_path: Path) -> None:
+        """内置规则集应扫描到 .env 等敏感文件名（P0102）。"""
+        path = tmp_path / ".env"
+        path.write_text("DATABASE_URL=postgres://localhost\n", encoding="utf-8")
+        ruleset = load_builtin_ruleset()
+        scanner = Scanner(ruleset)
+        report = scanner.scan(tmp_path)
+
+        filename_hit = _find_hit(report.results, "P0102-敏感配置文件名")
+        assert filename_hit is not None
 
     def test_builtin_ruleset_scans_yaml_password(self, tmp_path: Path) -> None:
         """内置规则集应扫描到 yaml 中的密码赋值。"""
@@ -467,7 +474,7 @@ class TestBuiltinRulesetIntegration:
         ruleset = load_builtin_ruleset()
         scanner = Scanner(ruleset)
         report = scanner.scan(tmp_path)
-        hit = _find_hit(report.results, "P0102-通用密码赋值")
+        hit = _find_hit(report.results, "P0101-通用密码赋值")
         assert hit is not None
         assert _PASSWORD_SAMPLE in hit.match_text
 
@@ -481,6 +488,6 @@ class TestBuiltinRulesetIntegration:
         ruleset = load_builtin_ruleset()
         scanner = Scanner(ruleset)
         report = scanner.scan(tmp_path)
-        hit = _find_hit(report.results, "P0102-通用密码赋值")
+        hit = _find_hit(report.results, "P0101-通用密码赋值")
         assert hit is not None
         assert _PASSWORD_SAMPLE in hit.match_text

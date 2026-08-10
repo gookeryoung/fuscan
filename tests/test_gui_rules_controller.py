@@ -146,16 +146,15 @@ class TestRulesFileList:
         assert model[1]["exists"] is False
 
     def test_rules_file_model_builtin_has_scan_extensions(self, config_controller: ConfigController) -> None:
-        """内置规则项应携带 scanExtensions（来自 builtin.yaml）与 state='list'。"""
+        """内置规则项应携带 scanExtensions（来自 builtin-patterns.yaml）与 state='list'。"""
         controller = RulesController(config_controller)
         model = controller.rulesFileModel
         assert model[0]["isBuiltin"] is True
         assert model[0]["scanExtensionsState"] == "list"
         exts = model[0]["scanExtensions"]
         assert isinstance(exts, list)
-        # builtin.yaml 至少定义了 txt/log/pdf/docx 等后缀
-        assert "txt" in exts
-        assert "pdf" in exts
+        # builtin-patterns.yaml 仅定义 txt 后缀作为极简默认，用户可覆盖扩展
+        assert exts == ["txt"]
 
     def test_rules_file_model_user_file_without_scan_extensions(self, controller_with_file: RulesController) -> None:
         """用户规则文件未定义 scan_extensions 时 state='unset'，列表为空。"""

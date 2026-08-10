@@ -1,4 +1,4 @@
-# fuscan-re 工具链配置：nightly + rust-src。
+# fuscan-core 工具链配置：nightly + rust-src。
 #
 # 原因：Rust ≥1.78 stable 的 prebuilt std 硬引用 Win8/Win10 才有的 API
 # （WaitOnAddress / GetSystemTimePreciseAsFileTime / ProcessPrng），
@@ -10,8 +10,8 @@
 # rustup 读取本文件后自动安装 nightly 工具链与 rust-src 组件（build-std 必需）。
 # 不列 targets 字段：win7 target 是 Tier-3 无预编译 artifacts，rustup target add
 # 会报错；-Z build-std 从 rust-src 源码构建 std，不需要 target 预安装。
-# 仅影响 packages/fuscan-re/ 下的 cargo 命令；fuscan 主项目（Python）开发不受影响。
-# ci.yml 用 `--extra test` 不构建 fuscan-re，故 CI test job 不需要 nightly。
+# 仅影响 packages/fuscan-core/ 下的 cargo 命令；fuscan 主项目（Python）开发不受影响。
+# ci.yml 用 `--extra test` 不构建 fuscan-core，故 CI test job 不需要 nightly。
 [toolchain]
 channel = "nightly"
 components = ["rust-src"]

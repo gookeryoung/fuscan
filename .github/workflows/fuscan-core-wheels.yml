@@ -1,40 +1,40 @@
-name: fuscan-re wheels
+name: fuscan-core wheels
 
-# 构建 fuscan-re（Rust + PyO3 原生匹配引擎）的多平台 wheel。
+# 构建 fuscan-core（Rust + PyO3 原生匹配引擎）的多平台 wheel。
 #
 # 触发：
-#   - push 到 main/develop（仅 packages/fuscan-re/ 或本 workflow 变更时）：构建验证
+#   - push 到 main/develop（仅 packages/fuscan-core/ 或本 workflow 变更时）：构建验证
 #   - PR 到 main/develop（同上 paths 过滤）：构建验证
-#   - tag fuscan-re-v*.*.*：构建 + 发布到 PyPI（OIDC trusted publisher）
+#   - tag fuscan-core-v*.*.*：构建 + 发布到 PyPI（OIDC trusted publisher）
 #   - workflow_dispatch：手动触发构建验证
 #
-# fuscan-re 是独立 PyPI 包（版本独立于 fuscan 主包），位于 packages/fuscan-re/。
+# fuscan-core 是独立 PyPI 包（版本独立于 fuscan 主包），位于 packages/fuscan-core/。
 # monorepo 布局：用 maturin-action 的 working-directory 在子目录运行 maturin。
 #
 # 发布前置条件（仅 tag 触发时需要）：
-#   - PyPI 项目 fuscan-re 配置 GitHub Actions OIDC trusted publisher
-#     （owner=gookeryoung/fuscan, workflow=fuscan-re-wheels.yml, environment=pypi）
+#   - PyPI 项目 fuscan-core 配置 GitHub Actions OIDC trusted publisher
+#     （owner=gookeryoung/fuscan, workflow=fuscan-core-wheels.yml, environment=pypi）
 #   - 或在 repository secrets 配置 PYPI_API_TOKEN，改用 token 发布
 #
-# iter-03：替代 packages/fuscan-re/.github/workflows/CI.yml（maturin 自动生成，
+# iter-03：替代 packages/fuscan-core/.github/workflows/CI.yml（maturin 自动生成，
 # 但位于子目录不会被 GitHub Actions 识别）。
 
 on:
   push:
     branches: [main, develop]
     paths:
-      - 'packages/fuscan-re/**'
-      - '.github/workflows/fuscan-re-wheels.yml'
-    tags: ['fuscan-re-v*.*.*']
+      - 'packages/fuscan-core/**'
+      - '.github/workflows/fuscan-core-wheels.yml'
+    tags: ['fuscan-core-v*.*.*']
   pull_request:
     branches: [main, develop]
     paths:
-      - 'packages/fuscan-re/**'
-      - '.github/workflows/fuscan-re-wheels.yml'
+      - 'packages/fuscan-core/**'
+      - '.github/workflows/fuscan-core-wheels.yml'
   workflow_dispatch:
 
 concurrency:
-  group: fuscan-re-wheels-${{ github.ref }}
+  group: fuscan-core-wheels-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -81,7 +81,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           # monorepo：在子目录运行 maturin
-          working-directory: packages/fuscan-re
+          working-directory: packages/fuscan-core
           target: ${{ matrix.platform.target }}
           # Windows win7 target 需 nightly 工具链；其他平台用默认 stable
           toolchain: ${{ matrix.platform.toolchain || 'stable' }}
@@ -101,8 +101,8 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: fuscan-re-wheels-${{ matrix.platform.os }}-${{ matrix.platform.target }}
-          path: packages/fuscan-re/dist
+          name: fuscan-core-wheels-${{ matrix.platform.os }}-${{ matrix.platform.target }}
+          path: packages/fuscan-core/dist
           retention-days: 7
           if-no-files-found: error
 
@@ -116,22 +116,22 @@ jobs:
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
-          working-directory: packages/fuscan-re
+          working-directory: packages/fuscan-core
           command: sdist
           args: --out dist
 
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
-          name: fuscan-re-sdist
-          path: packages/fuscan-re/dist
+          name: fuscan-core-sdist
+          path: packages/fuscan-core/dist
           retention-days: 7
           if-no-files-found: error
 
   publish:
     name: Publish to PyPI
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/fuscan-re-v')
+    if: startsWith(github.ref, 'refs/tags/fuscan-core-v')
     needs: [build, sdist]
     environment: pypi
     timeout-minutes: 10
@@ -152,6 +152,6 @@ jobs:
         uses: astral-sh/setup-uv@v8.3.2
 
       # OIDC trusted publisher：无需 API token，由 PyPI 验证 GitHub OIDC
-      # 前置：在 PyPI 项目 fuscan-re 配置 trusted publisher
+      # 前置：在 PyPI 项目 fuscan-core 配置 trusted publisher
       - name: Publish to PyPI (OIDC)
         run: uv publish dist/

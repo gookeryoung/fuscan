@@ -45,8 +45,8 @@ from fuscan.scanner.context import MatchContext
 from fuscan.scanner.result import MatchResult
 
 if TYPE_CHECKING:
-    # fuscan_re 是 PyO3 编译扩展，无 Python stub；仅用于类型检查提示
-    from fuscan_re import ContentRegexPoolEngine  # pyrefly: ignore [missing-module-attribute]
+    # fuscan_core 是 PyO3 编译扩展，无 Python stub；仅用于类型检查提示
+    from fuscan_core import ContentRegexPoolEngine  # pyrefly: ignore [missing-module-attribute]
 
 __all__ = [
     "AndMatcher",
@@ -444,7 +444,7 @@ class ContentRegexPool:
         # evaluate 结果缓存：同 context 只跑一次
         self._cached_context_id: int | None = None
         self._cached_results: dict[int, MatchResult] | None = None
-        # 原生正则池引擎（fuscan_re 可用时构建），None 时走 Python 路径
+        # 原生正则池引擎（fuscan_core 可用时构建），None 时走 Python 路径
         self._native_engine: ContentRegexPoolEngine | None = None
 
     def register(self, spec: LeafMatch) -> int:
@@ -528,7 +528,7 @@ class ContentRegexPool:
             if group.compiled is not None:
                 compiled_ids.update(group.child_ids)
         self._compiled_child_ids = frozenset(compiled_ids)
-        # 原生正则池引擎：fuscan_re 可用时构建，与 Python 池同源（所有已注册
+        # 原生正则池引擎：fuscan_core 可用时构建，与 Python 池同源（所有已注册
         # 子项）。evaluate() 优先走原生路径（释放 GIL），失败回退 Python 路径。
         # 原生引擎按 case_sensitive 重新分组并编译复合 OR 正则，单子项组自动
         # 跳过（与 Python 一致）。用原生引擎的 compiled_child_ids 替换 Python 侧

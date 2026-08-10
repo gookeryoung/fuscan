@@ -1,4 +1,4 @@
-//! fuscan-re：Rust + PyO3 原生匹配引擎。
+//! fuscan-core：Rust + PyO3 原生引擎。
 //!
 //! 将 fuscan 的 `match_content_via_buckets` 核心逻辑下沉到 Rust，
 //! 通过 PyO3 `allow_threads` 释放 GIL，并用 `regex` crate（DFA + aho-corasick）
@@ -1127,12 +1127,12 @@ fn dedup_substrings_py(keywords: Vec<String>) -> Vec<String> {
     dedup_substrings(keywords)
 }
 
-/// fuscan-re：Rust + PyO3 原生匹配引擎。
+/// fuscan-core：Rust + PyO3 原生引擎。
 ///
 /// 提供 `ContentBucketEngine` 类，替代 Python `match_content_via_buckets`，
 /// 释放 GIL 实现真正并行的正则匹配。
 #[pymodule]
-fn fuscan_re(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn fuscan_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ContentBucketEngine>()?;
     m.add_class::<RuleHitData>()?;
     m.add_class::<ContentRegexPoolEngine>()?;

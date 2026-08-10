@@ -1,16 +1,16 @@
-"""fuscan-re 原生匹配引擎集成层：条件导入 + RuleSpec 构建 + RuleHit 转换。
+"""fuscan-core 原生匹配引擎集成层：条件导入 + RuleSpec 构建 + RuleHit 转换。
 
 模块背景
 ----------
 
-``fuscan_re`` 是 fuscan 的 Rust + PyO3 原生匹配引擎，将 Python
+``fuscan_core`` 是 fuscan 的 Rust + PyO3 原生匹配引擎，将 Python
 :func:`fuscan.scanner._content_buckets.match_content_via_buckets` 的核心逻辑下沉到
 Rust：用 ``regex`` crate（DFA + aho-corasick）替代 Python ``re``，并通过 PyO3
 ``py.detach`` 释放 GIL，实现大文本复合正则的真正并行匹配。
 
 本模块在 Python 侧提供薄包装：
 
-- 运行时条件导入 ``fuscan_re``：未安装/导入失败时 ``NATIVE_AVAILABLE=False``，
+- 运行时条件导入 ``fuscan_core``：未安装/导入失败时 ``NATIVE_AVAILABLE=False``，
   扫描器自动回退纯 Python 路径，不影响功能。
 - :func:`build_native_engine` 从 Python 桶提取 :class:`RuleSpec` 构建原生引擎。
 - :func:`match_content_via_native` 调用原生引擎匹配并将 :class:`RuleHitData`
@@ -34,8 +34,8 @@ from fuscan.scanner._content_buckets import _ContentRuleBucket
 from fuscan.scanner.result import MatchResult, RuleHit
 
 if TYPE_CHECKING:
-    # fuscan_re 是 PyO3 编译扩展，无 Python stub；仅用于类型检查提示
-    from fuscan_re import (
+    # fuscan_core 是 PyO3 编译扩展，无 Python stub；仅用于类型检查提示
+    from fuscan_core import (
         ContentBucketEngine,  # pyrefly: ignore [missing-module-attribute]
         ContentRegexPoolEngine,  # pyrefly: ignore [missing-module-attribute]
         PoolHitData,  # pyrefly: ignore [missing-module-attribute]
@@ -53,13 +53,13 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 try:
-    from fuscan_re import ContentBucketEngine as _ContentBucketEngine  # pyrefly: ignore [missing-module-attribute]
-    from fuscan_re import (
+    from fuscan_core import ContentBucketEngine as _ContentBucketEngine  # pyrefly: ignore [missing-module-attribute]
+    from fuscan_core import (
         ContentRegexPoolEngine as _ContentRegexPoolEngine,  # pyrefly: ignore [missing-module-attribute]
     )
 
     NATIVE_AVAILABLE: bool = True
-except ImportError:  # pragma: no cover - fuscan_re 未安装时走此分支，CI 已安装跳过
+except ImportError:  # pragma: no cover - fuscan_core 未安装时走此分支，CI 已安装跳过
     NATIVE_AVAILABLE = False
     _ContentBucketEngine = None  # type: ignore[assignment,misc]
     _ContentRegexPoolEngine = None  # type: ignore[assignment,misc]
@@ -71,7 +71,7 @@ class RuleSpec:
 
     PyO3 ``FromPyObject`` derive 通过 ``getattr`` 提取字段，因此需用 dataclass
     实例（具备同名属性）传入，而非 dict。字段顺序与命名严格对齐 Rust 端
-    :class:`fuscan_re::RuleSpec`。
+    :class:`fuscan_core::RuleSpec`。
     """
 
     rule_name: str
@@ -93,7 +93,7 @@ def build_native_engine(
     原生引擎自动跳过（与 Python ``build_content_buckets`` 一致）。
 
     :param buckets: 已编译的 CONTENT 桶列表（global + ext 专属可合并传入）
-    :return: 原生引擎实例；``fuscan_re`` 不可用、无规则或构建失败时返回 None
+    :return: 原生引擎实例；``fuscan_core`` 不可用、无规则或构建失败时返回 None
     """
     if not NATIVE_AVAILABLE or not buckets:
         return None
@@ -181,7 +181,7 @@ def _convert_hit(raw: RuleHitData) -> RuleHit:
 class PoolGroupSpecData:
     """传给原生正则池引擎的子项规格。
 
-    与 Rust 端 :class:`fuscan_re::PoolGroupSpec` 字段严格对齐。
+    与 Rust 端 :class:`fuscan_core::PoolGroupSpec` 字段严格对齐。
     PyO3 ``FromPyObject`` 通过 ``getattr`` 提取字段，须用 dataclass 实例传入。
     """
 
@@ -202,7 +202,7 @@ def build_native_regex_pool(
     原生引擎自动跳过（与 Python ``ContentRegexPool.compile`` 一致）。
 
     :param specs: 池中所有已注册子项的规格列表
-    :return: 原生引擎实例；``fuscan_re`` 不可用、无规格或构建失败时返回 None
+    :return: 原生引擎实例；``fuscan_core`` 不可用、无规格或构建失败时返回 None
     """
     if not NATIVE_AVAILABLE or not specs:
         return None

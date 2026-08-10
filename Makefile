@@ -23,7 +23,7 @@ build b: ## 构建分发包 (wheel + sdist)
 clean c: ## 清理构建产物与缓存
 	rm -rf build/ dist/ wheels/ *.egg-info htmlcov/ .coverage .coverage.* coverage.xml docs/_build/ .tox/
 	rm -rf .ruff_cache/ .pyrefly_cache/ .mypy_cache/
-	rm -rf packages/fuscan-re/target/ packages/fuscan-re/dist/
+	rm -rf packages/fuscan-core/target/ packages/fuscan-core/dist/
 	find src tests -type d -name __pycache__ -exec rm -rf {} +
 	find src tests -type f -name "*.py[oc]" -delete
 

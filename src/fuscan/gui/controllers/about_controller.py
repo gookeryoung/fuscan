@@ -69,16 +69,16 @@ _DEPENDENCIES: tuple[str, ...] = (
 
 
 def _detect_native_matcher_status() -> str:
-    """检测 fuscan-re 原生匹配引擎状态。
+    """检测 fuscan-core 原生引擎状态。
 
-    fuscan-re 是可选依赖（Rust + PyO3 实现，缺失时回退纯 Python），
+    fuscan-core 是可选依赖（Rust + PyO3 实现，缺失时回退纯 Python），
     在依赖列表中显示其安装状态与版本，便于用户判断是否启用原生加速。
     """
     try:
-        v = version("fuscan-re")
+        v = version("fuscan-core")
     except PackageNotFoundError:
-        return "fuscan-re - 原生匹配引擎（未安装，使用纯 Python）"
-    return f"fuscan-re {v} - 原生匹配引擎（已启用）"
+        return "fuscan-core - 原生引擎（未安装，使用纯 Python）"
+    return f"fuscan-core {v} - 原生引擎（已启用）"
 
 
 class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -117,7 +117,7 @@ class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def nativeEngines(self) -> list[str]:
         """项目原生引擎列表（与第三方依赖并列展示）。
 
-        fuscan-re 是 Rust + PyO3 实现的可选原生匹配引擎，
+        fuscan-core 是 Rust + PyO3 实现的可选原生引擎，
         缺失时回退纯 Python，行为一致但性能较低。
         """
         return [_detect_native_matcher_status()]

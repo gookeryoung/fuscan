@@ -92,8 +92,8 @@ from fuscan.scanner.result import (
 from fuscan.scanner.walker import FileWalker
 
 if TYPE_CHECKING:
-    # fuscan_re 是 PyO3 编译扩展，无 Python stub；仅用于类型检查提示
-    from fuscan_re import ContentBucketEngine  # pyrefly: ignore [missing-module-attribute]
+    # fuscan_core 是 PyO3 编译扩展，无 Python stub；仅用于类型检查提示
+    from fuscan_core import ContentBucketEngine  # pyrefly: ignore [missing-module-attribute]
 
     from fuscan.archive import ArchiveScanner
     from fuscan.cache import CacheStore
@@ -287,7 +287,7 @@ class Scanner:
                         all_bucketed_names.add(r.name)
             self._bucketed_rule_names = frozenset(all_bucketed_names)
             self._content_rule_names = frozenset(rule.name for rule in ruleset.rules if spec_needs_content(rule.match))
-            # 原生匹配引擎：仅在 fuscan_re 可用时构建；与 Python 桶同源（global + 各 ext
+            # 原生匹配引擎：仅在 fuscan_core 可用时构建；与 Python 桶同源（global + 各 ext
             # 全局+专属桶），由 _match_content_via_buckets_impl 透传到
             # match_content_via_buckets。原生引擎不可用或构建失败时返回 None，
             # 自动回退到 Python 路径（语义完全等价）。

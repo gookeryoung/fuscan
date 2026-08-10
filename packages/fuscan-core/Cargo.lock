@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fuscan-re"
+name = "fuscan-core"
 version = "0.1.0"
 dependencies = [
  "pyo3",

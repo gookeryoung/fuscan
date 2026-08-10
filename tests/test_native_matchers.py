@@ -1,6 +1,6 @@
-"""fuscan-re 原生匹配引擎集成测试。
+"""fuscan-core 原生匹配引擎集成测试。
 
-验证 ``fuscan_re`` 原生引擎与 Python ``match_content_via_buckets`` 语义等价：
+验证 ``fuscan_core`` 原生引擎与 Python ``match_content_via_buckets`` 语义等价：
 - 各匹配模式（REGEX/CONTAINS/EQUALS/STARTSWITH/ENDSWITH）命中结果一致
 - case_sensitive True/False 行为一致
 - 预筛关键字命中/未命中路径一致
@@ -9,7 +9,7 @@
 - 原生引擎不可用时自动回退 Python 路径
 - Scanner 端到端扫描结果一致
 
-测试通过 ``pytest.importorskip("fuscan_re")`` 跳过未安装原生引擎的环境，
+测试通过 ``pytest.importorskip("fuscan_core")`` 跳过未安装原生引擎的环境，
 避免在纯 Python 部署中假失败。
 """
 
@@ -38,7 +38,7 @@ from fuscan.scanner._native_matchers import (
 from fuscan.scanner.matchers import build_matcher
 from fuscan.scanner.result import RuleHit
 
-fuscan_re = pytest.importorskip("fuscan_re")
+fuscan_core = pytest.importorskip("fuscan_core")
 
 
 def _build_ruleset(*rules: Rule) -> RuleSet:
@@ -79,7 +79,7 @@ class TestNativeAvailability:
     """原生引擎可用性基础检测。"""
 
     def test_native_available(self) -> None:
-        """fuscan_re 已安装时 NATIVE_AVAILABLE 应为 True。"""
+        """fuscan_core 已安装时 NATIVE_AVAILABLE 应为 True。"""
         assert NATIVE_AVAILABLE is True
 
     def test_build_native_engine_returns_engine_for_non_empty_buckets(self) -> None:
@@ -523,10 +523,10 @@ class TestNativeEngineFallback:
             case_sensitive=False,
         )
         # 直接调用原生引擎构造函数，应抛 ValueError 并被 build_native_engine 吞掉
-        import fuscan_re
+        import fuscan_core
 
         with pytest.raises(ValueError):
-            fuscan_re.ContentBucketEngine([bad_spec])  # pyrefly: ignore [missing-attribute]
+            fuscan_core.ContentBucketEngine([bad_spec])  # pyrefly: ignore [missing-attribute]
 
     def test_build_native_engine_swallows_constructor_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """原生引擎构造函数抛异常时 build_native_engine 返回 None（日志记录）。"""

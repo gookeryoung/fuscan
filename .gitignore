@@ -9,11 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
-# Rust 编译产物（fuscan-re PyO3 扩展）
+# Rust 编译产物（fuscan-core PyO3 扩展）
 # 防止 hatchling sdist 把 500MB+ 的 target/ 打入源码包
-packages/fuscan-re/target/
-packages/fuscan-re/dist/
-packages/fuscan-re/.venv*
+packages/fuscan-core/target/
+packages/fuscan-core/dist/
+packages/fuscan-core/.venv*
 
 # 测试与覆盖率
 .coverage

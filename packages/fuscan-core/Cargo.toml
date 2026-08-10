@@ -1,21 +1,21 @@
 [package]
-name = "fuscan-re"
+name = "fuscan-core"
 version = "0.1.0"
 edition = "2021"
-description = "Rust + PyO3 原生匹配引擎，释放 GIL 加速 fuscan 正则扫描"
+description = "Rust + PyO3 原生引擎，释放 GIL 加速 fuscan 扫描（正则匹配/编码检测/OLE 解析）"
 license = "MIT"
 repository = "https://github.com/gooker_young/fuscan"
-keywords = ["regex", "pyo3", "scanner", "gil"]
+keywords = ["regex", "pyo3", "scanner", "gil", "encoding"]
 categories = ["text-processing"]
 
 [lib]
-name = "fuscan_re"
+name = "fuscan_core"
 crate-type = ["cdylib"]
 
 [dependencies]
 # abi3-py310：绑定 CPython 3.10 稳定 ABI（PEP 384），构建单一 wheel 覆盖 Python 3.10+。
 # 收益：构建量从 N 版本 × M 平台降为 1 × M 平台；PyPI wheel 数减少，覆盖更广。
-# 限制：不能用 CPython 版本特定 API；fuscan-re 仅用基础类型，完全兼容。
+# 限制：不能用 CPython 版本特定 API；fuscan-core 仅用基础类型，完全兼容。
 pyo3 = { version = "0.28.2", features = ["extension-module", "abi3-py310"] }
 regex = "1.11"
 regex-syntax = "0.8"

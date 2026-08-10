@@ -54,8 +54,8 @@ from fuscan.scanner.matchers import Matcher
 from fuscan.scanner.result import MatchResult, RuleHit
 
 if TYPE_CHECKING:
-    # fuscan_re 是 PyO3 编译扩展，无 Python stub；仅用于类型检查提示
-    from fuscan_re import ContentBucketEngine  # pyrefly: ignore [missing-module-attribute]
+    # fuscan_core 是 PyO3 编译扩展，无 Python stub；仅用于类型检查提示
+    from fuscan_core import ContentBucketEngine  # pyrefly: ignore [missing-module-attribute]
 
 __all__ = [
     "build_content_buckets",

@@ -1,6 +1,6 @@
 """ContentRegexPool 原生引擎集成测试。
 
-验证 fuscan_re.ContentRegexPoolEngine 与 Python ContentRegexPool.evaluate
+验证 fuscan_core.ContentRegexPoolEngine 与 Python ContentRegexPool.evaluate
 语义完全等价：child_id 集合、MatchResult 字段（match_text/match_count/detail/
 match_texts/match_description）一致。
 """
@@ -22,7 +22,7 @@ from fuscan.scanner.context import FileEntry, MatchContext
 from fuscan.scanner.matchers import ContentRegexPool
 from fuscan.scanner.result import MatchResult
 
-pytestmark = pytest.mark.skipif(not NATIVE_AVAILABLE, reason="fuscan_re 未安装")
+pytestmark = pytest.mark.skipif(not NATIVE_AVAILABLE, reason="fuscan_core 未安装")
 
 
 def _make_context(content: str) -> MatchContext:
@@ -325,7 +325,7 @@ class TestPoolEnginePerformance:
         # 构建池（compile 构建原生引擎）
         pool = _build_pool(specs)
         native_engine = pool._native_engine
-        assert native_engine is not None, "fuscan_re 可用时原生引擎应构建成功"
+        assert native_engine is not None, "fuscan_core 可用时原生引擎应构建成功"
 
         # 构造约 48KB 测试文本：命中样本 + 噪声（与 iter-01 BucketEngine 基准一致）
         hit_block = (

@@ -3,8 +3,8 @@ name: fuscan-re wheels
 # 构建 fuscan-re（Rust + PyO3 原生匹配引擎）的多平台 wheel。
 #
 # 触发：
-#   - push 到 main/develop：构建验证（仅上传 artifact，不发布）
-#   - PR 到 main/develop：构建验证
+#   - push 到 main/develop（仅 packages/fuscan-re/ 或本 workflow 变更时）：构建验证
+#   - PR 到 main/develop（同上 paths 过滤）：构建验证
 #   - tag fuscan-re-v*.*.*：构建 + 发布到 PyPI（OIDC trusted publisher）
 #   - workflow_dispatch：手动触发构建验证
 #
@@ -22,9 +22,15 @@ name: fuscan-re wheels
 on:
   push:
     branches: [main, develop]
+    paths:
+      - 'packages/fuscan-re/**'
+      - '.github/workflows/fuscan-re-wheels.yml'
     tags: ['fuscan-re-v*.*.*']
   pull_request:
     branches: [main, develop]
+    paths:
+      - 'packages/fuscan-re/**'
+      - '.github/workflows/fuscan-re-wheels.yml'
   workflow_dispatch:
 
 concurrency:

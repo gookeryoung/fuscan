@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import importlib
 import logging
 import os
 import sys
@@ -135,11 +136,12 @@ def _play_hit_sound(severity: str) -> None:
     if sys.platform != "win32":
         return
     try:
-        import winsound
-
+        # 动态导入避免 pyrefly 在 Linux CI 上报 missing-import
+        # winsound 是 Windows 专有标准库模块
+        winsound = importlib.import_module("winsound")
         freq, duration = _HIT_SOUND_PARAMS.get(severity, (800, 200))
         winsound.Beep(freq, duration)
-    except (OSError, RuntimeError) as exc:
+    except (OSError, RuntimeError, ImportError) as exc:
         # 蜂鸣器不可用（部分虚拟机/无音频设备）不阻塞流程
         logger.debug("监控命中提示音播放失败: %s", exc)
 

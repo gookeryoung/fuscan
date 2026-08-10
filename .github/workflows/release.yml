@@ -90,8 +90,13 @@ jobs:
       # fspack 不在 fuscan 依赖中，需单独安装到 venv。
       # fspack 的 download_wheels 用 `pip download` 拉 wheel，但 uv 管理的 venv 默认不含 pip，
       # 且 CI runner 上 PATH 中可能没有带 pip 的系统 python，故显式安装 pip 到 venv。
+      # 临时从 GitHub main 安装：PyPI 0.3.18-0.3.26 的 .gitignore `wheels/` 规则误杀
+      # src/fspack/packaging/wheels/ 子包（hatchling 尊重 .gitignore 排除），
+      # stages.py 顶层 `from fspack.packaging.wheels import download_wheels` 抛 ModuleNotFoundError。
+      # 已修复（.gitignore `wheels/` → `/wheels/` 限定根目录）并推送 main，
+      # 待 fspack bump 版本发布 0.3.27 到 PyPI 后改回 `uv pip install fspack`。
       - name: Install fspack & pip
-        run: uv pip install fspack pip
+        run: uv pip install git+https://github.com/gookeryoung/fspack.git pip
 
       # fuscan-re 原生匹配引擎：从 PyPI 拉预编译 wheel（由 fuscan-re-wheels.yml 发布），
       # 避免在 fspack job 安装 Rust 工具链。uv pip install 不走 workspace 解析，直接从 PyPI 拉。
@@ -170,8 +175,13 @@ jobs:
       # fspack 不在 fuscan 依赖中，需单独安装到 venv。
       # fspack 的 download_wheels 用 `pip download` 拉 wheel，但 uv 管理的 venv 默认不含 pip，
       # 且 CI runner 上 PATH 中可能没有带 pip 的系统 python，故显式安装 pip 到 venv。
+      # 临时从 GitHub main 安装：PyPI 0.3.18-0.3.26 的 .gitignore `wheels/` 规则误杀
+      # src/fspack/packaging/wheels/ 子包（hatchling 尊重 .gitignore 排除），
+      # stages.py 顶层 `from fspack.packaging.wheels import download_wheels` 抛 ModuleNotFoundError。
+      # 已修复（.gitignore `wheels/` → `/wheels/` 限定根目录）并推送 main，
+      # 待 fspack bump 版本发布 0.3.27 到 PyPI 后改回 `uv pip install fspack`。
       - name: Install fspack & pip
-        run: uv pip install fspack pip
+        run: uv pip install git+https://github.com/gookeryoung/fspack.git pip
 
       # fuscan-re 原生匹配引擎：从 PyPI 拉预编译 wheel（由 fuscan-re-wheels.yml 发布），
       # 避免在 fspack job 安装 Rust 工具链。uv pip install 不走 workspace 解析，直接从 PyPI 拉。

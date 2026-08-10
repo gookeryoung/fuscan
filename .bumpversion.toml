@@ -5,6 +5,9 @@ exclude = ["template/*"]
 message = "chore: 更新版本 {current_version} → {new_version}"
 tag = true
 tag_name = "v{new_version}"
+# 版本升级后重新生成用户手册 PDF，确保随包分发的 PDF 与代码版本同步。
+# pre_commit_hooks 在文件修改后、commit 前运行，脚本会自动 git add 生成的 PDF。
+pre_commit_hooks = ["uv run python scripts/generate_manual_pdf.py"]
 
 [[tool.bumpversion.files]]
 filename = "pyproject.toml"
@@ -16,3 +19,8 @@ replace = '\1"{new_version}"'
 filename = "src/fuscan/__init__.py"
 search = '__version__ = "{current_version}"'
 replace = '__version__ = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "docs/manual.md"
+search = "> 版本：{current_version}"
+replace = "> 版本：{new_version}"

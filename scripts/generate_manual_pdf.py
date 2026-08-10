@@ -8,15 +8,22 @@
 
 中文字体使用 reportlab 内置 CID 字体 ``STSong-Light``，跨平台一致。
 
+版本号从 ``src/fuscan/__init__.py`` 的 ``__version__`` 动态读取，
+不依赖 fuscan 包安装，确保 PDF 与代码版本始终同步。
+
 使用::
 
     uv run python scripts/generate_manual_pdf.py
 
-版本升级后须重新运行本脚本，确保随包分发的 PDF 与代码版本同步。
+``bump-my-version`` 的 ``pre_commit_hooks`` 会在版本升级时自动调用本脚本，
+重新生成 PDF 并将其暂存，随后并入 bump commit。
 """
 
 from __future__ import annotations
 
+import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -43,7 +50,23 @@ from reportlab.platypus import (
 _ROOT = Path(__file__).resolve().parent.parent
 _OUTPUT_DIR = _ROOT / "src" / "fuscan" / "assets" / "docs"
 _OUTPUT_PDF = _OUTPUT_DIR / "fuscan-用户手册.pdf"
-_VERSION = "0.2.17"
+_INIT_FILE = _ROOT / "src" / "fuscan" / "__init__.py"
+
+
+def _read_version() -> str:
+    """从 ``src/fuscan/__init__.py`` 解析 ``__version__``。
+
+    直接读取源文件而非 import，避免脚本依赖 fuscan 包安装，
+    确保在 bump hook 等未安装环境也能运行。
+    """
+    text = _INIT_FILE.read_text(encoding="utf-8")
+    match = re.search(r'^__version__\s*=\s*"([^"]+)"', text, re.MULTILINE)
+    if not match:
+        raise RuntimeError(f"无法从 {_INIT_FILE} 解析 __version__")
+    return match.group(1)
+
+
+_VERSION = _read_version()
 
 # 中文字体
 _FONT_CN = "STSong-Light"
@@ -530,6 +553,13 @@ def main() -> int:
     doc.build([kif])
 
     print(f"已生成: {_OUTPUT_PDF} (版本 {_VERSION}, A3 横版单页)")
+
+    # 在 bump-my-version hook 中运行时，自动暂存生成的 PDF，
+    # 使其并入 bump commit（hook 会设置 BVHOOK_NEW_VERSION 环境变量）。
+    if os.environ.get("BVHOOK_NEW_VERSION"):
+        subprocess.run(["git", "add", str(_OUTPUT_PDF)], cwd=_ROOT, check=True)
+        print(f"已暂存（bump hook）: {_OUTPUT_PDF.name}")
+
     return 0
 
 

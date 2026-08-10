@@ -18,7 +18,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-__all__ = ["ASSETS_DIR", "BUILTIN_PATTERNS_PATH", "BUILTIN_RULES_PATH", "MANUAL_PDF_PATH", "SPLASH_QML_URL"]
+__all__ = [
+    "ASSETS_DIR",
+    "BUILTIN_PATTERNS_PATH",
+    "BUILTIN_RULES_PATH",
+    "ICON_QRC_URL",
+    "MANUAL_PDF_PATH",
+    "SPLASH_QML_URL",
+]
 
 # 包内静态资源根目录：``src/fuscan/assets/``
 ASSETS_DIR: Path = Path(__file__).parent / "assets"
@@ -32,6 +39,10 @@ BUILTIN_PATTERNS_PATH: Path = ASSETS_DIR / "rules" / "builtin-patterns.yaml"
 
 # 用户手册 PDF：``assets/docs/fuscan-用户手册.pdf``，GUI 关于页打开
 MANUAL_PDF_PATH: Path = ASSETS_DIR / "docs" / "fuscan-用户手册.pdf"
+
+# 应用图标：``assets/icons/favicon.ico`` 编译进 qrc，供 QGuiApplication.setWindowIcon 使用。
+# Windows 任务栏与窗口标题栏图标均依赖 setWindowIcon，缺失时显示为空白 exe 默认图标。
+ICON_QRC_URL: str = "qrc:/icons/favicon.ico"
 
 # QML
 QML_IMPORT_PATH = "qrc:/qml"

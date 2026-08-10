@@ -58,14 +58,15 @@ def collect_qml_files() -> list[tuple[str, Path]]:
 
 
 def collect_icon_files() -> list[tuple[str, Path]]:
-    """收集所有 .svg 图标，返回 (qrc_alias, abs_path) 列表。
+    """收集所有 .svg 与 .ico 图标，返回 (qrc_alias, abs_path) 列表。
 
     :return: alias 形如 ``icons/pause.svg``，对应 qrc 内路径 ``qrc:/icons/pause.svg``
     """
     files: list[tuple[str, Path]] = []
-    for svg in sorted(ICONS_DIR.glob("*.svg")):
-        alias = f"icons/{svg.name}"
-        files.append((alias, svg))
+    for pattern in ("*.svg", "*.ico"):
+        for icon in sorted(ICONS_DIR.glob(pattern)):
+            alias = f"icons/{icon.name}"
+            files.append((alias, icon))
     return files
 
 
@@ -144,7 +145,7 @@ def main() -> int:
     """
     qml_files = collect_qml_files()
     icon_files = collect_icon_files()
-    print(f"收集 QML 文件 {len(qml_files)} 个，SVG 图标 {len(icon_files)} 个")
+    print(f"收集 QML 文件 {len(qml_files)} 个，图标 {len(icon_files)} 个")
 
     write_qrc(qml_files, icon_files)
     print(f"生成清单: {QRC_FILE.relative_to(ROOT)}")

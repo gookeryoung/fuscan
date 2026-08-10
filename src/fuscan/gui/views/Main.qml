@@ -17,6 +17,14 @@ ApplicationWindow {
     property ThemeController theme: Theme
     property WorkspaceControllerType workspaceController: WorkspaceController
 
+    // 全局字体绑定到 ThemeController：
+    // QGuiApplication.setFont() 仅设置默认值，不会主动刷新已存在的 QML 控件。
+    // 在 ApplicationWindow 显式绑定 font 属性，themeChanged 触发时窗口字体立即更新，
+    // 所有未显式设置 font 的子控件通过 Qt 字体传播机制继承新字体。
+    font.family: theme.fontFamily
+    font.pixelSize: theme.fontSizeBody
+    font.bold: theme.fontBold
+
     // 拦截窗口关闭，先显示退出保存进度 Popup，再异步触发 Qt.quit()
     // 避免 cleanup 阻塞主线程时用户看到「无响应」假象
     onClosing: {

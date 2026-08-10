@@ -59,11 +59,6 @@
     <file alias="icons/target.svg">../assets/icons/target.svg</file>
     <file alias="icons/up_arrow.svg">../assets/icons/up_arrow.svg</file>
     <file alias="icons/warning.svg">../assets/icons/warning.svg</file>
-    <file alias="animations/spinner_primary.png">../assets/animations/spinner_primary.png</file>
-    <file alias="animations/spinner_primary@2x.png">../assets/animations/spinner_primary@2x.png</file>
-    <file alias="animations/spinner_warning.png">../assets/animations/spinner_warning.png</file>
-    <file alias="animations/spinner_warning@2x.png">../assets/animations/spinner_warning@2x.png</file>
-    <file alias="animations/spinner_secondary.png">../assets/animations/spinner_secondary.png</file>
-    <file alias="animations/spinner_secondary@2x.png">../assets/animations/spinner_secondary@2x.png</file>
+    <file alias="icons/favicon.ico">../assets/icons/favicon.ico</file>
   </qresource>
 </RCC>

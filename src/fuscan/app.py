@@ -9,17 +9,17 @@ import sys
 import warnings
 from collections.abc import Sequence
 
-from fuscan.paths import MAIN_QML_URL, QML_IMPORT_PATH, SPLASH_QML_URL
+from fuscan.paths import ICON_QRC_URL, MAIN_QML_URL, QML_IMPORT_PATH, SPLASH_QML_URL
 from fuscan.perf import PerfReport, render_startup_summary, timed
 
 try:
     from PySide2.QtCore import QUrl
-    from PySide2.QtGui import QFont, QGuiApplication
+    from PySide2.QtGui import QFont, QGuiApplication, QIcon
     from PySide2.QtQml import QQmlApplicationEngine
     from PySide2.QtQuickControls2 import QQuickStyle
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import QUrl  # pyrefly: ignore [missing-import]
-    from PySide6.QtGui import QFont, QGuiApplication  # pyrefly: ignore [missing-import]
+    from PySide6.QtGui import QFont, QGuiApplication, QIcon  # pyrefly: ignore [missing-import]
     from PySide6.QtQml import QQmlApplicationEngine  # pyrefly: ignore [missing-import]
     from PySide6.QtQuickControls2 import QQuickStyle  # pyrefly: ignore [missing-import]
 
@@ -152,6 +152,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             app = QGuiApplication.instance() or QGuiApplication(args)
             app.setApplicationName("fuscan")
             app.setOrganizationName("fuscan")
+
+            # 设置应用图标：影响 Windows 任务栏与窗口标题栏图标。
+            # favicon.ico 已编译进 qrc（resources_rc.py），通过 qrc 路径加载。
+            # 必须在 QGuiApplication 构造后、首次显示窗口前设置。
+            app.setWindowIcon(QIcon(ICON_QRC_URL))
 
             # 设置 QtQuick Controls 2 风格为 Fusion（跨平台一致）
             QQuickStyle.setStyle("Fusion")

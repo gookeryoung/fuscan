@@ -158,6 +158,55 @@ Item {
             }
         }
 
+        // ---------- 已替换维度 Tab：待处理 / 已替换 / 全部 ----------
+        TabBar {
+            id: replacedTabBar
+            Layout.fillWidth: true
+            // 默认「待处理」：扫描完成后用户进入结果页时，自动替换的项已被
+            // 标记 replaced=True 并分到此 Tab，避免与未替换项混在一起
+            currentIndex: 0
+            visible: workspaceController.hasCurrentWorkspace
+
+            TabButton {
+                text: "待处理"
+                font.pixelSize: theme.fontSizeBody
+            }
+            TabButton {
+                text: "已替换"
+                font.pixelSize: theme.fontSizeBody
+            }
+            TabButton {
+                text: "全部"
+                font.pixelSize: theme.fontSizeBody
+            }
+
+            onCurrentIndexChanged: {
+                if (!workspaceController.hasCurrentWorkspace) return
+                // 0=待处理（仅未替换）→ 1, 1=已替换 → 2, 2=全部 → 0
+                var v = 1
+                if (currentIndex === 1) v = 2
+                else if (currentIndex === 2) v = 0
+                workspaceController.currentScanController.setResultFilterReplaced(v)
+            }
+
+            // 切换工作区时重置回「待处理」并同步 controller 过滤条件
+            Connections {
+                target: workspaceController
+                function onCurrentWorkspaceChanged() {
+                    replacedTabBar.currentIndex = 0
+                    if (workspaceController.hasCurrentWorkspace) {
+                        workspaceController.currentScanController.setResultFilterReplaced(1)
+                    }
+                }
+            }
+
+            Component.onCompleted: {
+                if (workspaceController.hasCurrentWorkspace) {
+                    workspaceController.currentScanController.setResultFilterReplaced(1)
+                }
+            }
+        }
+
         // ---------- 主体：左右分栏 ----------
         RowLayout {
             Layout.fillWidth: true

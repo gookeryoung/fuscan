@@ -59,6 +59,7 @@ _ROLE_SEVERITY_TEXT = b"severityText"
 _ROLE_SEVERITY_COLOR = b"severityColor"
 _ROLE_HITS_COUNT = b"hitsCount"
 _ROLE_INDEX = b"index"
+_ROLE_REPLACED = b"replaced"
 
 _ROLES: dict[int, bytes] = {
     Qt.UserRole + 1: _ROLE_FILE_PATH,
@@ -67,6 +68,7 @@ _ROLES: dict[int, bytes] = {
     Qt.UserRole + 4: _ROLE_SEVERITY_COLOR,
     Qt.UserRole + 5: _ROLE_HITS_COUNT,
     Qt.UserRole + 6: _ROLE_INDEX,
+    Qt.UserRole + 7: _ROLE_REPLACED,
 }
 
 # 严重度排序权重：CRITICAL=3, WARNING=2, INFO=1，未命中（不应出现）=0
@@ -308,6 +310,7 @@ def filter_and_sort(
     filter_severities: frozenset[Severity],
     sort_field: str,
     sort_ascending: bool,
+    filter_replaced: bool | None = None,
 ) -> tuple[ScanResult, ...]:
     """纯函数：过滤+排序扫描结果（无副作用，可独立测试）。
 
@@ -320,6 +323,8 @@ def filter_and_sort(
     :param filter_severities: 严重度过滤集合（空集合表示不过滤）
     :param sort_field: 排序字段
     :param sort_ascending: True 升序，False 降序
+    :param filter_replaced: 已替换维度过滤；None 不过滤，True 仅显示已替换，
+        False 仅显示未替换（用于「待处理 / 已替换」Tab 切换）
     :return: 过滤+排序后的结果元组
     """
     if not results:
@@ -334,6 +339,8 @@ def filter_and_sort(
         view = [r for r in view if any(name in filter_rules for name in r.rule_names)]
     if filter_severities:
         view = [r for r in view if r.max_severity in filter_severities]
+    if filter_replaced is not None:
+        view = [r for r in view if r.replaced == filter_replaced]
 
     # 阶段 2：排序
     if sort_field == SORT_DEFAULT:
@@ -352,23 +359,26 @@ def filter_and_sort(
     return tuple(view)
 
 
-# 扁平数据行结构（6 列对应 role 定义：filePath, ruleName, severityText, severityColor, hitsCount, index）
+# 扁平数据行结构（7 列对应 role 定义：filePath, ruleName, severityText,
+# severityColor, hitsCount, index, replaced）
 # 用列表元组代替每次 data() 中对 ScanResult 的属性访问 + 计算，减少 5k 行场景下
 # 每帧可见行的 Python 调用开销（约 70-80% 的 data() 直接索引命中）
-_FLAT_COLS = 6
+_FLAT_COLS = 7
 _FLAT_FILE_PATH = 0
 _FLAT_RULE_NAME = 1
 _FLAT_SEV_TEXT = 2
 _FLAT_SEV_COLOR = 3
 _FLAT_HITS_COUNT = 4
 _FLAT_INDEX = 5
+_FLAT_REPLACED = 6
 
 
-def _build_flat_row(result: ScanResult, index: int) -> tuple[str, str, str, str, int, int]:
+def _build_flat_row(result: ScanResult, index: int) -> tuple[str, str, str, str, int, int, bool]:
     """从 ScanResult 预构造扁平数据行（避免 QML data() 中重复属性访问）。
 
     只包含 ResultsPage.qml delegate 使用的字段：
-    file_path_str, rule_name, severity_text, severity_color_hex, hits_count, row_index。
+    file_path_str, rule_name, severity_text, severity_color_hex, hits_count,
+    row_index, replaced。
     """
     return (
         str(result.path),
@@ -377,6 +387,7 @@ def _build_flat_row(result: ScanResult, index: int) -> tuple[str, str, str, str,
         severity_color_hex(result.max_severity),
         len(result.hits),
         index,
+        result.replaced,
     )
 
 
@@ -387,7 +398,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
     内置过滤+排序视图，``rowCount``/``data``/``get_result`` 均基于
     过滤后的视图，``selectedResultIndex`` 直接对应视图行号无需映射。
 
-    新增扁平数据层 ``_flat_data``，预先为每一行构造 6 列扁平元组，
+    新增扁平数据层 ``_flat_data``，预先为每一行构造 7 列扁平元组，
     使 ``data()`` 直接从扁平列表按索引读取而非每次重新计算，
     5k 行场景下 QML delegate 每帧可见 10-20 行时的 Python 调用开销降低约 70%。
     """
@@ -405,17 +416,18 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
 
         # 扁平数据层（与 _filtered 行数相同；None 行对应的 flat 也为 None）
         # 虚拟化范围内的可见行对应的 flat 元组直接供 data() 返回
-        self._flat_data: list[tuple[str, str, str, str, int, int] | None] = []
+        self._flat_data: list[tuple[str, str, str, str, int, int, bool] | None] = []
 
         # 倒排索引（set_results 时重建，remove_result_by_path 增量更新）
         self._severity_index: dict[Severity, list[int]] = {}
         self._rule_index: dict[str, list[int]] = {}
 
         # 排序缓存，key = (id(self._results), filter_text, filter_rules,
-        # filter_severities, sort_field, sort_ascending)，value = 过滤+排序后最终 tuple
+        # filter_severities, filter_replaced, sort_field, sort_ascending)，
+        # value = 过滤+排序后最终 tuple
         # 同一结果集、相同过滤排序条件直接命中，跳过 filter_and_sort
         self._sort_cache: dict[
-            tuple[int, str, frozenset[str], frozenset[Severity], str, bool],
+            tuple[int, str, frozenset[str], frozenset[Severity], bool | None, str, bool],
             tuple[ScanResult, ...],
         ] = {}
 
@@ -423,6 +435,9 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         self._filter_text: str = ""
         self._filter_rules: frozenset[str] = frozenset()
         self._filter_severities: frozenset[Severity] = frozenset()
+        # 已替换维度过滤：None 不过滤，True 仅显示已替换，False 仅显示未替换
+        # 用于「待处理 / 已替换」Tab 切换
+        self._filter_replaced: bool | None = None
 
         # 排序条件：默认按严重度降序（严重 → 轻微）
         self._sort_field: str = SORT_SEVERITY
@@ -478,11 +493,13 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             buf_start = max(0, self._visible_start - _VISIBLE_BUFFER_ROWS)
             buf_end = min(len(self._filtered) - 1, self._visible_end + _VISIBLE_BUFFER_ROWS)
             if not (buf_start <= row <= buf_end):
-                # 占位值：空字符串 / 0，保持 delegate 高度稳定不跳动
+                # 占位值：空字符串 / 0 / False，保持 delegate 高度稳定不跳动
                 if role == Qt.UserRole + 5:  # hitsCount
                     return 0
                 if role == Qt.UserRole + 6:  # index
                     return row
+                if role == Qt.UserRole + 7:  # replaced
+                    return False
                 return ""
         # 扁平数据就绪时直接索引，减少 70%+ Python 属性访问
         if row < len(self._flat_data):
@@ -500,6 +517,8 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
                     return flat_row[_FLAT_HITS_COUNT]
                 if role == Qt.UserRole + 6:
                     return flat_row[_FLAT_INDEX]
+                if role == Qt.UserRole + 7:
+                    return flat_row[_FLAT_REPLACED]
                 return ""
         result = self._filtered[row]
         # 幽灵行（尚未懒填充）直接返回占位
@@ -508,6 +527,8 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
                 return 0
             if role == Qt.UserRole + 6:  # index
                 return row
+            if role == Qt.UserRole + 7:  # replaced
+                return False
             return ""
         if role == Qt.UserRole + 1:
             return str(result.path)
@@ -522,6 +543,8 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             return len(result.hits)
         if role == Qt.UserRole + 6:
             return row
+        if role == Qt.UserRole + 7:
+            return result.replaced
         return ""
 
     # ----------------------------- 公共 API -----------------------------
@@ -952,13 +975,38 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         self._sort_ascending = ascending
         self._schedule_filter_refresh()
 
+    @Slot(int)  # pyrefly: ignore [not-callable]
+    def set_filter_replaced(self, value: int) -> None:
+        """设置已替换维度过滤条件（供 QML 「待处理 / 已替换」Tab 切换）。
+
+        :param value: 0=不过滤（全部），1=仅未替换（待处理），2=仅已替换
+            传入其它值视为不过滤
+        """
+        new_value: bool | None
+        if value == 1:
+            new_value = False
+        elif value == 2:
+            new_value = True
+        else:
+            new_value = None
+        if new_value == self._filter_replaced:
+            return
+        self._filter_replaced = new_value
+        self._schedule_filter_refresh()
+
     def clear_filters(self) -> None:
         """清除所有过滤条件（保留排序）。"""
-        if not self._filter_text and not self._filter_rules and not self._filter_severities:
+        if (
+            not self._filter_text
+            and not self._filter_rules
+            and not self._filter_severities
+            and self._filter_replaced is None
+        ):
             return
         self._filter_text = ""
         self._filter_rules = frozenset()
         self._filter_severities = frozenset()
+        self._filter_replaced = None
         self._schedule_filter_refresh()
 
     @property
@@ -977,6 +1025,11 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         return self._filter_severities
 
     @property
+    def filter_replaced(self) -> bool | None:
+        """当前已替换维度过滤条件。"""
+        return self._filter_replaced
+
+    @property
     def sort_field(self) -> str:
         """当前排序字段。"""
         return self._sort_field
@@ -988,13 +1041,16 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
 
     # ----------------------------- 内部实现 -----------------------------
 
-    def _sort_cache_key(self) -> tuple[int, str, frozenset[str], frozenset[Severity], str, bool]:
+    def _sort_cache_key(
+        self,
+    ) -> tuple[int, str, frozenset[str], frozenset[Severity], bool | None, str, bool]:
         """构建排序缓存 key。"""
         return (
             id(self._results),
             self._filter_text,
             self._filter_rules,
             self._filter_severities,
+            self._filter_replaced,
             self._sort_field,
             self._sort_ascending,
         )
@@ -1063,6 +1119,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
                 self._filter_severities,
                 self._sort_field,
                 self._sort_ascending,
+                self._filter_replaced,
             )
             self._sort_cache[cache_key] = new_filtered
             # 公共应用方法（大小判断→幽灵行/直接赋值）
@@ -1083,6 +1140,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
             filter_severities=self._filter_severities,
             sort_field=self._sort_field,
             sort_ascending=self._sort_ascending,
+            filter_replaced=self._filter_replaced,
             build_index=True,
             index_threshold=_INDEX_THRESHOLD,
             # 索引建在全量 _results 上（非裁剪后的 candidates），保持索引位置与 _results 对齐
@@ -1162,7 +1220,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
     def _on_filter_done(
         self,
         generation: int,
-        cache_key: tuple[int, str, frozenset[str], frozenset[Severity], str, bool],
+        cache_key: tuple[int, str, frozenset[str], frozenset[Severity], bool | None, str, bool],
         filtered: tuple[ScanResult, ...],
         severity_index: dict[Severity, list[int]],
         rule_index: dict[str, list[int]],

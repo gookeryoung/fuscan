@@ -68,6 +68,11 @@ Pane {
             selected: sidebar.currentPage === "home"
             onClicked: { sidebar.currentPage = "home" }
         }
+        NavItem {
+            iconSource: "qrc:/icons/search.svg"; label: "文件监控"; pageId: "monitor"
+            selected: sidebar.currentPage === "monitor"
+            onClicked: { sidebar.currentPage = "monitor" }
+        }
 
         Item { Layout.fillHeight: true }  // 弹性撑开
 

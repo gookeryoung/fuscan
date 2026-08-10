@@ -46,6 +46,8 @@ class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
     :param filter_severities: 严重度过滤集合（空集合表示不过滤）
     :param sort_field: 排序字段（``SORT_DEFAULT`` / ``SORT_FILE_PATH`` / …）
     :param sort_ascending: True 升序，False 降序
+    :param filter_replaced: 已替换维度过滤；None 不过滤，True 仅显示已替换，
+        False 仅显示未替换（用于「待处理 / 已替换」Tab 切换）
     """
 
     # 扩展信号签名，同时回传过滤结果 + 严重度/规则名倒排索引
@@ -60,12 +62,15 @@ class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         sort_field: str,
         sort_ascending: bool,
         *,
+        filter_replaced: bool | None = None,
         build_index: bool = True,
         index_threshold: int = 2000,
         index_results: tuple[ScanResult, ...] | None = None,
     ) -> None:
         """初始化过滤线程。
 
+        :param filter_replaced: 已替换维度过滤；None 不过滤，True 仅显示已替换，
+            False 仅显示未替换
         :param build_index: 是否在后台同时构建倒排索引（默认 True）
         :param index_threshold: 结果数达到该阈值才构建索引（默认 2000，与
             ``result_model._INDEX_THRESHOLD`` 保持一致）
@@ -81,6 +86,7 @@ class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
         self._filter_severities = filter_severities
         self._sort_field = sort_field
         self._sort_ascending = sort_ascending
+        self._filter_replaced = filter_replaced
         self._build_index = build_index
         self._index_threshold = index_threshold
         # 索引构建使用的结果集（默认与过滤输入相同；调用方可传入完整结果保持索引位置对齐）
@@ -95,6 +101,7 @@ class FilterWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
             self._filter_severities,
             self._sort_field,
             self._sort_ascending,
+            self._filter_replaced,
         )
         # 后台构建倒排索引（仅对索引结果集 >= 阈值时）
         if self._build_index and len(self._index_results) >= self._index_threshold:

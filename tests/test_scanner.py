@@ -926,6 +926,39 @@ class TestScanResult:
         result = ScanResult(path=Path("/x"), size=0, hits=())
         assert result.user_skipped is False
 
+    def test_replaced_defaults(self) -> None:
+        """ScanResult.replaced/replaced_count 默认为 False/0（iter-220）。"""
+        result = ScanResult(path=Path("/x"), size=0, hits=())
+        assert result.replaced is False
+        assert result.replaced_count == 0
+
+    def test_summary_replaced_prefix(self) -> None:
+        """replaced=True 时 summary 附加「已自动替换 N 条」前缀（iter-220）。"""
+        from fuscan.scanner.result import RuleHit
+
+        result = ScanResult(
+            path=Path("/x"),
+            size=0,
+            hits=(RuleHit("r1", Severity.INFO, "d1", match_count=2),),
+            replaced=True,
+            replaced_count=3,
+        )
+        assert result.summary() == "已自动替换 3 条 | 1 条规则 / 2 处匹配"
+
+    def test_summary_user_skipped_takes_precedence_over_replaced(self) -> None:
+        """user_skipped 与 replaced 同时为 True 时优先显示「已标记跳过」（iter-220）。"""
+        from fuscan.scanner.result import RuleHit
+
+        result = ScanResult(
+            path=Path("/x"),
+            size=0,
+            hits=(RuleHit("r1", Severity.INFO, "d1", match_count=1),),
+            user_skipped=True,
+            replaced=True,
+            replaced_count=2,
+        )
+        assert result.summary() == "已标记跳过 | 1 条规则 / 1 处匹配"
+
 
 class TestScanStats:
     def test_summary_default_complete(self) -> None:
@@ -1153,6 +1186,25 @@ class TestScanReport:
         assert len(report.hits) == original_hits_count
         a = next(r for r in report.hits if r.path.name == "a.txt")
         assert len(a.hits) == 2
+
+    def test_filter_preserves_replaced_fields(self, tmp_path: Path) -> None:
+        """filter() 返回的新 ScanResult 应保留原 replaced/replaced_count 字段（iter-220）。"""
+        from fuscan.scanner.result import RuleHit
+
+        results = (
+            ScanResult(
+                path=tmp_path / "a.txt",
+                size=10,
+                hits=(RuleHit("敏感内容", Severity.CRITICAL, "d1"),),
+                replaced=True,
+                replaced_count=2,
+            ),
+        )
+        report = ScanReport(root=tmp_path, results=results, stats=ScanStats())
+        filtered = report.filter(rule_name="敏感内容")
+        assert len(filtered.hits) == 1
+        assert filtered.hits[0].replaced is True
+        assert filtered.hits[0].replaced_count == 2
 
     def test_group_by_rule(self, tmp_path: Path) -> None:
         report = self._build_report(tmp_path)
@@ -5237,6 +5289,78 @@ class TestIter166StreamSave:
         empty.save_csv_file(csv_out, chunk_size=100)
         assert _json.loads(json_out.read_bytes())["hits"] == []
         assert csv_out.read_text(encoding="utf-8").splitlines() == empty.to_csv().splitlines()
+
+    def test_replaced_fields_roundtrip_json(self, tmp_path: Path) -> None:
+        """ScanResult.replaced/replaced_count 序列化与反序列化保持一致（iter-220）。"""
+        from fuscan.scanner.result import RuleHit
+
+        results = (
+            ScanResult(
+                path=tmp_path / "a.txt",
+                size=10,
+                hits=(RuleHit("敏感内容", Severity.CRITICAL, "d1"),),
+                replaced=True,
+                replaced_count=2,
+            ),
+            ScanResult(
+                path=tmp_path / "b.txt",
+                size=20,
+                hits=(RuleHit("API 密钥", Severity.WARNING, "d2"),),
+            ),
+        )
+        report = ScanReport(root=tmp_path, results=results, stats=ScanStats())
+        # to_json → from_json 还原后 replaced 字段应一致
+        restored = ScanReport.from_json(report.to_json())
+        assert restored.hits[0].replaced is True
+        assert restored.hits[0].replaced_count == 2
+        assert restored.hits[1].replaced is False
+        assert restored.hits[1].replaced_count == 0
+
+    def test_replaced_fields_in_save_json_file(self, tmp_path: Path) -> None:
+        """save_json_file 写出的 JSON 包含 replaced/replaced_count 字段（iter-220）。"""
+        import json as _json
+
+        from fuscan.scanner.result import RuleHit
+
+        results = (
+            ScanResult(
+                path=tmp_path / "a.txt",
+                size=10,
+                hits=(RuleHit("敏感内容", Severity.CRITICAL, "d1"),),
+                replaced=True,
+                replaced_count=3,
+            ),
+        )
+        report = ScanReport(root=tmp_path, results=results, stats=ScanStats())
+        out = tmp_path / "replaced.json"
+        report.save_json_file(out, chunk_size=10)
+        data = _json.loads(out.read_bytes())
+        assert data["hits"][0]["replaced"] is True
+        assert data["hits"][0]["replaced_count"] == 3
+
+    def test_from_json_legacy_missing_replaced_defaults(self, tmp_path: Path) -> None:
+        """from_json 兼容旧版 JSON（无 replaced 字段）：默认 False/0（iter-220）。"""
+        import json as _json
+
+        from fuscan.scanner.result import RuleHit
+
+        results = (
+            ScanResult(
+                path=tmp_path / "a.txt",
+                size=10,
+                hits=(RuleHit("敏感内容", Severity.CRITICAL, "d1"),),
+            ),
+        )
+        report = ScanReport(root=tmp_path, results=results, stats=ScanStats())
+        data = _json.loads(report.to_json())
+        # 模拟旧版 JSON：移除 replaced/replaced_count 字段
+        for hit in data["hits"]:
+            hit.pop("replaced", None)
+            hit.pop("replaced_count", None)
+        legacy_json = _json.dumps(data, ensure_ascii=False)
+        restored = ScanReport.from_json(legacy_json)
+        assert restored.hits[0].replaced is False
+        assert restored.hits[0].replaced_count == 0
 
 
 class TestIter160ProgressThrottle:

@@ -23,10 +23,11 @@ Pane {
     // 符合 PySide SKILL 硬约束「复用控件（hide/show + 刷数据），禁止反复创建销毁」。
     readonly property var _pageIndex: ({
         "home": 0,
-        "results": 1,
-        "stats": 2,
-        "settings": 3,
-        "about": 4
+        "monitor": 1,
+        "results": 2,
+        "stats": 3,
+        "settings": 4,
+        "about": 5
     })
 
     StackLayout {
@@ -39,6 +40,8 @@ Pane {
             onViewResultsRequested: contentArea.sidebarRef.currentPage = "results"
             onViewStatsRequested: contentArea.sidebarRef.currentPage = "stats"
         }
+
+        FileMonitorPage {}
 
         ResultsPage {
             onBackRequested: contentArea.sidebarRef.currentPage = "home"

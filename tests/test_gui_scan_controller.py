@@ -2177,6 +2177,203 @@ class TestIter124CustomReplaceWith:
         assert controller.canReplaceSelected is True
 
 
+class TestIter220AutoReplaceHits:
+    """iter-220：扫描完成后 ScanController._auto_replace_hits 自动替换流程。"""
+
+    def _setup_replaceable_ruleset(self, controller: ScanController) -> Rule:
+        """注入含 replace=True 规则的 ruleset 到 controller，返回规则实例。"""
+        rule = Rule(
+            name="可替换规则",
+            severity=Severity.WARNING,
+            match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="password"),
+            replace=True,
+            replace_with="***",
+        )
+        controller._ruleset = RuleSet(version="1.0", rules=(rule,))
+        return rule
+
+    def _make_hit(self) -> RuleHit:
+        return RuleHit(
+            rule_name="可替换规则",
+            severity=Severity.WARNING,
+            detail="匹配",
+            match_texts=("password",),
+        )
+
+    def test_empty_hits_returns_empty(self, controller: ScanController) -> None:
+        """空结果元组直接返回，配对为空。"""
+        new_hits, pairs = controller._auto_replace_hits((), Path("/tmp"))
+        assert new_hits == ()
+        assert pairs == ()
+
+    def test_no_ruleset_returns_original(self, controller: ScanController, tmp_path: Path) -> None:
+        """ruleset 为 None 时返回原元组，不执行替换。"""
+        controller._ruleset = None
+        src = tmp_path / "a.txt"
+        src.write_text("password=abc\n", encoding="utf-8")
+        sr = ScanResult(path=src, size=src.stat().st_size, hits=(self._make_hit(),))
+        new_hits, pairs = controller._auto_replace_hits((sr,), tmp_path)
+        assert new_hits == (sr,)
+        assert pairs == ()
+        # 文件未被修改
+        assert src.read_text(encoding="utf-8") == "password=abc\n"
+
+    def test_replace_success_marks_replaced(self, controller: ScanController, tmp_path: Path) -> None:
+        """含 replace=True 规则且替换成功：新 ScanResult 标记 replaced=True。"""
+        self._setup_replaceable_ruleset(controller)
+        scan_root = tmp_path / "scan"
+        scan_root.mkdir()
+        src = scan_root / "a.txt"
+        src.write_text("password=abc\n", encoding="utf-8")
+        sr = ScanResult(path=src, size=src.stat().st_size, hits=(self._make_hit(),))
+        new_hits, pairs = controller._auto_replace_hits((sr,), scan_root)
+        assert len(new_hits) == 1
+        assert new_hits[0].replaced is True
+        assert new_hits[0].replaced_count >= 1
+        # 配对非空：包含 (src, backup_path)
+        assert len(pairs) == 1
+        assert pairs[0][0] == src
+        # 源文件应已被替换
+        assert "password" not in src.read_text(encoding="utf-8")
+
+    def test_no_replace_rule_preserved(self, controller: ScanController, tmp_path: Path) -> None:
+        """命中规则不含 replace=True：保留原 ScanResult（replaced=False）。"""
+        # ruleset 中规则 replace=False
+        rule = Rule(
+            name="只检测规则",
+            severity=Severity.WARNING,
+            match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="password"),
+            replace=False,
+            replace_with="***",
+        )
+        controller._ruleset = RuleSet(version="1.0", rules=(rule,))
+        src = tmp_path / "a.txt"
+        src.write_text("password=abc\n", encoding="utf-8")
+        hit = RuleHit(
+            rule_name="只检测规则",
+            severity=Severity.WARNING,
+            detail="匹配",
+            match_texts=("password",),
+        )
+        sr = ScanResult(path=src, size=src.stat().st_size, hits=(hit,))
+        new_hits, pairs = controller._auto_replace_hits((sr,), tmp_path)
+        assert new_hits[0].replaced is False
+        assert pairs == ()
+        # 文件未被修改
+        assert src.read_text(encoding="utf-8") == "password=abc\n"
+
+    def test_archive_entry_skipped(self, controller: ScanController, tmp_path: Path) -> None:
+        """压缩包内部条目跳过自动替换。"""
+        self._setup_replaceable_ruleset(controller)
+        archive = tmp_path / "bundle.zip"
+        archive.write_bytes(b"fake zip")
+        sr = ScanResult(
+            path=tmp_path / "bundle.zip!inner.txt",
+            size=10,
+            hits=(self._make_hit(),),
+            archive_path=archive,
+        )
+        new_hits, pairs = controller._auto_replace_hits((sr,), tmp_path)
+        assert new_hits[0].replaced is False
+        assert pairs == ()
+
+    def test_mixed_results_partial_replaced(self, controller: ScanController, tmp_path: Path) -> None:
+        """混合结果：部分可替换 + 部分无可替换规则 → 仅前者标记 replaced。"""
+        self._setup_replaceable_ruleset(controller)
+        scan_root = tmp_path / "scan"
+        scan_root.mkdir()
+        # 可替换文件
+        src1 = scan_root / "a.txt"
+        src1.write_text("password=abc\n", encoding="utf-8")
+        sr1 = ScanResult(path=src1, size=src1.stat().st_size, hits=(self._make_hit(),))
+        # 不可替换文件（规则集中无对应规则）
+        src2 = scan_root / "b.txt"
+        src2.write_text("secret=xyz\n", encoding="utf-8")
+        hit2 = RuleHit(
+            rule_name="未注册规则",
+            severity=Severity.WARNING,
+            detail="匹配",
+            match_texts=("secret",),
+        )
+        sr2 = ScanResult(path=src2, size=src2.stat().st_size, hits=(hit2,))
+        new_hits, pairs = controller._auto_replace_hits((sr1, sr2), scan_root)
+        assert len(new_hits) == 2
+        assert new_hits[0].replaced is True
+        assert new_hits[1].replaced is False
+        assert len(pairs) == 1
+        assert pairs[0][0] == src1
+
+
+class TestIter220SetResultFilterReplaced:
+    """iter-220：ScanController.setResultFilterReplaced 槽函数覆盖。"""
+
+    def _build_mixed_results(self, tmp_path: Path) -> tuple[ScanResult, ...]:
+        """构造 2 条已替换 + 2 条未替换的结果元组。"""
+        h_critical = RuleHit(rule_name="敏感内容", severity=Severity.CRITICAL, detail="d1")
+        h_warning = RuleHit(rule_name="API 密钥", severity=Severity.WARNING, detail="d2")
+        return (
+            ScanResult(
+                path=tmp_path / "a.txt",
+                size=10,
+                hits=(h_critical,),
+                errors=0,
+                replaced=True,
+                replaced_count=1,
+            ),
+            ScanResult(path=tmp_path / "b.txt", size=20, hits=(h_warning,), errors=0),
+            ScanResult(
+                path=tmp_path / "c.txt",
+                size=30,
+                hits=(h_critical, h_warning),
+                errors=0,
+                replaced=True,
+                replaced_count=2,
+            ),
+            ScanResult(path=tmp_path / "d.txt", size=40, hits=(h_warning,), errors=0),
+        )
+
+    def test_filter_pending_reduces_count(self, controller: ScanController, tmp_path: Path) -> None:
+        """value=1（仅未替换）过滤后结果数减少为 2。"""
+        controller._result_model.set_results(self._build_mixed_results(tmp_path))
+        assert controller._result_model.filtered_count == 4
+        controller.setResultFilterReplaced(1)
+        assert controller._result_model.filtered_count == 2
+        for r in controller._result_model.filtered_results:
+            assert r.replaced is False
+
+    def test_filter_replaced_only(self, controller: ScanController, tmp_path: Path) -> None:
+        """value=2（仅已替换）过滤后结果数为 2。"""
+        controller._result_model.set_results(self._build_mixed_results(tmp_path))
+        controller.setResultFilterReplaced(2)
+        assert controller._result_model.filtered_count == 2
+        for r in controller._result_model.filtered_results:
+            assert r.replaced is True
+
+    def test_filter_all_clears(self, controller: ScanController, tmp_path: Path) -> None:
+        """value=0（全部）清除过滤维度，结果数恢复为 4。"""
+        controller._result_model.set_results(self._build_mixed_results(tmp_path))
+        controller.setResultFilterReplaced(2)
+        assert controller._result_model.filtered_count == 2
+        controller.setResultFilterReplaced(0)
+        assert controller._result_model.filtered_count == 4
+
+    def test_filter_resets_out_of_range_selection(self, controller: ScanController, tmp_path: Path) -> None:
+        """过滤后选中索引越界时重置为 -1。"""
+        controller._result_model.set_results(self._build_mixed_results(tmp_path))
+        controller.setSelectedResultIndex(3)  # 选中第 4 行
+        # 过滤为仅未替换（2 条），索引 3 越界 → 重置为 -1
+        controller.setResultFilterReplaced(1)
+        assert controller._selected_result_index == -1
+
+    def test_filter_preserves_valid_selection(self, controller: ScanController, tmp_path: Path) -> None:
+        """过滤后选中索引仍有效时保留。"""
+        controller._result_model.set_results(self._build_mixed_results(tmp_path))
+        controller.setSelectedResultIndex(0)
+        controller.setResultFilterReplaced(1)
+        # 过滤后仍有 2 条，索引 0 有效 → 保留
+        assert controller._selected_result_index == 0
+
+
 class TestBuildScanRoots:
     """测试 _build_scan_roots 构建扫描根路径。"""
 

@@ -24,7 +24,7 @@ try:
         from PySide6.QtCore import QModelIndex, Qt  # pyrefly: ignore [missing-import]
         from PySide6.QtWidgets import QApplication  # pyrefly: ignore [missing-import]
 
-    from fuscan.gui.models.result_model import ResultListModel
+    from fuscan.gui.models.result_model import SORT_DEFAULT, ResultListModel
     from fuscan.rules.model import Severity
     from fuscan.scanner.result import RuleHit, ScanResult
 
@@ -141,6 +141,32 @@ class TestData:
         # 其余 role 占位为空串
         assert model.data(idx, Qt.UserRole + 1) == ""
         assert model.data(idx, Qt.UserRole + 2) == ""
+
+    def test_data_fallback_when_flat_data_empty(self, model: ResultListModel, tmp_path: Path) -> None:
+        """``_flat_data`` 为空但 ``_filtered`` 有真实值时，data() 回退到直接访问 ScanResult。
+
+        覆盖 result_model.data() 行 523-548 回退路径：扁平数据未就绪（空列表）+
+        filtered 对应行为真实 ScanResult 时，按 role 直接从 ScanResult 属性返回。
+        """
+        # 故障注入：清空扁平数据，强制走回退路径
+        model._flat_data = []  # type: ignore[attr-defined]
+        idx = model.index(0)
+        # filePath 直接从 result.path 返回
+        assert model.data(idx, Qt.UserRole + 1) == str(tmp_path / "a.txt")
+        # ruleName 从 result.rule_names[0] 返回
+        assert model.data(idx, Qt.UserRole + 2) == "敏感内容"
+        # severityText 从 severity_text(result.max_severity) 返回
+        assert model.data(idx, Qt.UserRole + 3) == "严重"
+        # severityColor 从 severity_color_hex(result.max_severity) 返回
+        assert model.data(idx, Qt.UserRole + 4) == "#D73A49"
+        # hitsCount 从 len(result.hits) 返回
+        assert model.data(idx, Qt.UserRole + 5) == 1
+        # index 返回 row
+        assert model.data(idx, Qt.UserRole + 6) == 0
+        # replaced 从 result.replaced 返回
+        assert model.data(idx, Qt.UserRole + 7) is False
+        # 未知 role 返回空串
+        assert model.data(idx, Qt.DisplayRole) == ""
 
 
 class TestClear:
@@ -309,6 +335,13 @@ class TestIter112FilterRules:
         filter_model.set_filter_rules(None)
         assert filter_model.filtered_count == 4
 
+    def test_filter_rules_idempotent_same_value(self, filter_model: ResultListModel) -> None:
+        """重复设置相同规则名过滤条件应无副作用（覆盖早期 return 路径）。"""
+        filter_model.set_filter_rules(["敏感内容"])
+        count1 = filter_model.filtered_count
+        filter_model.set_filter_rules(["敏感内容"])
+        assert filter_model.filtered_count == count1
+
 
 class TestIter112FilterSeverities:
     """iter-112：严重度多选过滤。"""
@@ -327,6 +360,13 @@ class TestIter112FilterSeverities:
         filter_model.set_filter_severities([Severity.CRITICAL])
         filter_model.set_filter_severities([])
         assert filter_model.filtered_count == 4
+
+    def test_filter_severities_idempotent_same_value(self, filter_model: ResultListModel) -> None:
+        """重复设置相同严重度过滤条件应无副作用（覆盖早期 return 路径）。"""
+        filter_model.set_filter_severities([Severity.CRITICAL])
+        count1 = filter_model.filtered_count
+        filter_model.set_filter_severities([Severity.CRITICAL])
+        assert filter_model.filtered_count == count1
 
 
 class TestIter112CombinedFilter:
@@ -357,6 +397,132 @@ class TestIter112CombinedFilter:
         assert filter_model.filtered_count == 4
         assert filter_model.sort_field == "filePath"
         assert filter_model.sort_ascending is False
+
+
+def _build_replaced_results(tmp_path: Path) -> tuple[ScanResult, ...]:
+    """构造 4 条命中结果，其中 2 条标记 replaced=True。
+
+    用于 ``set_filter_replaced`` 维度的过滤测试。
+    """
+    h_critical = RuleHit(rule_name="敏感内容", severity=Severity.CRITICAL, detail="d1")
+    h_warning = RuleHit(rule_name="API 密钥", severity=Severity.WARNING, detail="d2")
+    return (
+        # 已替换 2 条规则
+        ScanResult(
+            path=tmp_path / "config" / "secret.txt",
+            size=10,
+            hits=(h_critical,),
+            errors=0,
+            replaced=True,
+            replaced_count=2,
+        ),
+        # 未替换
+        ScanResult(path=tmp_path / "app.py", size=20, hits=(h_warning,), errors=0),
+        # 已替换 1 条规则
+        ScanResult(
+            path=tmp_path / "README.md",
+            size=30,
+            hits=(h_critical, h_warning),
+            errors=0,
+            replaced=True,
+            replaced_count=1,
+        ),
+        # 未替换
+        ScanResult(path=tmp_path / "config" / "db.yaml", size=40, hits=(h_warning,), errors=0),
+    )
+
+
+@pytest.fixture()
+def replaced_model(tmp_path: Path) -> ResultListModel:
+    m = ResultListModel()
+    m.set_results(_build_replaced_results(tmp_path))
+    return m
+
+
+class TestIter220FilterReplaced:
+    """iter-220：已替换维度过滤（TabBar 切换）。"""
+
+    def test_default_no_filter_shows_all(self, replaced_model: ResultListModel) -> None:
+        # 默认 _filter_replaced=None 不过滤，全部 4 条都显示
+        assert replaced_model.filter_replaced is None
+        assert replaced_model.filtered_count == 4
+
+    def test_filter_pending_only(self, replaced_model: ResultListModel) -> None:
+        # value=1 → False（仅未替换，待处理 Tab）
+        replaced_model.set_filter_replaced(1)
+        assert replaced_model.filter_replaced is False
+        assert replaced_model.filtered_count == 2
+        for r in replaced_model.filtered_results:
+            assert r.replaced is False
+
+    def test_filter_replaced_only(self, replaced_model: ResultListModel) -> None:
+        # value=2 → True（仅已替换 Tab）
+        replaced_model.set_filter_replaced(2)
+        assert replaced_model.filter_replaced is True
+        assert replaced_model.filtered_count == 2
+        for r in replaced_model.filtered_results:
+            assert r.replaced is True
+
+    def test_filter_all_clears_dimension(self, replaced_model: ResultListModel) -> None:
+        # 先设过滤再切回 0 → None（全部 Tab）
+        replaced_model.set_filter_replaced(2)
+        assert replaced_model.filtered_count == 2
+        replaced_model.set_filter_replaced(0)
+        assert replaced_model.filter_replaced is None
+        assert replaced_model.filtered_count == 4
+
+    def test_invalid_value_treated_as_no_filter(self, replaced_model: ResultListModel) -> None:
+        # 未知整数值视为不过滤（防御性）
+        replaced_model.set_filter_replaced(99)
+        assert replaced_model.filter_replaced is None
+        assert replaced_model.filtered_count == 4
+
+    def test_idempotent_same_value(self, replaced_model: ResultListModel) -> None:
+        replaced_model.set_filter_replaced(1)
+        count1 = replaced_model.filtered_count
+        replaced_model.set_filter_replaced(1)  # 重复设置应无副作用
+        assert replaced_model.filtered_count == count1
+
+    def test_combined_with_text_filter(self, replaced_model: ResultListModel) -> None:
+        # 已替换 + 路径含 config → 仅 secret.txt
+        replaced_model.set_filter_replaced(2)
+        replaced_model.set_filter_text("config")
+        assert replaced_model.filtered_count == 1
+        assert "secret.txt" in str(replaced_model.filtered_results[0].path)
+        assert replaced_model.filtered_results[0].replaced is True
+
+    def test_clear_filters_resets_replaced_dimension(self, replaced_model: ResultListModel) -> None:
+        replaced_model.set_filter_replaced(1)
+        assert replaced_model.filter_replaced is False
+        replaced_model.clear_filters()
+        assert replaced_model.filter_replaced is None
+        assert replaced_model.filtered_count == 4
+
+    def test_clear_filters_noop_when_already_clean(self, tmp_path: Path) -> None:
+        """无任何过滤条件时 clear_filters 直接返回（覆盖早期 return 路径）。"""
+        m = ResultListModel()
+        m.set_results(_build_replaced_results(tmp_path))
+        count_before = m.filtered_count
+        m.clear_filters()  # 无过滤条件 → 早期 return
+        assert m.filtered_count == count_before
+
+    def test_replaced_role_in_data(self, replaced_model: ResultListModel) -> None:
+        """data() 中 UserRole+7（replaced）正确返回 ScanResult.replaced 字段。"""
+        # 切到默认排序（保留插入顺序），避免 SORT_SEVERITY 打乱顺序
+        replaced_model.set_sort(SORT_DEFAULT, ascending=True)
+        # 插入顺序：secret.txt(True) → app.py(False) → README.md(True) → db.yaml(False)
+        idx = replaced_model.index(0, 0)
+        # 第 0 行是 secret.txt，replaced=True
+        assert idx.data(Qt.UserRole + 7) is True
+        idx2 = replaced_model.index(1, 0)
+        # 第 1 行是 app.py，replaced=False
+        assert idx2.data(Qt.UserRole + 7) is False
+        idx3 = replaced_model.index(2, 0)
+        # 第 2 行是 README.md，replaced=True
+        assert idx3.data(Qt.UserRole + 7) is True
+        idx4 = replaced_model.index(3, 0)
+        # 第 3 行是 db.yaml，replaced=False
+        assert idx4.data(Qt.UserRole + 7) is False
 
 
 class TestIter112Sort:
@@ -1292,10 +1458,10 @@ class TestIter159FlatData:
         assert row1 is not None
         assert row1[_FLAT_RULE_NAME] == "敏感内容"
         assert row1[_FLAT_HITS_COUNT] == 2
-        # 扁平数据列数正确（6 列）
+        # 扁平数据列数正确（7 列：filePath/ruleName/sevText/sevColor/hitsCount/index/replaced）
         for i, r in enumerate(flat):
             assert r is not None, f"第 {i} 行为 None（应为扁平元组）"
-            assert len(r) == 6, f"第 {i} 行元组长度 {len(r)} != 6"
+            assert len(r) == 7, f"第 {i} 行元组长度 {len(r)} != 7"
 
     def test_flat_data_filled_during_lazy_fill(self, qapp: QApplication, tmp_path: Path) -> None:
         """懒加载填充可见范围时，_flat_data 同步构造扁平元组。"""

@@ -597,6 +597,207 @@ class TestEventHandling:
         assert controller.model.count == 0
 
 
+class TestEventLog:
+    """事件日志功能测试：eventCount / recentEvents / clearEvents。"""
+
+    def test_initial_event_count_is_zero(self, controller: FileMonitorController) -> None:
+        """初始状态事件计数为 0。"""
+        assert controller.eventCount == 0
+        assert controller.recentEvents == []
+
+    def test_event_received_increments_count(self, controller: FileMonitorController, tmp_path: Path) -> None:
+        """收到事件后 eventCount 递增，recentEvents 追加一条。"""
+        controller._monitoring_enabled = True
+        controller._on_event_received(str(tmp_path / "a.txt"), "created")
+        assert controller.eventCount == 1
+        assert len(controller.recentEvents) == 1
+        assert controller.recentEvents[0]["path"] == str(tmp_path / "a.txt")
+        assert controller.recentEvents[0]["event_type"] == "created"
+        controller.cleanup()
+
+    def test_multiple_events_accumulate(self, controller: FileMonitorController, tmp_path: Path) -> None:
+        """多个事件累加计数与日志。"""
+        controller._monitoring_enabled = True
+        controller._on_event_received(str(tmp_path / "a.txt"), "created")
+        controller._on_event_received(str(tmp_path / "b.txt"), "modified")
+        controller._on_event_received(str(tmp_path / "c.txt"), "created")
+        assert controller.eventCount == 3
+        assert len(controller.recentEvents) == 3
+        controller.cleanup()
+
+    def test_event_log_fifo_eviction(self, controller: FileMonitorController, tmp_path: Path) -> None:
+        """超过 _RECENT_EVENTS_MAX 后丢弃最旧记录。"""
+        from fuscan.gui.controllers.file_monitor_controller import _RECENT_EVENTS_MAX
+
+        controller._monitoring_enabled = True
+        for i in range(_RECENT_EVENTS_MAX + 10):
+            controller._on_event_received(str(tmp_path / f"f{i}.txt"), "created")
+        # eventCount 记录全部，recentEvents 只保留最近 N 条
+        assert controller.eventCount == _RECENT_EVENTS_MAX + 10
+        assert len(controller.recentEvents) == _RECENT_EVENTS_MAX
+        # 最旧记录已被丢弃，最新记录在末尾
+        assert f"f{_RECENT_EVENTS_MAX + 9}.txt" in controller.recentEvents[-1]["path"]
+        controller.cleanup()
+
+    def test_event_not_recorded_when_monitoring_disabled(
+        self, controller: FileMonitorController, tmp_path: Path
+    ) -> None:
+        """监控停用时事件不记录日志。"""
+        controller._monitoring_enabled = False
+        controller._on_event_received(str(tmp_path / "a.txt"), "created")
+        assert controller.eventCount == 0
+        assert controller.recentEvents == []
+
+    def test_clear_events_resets_log(self, controller: FileMonitorController, tmp_path: Path) -> None:
+        """clearEvents 清零事件计数与日志。"""
+        controller._monitoring_enabled = True
+        controller._on_event_received(str(tmp_path / "a.txt"), "created")
+        assert controller.eventCount == 1
+        controller.clearEvents()
+        assert controller.eventCount == 0
+        assert controller.recentEvents == []
+        controller.cleanup()
+
+    def test_enable_monitoring_resets_event_log(self, controller: FileMonitorController, tmp_path: Path) -> None:
+        """重新启用监控时重置事件日志。"""
+        controller._monitoring_enabled = True
+        controller._on_event_received(str(tmp_path / "a.txt"), "created")
+        assert controller.eventCount == 1
+        # 模拟停用再启用
+        controller._monitoring_enabled = False
+        controller._monitoring_enabled = True
+        controller._event_count = 0  # setMonitoringEnabled 中的重置逻辑
+        controller._recent_events.clear()
+        assert controller.eventCount == 0
+
+    def test_recent_events_have_timestamp(self, controller: FileMonitorController, tmp_path: Path) -> None:
+        """recentEvents 每项包含 time 字段（HH:MM:SS 格式）。"""
+        controller._monitoring_enabled = True
+        controller._on_event_received(str(tmp_path / "a.txt"), "created")
+        event = controller.recentEvents[0]
+        assert "time" in event
+        # 格式 HH:MM:SS（8 字符）
+        assert len(event["time"]) == 8
+        assert event["time"][2] == ":"
+        assert event["time"][5] == ":"
+        controller.cleanup()
+
+
+class TestFilterStats:
+    """过滤统计测试：ignoredDirCount / filteredExtCount / dirEventCount。"""
+
+    def test_initial_filter_stats_zero(self, controller: FileMonitorController) -> None:
+        """初始状态过滤统计全为 0。"""
+        assert controller.ignoredDirCount == 0
+        assert controller.filteredExtCount == 0
+        assert controller.dirEventCount == 0
+
+    def test_ignored_dir_counted(self, controller: FileMonitorController) -> None:
+        """噪声目录路径的事件计入 ignoredDirCount，不 emit event_received。"""
+        stats: dict[str, int] = {"ignored_dir": 0, "filtered_ext": 0, "dir_events": 0}
+        handler = _WatchdogHandler(
+            emitter=controller._emitter,  # type: ignore[attr-defined]
+            scan_extensions=None,
+            filter_stats=stats,
+        )
+        # 模拟 .git 目录下的文件创建事件
+        event = _FakeFileEvent(str(Path("/proj/.git/config")), is_directory=False)
+        handler.on_created(event)  # pyrefly: ignore [bad-argument-type]
+        assert stats["ignored_dir"] == 1
+        assert stats["filtered_ext"] == 0
+        assert stats["dir_events"] == 0
+
+    def test_filtered_ext_counted(self, controller: FileMonitorController) -> None:
+        """扩展名不匹配的事件计入 filteredExtCount。"""
+        stats: dict[str, int] = {"ignored_dir": 0, "filtered_ext": 0, "dir_events": 0}
+        handler = _WatchdogHandler(
+            emitter=controller._emitter,  # type: ignore[attr-defined]
+            scan_extensions=("py", "yaml"),
+            filter_stats=stats,
+        )
+        # .txt 文件不在白名单
+        event = _FakeFileEvent("/proj/notes.txt", is_directory=False)
+        handler.on_created(event)  # pyrefly: ignore [bad-argument-type]
+        assert stats["filtered_ext"] == 1
+        assert stats["ignored_dir"] == 0
+        assert stats["dir_events"] == 0
+
+    def test_dir_events_counted(self, controller: FileMonitorController) -> None:
+        """目录事件计入 dirEventCount，不触发文件扫描。"""
+        stats: dict[str, int] = {"ignored_dir": 0, "filtered_ext": 0, "dir_events": 0}
+        handler = _WatchdogHandler(
+            emitter=controller._emitter,  # type: ignore[attr-defined]
+            scan_extensions=None,
+            filter_stats=stats,
+        )
+        event = _FakeFileEvent("/proj/new_folder", is_directory=True)
+        handler.on_created(event)  # pyrefly: ignore [bad-argument-type]
+        assert stats["dir_events"] == 1
+        assert stats["ignored_dir"] == 0
+        assert stats["filtered_ext"] == 0
+
+    def test_passed_event_not_counted_in_filter(self, controller: FileMonitorController) -> None:
+        """通过过滤的事件不计入任何过滤统计。"""
+        stats: dict[str, int] = {"ignored_dir": 0, "filtered_ext": 0, "dir_events": 0}
+        handler = _WatchdogHandler(
+            emitter=controller._emitter,  # type: ignore[attr-defined]
+            scan_extensions=("py",),
+            filter_stats=stats,
+        )
+        event = _FakeFileEvent("/proj/app.py", is_directory=False)
+        handler.on_created(event)  # pyrefly: ignore [bad-argument-type]
+        assert stats["ignored_dir"] == 0
+        assert stats["filtered_ext"] == 0
+        assert stats["dir_events"] == 0
+
+    def test_poll_filter_stats_emits_signal(self, controller: FileMonitorController) -> None:
+        """_poll_filter_stats 检测到变化时 emit eventLogChanged。"""
+        # 手动修改 filter_stats 模拟 handler 线程递增
+        controller._filter_stats["dir_events"] = 5
+        emitted = []
+        controller.eventLogChanged.connect(lambda: emitted.append(1))  # type: ignore[attr-defined]
+        controller._poll_filter_stats()
+        assert len(emitted) == 1
+        assert controller.dirEventCount == 5
+
+    def test_poll_filter_stats_no_change_no_emit(self, controller: FileMonitorController) -> None:
+        """_poll_filter_stats 无变化时不 emit。"""
+        controller._poll_filter_stats()  # 初次调用，记下快照
+        emitted = []
+        controller.eventLogChanged.connect(lambda: emitted.append(1))  # type: ignore[attr-defined]
+        controller._poll_filter_stats()  # 无变化
+        assert len(emitted) == 0
+
+    def test_clear_events_resets_filter_stats(self, controller: FileMonitorController) -> None:
+        """clearEvents 同时清零过滤统计。"""
+        controller._filter_stats["ignored_dir"] = 3
+        controller._filter_stats["filtered_ext"] = 5
+        controller._filter_stats["dir_events"] = 2
+        controller.clearEvents()
+        assert controller.ignoredDirCount == 0
+        assert controller.filteredExtCount == 0
+        assert controller.dirEventCount == 0
+
+    def test_enable_monitoring_resets_filter_stats(self, controller: FileMonitorController) -> None:
+        """重新启用监控时清零过滤统计。"""
+        controller._filter_stats["ignored_dir"] = 10
+        # 模拟 setMonitoringEnabled 中的重置逻辑
+        controller._filter_stats["ignored_dir"] = 0
+        for key in controller._filter_stats:
+            controller._filter_stats[key] = 0
+        assert controller.ignoredDirCount == 0
+
+
+class _FakeFileEvent:
+    """伪 watchdog FileSystemEvent，用于测试 handler 回调。"""
+
+    def __init__(self, src_path: str, *, is_directory: bool = False) -> None:
+        self.src_path = src_path
+        self.dest_path = src_path
+        self.is_directory = is_directory
+        self.event_type = "created"
+
+
 class TestRulesetChanged:
     """``rulesetChanged`` 信号处理测试。"""
 
@@ -1038,11 +1239,175 @@ class TestAppTrayIntegration:
         class _StubController:
             file_monitor: object | None = None
 
+        class _StubTrayIcon:
+            @staticmethod
+            def isSystemTrayAvailable() -> bool:
+                return False
+
         monkeypatch.setattr(
-            "fuscan.app.QSystemTrayIcon.isSystemTrayAvailable",
-            staticmethod(lambda: False),
+            "fuscan.app.QSystemTrayIcon",
+            _StubTrayIcon,
         )
         from fuscan.app import _setup_file_monitor_tray
 
         result = _setup_file_monitor_tray(_StubApp(), _StubController())
         assert result is None
+
+
+class TestGetScanner:
+    """``_get_scanner`` Scanner 缓存与构造测试。"""
+
+    def test_get_scanner_constructs_and_caches(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """有 ruleset 时应构造 Scanner 并缓存。"""
+
+        class _FakeRuleset:
+            scan_extensions: tuple[str, ...] | None = None
+            ignore_dirs: tuple[str, ...] = ()
+
+        fake_rules_controller._ruleset = _FakeRuleset()
+
+        # mock Scanner 构造，避免依赖真实规则编译
+        constructed: list[Any] = []
+
+        class _StubScanner:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                constructed.append(args)
+
+        monkeypatch.setattr(
+            "fuscan.gui.controllers.file_monitor_controller.Scanner",
+            _StubScanner,
+        )
+
+        s1 = controller._get_scanner()
+        assert s1 is not None
+        assert len(constructed) == 1
+
+        # 第二次调用应命中缓存
+        s2 = controller._get_scanner()
+        assert s2 is s1
+        assert len(constructed) == 1
+
+
+class TestScanPathNoHit:
+    """``_scan_path`` 无命中路径测试。"""
+
+    def test_scan_path_with_scanner_but_no_hit(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """有 Scanner 但无命中时不追加记录。"""
+
+        class _FakeRuleset:
+            scan_extensions: tuple[str, ...] | None = None
+            ignore_dirs: tuple[str, ...] = ()
+
+        fake_rules_controller._ruleset = _FakeRuleset()
+
+        class _FakeScanner:
+            def scan_file(self, path: Path) -> _FakeScanResult:
+                return _FakeScanResult(hits=())
+
+        monkeypatch.setattr(controller, "_get_scanner", _FakeScanner)
+        controller._monitoring_enabled = True
+
+        f = tmp_path / "normal.txt"
+        f.write_text("content")
+        controller._scan_path(str(f))
+        assert controller.model.count == 0
+
+
+class TestPersistError:
+    """``_persist`` 异常路径测试。"""
+
+    def test_persist_oserror_does_not_raise(
+        self,
+        controller: FileMonitorController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """_persist 写入 OSError 时不应抛异常。"""
+        d = tmp_path / "watched"
+        d.mkdir()
+
+        def _raise_oserror(*args: Any, **kwargs: Any) -> Any:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(Path, "write_text", _raise_oserror)
+        # addWatch 内部调用 _persist，不应抛异常
+        controller.addWatch(str(d))
+
+
+class TestTrayAvailable:
+    """``_setup_file_monitor_tray`` 托盘可用时路径测试。"""
+
+    def test_setup_tray_when_available(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """系统托盘可用时应返回 QSystemTrayIcon 实例。"""
+        from fuscan.app import _setup_file_monitor_tray
+
+        tray_instances: list[Any] = []
+
+        class _StubTrayIcon:
+            Critical = 3
+            Warning = 2
+            Information = 1
+
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                tray_instances.append(self)
+                self._shown = False
+
+            def setToolTip(self, text: str) -> None:
+                self._tooltip = text
+
+            def showMessage(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            def show(self) -> None:
+                self._shown = True
+
+            @staticmethod
+            def isSystemTrayAvailable() -> bool:
+                return True
+
+        class _StubFileMonitor:
+            hitFound: Any = None
+
+            class _Signal:
+                def connect(self, cb: Any) -> None:
+                    self._cb = cb
+
+            def __init__(self) -> None:
+                self.hitFound = _StubFileMonitor._Signal()
+
+        file_monitor = _StubFileMonitor()
+
+        class _StubController:
+            file_monitor: object | None = None
+
+        stub_controller = _StubController()
+        stub_controller.file_monitor = file_monitor
+
+        monkeypatch.setattr(
+            "fuscan.app.QSystemTrayIcon",
+            _StubTrayIcon,
+        )
+        monkeypatch.setattr("fuscan.app._play_hit_sound", lambda sev: None)
+
+        class _StubApp:
+            pass
+
+        result = _setup_file_monitor_tray(_StubApp(), stub_controller)
+        assert result is not None
+        assert result._shown is True
+        assert result._tooltip == "fuscan 文件监控"

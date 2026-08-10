@@ -296,6 +296,12 @@ class ScanResult:
     # _scan_entry 按扩展名反查对应提取器 engine_info 回填，供 GUI 明细行标注。
     # 属运行期展示信息，不参与 JSON/CSV 序列化（引擎由扩展名静态决定，可随时反查）。
     engine: str = ""
+    # 自动替换标识：True 表示扫描完成后已对该文件执行自动替换。
+    # GUI 据此将结果分到「已替换」Tab 展示，并禁用对已替换文件的重复替换入口。
+    replaced: bool = False
+    # 实际替换的规则条数：自动替换时统计 replace=True 且成功写入文件的规则数，
+    # 供 GUI 详情区展示「已替换 N 条规则」。
+    replaced_count: int = 0
 
     @property
     def has_hit(self) -> bool:
@@ -354,10 +360,12 @@ class ScanResult:
         return tuple(names)
 
     def summary(self) -> str:
-        """返回简洁摘要：``N 条规则 / M 处匹配``，已标记跳过时附加前缀。"""
+        """返回简洁摘要：``N 条规则 / M 处匹配``，已标记跳过/已替换时附加前缀。"""
         base = f"{len(self.hits)} 条规则 / {self.total_match_count} 处匹配"
         if self.user_skipped:
             return f"已标记跳过 | {base}"
+        if self.replaced:
+            return f"已自动替换 {self.replaced_count} 条 | {base}"
         return base
 
     def file_info_html(self, extra: str = "") -> str:
@@ -599,6 +607,8 @@ class ScanReport:
                         errors=sr.errors,
                         user_skipped=sr.user_skipped,
                         archive_path=sr.archive_path,
+                        replaced=sr.replaced,
+                        replaced_count=sr.replaced_count,
                     )
                 )
             else:
@@ -644,6 +654,8 @@ class ScanReport:
                     "max_severity": r.max_severity.value,
                     "match_count": r.total_match_count,
                     "user_skipped": r.user_skipped,
+                    "replaced": r.replaced,
+                    "replaced_count": r.replaced_count,
                     "rules": [asdict(h) for h in r.hits],
                 }
                 for r in self.hits
@@ -739,6 +751,8 @@ class ScanReport:
                     hits=tuple(rule_hits),
                     user_skipped=user_skipped,
                     archive_path=archive_path,
+                    replaced=bool(hit_data.get("replaced", False)),
+                    replaced_count=int(hit_data.get("replaced_count", 0)),
                 )
             )
 
@@ -941,6 +955,8 @@ class ScanReport:
                             "max_severity": r.max_severity.value,
                             "match_count": r.total_match_count,
                             "user_skipped": r.user_skipped,
+                            "replaced": r.replaced,
+                            "replaced_count": r.replaced_count,
                             "rules": [asdict(h) for h in r.hits],
                         }
                     )

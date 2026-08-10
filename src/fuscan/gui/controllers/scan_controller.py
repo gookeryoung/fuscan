@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import logging
 import sqlite3
 import threading
@@ -1090,6 +1091,18 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
         self._refresh_detail_hits()
 
+    @Slot(int)  # pyrefly: ignore [not-callable]
+    def setResultFilterReplaced(self, value: int) -> None:
+        """设置结果列表「已替换」维度过滤（供 QML TabBar 切换）。
+
+        :param value: 0=不过滤（全部），1=仅未替换（待处理 Tab），2=仅已替换
+        """
+        self._result_model.set_filter_replaced(value)
+        if self._selected_result_index >= self._result_model.rowCount():
+            self.setSelectedResultIndex(-1)
+        self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self._refresh_detail_hits()
+
     @Property(int, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
     def resultTotalCount(self) -> int:
         """原始结果总数（未过滤）。"""
@@ -1857,10 +1870,26 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         speed = report.stats.speed
         if speed > 0:
             summary += f" | 速度 {speed:.0f} 文件/s"
+        # 未取消时执行扫描后自动替换：对带 replace=True 规则的命中文件自动替换，
+        # 标记到 ScanResult.replaced 供「已替换」Tab 展示，并记录 (src, backup) 配对
+        # 供 undoLastBatchReplace 撤销
+        final_hits = report.hits
+        auto_replaced_msg = ""
+        if not report.cancelled and report.hits:
+            final_hits, auto_backup_pairs = self._auto_replace_hits(report.hits, report.root)
+            if auto_backup_pairs:
+                self._last_batch_backup_paths = auto_backup_pairs
+                auto_replaced_msg = f" | 已自动替换 {len(auto_backup_pairs)} 个文件"
+        # 状态文本在自动替换后再设置：把替换数追加到 summary，避免被覆盖
+        summary = report.summary()
+        speed = report.stats.speed
+        if speed > 0:
+            summary += f" | 速度 {speed:.0f} 文件/s"
+        summary += auto_replaced_msg
         self._set_status(STR_STATUS_DONE if not report.cancelled else STR_STATUS_CANCELLED, summary)
         self._set_scan_state(STATE_RESULTS if report.hits else STATE_SETUP)
         # 耗时收尾：结果模型填充 + 统计同步 + manifest 持久化
-        self._result_model.set_results(report.hits)
+        self._result_model.set_results(final_hits)
         self._sync_stats_from_report(report)
         # 持久化本次构建的 manifest（仅 startIncrementalScan 设置了 _pending_ws_id）
         if self._pending_ws_id and self._pending_manifest is not None:
@@ -1870,6 +1899,79 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
         # 强制刷新明细列表定格最新状态（不受节流延迟影响，可能有 pending 未刷新）
         self._maybe_emit_recent(force=True)
+
+    def _auto_replace_hits(
+        self,
+        hits: tuple[ScanResult, ...],
+        scan_root: Path,
+    ) -> tuple[tuple[ScanResult, ...], tuple[tuple[Path, Path], ...]]:
+        """扫描完成后对带替换规则的命中文件执行自动替换。
+
+        仅处理：
+        - ``archive_path is None``（非压缩包内部条目）
+        - 命中规则中存在 ``replace=True`` 且 ``replace_with`` 非空（ruleset 反查）
+
+        其他情况保留原 :class:`ScanResult` 不变（``replaced=False``）。
+        替换成功的项构造新 :class:`ScanResult`（``replaced=True``，
+        ``replaced_count=N``），并累计 ``(src, backup)`` 配对供
+        :meth:`undoLastBatchReplace` 撤销。规则集未加载或全部失败时
+        返回原元组与空配对，调用方据此跳过撤销状态更新。
+
+        :param hits: 原始扫描结果元组
+        :param scan_root: 扫描根目录（用于备份相对路径计算）
+        :return: ``(新结果元组, 撤销配对元组)``；无任何成功替换时配对为空
+        """
+        if not hits or self._ruleset is None:
+            return hits, ()
+
+        from fuscan.processing.replacer import ReplaceStatus, replace_in_file
+
+        backup_dir = self._resolve_backup_dir()
+        preserve_relative = self._config.backup_preserve_relative_path
+        ruleset = self._ruleset
+        # 按 rule_name 索引规则集，便于从 RuleHit 反查 Rule.replace / replace_with
+        rule_map = {r.name: r for r in ruleset.rules}
+
+        new_hits: list[ScanResult] = []
+        backup_pairs: list[tuple[Path, Path]] = []
+        auto_replaced_count = 0
+
+        for sr in hits:
+            # 压缩包内部条目跳过（replace_in_file 也会拒绝，提前跳过避免日志噪声）
+            if sr.archive_path is not None:
+                new_hits.append(sr)
+                continue
+            # 检查是否含有 replace=True 且 replace_with 非空的命中规则
+            has_replace_rule = False
+            for h in sr.hits:
+                rule = rule_map.get(h.rule_name)
+                if rule is not None and rule.replace and rule.replace_with:
+                    has_replace_rule = True
+                    break
+            if not has_replace_rule:
+                new_hits.append(sr)
+                continue
+
+            result = replace_in_file(
+                src=sr.path,
+                hits=sr.hits,
+                ruleset=ruleset,
+                backup_root=backup_dir,
+                scan_root=scan_root,
+                preserve_relative=preserve_relative,
+            )
+            if result.status == ReplaceStatus.SUCCESS and result.replaced_count > 0:
+                new_sr = dataclasses.replace(sr, replaced=True, replaced_count=result.replaced_count)
+                new_hits.append(new_sr)
+                auto_replaced_count += 1
+                if result.backup_path is not None:
+                    backup_pairs.append((sr.path, result.backup_path))
+            else:
+                # 替换失败/未替换到内容：保留原结果（replaced=False），用户可在 Tab 中手动处理
+                new_hits.append(sr)
+
+        logger.info("扫描后自动替换：%d/%d 个文件成功替换", auto_replaced_count, len(hits))
+        return tuple(new_hits), tuple(backup_pairs)
 
     @Slot(str)  # pyrefly: ignore [not-callable]
     def _on_scan_failed(self, error: str) -> None:

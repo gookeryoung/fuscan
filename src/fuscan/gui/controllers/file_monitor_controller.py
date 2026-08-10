@@ -33,6 +33,7 @@ import datetime
 import json
 import logging
 import threading
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 
@@ -59,6 +60,13 @@ _DEBOUNCE_MS = 300
 
 # 匹配文本摘要最大长度（避免 QML 列表过宽）
 _MATCH_TEXT_MAX = 120
+
+# 最近事件日志最大保留条数（FIFO，超过后丢弃最旧）
+_RECENT_EVENTS_MAX = 50
+
+# 过滤统计轮询间隔（毫秒）：handler 线程仅递增计数器，controller 每 N ms
+# 轮询一次并 emit 信号刷新 QML，避免逐事件信号开销
+_STATS_POLL_MS = 500
 
 # 噪声目录名（路径中包含这些片段的直接跳过，避免 IDE/构建产物刷屏）
 _IGNORE_DIR_PARTS: frozenset[str] = frozenset(
@@ -104,15 +112,20 @@ class _WatchdogHandler(FileSystemEventHandler):
     :param emitter: 跨线程信号桥
     :param scan_extensions: 全局规则集的扩展名白名单；``None`` 表示不过滤，
         空 tuple 表示都不扫描（与 Scanner ``_should_scan`` 语义一致）
+    :param filter_stats: 共享过滤统计字典（controller 持有，handler 累加）。
+        单写单读（handler 线程写，controller 线程读），GIL 保证安全。
+        仅做整数递增，不 emit 信号，避免逐事件信号开销。
     """
 
     def __init__(
         self,
         emitter: _EventEmitter,
         scan_extensions: tuple[str, ...] | None,
+        filter_stats: dict[str, int] | None = None,
     ) -> None:
         super().__init__()
         self._emitter = emitter
+        self._filter_stats: dict[str, int] = filter_stats if filter_stats is not None else {}
         # 三态语义（与 Scanner._should_scan 一致）：
         # - None → 不过滤（扫描所有文件）
         # - 空 frozenset → 全部跳过（用户取消所有扩展名勾选）
@@ -125,10 +138,10 @@ class _WatchdogHandler(FileSystemEventHandler):
     def _should_handle(self, path: str | bytes) -> bool:
         """判断该路径是否需要触发扫描。
 
-        - 路径任一部分命中噪声目录名 → 跳过
+        - 路径任一部分命中噪声目录名 → 跳过（计入 ignored_dir）
         - ``scan_extensions`` 为 ``None`` → 通过（扫描所有文件）
-        - ``scan_extensions`` 为空 frozenset → 全部跳过（与 Scanner 语义一致）
-        - 否则按扩展名白名单过滤
+        - ``scan_extensions`` 为空 frozenset → 全部跳过（计入 filtered_ext）
+        - 否则按扩展名白名单过滤（不匹配计入 filtered_ext）
         """
         from pathlib import PurePath
 
@@ -137,30 +150,44 @@ class _WatchdogHandler(FileSystemEventHandler):
         p = PurePath(path)
         for part in p.parts:
             if part.lower() in _IGNORE_DIR_PARTS:
+                self._filter_stats["ignored_dir"] = self._filter_stats.get("ignored_dir", 0) + 1
                 return False
         if self._scan_extensions is None:
             return True
         if not self._scan_extensions:
+            self._filter_stats["filtered_ext"] = self._filter_stats.get("filtered_ext", 0) + 1
             return False
         ext = p.suffix.lower().lstrip(".")
-        return ext in self._scan_extensions
+        if ext not in self._scan_extensions:
+            self._filter_stats["filtered_ext"] = self._filter_stats.get("filtered_ext", 0) + 1
+            return False
+        return True
 
     @override
     def on_created(self, event: FileSystemEvent) -> None:
         """文件创建事件。"""
-        if not event.is_directory and self._should_handle(event.src_path):
+        if event.is_directory:
+            self._filter_stats["dir_events"] = self._filter_stats.get("dir_events", 0) + 1
+            return
+        if self._should_handle(event.src_path):
             self._emitter.event_received.emit(event.src_path, "created")  # pyrefly: ignore [missing-attribute]
 
     @override
     def on_modified(self, event: FileSystemEvent) -> None:
         """文件修改事件。"""
-        if not event.is_directory and self._should_handle(event.src_path):
+        if event.is_directory:
+            self._filter_stats["dir_events"] = self._filter_stats.get("dir_events", 0) + 1
+            return
+        if self._should_handle(event.src_path):
             self._emitter.event_received.emit(event.src_path, "modified")  # pyrefly: ignore [missing-attribute]
 
     @override
     def on_moved(self, event: FileSystemEvent) -> None:
         """文件移动事件（按目标路径扫描）。"""
-        if not event.is_directory and self._should_handle(event.dest_path):
+        if event.is_directory:
+            self._filter_stats["dir_events"] = self._filter_stats.get("dir_events", 0) + 1
+            return
+        if self._should_handle(event.dest_path):
             self._emitter.event_received.emit(event.dest_path, "moved")  # pyrefly: ignore [missing-attribute]
 
 
@@ -179,6 +206,9 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
     directoryRemoved = Signal(str)
     monitorStateChanged = Signal(bool)
     watchedDirectoriesChanged = Signal()
+    # 事件日志变更信号——收到任意文件变更事件时 emit，
+    # 驱动 QML 刷新 eventCount / recentEvents 属性，让用户知道监控在工作
+    eventLogChanged = Signal()
 
     def __init__(
         self,
@@ -210,6 +240,20 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._debounce_timers: dict[str, QTimer] = {}
         # 持久化文件锁（多线程写 monitor.json 互斥；测试并发用）
         self._persist_lock = threading.Lock()
+        # 事件日志：累计事件计数 + 最近 N 条事件摘要（不限命中）
+        # 让用户能直观看到「监控在工作」而非仅「等待文件变更」
+        self._event_count: int = 0
+        self._recent_events: deque[dict[str, str]] = deque(maxlen=_RECENT_EVENTS_MAX)
+        # 过滤统计（共享引用，handler 线程累加，controller 线程轮询读取）
+        # 单写单读 + GIL 保证安全，仅整数递增不 emit 信号，无性能开销
+        self._filter_stats: dict[str, int] = {"ignored_dir": 0, "filtered_ext": 0, "dir_events": 0}
+        # 过滤统计轮询定时器：500ms 间隔，有变化时 emit eventLogChanged
+        self._stats_timer: QTimer = QTimer(self)
+        self._stats_timer.setSingleShot(False)
+        self._stats_timer.setInterval(_STATS_POLL_MS)
+        self._stats_timer.timeout.connect(self._poll_filter_stats)
+        # 上次轮询的过滤统计快照（用于检测变化）
+        self._last_filter_stats: tuple[int, int, int] = (0, 0, 0)
 
         # 监听规则集变化
         rules_controller.rulesetChanged.connect(self._on_ruleset_changed)  # pyrefly: ignore [missing-attribute]
@@ -240,6 +284,34 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def watchedCount(self) -> int:
         """监控目录数。"""
         return len(self._watched)
+
+    @Property(int, notify=eventLogChanged)  # pyrefly: ignore [not-callable]
+    def eventCount(self) -> int:
+        """自监控启动以来累计收到的文件变更事件数。"""
+        return self._event_count
+
+    @Property("QVariantList", notify=eventLogChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
+    def recentEvents(self) -> list[dict[str, str]]:
+        """最近 N 条文件变更事件摘要（FIFO，最多 ``_RECENT_EVENTS_MAX`` 条）。
+
+        每项为 ``{"time": "HH:MM:SS", "path": "...", "event_type": "created"}``。
+        """
+        return list(self._recent_events)
+
+    @Property(int, notify=eventLogChanged)  # pyrefly: ignore [not-callable]
+    def ignoredDirCount(self) -> int:
+        """被噪声目录过滤的事件数（.git/node_modules 等）。"""
+        return self._filter_stats.get("ignored_dir", 0)
+
+    @Property(int, notify=eventLogChanged)  # pyrefly: ignore [not-callable]
+    def filteredExtCount(self) -> int:
+        """被扩展名白名单过滤的事件数。"""
+        return self._filter_stats.get("filtered_ext", 0)
+
+    @Property(int, notify=eventLogChanged)  # pyrefly: ignore [not-callable]
+    def dirEventCount(self) -> int:
+        """目录事件数（文件夹创建/修改/移动，不触发文件扫描）。"""
+        return self._filter_stats.get("dir_events", 0)
 
     # ----------------------------- QML Slots -----------------------------
 
@@ -318,17 +390,33 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if enabled == self._monitoring_enabled:
             return
         if enabled:
+            # 重新启用时重置事件日志与过滤统计，从 0 开始计数本次会话
+            self._event_count = 0
+            self._recent_events.clear()
+            for key in self._filter_stats:
+                self._filter_stats[key] = 0
             self._start_observer()
         else:
             self._stop_observer()
         self._monitoring_enabled = enabled
         self._persist()
         self.monitorStateChanged.emit(enabled)  # pyrefly: ignore [missing-attribute]
+        if enabled:
+            self.eventLogChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     @Slot()  # pyrefly: ignore [not-callable]
     def clearHits(self) -> None:
         """清空命中记录列表。"""
         self._model.clear()
+
+    @Slot()  # pyrefly: ignore [not-callable]
+    def clearEvents(self) -> None:
+        """清空事件日志（累计计数 + 最近事件列表 + 过滤统计）。"""
+        self._event_count = 0
+        self._recent_events.clear()
+        for key in self._filter_stats:
+            self._filter_stats[key] = 0
+        self.eventLogChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def cleanup(self) -> None:
         """窗口关闭时统一清理：停用 Observer，取消未触发的防抖定时器。"""
@@ -361,9 +449,12 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     logger.warning("监控目录失败 %s: %s", path_str, exc)
                     new_watched[path_str] = None
             self._watched = new_watched
+        # 启动过滤统计轮询定时器
+        self._stats_timer.start()  # pyrefly: ignore [missing-argument]
 
     def _stop_observer(self) -> None:
         """停止 watchdog Observer。"""
+        self._stats_timer.stop()
         if self._observer is None:
             return
         with _suppress_observer_errors():
@@ -373,12 +464,29 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 但清空 watch handle（下次启用时重新 schedule）
         for path_str in list(self._watched.keys()):
             self._watched[path_str] = None
+        # 停止时最后轮询一次，确保 QML 显示最终统计值
+        self._poll_filter_stats()
+
+    def _poll_filter_stats(self) -> None:
+        """轮询 handler 的过滤统计，有变化时 emit eventLogChanged。
+
+        handler 线程仅递增 dict 值（无信号开销），controller 每 500ms 轮询一次，
+        检测到变化才 emit，驱动 QML 刷新 ignoredDirCount 等属性。
+        """
+        current = (
+            self._filter_stats.get("ignored_dir", 0),
+            self._filter_stats.get("filtered_ext", 0),
+            self._filter_stats.get("dir_events", 0),
+        )
+        if current != self._last_filter_stats:
+            self._last_filter_stats = current
+            self.eventLogChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def _rebuild_handler(self) -> None:
         """根据当前规则集重建 watchdog handler（刷新 scan_extensions）。"""
         ruleset = self._rules_controller.ruleset  # pyrefly: ignore [missing-attribute]
         scan_extensions = ruleset.scan_extensions if ruleset is not None else None
-        self._handler = _WatchdogHandler(self._emitter, scan_extensions)
+        self._handler = _WatchdogHandler(self._emitter, scan_extensions, self._filter_stats)
 
     def _on_ruleset_changed(self) -> None:
         """规则集变更：清空 Scanner 缓存，重建 handler，下次事件用新规则集。"""
@@ -416,6 +524,16 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 监控停用或路径已被移除时忽略残留事件
         if not self._monitoring_enabled:
             return
+        # 记录事件日志（不限命中，让用户看到监控在工作）
+        self._event_count += 1
+        self._recent_events.append(
+            {
+                "time": datetime.datetime.now().strftime("%H:%M:%S"),
+                "path": path,
+                "event_type": _event_type,
+            }
+        )
+        self.eventLogChanged.emit()  # pyrefly: ignore [missing-attribute]
         # 路径不在监控列表中（可能已被移除，或为子路径——子路径扫描仍允许）
         # 这里仅过滤掉明显已不在监控根目录下的事件（如监控目录被移除后残留事件）
         # 由于 watchdog recursive=True，事件路径可能是监控目录的子路径，这是正常的

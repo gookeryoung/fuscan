@@ -33,6 +33,7 @@ try:
     from fuscan.gui import AppController
     from fuscan.gui.controllers.about_controller import AboutController
     from fuscan.gui.controllers.config_controller import ConfigController
+    from fuscan.gui.controllers.file_monitor_controller import FileMonitorController
     from fuscan.gui.controllers.rules_controller import RulesController
     from fuscan.gui.controllers.workspace_controller import WorkspaceController
     from fuscan.gui.theme import ThemeController
@@ -69,6 +70,9 @@ class TestConstruction:
     def test_about_property(self, controller: AppController) -> None:
         assert isinstance(controller.about, AboutController)
 
+    def test_file_monitor_property(self, controller: AppController) -> None:
+        assert isinstance(controller.file_monitor, FileMonitorController)
+
     def test_children_parented_to_controller(self, controller: AppController) -> None:
         """子 controller 的 parent 应为 AppController，确保生命周期管理。"""
         assert controller.theme.parent() is controller
@@ -76,6 +80,7 @@ class TestConstruction:
         assert controller.rules.parent() is controller
         assert controller.workspace.parent() is controller
         assert controller.about.parent() is controller
+        assert controller.file_monitor.parent() is controller
 
 
 class TestRegisterTo:
@@ -86,7 +91,7 @@ class TestRegisterTo:
         controller: AppController,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """register_to 应将 6 个 controller 全部注册到 QML context。"""
+        """register_to 应将 7 个 controller 全部注册到 QML context。"""
         registered: dict[str, QObject] = {}
 
         def fake_set_context_property(name: str, obj: QObject) -> None:
@@ -109,6 +114,7 @@ class TestRegisterTo:
             "WorkspaceController",
             "WhitelistController",
             "AboutController",
+            "FileMonitorController",
         }
         assert registered["Theme"] is controller.theme
         assert registered["ConfigController"] is controller.config
@@ -116,6 +122,7 @@ class TestRegisterTo:
         assert registered["WorkspaceController"] is controller.workspace
         assert registered["WhitelistController"] is controller.whitelist
         assert registered["AboutController"] is controller.about
+        assert registered["FileMonitorController"] is controller.file_monitor
 
 
 class TestCleanup:

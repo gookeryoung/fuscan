@@ -1794,6 +1794,12 @@ Item {
                 Item { Layout.fillWidth: true }
             }
         }
+
+        // ---------- 文件监控面板（盘符扫描入口下方） ----------
+        FileMonitorPanel {
+            Layout.fillWidth: true
+            visible: !workspaceController.hasActiveScan
+        }
     }
 
     // 信号：通知 ContentArea 切换页面

@@ -31,6 +31,7 @@ except ImportError:  # pragma: no cover
 
 from fuscan.gui.controllers.about_controller import AboutController
 from fuscan.gui.controllers.config_controller import ConfigController
+from fuscan.gui.controllers.file_monitor_controller import FileMonitorController
 from fuscan.gui.controllers.rules_controller import RulesController
 from fuscan.gui.controllers.scan_controller import ScanController
 from fuscan.gui.controllers.splash_controller import SplashController
@@ -38,6 +39,7 @@ from fuscan.gui.controllers.whitelist_controller import WhitelistController
 from fuscan.gui.controllers.workspace_controller import WorkspaceController
 from fuscan.gui.models import (
     ExtractorListModel,
+    FileMonitorModel,
     ResultListModel,
     RuleListModel,
     WorkspaceListModel,
@@ -78,8 +80,10 @@ def register_qml_types() -> None:
     qmlRegisterType(WorkspaceController, "fuscan.controllers", 1, 0, "WorkspaceControllerType")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(WhitelistController, "fuscan.controllers", 1, 0, "WhitelistControllerType")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(AboutController, "fuscan.controllers", 1, 0, "AboutControllerType")  # pyrefly: ignore [bad-argument-type]
+    qmlRegisterType(FileMonitorController, "fuscan.controllers", 1, 0, "FileMonitorControllerType")  # pyrefly: ignore [bad-argument-type]
     # URI=fuscan.models，QML 用 `import fuscan.models 1.0` 后用各 model 类型
     qmlRegisterType(ExtractorListModel, "fuscan.models", 1, 0, "ExtractorListModel")  # pyrefly: ignore [bad-argument-type]
+    qmlRegisterType(FileMonitorModel, "fuscan.models", 1, 0, "FileMonitorModel")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(RuleListModel, "fuscan.models", 1, 0, "RuleListModel")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(ResultListModel, "fuscan.models", 1, 0, "ResultListModel")  # pyrefly: ignore [bad-argument-type]
     qmlRegisterType(WorkspaceListModel, "fuscan.models", 1, 0, "WorkspaceListModel")  # pyrefly: ignore [bad-argument-type]
@@ -109,6 +113,9 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 通过 set_workspace_controller 注入后即可访问当前工作区以管理临时规则
         self._rules.set_workspace_controller(self._workspace)
         self._about = AboutController(self)
+        # FileMonitorController 依赖 RulesController（构造期读取当前 ruleset，
+        # 连接 rulesetChanged 信号），在 about 之后构造（不依赖 workspace）
+        self._file_monitor = FileMonitorController(self._rules, self)
         # 从用户配置注入字体设置到 ThemeController（QML 绑定 theme.fontSize* 自动刷新）
         self._apply_font_config_to_theme()
         # 监听 ConfigController 字体变更信号，实时同步到 ThemeController
@@ -172,11 +179,17 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """关于控制器。"""
         return self._about
 
+    @property
+    def file_monitor(self) -> FileMonitorController:
+        """文件监控控制器。"""
+        return self._file_monitor
+
     def register_to(self, context: object) -> None:
         """注册所有 controller 到 QQmlContext（以 QML 可见的名字）。
 
         QML 中通过 ``Theme`` / ``ConfigController`` / ``RulesController`` /
-        ``WorkspaceController`` / ``AboutController`` 直接访问。
+        ``WorkspaceController`` / ``AboutController`` / ``FileMonitorController``
+        直接访问。
 
         :param context: ``QQmlContext`` 实例
         """
@@ -186,7 +199,9 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
         context.setContextProperty("WorkspaceController", self._workspace)  # pyrefly: ignore [missing-attribute]
         context.setContextProperty("WhitelistController", self._whitelist)  # pyrefly: ignore [missing-attribute]
         context.setContextProperty("AboutController", self._about)  # pyrefly: ignore [missing-attribute]
+        context.setContextProperty("FileMonitorController", self._file_monitor)  # pyrefly: ignore [missing-attribute]
 
     def cleanup(self) -> None:
-        """窗口关闭时清理资源（工作区 ScanController + 缓存）。"""
+        """窗口关闭时清理资源（工作区 ScanController + 缓存 + 文件监控 Observer）。"""
+        self._file_monitor.cleanup()
         self._workspace.cleanup()

@@ -25,6 +25,7 @@ dependencies = [
     "reportlab>=4.0.0",
     "python-calamine==0.8.2",
     "orjson>=3.9.0",
+    "watchdog>=3.0.0",
 ]
 
 description     = "极速通用文件扫描器."

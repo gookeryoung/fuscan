@@ -8,6 +8,7 @@ import os
 import sys
 import warnings
 from collections.abc import Sequence
+from typing import Any
 
 from fuscan.paths import ICON_QRC_URL, MAIN_QML_URL, QML_IMPORT_PATH, SPLASH_QML_URL
 from fuscan.perf import PerfReport, render_startup_summary, timed
@@ -17,11 +18,13 @@ try:
     from PySide2.QtGui import QFont, QGuiApplication, QIcon
     from PySide2.QtQml import QQmlApplicationEngine
     from PySide2.QtQuickControls2 import QQuickStyle
+    from PySide2.QtWidgets import QSystemTrayIcon
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import QUrl  # pyrefly: ignore [missing-import]
     from PySide6.QtGui import QFont, QGuiApplication, QIcon  # pyrefly: ignore [missing-import]
     from PySide6.QtQml import QQmlApplicationEngine  # pyrefly: ignore [missing-import]
     from PySide6.QtQuickControls2 import QQuickStyle  # pyrefly: ignore [missing-import]
+    from PySide6.QtWidgets import QSystemTrayIcon  # pyrefly: ignore [missing-import]
 
 # 显式 import QtSvg：触发 fspack 打包 Qt5Svg.dll/Qt6Svg.dll（qsvg imageformat plugin 依赖）。
 # fspack 的 imageformats plugin 始终保留 qsvg.dll，但未标明其对 Svg 子模块的依赖，
@@ -115,6 +118,73 @@ def _load_splash(app: QGuiApplication, splash_controller: SplashController) -> Q
     return engine
 
 
+# 文件监控命中时的声音参数（仅 Windows winsound.Beep 可用）
+# 严重度越高频率越高、时长越长，便于用户从声音区分等级
+_HIT_SOUND_PARAMS: dict[str, tuple[int, int]] = {
+    "info": (800, 200),
+    "warning": (1000, 300),
+    "critical": (1200, 500),
+}
+
+
+def _play_hit_sound(severity: str) -> None:
+    """播放监控命中提示音（仅 Windows；非 Windows 静默跳过）。
+
+    :param severity: 严重度值（``"info"``/``"warning"``/``"critical"``）
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import winsound
+
+        freq, duration = _HIT_SOUND_PARAMS.get(severity, (800, 200))
+        winsound.Beep(freq, duration)
+    except (OSError, RuntimeError) as exc:
+        # 蜂鸣器不可用（部分虚拟机/无音频设备）不阻塞流程
+        logger.debug("监控命中提示音播放失败: %s", exc)
+
+
+def _setup_file_monitor_tray(app: QGuiApplication, controller: object) -> QSystemTrayIcon | None:
+    """构造系统托盘图标，连接文件监控命中信号触发托盘通知 + 声音。
+
+    托盘在系统通知区显示 fuscan 图标，命中规则时弹出消息框并播放提示音。
+    无系统托盘环境（如部分 Linux 无 tray）时静默跳过，不影响主功能。
+
+    :param app: QGuiApplication 实例（提供图标）
+    :param controller: AppController 实例（读取 ``file_monitor`` 属性）
+    :return: 构造的 :class:`QSystemTrayIcon`；不可用时返回 ``None``
+    """
+    if not QSystemTrayIcon.isSystemTrayAvailable():
+        logger.info("系统托盘不可用，跳过托盘通知")
+        return None
+    tray = QSystemTrayIcon(QIcon(ICON_QRC_URL), app)
+    tray.setToolTip("fuscan 文件监控")
+
+    file_monitor = controller.file_monitor  # pyrefly: ignore [missing-attribute]
+
+    def _on_hit(hit: dict[str, Any]) -> None:
+        severity = hit.get("severity", "info")
+        severity_text = hit.get("severity_text", "")
+        rule_name = hit.get("rule_name", "")
+        path = hit.get("path", "")
+        # 文件名取路径最后一段（避免托盘消息过长）
+        file_name = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] if path else ""
+        title = f"fuscan 监控命中 · {severity_text}"
+        body = f"{rule_name} · {file_name}"
+        # 图标按严重度选择：critical→Critical，warning→Warning，info→Information
+        icon_flag = {
+            "critical": QSystemTrayIcon.Critical,
+            "warning": QSystemTrayIcon.Warning,
+        }.get(severity, QSystemTrayIcon.Information)
+        # showMessage 在部分平台（macOS）不显示，已通过界面内提醒面板兜底
+        tray.showMessage(title, body, icon_flag, 5000)  # pyrefly: ignore [bad-argument-type]
+        _play_hit_sound(severity)
+
+    file_monitor.hitFound.connect(_on_hit)
+    tray.show()
+    return tray
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """启动 QML GUI 应用。
 
@@ -202,6 +272,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         # 窗口关闭时清理 controller 资源
         app.aboutToQuit.connect(controller.cleanup)
+
+        # 构造系统托盘并连接文件监控命中信号（无系统托盘环境静默跳过）
+        with timed("构造文件监控托盘", level=logging.DEBUG, report=report):
+            _setup_file_monitor_tray(app, controller)
 
         # 主窗口已加载显示，关闭并释放 Splash 资源
         splash_controller.setStage("就绪")

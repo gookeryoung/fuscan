@@ -11,6 +11,7 @@
 - :class:`WorkspaceController`：工作区管理（多任务）
 - :class:`WhitelistController`：误报白名单管理（路径 glob + 规则名）
 - :class:`AboutController`：关于页信息
+- :class:`FileMonitorController`：文件监控（watchdog 事件驱动 + 实时命中推送）
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from __future__ import annotations
 from fuscan.gui.controllers.about_controller import AboutController
 from fuscan.gui.controllers.app_controller import AppController, register_qml_types
 from fuscan.gui.controllers.config_controller import ConfigController
+from fuscan.gui.controllers.file_monitor_controller import FileMonitorController
 from fuscan.gui.controllers.rules_controller import RulesController
 from fuscan.gui.controllers.scan_controller import ScanController
 from fuscan.gui.controllers.splash_controller import SplashController
@@ -28,6 +30,7 @@ __all__ = [
     "AboutController",
     "AppController",
     "ConfigController",
+    "FileMonitorController",
     "RulesController",
     "ScanController",
     "SplashController",

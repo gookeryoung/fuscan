@@ -7,17 +7,20 @@
 - :class:`RuleListModel`：规则列表（按规则文件分组）
 - :class:`ResultListModel`：扫描结果列表（含命中规则数/严重度/跳过标记）
 - :class:`WorkspaceListModel`：工作区列表（多任务管理）
+- :class:`FileMonitorModel`：文件监控命中列表（实时增量追加 + FIFO 限容）
 """
 
 from __future__ import annotations
 
 from fuscan.gui.models.extractor_model import ExtractorListModel
+from fuscan.gui.models.file_monitor_model import FileMonitorModel
 from fuscan.gui.models.result_model import ResultListModel
 from fuscan.gui.models.rule_model import RuleListModel
 from fuscan.gui.models.workspace_model import WorkspaceItem, WorkspaceListModel
 
 __all__ = [
     "ExtractorListModel",
+    "FileMonitorModel",
     "ResultListModel",
     "RuleListModel",
     "WorkspaceItem",

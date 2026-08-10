@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RCC version="1.0">
   <qresource prefix="/">
+    <file alias="qml/components/FileMonitorPanel.qml">views/components/FileMonitorPanel.qml</file>
     <file alias="qml/components/IconButton.qml">views/components/IconButton.qml</file>
     <file alias="qml/components/PhaseNode.qml">views/components/PhaseNode.qml</file>
     <file alias="qml/components/ResultDetailPanel.qml">views/components/ResultDetailPanel.qml</file>

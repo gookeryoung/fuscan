@@ -56,8 +56,8 @@ def test_fastpath_utf8_keeps_keywords() -> None:
     assert "AKIAIOSFODNN7EXAMPLE" in content
 
 
-def test_gbk_falls_back_to_charset_normalizer() -> None:
-    """GBK 字节不走 UTF-8 快路径，回退 charset-normalizer 正确解码中文。"""
+def test_gbk_decoded_correctly() -> None:
+    """GBK 字节不走 UTF-8 快路径，由原生编码检测或 charset-normalizer 正确解码中文。"""
     data = "这是包含密码字段的配置：password123，请妥善保管".encode("gbk")
     content = TextExtractor().extract_from_bytes(data)
     assert "密码" in content

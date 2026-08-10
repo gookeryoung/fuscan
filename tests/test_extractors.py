@@ -169,7 +169,9 @@ class TestTextExtractor:
 
         内容用 GBK 编码写入，使其无法命中 UTF-8 快路径，从而进入
         charset-normalizer 分支触发 ImportError 回退（回退链中 GBK 可解）。
+        禁用原生编码检测以隔离测试 charset-normalizer 回退路径。
         """
+        monkeypatch.setattr("fuscan.extractors.text._NATIVE_DECODE_AVAILABLE", False)
         path = tmp_path / "fallback.txt"
         path.write_bytes("回退解码 password".encode("gbk"))
 
@@ -215,7 +217,9 @@ class TestTextExtractor:
 
         内容用 GBK 编码写入，使其无法命中 UTF-8 快路径，从而进入
         charset-normalizer 分支触发 RuntimeError 回退（回退链中 GBK 可解）。
+        禁用原生编码检测以隔离测试 charset-normalizer 异常回退路径。
         """
+        monkeypatch.setattr("fuscan.extractors.text._NATIVE_DECODE_AVAILABLE", False)
         path = tmp_path / "test.txt"
         path.write_bytes("异常回退 password".encode("gbk"))
 
@@ -231,7 +235,9 @@ class TestTextExtractor:
 
         字节须既非 BOM 也非合法 UTF-8，才不会命中头部快路径而进入
         charset-normalizer 分支（``\\x80\\x81\\xfd`` 为孤立续字节，非法 UTF-8）。
+        禁用原生编码检测以隔离测试 charset-normalizer None 回退路径。
         """
+        monkeypatch.setattr("fuscan.extractors.text._NATIVE_DECODE_AVAILABLE", False)
         path = tmp_path / "test.txt"
         path.write_bytes(b"\x80\x81\xfd")
 
@@ -240,6 +246,63 @@ class TestTextExtractor:
         assert isinstance(content, str)
         # latin-1 能解码任意字节，不应为空
         assert len(content) == 3
+
+    def test_native_decode_gbk(self, tmp_path: Path) -> None:
+        """原生编码检测（fuscan-core）正确解码 GBK 中文。
+
+        用足够长的 GBK 文本给 chardetng 统计检测足够的特征，
+        确保检测到 GBK 编码并正确解码中文与 ASCII 关键字。
+        """
+        path = tmp_path / "gbk_native.txt"
+        text = "这是一个包含密码字段的配置文件，密码为 password123，请妥善保管。"
+        path.write_bytes(text.encode("gbk"))
+        content = TextExtractor().extract(path)
+        assert "密码" in content
+        assert "password123" in content
+
+    def test_native_decode_priority_over_charset_normalizer(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """原生编码检测可用时优先于 charset-normalizer。
+
+        monkeypatch charset-normalizer 抛异常，若原生路径生效则不受影响，
+        GBK 内容仍被正确解码（证明走了原生路径而非 charset-normalizer）。
+        """
+
+        def fake_from_bytes(data: bytes):
+            raise AssertionError("charset-normalizer 不应被调用，原生路径应优先")
+
+        monkeypatch.setattr("charset_normalizer.from_bytes", fake_from_bytes)
+        path = tmp_path / "gbk_priority.txt"
+        text = "原生编码检测优先 password 配置文件密码"
+        path.write_bytes(text.encode("gbk"))
+        content = TextExtractor().extract(path)
+        assert "password" in content
+
+    def test_native_decode_exception_fallback(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """原生编码检测抛异常时回退到 charset-normalizer。
+
+        monkeypatch 原生 decode_bytes 抛 RuntimeError，验证回退到
+        charset-normalizer 路径仍能正确解码 GBK 内容。
+        """
+
+        def fake_decode(data: bytes) -> str:
+            raise RuntimeError("模拟原生检测异常")
+
+        monkeypatch.setattr("fuscan.extractors.text._native_decode_bytes", fake_decode)
+        path = tmp_path / "native_exc.txt"
+        text = "异常回退原生检测 password 密码配置"
+        path.write_bytes(text.encode("gbk"))
+        content = TextExtractor().extract(path)
+        assert "password" in content
+
+    def test_native_decode_invalid_bytes(self, tmp_path: Path) -> None:
+        """原生编码检测对非法字节用 U+FFFD 替换，不 panic/不抛异常。"""
+        path = tmp_path / "invalid.txt"
+        path.write_bytes(b"\x80\x81\xfd")
+        content = TextExtractor().extract(path)
+        assert isinstance(content, str)
+        assert len(content) > 0
 
     def test_normalizes_crlf_to_lf(self, tmp_path: Path) -> None:
         """CRLF 行尾应规范化为 LF，保证跨平台 CONTENT EQUALS 比较一致。"""

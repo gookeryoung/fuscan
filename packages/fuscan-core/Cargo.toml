@@ -19,6 +19,11 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.28.2", features = ["extension-module", "abi3-py310"] }
 regex = "1.11"
 regex-syntax = "0.8"
+# 编码检测+解码：替代 Python charset-normalizer，释放 GIL 实现并行解码。
+# encoding_rs：WHATWG Encoding Standard 实现，零拷贝 UTF-8/ASCII 快路径。
+# chardetng：Mozilla 统计编码检测器（用于非 BOM/非 UTF-8 字节的编码猜测）。
+encoding_rs = "0.8"
+chardetng = "0.1"
 
 [profile.release]
 opt-level = 3

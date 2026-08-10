@@ -1,10 +1,10 @@
 """纯文本提取器。
 
-使用 charset-normalizer 自动检测编码，支持 BOM 处理与最大读取限制。
+编码检测优先使用 fuscan-core 原生引擎（encoding_rs + chardetng，释放 GIL），
+缺失时回退 charset-normalizer。支持 BOM 处理与最大读取限制，
 覆盖常见纯文本与代码文件格式。
 
-大文件（>10MB）采用分块流式读取 + 增量解码，跳过 charset-normalizer
-全量分析以降低内存峰值。
+大文件（>10MB）采用分块流式读取 + 增量解码，跳过全量编码分析以降低内存峰值。
 
 GUI 文件类型树中文本类别仅展示「纯文本」与「源代码」两项，
 原 ``ConfigFileExtractor``/``MarkupDataExtractor``/``StylesheetExtractor``
@@ -32,6 +32,16 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+# fuscan-core 原生编码检测：encoding_rs + chardetng，py.detach 释放 GIL。
+# 缺失时回退 charset-normalizer，不影响功能。
+try:
+    from fuscan_core import decode_bytes as _native_decode_bytes  # pyrefly: ignore [missing-module-attribute]
+
+    _NATIVE_DECODE_AVAILABLE: bool = True
+except ImportError:  # pragma: no cover - fuscan_core 未安装时走此分支
+    _NATIVE_DECODE_AVAILABLE = False
+    _native_decode_bytes = None  # type: ignore[assignment,misc]
 
 # 纯文本扩展名（不含点，小写）
 PLAIN_TEXT_EXTENSIONS: tuple[str, ...] = (
@@ -147,8 +157,8 @@ class TextExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """charset-normalizer + 内置解码。"""
-        return "charset-normalizer"
+        """编码检测引擎：fuscan-core 原生优先，缺失时 charset-normalizer。"""
+        return "fuscan-core" if _NATIVE_DECODE_AVAILABLE else "charset-normalizer"
 
     @override
     def extract(self, path: Path) -> str:
@@ -218,12 +228,14 @@ class TextExtractor(Extractor):
 
         解码优先级：
 
-        1. **头部快路径**（BOM / 整段严格 UTF-8）：命中即跳过 charset-normalizer
-           全量分析。为零误判，仅当 BOM 明确或整段字节严格 UTF-8 解码成功
+        1. **头部快路径**（BOM / 整段严格 UTF-8）：命中即跳过全量编码分析。
+           为零误判，仅当 BOM 明确或整段字节严格 UTF-8 解码成功
            （纯 ASCII 属其子集）时走快路径；GBK 等无法确证的编码不走，
            避免「头部纯 ASCII 但正文 GBK」被 UTF-8 ``errors="ignore"`` 误吞。
         2. **大 bytes（>10MB）头部检测**：超阈值文件用文件头启发式检测编码。
-        3. **charset-normalizer 精确检测**：前两者未命中时的通用回退。
+        3. **原生编码检测**（fuscan-core）：encoding_rs + chardetng 统计检测，
+           ``py.detach`` 释放 GIL；缺失/异常时回退 charset-normalizer。
+        4. **charset-normalizer 精确检测**：原生不可用时的 Python 回退。
         """
         fast = _fast_decode(data)
         if fast is not None:
@@ -233,6 +245,14 @@ class TextExtractor(Extractor):
             encoding = _detect_encoding_from_header(data[:_HEADER_SIZE])
             if encoding is not None:
                 return _normalize_newlines(data.decode(encoding, errors="ignore"))
+
+        # 原生编码检测优先（fuscan-core），缺失/异常回退 charset-normalizer
+        if _NATIVE_DECODE_AVAILABLE:
+            try:
+                assert _native_decode_bytes is not None
+                return _normalize_newlines(_native_decode_bytes(data))
+            except Exception:
+                logger.warning("原生编码检测失败，回退 charset-normalizer", exc_info=True)
 
         try:
             from charset_normalizer import from_bytes
@@ -275,8 +295,8 @@ class PlainTextExtractor(TextExtractor):
     @override
     @property
     def engine_info(self) -> str:
-        """charset-normalizer + 内置解码。"""
-        return "charset-normalizer"
+        """编码检测引擎：fuscan-core 原生优先，缺失时 charset-normalizer。"""
+        return "fuscan-core" if _NATIVE_DECODE_AVAILABLE else "charset-normalizer"
 
 
 class SourceCodeExtractor(TextExtractor):
@@ -301,8 +321,8 @@ class SourceCodeExtractor(TextExtractor):
     @override
     @property
     def engine_info(self) -> str:
-        """charset-normalizer + 内置解码。"""
-        return "charset-normalizer"
+        """编码检测引擎：fuscan-core 原生优先，缺失时 charset-normalizer。"""
+        return "fuscan-core" if _NATIVE_DECODE_AVAILABLE else "charset-normalizer"
 
 
 def _fast_decode(data: bytes) -> str | None:

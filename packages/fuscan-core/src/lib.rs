@@ -13,6 +13,8 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::sync::RwLock;
 
+mod encoding;
+
 // ============================================================================
 // 常量与枚举
 // ============================================================================
@@ -1140,6 +1142,7 @@ fn fuscan_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(extract_literals_py, m)?)?;
     m.add_function(wrap_pyfunction!(extract_inline_flags_py, m)?)?;
     m.add_function(wrap_pyfunction!(dedup_substrings_py, m)?)?;
+    m.add_function(wrap_pyfunction!(encoding::decode_bytes, m)?)?;
     Ok(())
 }
 

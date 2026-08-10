@@ -5752,13 +5752,16 @@ class TestPerFileElapsedMs:
 
     def test_scan_result_carries_engine(self, tmp_path: Path) -> None:
         """_scan_entry 应按扩展名回填解析引擎名（纯文本 → 「纯文本」）。"""
+        from fuscan.extractors.text import _NATIVE_DECODE_AVAILABLE
+
         p = tmp_path / "a.txt"
         p.write_text("hello world content", encoding="utf-8")
         rs = _build_ruleset(_content_rule("pwd", "password"))
         scanner = Scanner(rs, max_workers=1, cache=None)
         result = scanner._scan_entry(_plain_entry(p))
-        # .txt 由 PlainTextExtractor 处理，引擎为 charset-normalizer
-        assert result.engine == "charset-normalizer"
+        # .txt 由 PlainTextExtractor 处理，引擎为 fuscan-core（原生可用时）或 charset-normalizer
+        expected = "fuscan-core" if _NATIVE_DECODE_AVAILABLE else "charset-normalizer"
+        assert result.engine == expected
 
     def test_concurrent_elapsed_not_cumulative(self, tmp_path: Path) -> None:
         """并发模式下单文件耗时不应随队列位置单调递增（不是累计耗时）。
@@ -5853,10 +5856,12 @@ class TestEngineForExtension:
 
     def test_registered_extension_returns_engine_info(self) -> None:
         """已注册扩展名返回其提取器 engine_info。"""
+        from fuscan.extractors.text import _NATIVE_DECODE_AVAILABLE
         from fuscan.scanner._helpers import engine_for_extension
 
-        # .txt → PlainTextExtractor.engine_info == "charset-normalizer"
-        assert engine_for_extension("txt") == "charset-normalizer"
+        # .txt → PlainTextExtractor.engine_info，原生可用时为 fuscan-core 否则 charset-normalizer
+        expected = "fuscan-core" if _NATIVE_DECODE_AVAILABLE else "charset-normalizer"
+        assert engine_for_extension("txt") == expected
 
     def test_extension_case_insensitive(self) -> None:
         """扩展名大小写不敏感（注册表内部归一化为小写）。"""

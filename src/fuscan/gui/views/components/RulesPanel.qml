@@ -24,9 +24,12 @@ Item {
     property bool collapsed: false
 
     // 规则文件选择对话框（加载到全局规则）
+    // folder 绑定 rulesController.lastRulesDir：记忆上次加载/导入/导出目录，
+    // 避免每次重新定位；为空时 FileDialog 回退到平台默认目录
     Dialogs.FileDialog {
         id: rulesFileDialog
         title: "选择规则文件（加载到全局）"
+        folder: rulesController.lastRulesDir.length > 0 ? "file:///" + rulesController.lastRulesDir : ""
         nameFilters: ["YAML 文件 (*.yaml *.yml)", "所有文件 (*.*)"]
         onAccepted: {
             var pathStr = rulesFileDialog.fileUrl.toString()
@@ -44,6 +47,7 @@ Item {
         title: "选择规则文件（加载到临时规则" +
                (rulesController.hasCurrentWorkspace ? " · " + rulesController.currentWorkspaceName : "")
                + "）"
+        folder: rulesController.lastRulesDir.length > 0 ? "file:///" + rulesController.lastRulesDir : ""
         nameFilters: ["YAML 文件 (*.yaml *.yml)", "所有文件 (*.*)"]
         onAccepted: {
             var pathStr = tempRulesFileDialog.fileUrl.toString()
@@ -58,6 +62,7 @@ Item {
     Dialogs.FileDialog {
         id: importFileDialog
         title: "导入规则集"
+        folder: rulesController.lastRulesDir.length > 0 ? "file:///" + rulesController.lastRulesDir : ""
         nameFilters: ["YAML/JSON 文件 (*.yaml *.yml *.json)", "所有文件 (*.*)"]
         onAccepted: {
             var pathStr = importFileDialog.fileUrl.toString()
@@ -72,6 +77,7 @@ Item {
     Dialogs.FileDialog {
         id: exportFileDialog
         title: "导出规则集"
+        folder: rulesController.lastRulesDir.length > 0 ? "file:///" + rulesController.lastRulesDir : ""
         nameFilters: ["YAML 文件 (*.yaml *.yml)", "JSON 文件 (*.json)", "所有文件 (*.*)"]
         selectExisting: false
         defaultSuffix: "yaml"

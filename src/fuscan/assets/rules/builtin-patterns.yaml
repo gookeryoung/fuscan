@@ -1,0 +1,45 @@
+# fuscan 内置匹配规则与文件后缀白名单
+#
+# 此文件随软件分发，提供通用的文件后缀白名单与密钥/敏感信息匹配规则。
+# 与 ``builtin.yaml``（承载忽略目录与扫描参数）分离，职责单一：
+#   - ``builtin.yaml``：ignore_paths / ignore_dirs / scan_params / whitelist
+#   - ``builtin-patterns.yaml``（本文件）：scan_extensions / rules
+# 用户规则文件中同名规则会覆盖此处对应的规则；
+# scan_extensions 由后者非 None 覆盖；rules 同名覆盖。
+version: "1.0"
+
+# 文件后缀白名单（小写、无前导点）。
+#   - null（未指定）= 全选默认（所有注册提取器支持的后缀）
+#   - 空 list = 都不扫描
+#   - 非空 list = 仅扫描指定后缀
+scan_extensions:
+  - "txt"
+
+rules:
+  # ---------- 敏感个人信息(PRIVATE INFO) ----------
+  - name: P0101-通用密码赋值
+    description: 检测配置文件中的密码赋值语句
+    severity: warning
+    match:
+      type: content
+      mode: regex
+      pattern: '(?i)(password|passwd|pwd)\s*[=:]\s*\S+'
+  - name: P0102-敏感配置文件名
+    description: 检测常见敏感配置文件名
+    severity: info
+    match:
+      type: filename
+      mode: regex
+      pattern: '(?i)(^\.env$|^\.env\.|^credentials|^secrets\.|\.pem$|\.key$|\.pfx$|\.keystore$)'
+  - name: P0103-邮件信息包含敏感词
+    description: 检测邮件信息包含敏感词
+    severity: critical
+    match:
+      type: and
+      children:
+        - type: filename
+          mode: regex
+          pattern: '(?i)(^\.eml$)'
+        - type: content
+          mode: regex
+          pattern: '(价格|内部|商业|薪酬)'

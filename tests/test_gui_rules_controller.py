@@ -1594,21 +1594,36 @@ class TestEffectiveConfigPreview:
         assert preview["scanExtensions"] == []
         assert preview["whitelistCount"] == 0
 
-    def test_preview_with_builtin_ruleset(self, config_controller: ConfigController) -> None:
-        """内置规则集加载后 hasRuleset=True，字段反映内置默认。"""
-        controller = RulesController(config_controller)
-        assert controller.ruleset is not None
+    def test_preview_with_builtin_ruleset(
+        self,
+        config_controller: ConfigController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """内置规则集加载后 hasRuleset=True，max_workers 按 CPU 核数动态计算。"""
+        # 锁定 CPU 核数为 8，使 recommended_max_workers() 稳定返回 6（8 - 2）
+        monkeypatch.setattr("os.cpu_count", lambda: 8)
+        from fuscan.rules.builtin import load_builtin_ruleset, recommended_max_workers
 
-        preview = controller.effectiveConfigPreview
-        assert preview["hasRuleset"] is True
-        # 内置规则集的 scan_params 各字段为 None，应回退到默认值
-        assert preview["scanArchives"] is True
-        assert preview["maxWorkers"] == 5
-        assert preview["maxDepth"] == 0
-        assert preview["cacheEnabled"] is True
-        assert preview["perfLogEnabled"] is False
-        assert isinstance(preview["ignoreDirs"], list)
-        assert isinstance(preview["scanExtensions"], list)
+        load_builtin_ruleset.cache_clear()
+        try:
+            expected_workers = recommended_max_workers(8)
+
+            controller = RulesController(config_controller)
+            assert controller.ruleset is not None
+
+            preview = controller.effectiveConfigPreview
+            assert preview["hasRuleset"] is True
+            # 内置规则集的 scan_params 各字段为 None，max_workers 按 CPU 核数动态计算
+            assert preview["scanArchives"] is True
+            assert preview["maxWorkers"] == expected_workers
+            assert preview["maxDepth"] == 0
+            assert preview["cacheEnabled"] is True
+            assert preview["perfLogEnabled"] is False
+            assert isinstance(preview["ignoreDirs"], list)
+            assert isinstance(preview["scanExtensions"], list)
+        finally:
+            # 清除缓存的 mocked 结果，避免污染后续测试（lru_cache 全局共享）
+            load_builtin_ruleset.cache_clear()
 
 
 # ============================= appendWhitelistEntry =============================

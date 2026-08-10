@@ -351,6 +351,30 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
             )
         return items
 
+    @Property(str, notify=rulesFileListChanged)  # pyrefly: ignore [not-callable]
+    def lastRulesDir(self) -> str:
+        """上次使用的规则文件目录（供 FileDialog folder 绑定）。
+
+        返回 ``Config.last_rules_dir``；为 None 时返回空串（QML FileDialog
+        会回退到平台默认目录）。``loadFileFromPath``/``loadFileToTemp``/
+        ``importRuleset``/``exportRuleset`` 成功后回写父目录。
+        """
+        return self._config.last_rules_dir or ""
+
+    def _update_last_rules_dir(self, path_str: str) -> None:
+        """从路径字符串提取父目录并回写 Config.last_rules_dir。
+
+        路径为空或父目录不存在时跳过；与上次相同时不触发持久化。
+        """
+        if not path_str:
+            return
+        parent = Path(path_str).parent
+        parent_str = str(parent)
+        if not parent.exists() or parent_str == self._config.last_rules_dir:
+            return
+        self._config.last_rules_dir = parent_str
+        self._config_controller.save()  # pyrefly: ignore [missing-attribute]
+
     @Property(int, notify=selectionChanged)  # pyrefly: ignore [not-callable]
     def selectedFileIndex(self) -> int:
         """选中规则文件行号。"""
@@ -417,6 +441,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         try:
             self._reload_ruleset()
             self._rule_model.set_ruleset(self._ruleset)
+            self._update_last_rules_dir(path_str)
             self._config_controller.save()  # pyrefly: ignore [missing-attribute]
             self.rulesFileListChanged.emit()  # pyrefly: ignore [missing-attribute]
             self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -466,6 +491,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._workspace_controller.setTaskOverride(  # pyrefly: ignore [missing-attribute]
             ws_id, "temp_rules_paths", json.dumps(current)
         )
+        self._update_last_rules_dir(path_str)
         self.rulesFileListChanged.emit()  # pyrefly: ignore [missing-attribute]
         msg = f"已加载临时规则 {path.name}"
         self.rulesIoCompleted.emit(True, msg)  # pyrefly: ignore [missing-attribute]
@@ -940,6 +966,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         path = Path(path_str)
         try:
             save_ruleset(self._ruleset, path)
+            self._update_last_rules_dir(path_str)
             msg = f"规则集已导出到 {path.name}（{len(self._ruleset.rules)} 条规则）"
             logger.info(msg)
             self.rulesIoCompleted.emit(True, msg)  # pyrefly: ignore [missing-attribute]

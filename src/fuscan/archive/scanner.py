@@ -135,8 +135,9 @@ class ArchiveScanner:
         results: list[ScanResult] = []
         # processed_count 同时驱动取消检查（每 CANCEL_CHECK_INTERVAL 条）
         # 与条目数上限保护（超过 max_entries 截断）。仅统计实际进入扫描的条目
-        # （已剔除 is_dir 与白名单过滤），与 results 长度一致。
+        # （已剔除 is_dir 与白名单与 oversize 过滤），与 results 长度一致。
         processed_count = 0
+        skipped_oversize = 0
         truncated = False
         for entry in entries:
             # 取消检查：cancel_check() 返回 True 表示外部已请求取消，立即 break。
@@ -156,6 +157,14 @@ class ArchiveScanner:
             # 空 frozenset 表示用户全部取消勾选，跳过所有条目。
             if self._scan_extensions is not None and entry.extension not in self._scan_extensions:
                 continue
+            # 条目大小过滤：超过 max_entry_size 的条目整体跳过，不进入扫描队列。
+            # 与 _filter_phase.run_filter_phase 对常规文件的 oversize 判断语义一致
+            # （剔除而非读空内容），避免 oversized 条目仍命中 FILENAME/PATH 规则
+            # 产生与"最大文件大小未生效"不一致的扫描结果。``max_entry_size=0`` 表示
+            # 不限制（与 ``Scanner.max_file_size=0`` 语义一致），跳过此分支。
+            if self._max_entry_size > 0 and entry.size > self._max_entry_size:
+                skipped_oversize += 1
+                continue
             # 条目数上限保护，超过 max_entries 截断避免 zip bomb 卡死
             if processed_count >= self._max_entries:
                 truncated = True
@@ -169,6 +178,14 @@ class ArchiveScanner:
             result = self._scan_entry(archive_path, entry, reader)
             results.append(result)
             processed_count += 1
+
+        if skipped_oversize > 0:
+            logger.info(
+                "压缩包内 %d 个条目超过大小上限 (%d 字节) 已跳过: %s",
+                skipped_oversize,
+                self._max_entry_size,
+                archive_path,
+            )
 
         self._close_reader(reader)
         # 截断时附加错误结果标识部分扫描，便于上层在统计中体现
@@ -346,13 +363,11 @@ class ArchiveScanner:
         entry: ArchiveEntry,
         reader: ArchiveReader,
     ) -> bytes:
-        """读取压缩包条目字节，超大或读取失败时返回空字节。
+        """读取压缩包条目字节，读取失败时返回空字节。
 
-        ``max_entry_size=0`` 表示不限制（与 ``Scanner.max_file_size=0`` 语义一致）。
+        注：``max_entry_size`` 大小过滤已在 :meth:`scan_archive` 主循环统一完成，
+        此处不再重复检查；调用方保证传入的 ``entry`` 已通过 oversize 过滤。
         """
-        if self._max_entry_size > 0 and entry.size > self._max_entry_size:
-            logger.debug("条目过大，跳过内容提取: %s", entry.display_path)
-            return b""
         try:
             return reader.read_entry(entry.entry_name)
         except ArchiveError as exc:

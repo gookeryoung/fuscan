@@ -705,6 +705,8 @@ Item {
                                     color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                                 }
                                 // 瀑布标签：每项一个圆角矩形，Flow 自动换行，比 GridLayout 两列更紧凑
+                                // 每个标签格式：`中文标签 (config_name: 值)`，斜体不加粗，
+                                // 让用户直观看到对应的 YAML 配置项与当前生效值
                                 Flow {
                                     Layout.fillWidth: true
                                     spacing: 6
@@ -719,9 +721,10 @@ Item {
                                         Label {
                                             id: spScanArchives
                                             anchors.centerIn: parent
-                                            text: "<b>扫描压缩包: <span style=\"color:" + (previewRulesDialog.previewData.scanArchives === true ? _rgb(theme.colorSuccess) : _rgb(theme.colorDanger)) + "\">" + (previewRulesDialog.previewData.scanArchives === true ? "是" : "否") + "</span></b>"
+                                            text: "扫描压缩包 (scan_archives: <span style=\"color:" + (previewRulesDialog.previewData.scanArchives === true ? _rgb(theme.colorSuccess) : _rgb(theme.colorDanger)) + "\">" + (previewRulesDialog.previewData.scanArchives === true ? "是" : "否") + "</span>)"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
+                                            font.italic: true
                                             color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                         }
                                     }
@@ -735,10 +738,11 @@ Item {
                                         Label {
                                             id: spMaxWorkers
                                             anchors.centerIn: parent
-                                            text: "<b>最大工作线程: " + (previewRulesDialog.previewData.maxWorkers !== undefined
-                                                  ? previewRulesDialog.previewData.maxWorkers : "—") + "</b>"
+                                            text: "最大工作线程 (max_workers: " + (previewRulesDialog.previewData.maxWorkers !== undefined
+                                                  ? previewRulesDialog.previewData.maxWorkers : "—") + ")"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
+                                            font.italic: true
                                             color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                         }
                                     }
@@ -752,10 +756,11 @@ Item {
                                         Label {
                                             id: spMaxFileSize
                                             anchors.centerIn: parent
-                                            text: "<b>最大文件大小（MB）: " + (previewRulesDialog.previewData.maxFileSizeMB !== undefined
-                                                  ? previewRulesDialog.previewData.maxFileSizeMB : "—") + "</b>"
+                                            text: "最大文件大小 (max_file_size: " + (previewRulesDialog.previewData.maxFileSizeMB !== undefined
+                                                  ? previewRulesDialog.previewData.maxFileSizeMB + " MB" : "—") + ")"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
+                                            font.italic: true
                                             color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                         }
                                     }
@@ -769,10 +774,11 @@ Item {
                                         Label {
                                             id: spMaxDepth
                                             anchors.centerIn: parent
-                                            text: "<b>最大扫描深度（0=无限）: " + (previewRulesDialog.previewData.maxDepth !== undefined
-                                                  ? previewRulesDialog.previewData.maxDepth : "—") + "</b>"
+                                            text: "最大扫描深度 (max_depth: " + (previewRulesDialog.previewData.maxDepth !== undefined
+                                                  ? previewRulesDialog.previewData.maxDepth : "—") + ")"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
+                                            font.italic: true
                                             color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                         }
                                     }
@@ -786,9 +792,10 @@ Item {
                                         Label {
                                             id: spCacheEnabled
                                             anchors.centerIn: parent
-                                            text: "<b>启用扫描结果缓存: <span style=\"color:" + (previewRulesDialog.previewData.cacheEnabled === true ? _rgb(theme.colorSuccess) : _rgb(theme.colorDanger)) + "\">" + (previewRulesDialog.previewData.cacheEnabled === true ? "是" : "否") + "</span></b>"
+                                            text: "启用扫描结果缓存 (cache_enabled: <span style=\"color:" + (previewRulesDialog.previewData.cacheEnabled === true ? _rgb(theme.colorSuccess) : _rgb(theme.colorDanger)) + "\">" + (previewRulesDialog.previewData.cacheEnabled === true ? "是" : "否") + "</span>)"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
+                                            font.italic: true
                                             color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                         }
                                     }
@@ -802,9 +809,10 @@ Item {
                                         Label {
                                             id: spPerfLog
                                             anchors.centerIn: parent
-                                            text: "<b>启用性能详细日志: <span style=\"color:" + (previewRulesDialog.previewData.perfLogEnabled === true ? _rgb(theme.colorSuccess) : _rgb(theme.colorDanger)) + "\">" + (previewRulesDialog.previewData.perfLogEnabled === true ? "是" : "否") + "</span></b>"
+                                            text: "启用性能详细日志 (perf_log_enabled: <span style=\"color:" + (previewRulesDialog.previewData.perfLogEnabled === true ? _rgb(theme.colorSuccess) : _rgb(theme.colorDanger)) + "\">" + (previewRulesDialog.previewData.perfLogEnabled === true ? "是" : "否") + "</span>)"
                                             textFormat: Text.RichText
                                             font.pixelSize: 11
+                                            font.italic: true
                                             color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                                         }
                                     }

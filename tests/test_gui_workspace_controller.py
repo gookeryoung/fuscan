@@ -1936,14 +1936,29 @@ class TestScanControllerTaskOverrides:
     def test_effective_reads_ruleset_defaults(
         self,
         controller: WorkspaceController,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """扫描参数应从规则集读取（builtin 默认 scan_archives=True, max_workers=5）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
-        controller.setCurrentWorkspaceId(ws_id)
-        sc = controller.currentScanController
+        """扫描参数应从规则集读取（builtin scan_archives=True，max_workers 按 CPU 动态计算）。"""
+        # 锁定 CPU 核数为 8，使 recommended_max_workers() 稳定返回 6（8 - 2）
+        monkeypatch.setattr("os.cpu_count", lambda: 8)
+        from fuscan.rules.builtin import load_builtin_ruleset, recommended_max_workers
 
-        assert sc._effective_scan_archives() is True
-        assert sc._effective_max_workers() == 5
+        load_builtin_ruleset.cache_clear()
+        try:
+            expected_workers = recommended_max_workers(8)
+            # RulesController.ruleset 在 fixture 构造时已用真实 CPU 核数加载，
+            # 此处刷新使其读取 mocked 缓存后的内置规则集（max_workers=expected_workers）
+            controller._rules_controller._reload_ruleset()  # type: ignore[attr-defined]
+
+            ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+            controller.setCurrentWorkspaceId(ws_id)
+            sc = controller.currentScanController
+
+            assert sc._effective_scan_archives() is True
+            assert sc._effective_max_workers() == expected_workers
+        finally:
+            # 清除缓存的 mocked 结果，避免污染后续测试（lru_cache 全局共享）
+            load_builtin_ruleset.cache_clear()
 
     def test_effective_ignore_dirs_returns_tuple(
         self,

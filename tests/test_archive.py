@@ -760,15 +760,55 @@ class TestArchiveScanner:
         assert any("a.conf" in n for n in hit_names)
         assert any("a.txt" in n for n in hit_names)
 
-    def test_scan_archive_oversize_entry_skipped(self, tmp_path: Path) -> None:
-        """超过 max_entry_size 的条目内容返回空字符串。"""
+    def test_scan_archive_oversize_entry_filtered(self, tmp_path: Path) -> None:
+        """超过 max_entry_size 的条目整体剔除，不进入扫描队列。
+
+        修复前行为：``_read_entry_bytes`` 仅跳过内容读取，条目仍产生 ScanResult
+        （FILENAME/PATH 规则仍可命中），与"最大文件大小未生效"不一致。
+        修复后行为：oversize 条目在 ``scan_archive`` 主循环被剔除，不出现在
+        ``results`` 中，与 :mod:`fuscan.scanner._filter_phase` 对常规文件的
+        oversize 处理语义一致。
+        """
         big_content = "x" * 1000
-        zip_path = _make_zip(tmp_path / "a.zip", {"big.txt": big_content})
+        zip_path = _make_zip(
+            tmp_path / "a.zip",
+            {"big.txt": big_content, "small.txt": "x"},
+        )
         rs = _build_ruleset(_content_rule("r", "x"))
         scanner = ArchiveScanner(rs, max_entry_size=10)
         results = scanner.scan_archive(zip_path)
-        # 内容被跳过，规则不命中
-        assert all(not r.has_hit for r in results)
+        # 仅 small.txt 进入扫描队列
+        assert len(results) == 1
+        assert "small.txt" in str(results[0].path)
+        assert results[0].has_hit
+
+    def test_scan_archive_oversize_filename_rule_still_filtered(self, tmp_path: Path) -> None:
+        """oversize 条目对 FILENAME 规则同样不命中（修复核心：整体剔除）。
+
+        回归场景：修复前 FILENAME 规则在内容跳过情况下仍能命中 oversized 条目，
+        导致用户感知"最大文件大小对压缩包无效"。修复后 oversized 条目不进入
+        规则求值链路。
+        """
+        big_content = "x" * 1000
+        zip_path = _make_zip(tmp_path / "a.zip", {"big.txt": big_content})
+        rs = _build_ruleset(_filename_rule("r", "big"))
+        scanner = ArchiveScanner(rs, max_entry_size=10)
+        results = scanner.scan_archive(zip_path)
+        # big.txt 被整体剔除，FILENAME 规则无对象求值
+        assert len(results) == 0
+
+    def test_scan_archive_max_entry_size_zero_unlimited(self, tmp_path: Path) -> None:
+        """``max_entry_size=0`` 表示不限制，大文件正常扫描。
+
+        与 :attr:`Scanner.max_file_size=0` 语义一致：0 表示禁用大小过滤。
+        """
+        big_content = "x" * 1000
+        zip_path = _make_zip(tmp_path / "a.zip", {"big.txt": big_content})
+        rs = _build_ruleset(_content_rule("r", "x"))
+        scanner = ArchiveScanner(rs, max_entry_size=0)
+        results = scanner.scan_archive(zip_path)
+        assert len(results) == 1
+        assert results[0].has_hit
 
     def test_scan_archive_corrupted_returns_error_result(self, tmp_path: Path) -> None:
         path = tmp_path / "bad.zip"
@@ -2048,14 +2088,20 @@ class TestArchiveScanner7z:
         assert len(hits) == 1
         assert "a.txt" in str(hits[0].path)
 
-    def test_scan_archive_oversize_entry_skipped(self, tmp_path: Path) -> None:
-        """超过 max_entry_size 的条目内容返回空。"""
+    def test_scan_archive_oversize_entry_filtered(self, tmp_path: Path) -> None:
+        """7Z: 超过 max_entry_size 的条目整体剔除，不进入扫描队列。"""
         big_content = "x" * 1000
-        sevenz_path = _make_7z(tmp_path / "a.7z", {"big.txt": big_content})
+        sevenz_path = _make_7z(
+            tmp_path / "a.7z",
+            {"big.txt": big_content, "small.txt": "x"},
+        )
         rs = _build_ruleset(_content_rule("r", "x"))
         scanner = ArchiveScanner(rs, max_entry_size=10)
         results = scanner.scan_archive(sevenz_path)
-        assert all(not r.has_hit for r in results)
+        # 仅 small.txt 进入扫描队列
+        assert len(results) == 1
+        assert "small.txt" in str(results[0].path)
+        assert results[0].has_hit
 
     def test_scan_archive_corrupted_returns_error_result(self, tmp_path: Path) -> None:
         """损坏的 7z 文件应返回单条错误结果而非抛异常。"""

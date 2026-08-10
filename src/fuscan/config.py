@@ -257,6 +257,9 @@ class Config:
     min_font_size: int = 12
     # 是否加粗
     font_bold: bool = False
+    # 上次加载/导入/导出规则文件的目录路径，供 FileDialog 记忆位置。
+    # None 表示未设置（首次使用或路径无效时回退到默认）。
+    last_rules_dir: str | None = None
 
 
 def load_config(path: Path | None = None) -> Config:

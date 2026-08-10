@@ -575,6 +575,9 @@ lint = [
     { name = "pyrefly" },
     { name = "ruff" },
 ]
+native = [
+    { name = "fuscan-re" },
+]
 perf = [
     { name = "rich" },
 ]
@@ -600,6 +603,7 @@ dev = [
 requires-dist = [
     { name = "charset-normalizer", specifier = ">=3.3.0" },
     { name = "fuscan", extras = ["lint", "perf", "test"], marker = "extra == 'dev'" },
+    { name = "fuscan-re", marker = "extra == 'native'", editable = "packages/fuscan-re" },
     { name = "lxml", specifier = ">=4.9.0" },
     { name = "myst-parser", marker = "extra == 'docs'", specifier = ">=3.0" },
     { name = "olefile", specifier = ">=0.46" },
@@ -632,7 +636,7 @@ requires-dist = [
     { name = "tox-uv", marker = "extra == 'dev'", specifier = ">=1.13.1" },
     { name = "typing-extensions", marker = "python_full_version < '3.13'", specifier = ">=4.0" },
 ]
-provides-extras = ["dev", "docs", "lint", "perf", "test"]
+provides-extras = ["dev", "docs", "lint", "native", "perf", "test"]
 
 [package.metadata.requires-dev]
 dev = [

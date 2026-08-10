@@ -93,6 +93,12 @@ jobs:
       - name: Install fspack & pip
         run: uv pip install fspack pip
 
+      # fuscan-re 原生匹配引擎：从 PyPI 拉预编译 wheel（由 fuscan-re-wheels.yml 发布），
+      # 避免在 fspack job 安装 Rust 工具链。uv pip install 不走 workspace 解析，直接从 PyPI 拉。
+      # 前置：fuscan-re 首次发布到 PyPI（打 fuscan-re-v*.*.* tag 触发 fuscan-re-wheels.yml）。
+      - name: Install fuscan-re (native engine)
+        run: uv pip install fuscan-re
+
       - name: Cache fspack assets
         uses: actions/cache@v5
         with:
@@ -166,6 +172,11 @@ jobs:
       # 且 CI runner 上 PATH 中可能没有带 pip 的系统 python，故显式安装 pip 到 venv。
       - name: Install fspack & pip
         run: uv pip install fspack pip
+
+      # fuscan-re 原生匹配引擎：从 PyPI 拉预编译 wheel（由 fuscan-re-wheels.yml 发布），
+      # 避免在 fspack job 安装 Rust 工具链。uv pip install 不走 workspace 解析，直接从 PyPI 拉。
+      - name: Install fuscan-re (native engine)
+        run: uv pip install fuscan-re
 
       - name: Cache fspack assets
         uses: actions/cache@v5

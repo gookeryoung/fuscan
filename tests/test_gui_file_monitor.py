@@ -423,6 +423,71 @@ class TestAddRemoveWatch:
         controller.removeWatch(str(d))
         assert len(removed_paths) == 1
 
+    def test_remove_last_watch_auto_disables_monitoring(
+        self,
+        controller: FileMonitorController,
+        tmp_path: Path,
+    ) -> None:
+        """移除最后一个监控目录时应自动停用监控，保持状态一致。"""
+        d = tmp_path / "watched"
+        d.mkdir()
+        controller.addWatch(str(d))
+        controller.setMonitoringEnabled(True)
+        assert controller.monitoringEnabled is True
+        controller.removeWatch(str(d))
+        assert controller.watchedCount == 0
+        assert controller.monitoringEnabled is False
+
+    def test_remove_one_of_many_keeps_monitoring_enabled(
+        self,
+        controller: FileMonitorController,
+        tmp_path: Path,
+    ) -> None:
+        """移除多个目录中的一个时不应停用监控。"""
+        d1 = tmp_path / "watched1"
+        d2 = tmp_path / "watched2"
+        d1.mkdir()
+        d2.mkdir()
+        controller.addWatch(str(d1))
+        controller.addWatch(str(d2))
+        controller.setMonitoringEnabled(True)
+        controller.removeWatch(str(d1))
+        assert controller.watchedCount == 1
+        assert controller.monitoringEnabled is True
+
+    def test_remove_last_watch_emits_monitor_state_changed(
+        self,
+        controller: FileMonitorController,
+        tmp_path: Path,
+    ) -> None:
+        """移除最后一个目录触发自动停用时，应 emit monitorStateChanged。"""
+        d = tmp_path / "watched"
+        d.mkdir()
+        controller.addWatch(str(d))
+        controller.setMonitoringEnabled(True)
+        state_changes: list[bool] = []
+        controller.monitorStateChanged.connect(state_changes.append)  # pyrefly: ignore [missing-attribute]
+        controller.removeWatch(str(d))
+        assert state_changes == [False]
+
+    def test_remove_last_watch_persists_disabled_state(
+        self,
+        controller: FileMonitorController,
+        config_dir: Path,
+        tmp_path: Path,
+    ) -> None:
+        """自动停用后应将 monitoring_enabled=False 持久化到 monitor.json。"""
+        d = tmp_path / "watched"
+        d.mkdir()
+        controller.addWatch(str(d))
+        controller.setMonitoringEnabled(True)
+        controller.removeWatch(str(d))
+        monitor_json = config_dir / "monitor.json"
+        assert monitor_json.is_file()
+        data = json.loads(monitor_json.read_text(encoding="utf-8"))
+        assert data["monitoring_enabled"] is False
+        assert data["directories"] == []
+
 
 class TestMonitoringEnable:
     """``setMonitoringEnabled`` 启停监控测试。"""

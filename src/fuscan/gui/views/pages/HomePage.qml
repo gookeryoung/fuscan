@@ -8,7 +8,7 @@ import fuscan.theme 1.0
 import fuscan.controllers 1.0
 import "../components"
 
-// 首页：工作区列表。
+// 文件扫描页：工作区列表。
 // 对话框（切换目标/任务级设置/扫描历史）共享单例，由 WorkspaceCard 发信号触发，
 // 避免 N 个工作区各持一份对话框对象（复用控件约束）。
 Item {
@@ -380,7 +380,7 @@ Item {
         }
     }
 
-    // 首页「添加文件夹」按钮用的文件夹选择器（多选，创建多个任务）
+    // 文件扫描页「添加文件夹」按钮用的文件夹选择器（多选，创建多个任务）
     Dialogs.FileDialog {
         id: folderDialogForAdd
         title: "选择要扫描的文件夹"
@@ -626,7 +626,7 @@ Item {
                         Layout.fillWidth: true
                         text: rulesController.hasCurrentWorkspace
                             ? "勾选启用/禁用所有规则（含临时规则）；上移/下移仅作用于全局规则文件排序"
-                            : "未选择工作区：加载到临时、临时规则启用/禁用需先在首页选择工作区"
+                            : "未选择工作区：加载到临时、临时规则启用/禁用需先在文件扫描页选择工作区"
                         font.pixelSize: 10
                         color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                         font.italic: true
@@ -1456,7 +1456,7 @@ Item {
         }
     }
 
-    // ========== 拖拽接收区：覆盖整个首页，拖入文件夹即创建扫描任务 ==========
+    // ========== 拖拽接收区：覆盖整个文件扫描页，拖入文件夹即创建扫描任务 ==========
     DropArea {
         id: dropArea
         anchors.fill: parent
@@ -1570,7 +1570,7 @@ Item {
                 visible: !workspaceController.hasActiveScan
                 iconSource: "qrc:/icons/folder.svg"
                 text: "添加文件夹"
-                tooltip: "选择一个或多个文件夹创建扫描任务（也可直接拖拽到首页）"
+                tooltip: "选择一个或多个文件夹创建扫描任务（也可直接拖拽到文件扫描页）"
                 accent: "secondary"
                 onClicked: folderDialogForAdd.open()
             }

@@ -463,7 +463,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         ws_id = self._current_ws_id()
         if not ws_id or self._workspace_controller is None:
             logger.warning("无当前工作区，无法加载临时规则")
-            self.rulesIoCompleted.emit(False, "请先在首页选择工作区")  # pyrefly: ignore [missing-attribute]
+            self.rulesIoCompleted.emit(False, "请先在文件扫描页选择工作区")  # pyrefly: ignore [missing-attribute]
             return False
 
         path = Path(path_str)
@@ -687,7 +687,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         ws_id = self._current_ws_id()
         if not ws_id or self._workspace_controller is None:
             logger.warning("无当前工作区，无法提升临时规则")
-            self.rulesIoCompleted.emit(False, "请先在首页选择工作区")  # pyrefly: ignore [missing-attribute]
+            self.rulesIoCompleted.emit(False, "请先在文件扫描页选择工作区")  # pyrefly: ignore [missing-attribute]
             return False
 
         current_temp = list(self._current_temp_paths())
@@ -760,7 +760,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         ws_id = self._current_ws_id()
         if not ws_id or self._workspace_controller is None:
             logger.warning("无当前工作区，无法降级全局规则")
-            self.rulesIoCompleted.emit(False, "请先在首页选择工作区")  # pyrefly: ignore [missing-attribute]
+            self.rulesIoCompleted.emit(False, "请先在文件扫描页选择工作区")  # pyrefly: ignore [missing-attribute]
             return False
 
         if path_str not in self._config.rules_paths:

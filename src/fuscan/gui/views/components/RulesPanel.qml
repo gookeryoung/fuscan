@@ -164,7 +164,7 @@ Item {
                 text: "加载到临时"
                 tooltip: rulesController.hasCurrentWorkspace
                     ? "从文件选择规则文件加载到当前工作区临时规则（" + rulesController.currentWorkspaceName + "）"
-                    : "请先在首页选择工作区"
+                    : "请先在文件扫描页选择工作区"
                 accent: "ghost"
                 enabled: rulesController.hasCurrentWorkspace
                 visible: !rulesPanel.collapsed
@@ -238,7 +238,7 @@ Item {
                     Label {
                         Layout.fillWidth: true
                         visible: !rulesController.hasCurrentWorkspace && !rulesPanel.collapsed
-                        text: "未选择工作区：临时规则需先在首页选择工作区"
+                        text: "未选择工作区：临时规则需先在文件扫描页选择工作区"
                         font.pixelSize: 11
                         color: theme.colorDanger
                         font.italic: true

@@ -62,9 +62,9 @@ Pane {
         }
 
         // ---------- 顶部主导航 ----------
-        // 入口精简：日常扫描由首页拖拽文件夹或盘符按钮完成
+        // 入口精简：日常扫描由文件扫描页拖拽文件夹或盘符按钮完成
         NavItem {
-            iconSource: "qrc:/icons/home.svg"; label: "首页"; pageId: "home"
+            iconSource: "qrc:/icons/home.svg"; label: "文件扫描"; pageId: "home"
             selected: sidebar.currentPage === "home"
             onClicked: { sidebar.currentPage = "home" }
         }

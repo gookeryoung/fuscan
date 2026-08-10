@@ -1,6 +1,6 @@
 """文件监控控制器：watchdog 事件驱动 + 单文件扫描 + 实时命中推送。
 
-在首页「文件监控」面板中，用户可拖拽或选择文件夹加入监控；watchdog
+在文件监控独立页面中，用户可拖拽或选择文件夹加入监控；watchdog
 ``Observer`` 监听目录树变更（创建/修改/移动），事件经噪声目录过滤后
 按文件路径防抖（300ms 单发 QTimer 合并同文件多次事件），触发
 :meth:`Scanner.scan_file` 对变动文件单独扫描。命中规则时：
@@ -356,6 +356,9 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def removeWatch(self, path: str) -> bool:
         """移除监控目录。
 
+        移除后若监控目录列表清空且当前启用监控，自动停用以保持状态一致
+        （避免 UI 显示「监控中」但实际无目录可监控，且开关被禁用无法关闭）。
+
         :param path: 目录路径字符串（绝对或相对）
         :return: 实际移除返回 ``True``，未找到返回 ``False``
         """
@@ -375,6 +378,9 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._persist()
         self.watchedDirectoriesChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.directoryRemoved.emit(abs_path)  # pyrefly: ignore [missing-attribute]
+        # 监控目录清空后自动停用监控，保持状态一致
+        if not self._watched and self._monitoring_enabled:
+            self.setMonitoringEnabled(False)
         return True
 
     @Slot(bool)  # pyrefly: ignore [not-callable]

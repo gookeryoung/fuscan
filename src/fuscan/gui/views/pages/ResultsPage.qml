@@ -11,7 +11,7 @@ Item {
     property ThemeController theme: Theme
     property WorkspaceControllerType workspaceController: WorkspaceController
 
-    // 通知 ContentArea 返回首页
+    // 通知 ContentArea 返回文件扫描页
     signal backRequested()
 
     ColumnLayout {
@@ -26,7 +26,7 @@ Item {
             IconButton {
                 iconSource: "qrc:/icons/back.svg"
                 text: "返回"
-                tooltip: "返回首页"
+                tooltip: "返回文件扫描页"
                 accent: "secondary"
                 onClicked: resultsPage.backRequested()
             }
@@ -283,7 +283,7 @@ Item {
                             && !workspaceController.currentScanController.restoring
                         text: workspaceController.hasCurrentWorkspace
                             ? "暂无命中结果"
-                            : "未选择任务\n请从首页工作区卡片点击「查看结果」"
+                            : "未选择任务\n请从文件扫描页工作区卡片点击「查看结果」"
                         font.pixelSize: 13
                         color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
                         horizontalAlignment: Text.AlignHCenter

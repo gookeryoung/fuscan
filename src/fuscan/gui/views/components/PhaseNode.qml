@@ -126,47 +126,40 @@ Item {
                 }
             }
 
-            // running：旋转转圈（底圈 + 旋转的强调色缺口圆弧）
-            // 用纯 Rectangle + RotationAnimator 实现，避免 Canvas 在部分渲染后端
-            // （软件/首次纹理未就绪）不重绘导致转圈不可见的问题。
+            // running：旋转转圈（彩色 PNG sprite sheet + AnimatedSprite）
+            // GitHub 风格 comet tail spinner：270 度弧线 + alpha 渐变（尾部透明→头部实色），
+            // 视觉上比小圆点跳跃更连续流畅。24 帧 × 15 度 = 一周，frameDuration=50ms → 1200ms 一周。
+            // 用帧动画替代 RotationAnimator，避免 Win7 OpenGL 软件渲染掉帧——
+            // AnimatedSprite 基于帧切换（仅纹理 rect 更新，无变换矩阵），软件渲染也顺滑。
+            // 去掉 ColorOverlay（ShaderEffect 在软件渲染下不随 AnimatedSprite 帧切换实时更新，
+            // 导致动画卡顿），改为直接用彩色 sprite sheet：根据 accentColor 选择对应资源。
             Item {
                 id: spinner
                 anchors.fill: parent
                 visible: node.nodeState === "running"
 
-                // 底圈：淡色整环
-                Rectangle {
-                    anchors.fill: parent
-                    radius: width / 2
-                    color: "transparent"
-                    border.width: 2
-                    border.color: node.theme.isDark
-                        ? node.theme.colorBorderDark : node.theme.colorBorder
+                // 根据 accentColor 选择对应彩色 sprite sheet
+                // accentColor 取值：colorPrimary 蓝 / colorWarning 橙 / colorTextSecondary 灰
+                readonly property string _spinnerSource: {
+                    if (Qt.colorEqual(node.accentColor, node.theme.colorPrimary))
+                        return "qrc:/animations/spinner_primary.png"
+                    if (Qt.colorEqual(node.accentColor, node.theme.colorWarning))
+                        return "qrc:/animations/spinner_warning.png"
+                    if (Qt.colorEqual(node.accentColor, node.theme.colorTextSecondary))
+                        return "qrc:/animations/spinner_secondary.png"
+                    // 默认 primary（accentColor 总是上述三者之一，兜底防御）
+                    return "qrc:/animations/spinner_primary.png"
                 }
-                // 旋转层：承载强调色圆弧缺口，整层旋转产生转圈观感
-                Item {
-                    id: spinnerArc
+
+                AnimatedSprite {
                     anchors.fill: parent
-                    // 强调色 3/4 圆弧：用整环 + 右下 1/4 遮罩近似。
-                    // 简化为一段强调色弧——用一个圆环，再叠一个底色扇形遮住一部分不便，
-                    // 故直接用一个旋转的强调色小圆点沿圆周运动，视觉即转圈。
-                    Rectangle {
-                        width: 5
-                        height: 5
-                        radius: 2.5
-                        color: node.accentColor
-                        // 定位到圆环顶部（12 点方向）
-                        x: (spinnerArc.width - width) / 2
-                        y: 0
-                    }
-                    RotationAnimator {
-                        target: spinnerArc
-                        from: 0
-                        to: 360
-                        duration: 900
-                        loops: Animation.Infinite
-                        running: node.nodeState === "running"
-                    }
+                    source: spinner._spinnerSource
+                    frameWidth: 20
+                    frameHeight: 20
+                    frameCount: 24
+                    frameDuration: 50  // 1200ms / 24 帧
+                    loops: Animation.Infinite
+                    running: node.nodeState === "running"
                 }
             }
         }

@@ -248,7 +248,7 @@ Rectangle {
                 tooltip: statusText === "扫描中" ? "暂停扫描"
                     : (statusText === "已暂停" ? "继续扫描" : "启动扫描")
                 accent: "primary"
-                // 已完成态禁用（扫描操作收入展开区「扫描选项」菜单）
+                // 已完成态禁用（已完成时改由右侧「重新扫描」入口接管）
                 enabled: !card.isCompletedState()
                 onClicked: {
                     // 扫描中/已暂停：切换暂停；就绪态：启动扫描
@@ -256,6 +256,28 @@ Rectangle {
                         workspaceController.togglePause(card.workspaceId)
                     } else {
                         workspaceController.startScan(card.workspaceId)
+                    }
+                }
+            }
+
+            // 重新扫描：仅在已完成态显示，提供增量/全量两个选项
+            // （从展开区提到主操作行启动扫描右侧，便于快速重新扫描）
+            IconButton {
+                iconSource: "qrc:/icons/rescan.svg"
+                text: "重新扫描"
+                tooltip: "增量扫描（仅变更文件）或全量重新扫描"
+                accent: "secondary"
+                visible: card.isCompletedState()
+                onClicked: scanOptionsMenu.open()
+                Menu {
+                    id: scanOptionsMenu
+                    MenuItem {
+                        text: "增量扫描（仅变更文件）"
+                        onTriggered: workspaceController.startIncrementalScan(card.workspaceId)
+                    }
+                    MenuItem {
+                        text: "全量重新扫描"
+                        onTriggered: workspaceController.startScan(card.workspaceId)
                     }
                 }
             }
@@ -335,27 +357,6 @@ Rectangle {
                     // 扫描中/暂停中禁用
                     enabled: statusText !== "扫描中" && statusText !== "已暂停"
                     onClicked: card.editTargetRequested(card.workspaceId)
-                }
-                // 扫描选项：增量扫描 / 全量重新扫描（合并菜单）
-                IconButton {
-                    iconSource: "qrc:/icons/rescan.svg"
-                    text: "扫描选项"
-                    tooltip: "增量扫描（仅变更文件）或全量重新扫描"
-                    accent: "ghost"
-                    // 已完成（含用户取消）的工作区可重新扫描
-                    enabled: card.isCompletedState()
-                    onClicked: scanOptionsMenu.open()
-                    Menu {
-                        id: scanOptionsMenu
-                        MenuItem {
-                            text: "增量扫描（仅变更文件）"
-                            onTriggered: workspaceController.startIncrementalScan(card.workspaceId)
-                        }
-                        MenuItem {
-                            text: "全量重新扫描"
-                            onTriggered: workspaceController.startScan(card.workspaceId)
-                        }
-                    }
                 }
                 // 导出：CSV/JSON/PDF 合并为菜单
                 IconButton {

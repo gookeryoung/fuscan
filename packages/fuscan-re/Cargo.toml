@@ -13,7 +13,10 @@ name = "fuscan_re"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.28.2", features = ["extension-module"] }
+# abi3-py310：绑定 CPython 3.10 稳定 ABI（PEP 384），构建单一 wheel 覆盖 Python 3.10+。
+# 收益：构建量从 N 版本 × M 平台降为 1 × M 平台；PyPI wheel 数减少，覆盖更广。
+# 限制：不能用 CPython 版本特定 API；fuscan-re 仅用基础类型，完全兼容。
+pyo3 = { version = "0.28.2", features = ["extension-module", "abi3-py310"] }
 regex = "1.11"
 regex-syntax = "0.8"
 

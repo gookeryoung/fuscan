@@ -64,15 +64,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # 安装多个 Python 版本，maturin --find-interpreter 为每个版本构建一个 wheel
-      # （pyo3 非 abi3 模式，每个 CPython ABI 版本需独立 wheel）
+      # abi3-py310 模式：构建单一 wheel 覆盖 Python 3.10+，无需为每个版本各构建。
+      # 仍需一个 Python 解释器供 maturin/pyo3 build-time 检测，装 3.10 即可。
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: |
-            3.10
-            3.12
-            3.14
+          python-version: "3.10"
 
       - name: Build wheels
         uses: PyO3/maturin-action@v1
@@ -82,6 +79,7 @@ jobs:
           target: ${{ matrix.platform.target }}
           # Windows win7 target 需 nightly 工具链；其他平台用默认 stable
           toolchain: ${{ matrix.platform.toolchain || 'stable' }}
+          # abi3 模式下 --find-interpreter 只找到一个 Python，构建单一 abi3 wheel
           args: --release --out dist --find-interpreter
           # manylinux auto 让 maturin 选择最低兼容的 manylinux 标签
           manylinux: auto

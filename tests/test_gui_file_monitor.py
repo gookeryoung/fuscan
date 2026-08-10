@@ -33,7 +33,14 @@ try:
         _WatchdogHandler,
     )
     from fuscan.gui.models.file_monitor_model import FileMonitorModel
-    from fuscan.rules.model import Severity
+    from fuscan.rules.model import (
+        LeafMatch,
+        MatchMode,
+        MatchTarget,
+        Rule,
+        RuleSet,
+        Severity,
+    )
 
     PYSIDE_AVAILABLE = True
 except ImportError:
@@ -595,6 +602,516 @@ class TestEventHandling:
         # 不应抛异常
         controller._scan_path(str(f))
         assert controller.model.count == 0
+
+
+# ============================ 真实文件解析测试 ============================
+
+
+def _build_real_ruleset(
+    *,
+    scan_extensions: tuple[str, ...] | None = None,
+) -> RuleSet:
+    """构造含「敏感内容」CONTENT 规则的真实 RuleSet。
+
+    :param scan_extensions: 扩展名白名单；``None`` 表示扫描所有文件
+    """
+    rule = Rule(
+        name="敏感内容",
+        severity=Severity.CRITICAL,
+        match=LeafMatch(
+            target=MatchTarget.CONTENT,
+            mode=MatchMode.CONTAINS,
+            pattern="password",
+        ),
+    )
+    return RuleSet(
+        version="1.0",
+        rules=(rule,),
+        scan_extensions=scan_extensions,
+    )
+
+
+class TestScanPathRealParsing:
+    """使用真实 Scanner + 真实 RuleSet 验证文件监控的端到端解析。
+
+    不 monkeypatch ``_get_scanner``，让真实 Scanner 构造与 ``scan_file``
+    全链路执行，覆盖提取器调度、内容桶匹配、RuleHit 构造、model 追加等路径。
+    """
+
+    def test_txt_file_with_password_triggers_hit(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """txt 文件包含 password → 命中、model 追加、hitFound emit。"""
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        controller._monitoring_enabled = True
+
+        hits: list[dict[str, Any]] = []
+        controller.hitFound.connect(hits.append)  # pyrefly: ignore [missing-attribute]
+
+        f = tmp_path / "secret.txt"
+        f.write_text("db_password=hunter2\n", encoding="utf-8")
+        controller._scan_path(str(f))
+
+        assert controller.model.count == 1
+        assert len(hits) == 1
+        assert hits[0]["rule_name"] == "敏感内容"
+        assert hits[0]["severity"] == "critical"
+        assert hits[0]["path"] == str(f)
+        controller.cleanup()
+
+    def test_py_file_with_password_triggers_hit(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """py 文件包含 password → 命中。"""
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        controller._monitoring_enabled = True
+
+        f = tmp_path / "config.py"
+        f.write_text('PASSWORD = "admin123"\n', encoding="utf-8")
+        controller._scan_path(str(f))
+
+        assert controller.model.count == 1
+        record = controller.model.records[0]
+        assert record.rule_name == "敏感内容"
+        controller.cleanup()
+
+    def test_yaml_file_with_password_triggers_hit(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """yaml 文件包含 password → 命中。"""
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        controller._monitoring_enabled = True
+
+        f = tmp_path / "db.yaml"
+        f.write_text("database:\n  password: secret123\n", encoding="utf-8")
+        controller._scan_path(str(f))
+
+        assert controller.model.count == 1
+        controller.cleanup()
+
+    def test_json_file_with_password_triggers_hit(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """json 文件包含 password → 命中。"""
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        controller._monitoring_enabled = True
+
+        f = tmp_path / "config.json"
+        f.write_text('{"password": "p@ssw0rd"}\n', encoding="utf-8")
+        controller._scan_path(str(f))
+
+        assert controller.model.count == 1
+        controller.cleanup()
+
+    def test_xml_file_with_password_triggers_hit(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """xml 文件包含 password → 命中。"""
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        controller._monitoring_enabled = True
+
+        f = tmp_path / "app.xml"
+        f.write_text("<config><password>s3cr3t</password></config>\n", encoding="utf-8")
+        controller._scan_path(str(f))
+
+        assert controller.model.count == 1
+        controller.cleanup()
+
+    def test_file_without_password_no_hit(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """文件不含 password → 无命中、model 不追加。"""
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        controller._monitoring_enabled = True
+
+        hits: list[dict[str, Any]] = []
+        controller.hitFound.connect(hits.append)  # pyrefly: ignore [missing-attribute]
+
+        f = tmp_path / "normal.txt"
+        f.write_text("just some normal content\n", encoding="utf-8")
+        controller._scan_path(str(f))
+
+        assert controller.model.count == 0
+        assert len(hits) == 0
+        controller.cleanup()
+
+    def test_empty_file_no_hit_no_crash(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """空文件 → 无命中，不抛异常。"""
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        controller._monitoring_enabled = True
+
+        f = tmp_path / "empty.txt"
+        f.write_text("", encoding="utf-8")
+        controller._scan_path(str(f))
+
+        assert controller.model.count == 0
+        controller.cleanup()
+
+    def test_binary_file_no_crash(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """二进制文件 → 不抛异常（Scanner 内部按二进制跳过或无文本命中）。"""
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        controller._monitoring_enabled = True
+
+        f = tmp_path / "binary.bin"
+        f.write_bytes(bytes(range(256)) * 4)
+        # 不应抛异常
+        controller._scan_path(str(f))
+        controller.cleanup()
+
+    def test_multiple_files_independent_hits(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """多次 _scan_path 调用独立追加命中到 model。"""
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        controller._monitoring_enabled = True
+
+        for i in range(5):
+            f = tmp_path / f"file_{i}.txt"
+            f.write_text(f"password{i}\n", encoding="utf-8")
+            controller._scan_path(str(f))
+
+        assert controller.model.count == 5
+        controller.cleanup()
+
+    def test_same_file_scanned_twice_appends_twice(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """同一文件被扫描两次 → model 追加两条（监控场景：文件反复修改）。"""
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        controller._monitoring_enabled = True
+
+        f = tmp_path / "changed.txt"
+        f.write_text("password=abc\n", encoding="utf-8")
+        controller._scan_path(str(f))
+        f.write_text("password=def\n", encoding="utf-8")
+        controller._scan_path(str(f))
+
+        assert controller.model.count == 2
+        controller.cleanup()
+
+    def test_hit_record_fields_complete(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """命中记录字段完整：time/file_path/rule_name/severity/match_text。"""
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        controller._monitoring_enabled = True
+
+        f = tmp_path / "cred.txt"
+        f.write_text("password=hunter2\n", encoding="utf-8")
+        controller._scan_path(str(f))
+
+        record = controller.model.records[0]
+        assert record.time  # 非空时间字符串
+        assert record.file_path == str(f)
+        assert record.rule_name == "敏感内容"
+        assert record.severity == Severity.CRITICAL
+        assert "password" in record.match_text.lower()
+        controller.cleanup()
+
+
+class TestGetScannerCache:
+    """``_get_scanner`` 缓存与 None ruleset 路径测试（不 monkeypatch）。"""
+
+    def test_get_scanner_returns_none_when_ruleset_none(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+    ) -> None:
+        """ruleset 为 None 时 _get_scanner 返回 None（真实路径，非 monkeypatch）。"""
+        fake_rules_controller._ruleset = None
+        assert controller._get_scanner() is None
+
+    def test_get_scanner_caches_by_ruleset_id(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+    ) -> None:
+        """同一 ruleset 多次调用返回同一 Scanner 实例。"""
+        rs = _build_real_ruleset()
+        fake_rules_controller._ruleset = rs
+        s1 = controller._get_scanner()
+        s2 = controller._get_scanner()
+        assert s1 is s2
+        controller.cleanup()
+
+    def test_get_scanner_new_instance_on_ruleset_change(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+    ) -> None:
+        """更换 ruleset 后返回新的 Scanner 实例。"""
+        rs1 = _build_real_ruleset()
+        fake_rules_controller._ruleset = rs1
+        s1 = controller._get_scanner()
+
+        rs2 = _build_real_ruleset()
+        fake_rules_controller._ruleset = rs2
+        s2 = controller._get_scanner()
+
+        assert s1 is not s2
+        controller.cleanup()
+
+    def test_scan_path_with_none_ruleset_no_crash(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """ruleset=None 时 _scan_path 不抛异常，无命中（覆盖行 566）。"""
+        fake_rules_controller._ruleset = None
+        controller._monitoring_enabled = True
+
+        f = tmp_path / "test.txt"
+        f.write_text("password=secret\n", encoding="utf-8")
+        controller._scan_path(str(f))
+
+        assert controller.model.count == 0
+        controller.cleanup()
+
+
+class TestScanPathErrorHandling:
+    """``_scan_path`` 边界与异常场景测试。"""
+
+    def test_scan_path_when_monitoring_disabled_skips(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """监控停用时 _scan_path 跳过扫描。"""
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        controller._monitoring_enabled = False
+
+        f = tmp_path / "secret.txt"
+        f.write_text("password=abc\n", encoding="utf-8")
+        controller._scan_path(str(f))
+
+        assert controller.model.count == 0
+
+    def test_scan_path_deletes_debounce_timer_after_scan(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """_scan_path 执行后从 _debounce_timers 移除该路径的定时器。"""
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        controller._monitoring_enabled = True
+
+        f = tmp_path / "test.txt"
+        f.write_text("content\n", encoding="utf-8")
+        path_str = str(f)
+
+        # 先通过 _on_event_received 创建防抖定时器
+        controller._on_event_received(path_str, "created")
+        assert path_str in controller._debounce_timers
+
+        # 直接调用 _scan_path（跳过防抖等待）
+        controller._scan_path(path_str)
+        assert path_str not in controller._debounce_timers
+        controller.cleanup()
+
+    def test_scan_path_oserror_handled(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """scan_file 抛 OSError 时静默处理，不中断监控（覆盖行 570-571）。"""
+
+        class _OSErrorScanner:
+            def scan_file(self, path: Path) -> Any:
+                raise OSError("权限拒绝")
+
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        monkeypatch.setattr(controller, "_get_scanner", _OSErrorScanner)
+
+        f = tmp_path / "locked.txt"
+        f.write_text("password=abc\n", encoding="utf-8")
+        controller._monitoring_enabled = True
+        # 不应抛异常
+        controller._scan_path(str(f))
+        assert controller.model.count == 0
+        controller.cleanup()
+
+    def test_scan_path_generic_exception_handled(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """scan_file 抛非 OSError 异常时静默处理（覆盖行 572-574）。"""
+
+        class _CrashScanner:
+            def scan_file(self, path: Path) -> Any:
+                raise ValueError("内部错误")
+
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        monkeypatch.setattr(controller, "_get_scanner", _CrashScanner)
+
+        f = tmp_path / "crash.txt"
+        f.write_text("password=abc\n", encoding="utf-8")
+        controller._monitoring_enabled = True
+        controller._scan_path(str(f))
+        assert controller.model.count == 0
+        controller.cleanup()
+
+    def test_match_text_truncation(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """match_text 超过 _MATCH_TEXT_MAX 时截断并加省略号。"""
+        from fuscan.gui.controllers.file_monitor_controller import _MATCH_TEXT_MAX
+
+        long_text = "A" * (_MATCH_TEXT_MAX + 50)
+
+        class _LongTextScanner:
+            def scan_file(self, path: Path) -> Any:
+                return _FakeScanResult(
+                    hits=(
+                        _FakeRuleHit(
+                            rule_name="长文本规则",
+                            severity=Severity.WARNING,
+                            match_text=long_text,
+                        ),
+                    )
+                )
+
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        monkeypatch.setattr(controller, "_get_scanner", _LongTextScanner)
+
+        f = tmp_path / "long.txt"
+        f.write_text("content\n", encoding="utf-8")
+        controller._monitoring_enabled = True
+        controller._scan_path(str(f))
+
+        record = controller.model.records[0]
+        assert len(record.match_text) == _MATCH_TEXT_MAX
+        assert record.match_text.endswith("…")
+        controller.cleanup()
+
+    def test_match_text_falls_back_to_detail_when_empty(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """match_text 为空时回退到 detail 字段。"""
+
+        class _EmptyMatchScanner:
+            def scan_file(self, path: Path) -> Any:
+                return _FakeScanResult(
+                    hits=(
+                        _FakeRuleHit(
+                            rule_name="规则",
+                            severity=Severity.WARNING,
+                            match_text="",
+                            detail="回退详情文本",
+                        ),
+                    )
+                )
+
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        monkeypatch.setattr(controller, "_get_scanner", _EmptyMatchScanner)
+
+        f = tmp_path / "test.txt"
+        f.write_text("content\n", encoding="utf-8")
+        controller._monitoring_enabled = True
+        controller._scan_path(str(f))
+
+        record = controller.model.records[0]
+        assert record.match_text == "回退详情文本"
+        controller.cleanup()
+
+    def test_scan_path_directory_skips(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """_scan_path 传入目录路径时跳过（is_file() 为 False）。"""
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        controller._monitoring_enabled = True
+
+        d = tmp_path / "subdir"
+        d.mkdir()
+        controller._scan_path(str(d))
+
+        assert controller.model.count == 0
+
+    def test_hit_found_signal_payload_complete(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+    ) -> None:
+        """hitFound 信号 payload 包含全部字段。"""
+        fake_rules_controller._ruleset = _build_real_ruleset()
+        controller._monitoring_enabled = True
+
+        hits: list[dict[str, Any]] = []
+        controller.hitFound.connect(hits.append)  # pyrefly: ignore [missing-attribute]
+
+        f = tmp_path / "secret.txt"
+        f.write_text("password=hunter2\n", encoding="utf-8")
+        controller._scan_path(str(f))
+
+        assert len(hits) == 1
+        payload = hits[0]
+        assert set(payload.keys()) == {
+            "time",
+            "path",
+            "rule_name",
+            "severity",
+            "severity_text",
+            "match_text",
+        }
+        assert payload["severity"] == "critical"
+        assert payload["severity_text"] == "严重"
+        controller.cleanup()
 
 
 class TestEventLog:

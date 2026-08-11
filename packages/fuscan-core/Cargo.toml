@@ -24,6 +24,9 @@ regex-syntax = "0.8"
 # chardetng：Mozilla 统计编码检测器（用于非 BOM/非 UTF-8 字节的编码猜测）。
 encoding_rs = "0.8"
 chardetng = "0.1"
+# OLE 复合文档解析：替代 Python olefile 的 OLE 流读取，释放 GIL 实现并行解析。
+# cfb：MS-CFB 格式实现（DOC/PPT 等 OLE 复合文档），纯 Rust，支持流读取与树遍历。
+cfb = "0.14"
 
 [profile.release]
 opt-level = 3

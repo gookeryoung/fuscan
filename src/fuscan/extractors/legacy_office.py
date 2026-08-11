@@ -1,8 +1,9 @@
 """旧版 Microsoft Office 提取器：XLS、DOC、PPT。
 
 XLS 通过 calamine（Rust + PyO3）读取 Excel 97-2003 工作簿，与 XLSX
-共用同一 Rust 后端（``_extract_calamine_workbook``）。DOC/PPT 使用 olefile
-读取 OLE 复合文档，从文本流中提取 UTF-16LE 编码内容（T3 中速）。
+共用同一 Rust 后端（``_extract_calamine_workbook``）。DOC/PPT 通过 OLE
+复合文档解析（fuscan-core cfb crate 或 olefile 回退），从文本流中提取
+UTF-16LE 编码内容（T3 中速）。
 
 注意：DOC/PPT 为二进制格式，本提取器仅做简单文本提取，不支持复杂格式
 （如修订、嵌入对象等）。如需完整提取，建议先转换为 DOCX/PPTX。
@@ -21,6 +22,18 @@ from fuscan.extractors.base import Extractor, ExtractorError, SpeedTier
 __all__ = ["DocExtractor", "PptExtractor", "XlsExtractor"]
 
 logger = logging.getLogger(__name__)
+
+# fuscan-core 原生 OLE 解析：cfb crate，py.detach 释放 GIL。
+# 缺失时回退 olefile，不影响功能。
+try:
+    from fuscan_core import (
+        extract_ole_stream as _native_extract_ole_stream,  # pyrefly: ignore [missing-module-attribute]
+    )
+
+    _NATIVE_OLE_AVAILABLE: bool = True
+except ImportError:  # pragma: no cover - fuscan_core 未安装时走此分支
+    _NATIVE_OLE_AVAILABLE = False
+    _native_extract_ole_stream = None  # type: ignore[assignment,misc]
 
 # UTF-16LE 可打印字符的字节模式（小端序，低字节在前）：
 # - ASCII 可打印（U+0020-U+007E）：低字节 [\x20-\x7E]，高字节 \x00
@@ -47,12 +60,41 @@ def _extract_utf16le_text(data: bytes) -> str:
     for match in _UTF16LE_RUN.finditer(data):
         try:
             text = match.group().decode("utf-16-le").strip()
-        except UnicodeDecodeError:
+        except UnicodeDecodeError:  # pragma: no cover - UTF-16LE 偶长度字节不解码失败
             continue
         if len(text) >= 2:
             parts.append(text)
 
     return "\n".join(parts)
+
+
+def _read_ole_stream(data: bytes, stream_name: str) -> bytes | None:
+    """读取 OLE 复合文档中指定流的字节内容。
+
+    优先使用 fuscan-core 原生引擎（cfb crate，``py.detach`` 释放 GIL），
+    缺失时回退 olefile。流不存在时返回 ``None``，与
+    ``olefile.OleFileIO.exists(name)`` 行为一致。
+
+    :param data: OLE 复合文档字节内容
+    :param stream_name: 流名称（如 ``"WordDocument"`` / ``"PowerPoint Document"``）
+    :return: 流的字节内容；流不存在返回 None
+    :raises OSError: olefile 路径解析失败（OLE 格式非法）
+    :raises ValueError: 原生路径解析失败（cfb crate 错误，PyValueError 子类）
+    :raises ImportError: 原生引擎不可用且 olefile 未安装
+    """
+    if _NATIVE_OLE_AVAILABLE:
+        assert _native_extract_ole_stream is not None
+        return _native_extract_ole_stream(data, stream_name)
+
+    import olefile  # 抛 ImportError 由调用方处理
+
+    ole = olefile.OleFileIO(io.BytesIO(data))
+    try:
+        if ole.exists(stream_name):
+            return ole.openstream(stream_name).read()
+        return None
+    finally:
+        ole.close()
 
 
 def _extract_ole_text(data: bytes, stream_name: str, error_label: str) -> str:
@@ -69,23 +111,17 @@ def _extract_ole_text(data: bytes, stream_name: str, error_label: str) -> str:
     :raises ExtractorError: olefile 未安装或 OLE 解析失败
     """
     try:
-        import olefile
+        stream_data = _read_ole_stream(data, stream_name)
     except ImportError as exc:
         raise ExtractorError(f"olefile 未安装，无法提取 {error_label}") from exc
-
-    try:
-        ole = olefile.OleFileIO(io.BytesIO(data))
-    except Exception as exc:
+    except (OSError, ValueError) as exc:
         raise ExtractorError(f"{error_label} 解析失败: {exc}") from exc
 
-    try:
-        if ole.exists(stream_name):
-            stream = ole.openstream(stream_name)
-            return _extract_utf16le_text(stream.read())
+    if stream_data is None:
         logger.debug("%s 文件无 %s 流", error_label, stream_name)
         return ""
-    finally:
-        ole.close()
+
+    return _extract_utf16le_text(stream_data)
 
 
 class XlsExtractor(Extractor):
@@ -130,8 +166,9 @@ class XlsExtractor(Extractor):
 class DocExtractor(Extractor):
     """DOC (Word 97-2003) 文档文本提取器。
 
-    通过 olefile 读取 OLE 复合文档中的 WordDocument 流，提取 UTF-16LE
-    编码的文本（T3 中速）。仅做简单文本提取，不解析复杂格式。
+    通过 OLE 复合文档解析（fuscan-core cfb crate 或 olefile 回退）读取
+    WordDocument 流，提取 UTF-16LE 编码的文本（T3 中速）。仅做简单文本
+    提取，不解析复杂格式。
     """
 
     @property
@@ -143,7 +180,7 @@ class DocExtractor(Extractor):
     @property
     @override
     def speed_tier(self) -> SpeedTier:
-        """olefile + UTF-16LE 正则扫描，T3 中速。"""
+        """OLE 解析 + UTF-16LE 正则扫描，T3 中速。"""
         return SpeedTier.MEDIUM
 
     @override
@@ -155,20 +192,21 @@ class DocExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """DOC 固定使用 olefile 解析引擎。"""
-        return "olefile"
+        """OLE 解析引擎：fuscan-core cfb 原生优先，缺失时 olefile。"""
+        return "fuscan-core (cfb)" if _NATIVE_OLE_AVAILABLE else "olefile"
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:
-        """从内存字节解析 DOC 文档（olefile + UTF-16LE 正则扫描）。"""
+        """从内存字节解析 DOC 文档（OLE 解析 + UTF-16LE 正则扫描）。"""
         return _extract_ole_text(data, stream_name="WordDocument", error_label="DOC")
 
 
 class PptExtractor(Extractor):
     """PPT (PowerPoint 97-2003) 演示文稿文本提取器。
 
-    通过 olefile 读取 OLE 复合文档中的 PowerPoint Document 流，提取
-    UTF-16LE 编码的文本（T3 中速）。仅做简单文本提取，不解析幻灯片结构。
+    通过 OLE 复合文档解析（fuscan-core cfb crate 或 olefile 回退）读取
+    PowerPoint Document 流，提取 UTF-16LE 编码的文本（T3 中速）。仅做
+    简单文本提取，不解析幻灯片结构。
     """
 
     @property
@@ -180,7 +218,7 @@ class PptExtractor(Extractor):
     @property
     @override
     def speed_tier(self) -> SpeedTier:
-        """olefile + UTF-16LE 正则扫描，T3 中速。"""
+        """OLE 解析 + UTF-16LE 正则扫描，T3 中速。"""
         return SpeedTier.MEDIUM
 
     @override
@@ -192,10 +230,10 @@ class PptExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """PPT 固定使用 olefile 解析引擎。"""
-        return "olefile"
+        """OLE 解析引擎：fuscan-core cfb 原生优先，缺失时 olefile。"""
+        return "fuscan-core (cfb)" if _NATIVE_OLE_AVAILABLE else "olefile"
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:
-        """从内存字节解析 PPT 演示文稿（olefile + UTF-16LE 正则扫描）。"""
+        """从内存字节解析 PPT 演示文稿（OLE 解析 + UTF-16LE 正则扫描）。"""
         return _extract_ole_text(data, stream_name="PowerPoint Document", error_label="PPT")

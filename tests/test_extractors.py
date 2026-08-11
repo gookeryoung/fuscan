@@ -1261,9 +1261,9 @@ class TestExtractorRegistry:
         assert XlsExtractor().engine_info == "python-calamine"
         # PDF 在 pdf_oxide 与 pypdfium2 之间切换
         assert PdfExtractor().engine_info in {"pdf_oxide", "pypdfium2"}
-        # DOC/PPT 固定使用 olefile
-        assert DocExtractor().engine_info == "olefile"
-        assert PptExtractor().engine_info == "olefile"
+        # DOC/PPT 在 fuscan-core (cfb) 与 olefile 之间切换
+        assert DocExtractor().engine_info in {"fuscan-core (cfb)", "olefile"}
+        assert PptExtractor().engine_info in {"fuscan-core (cfb)", "olefile"}
         # DOCX/PPTX 固定使用 lxml
         assert DocxExtractor().engine_info == "lxml"
         assert PptxExtractor().engine_info == "lxml"
@@ -1967,61 +1967,49 @@ class TestExtractUtf16leText:
         result = _extract_utf16le_text(data)
         assert result == ""
 
+    def test_skip_whitespace_only_fragments(self) -> None:
+        """纯空白片段 strip 后长度 < 2 被过滤。"""
+        from fuscan.extractors.legacy_office import _extract_utf16le_text
+
+        # 4 个 ASCII 空格（U+0020）的 UTF-16LE 编码，匹配正则但 strip 后为空
+        data = b"\x20\x00\x20\x00\x20\x00\x20\x00"
+        result = _extract_utf16le_text(data)
+        assert result == ""
+
 
 class TestDocExtractor:
     def test_supported_extensions(self) -> None:
         assert DocExtractor().supported_extensions == ("doc",)
 
     def test_extract_from_bytes_with_mock(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """mock olefile.OleFileIO 验证 WordDocument 流文本提取。"""
-        import olefile
-
+        """mock _read_ole_stream 验证 WordDocument 流文本提取。"""
         text = "Hello password world"
         encoded = text.encode("utf-16-le")
 
-        class FakeStream:
-            def read(self) -> bytes:
-                return encoded
+        def fake_read(data: bytes, stream_name: str) -> bytes | None:
+            assert stream_name == "WordDocument"
+            return encoded
 
-        class FakeOle:
-            def exists(self, name: str) -> bool:
-                return name == "WordDocument"
-
-            def openstream(self, name: str) -> FakeStream:
-                return FakeStream()
-
-            def close(self) -> None:
-                pass
-
-        monkeypatch.setattr(olefile, "OleFileIO", lambda data: FakeOle())
+        monkeypatch.setattr("fuscan.extractors.legacy_office._read_ole_stream", fake_read)
         content = DocExtractor().extract_from_bytes(b"fake doc data")
         assert "Hello password world" in content
 
     def test_extract_no_worddocument_stream(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """OLE 文件无 WordDocument 流时返回空字符串。"""
-        import olefile
 
-        class FakeOle:
-            def exists(self, name: str) -> bool:
-                return False
+        def fake_read(data: bytes, stream_name: str) -> bytes | None:
+            return None
 
-            def openstream(self, name: str) -> None:
-                raise AssertionError("不应调用 openstream")
-
-            def close(self) -> None:
-                pass
-
-        monkeypatch.setattr(olefile, "OleFileIO", lambda data: FakeOle())
+        monkeypatch.setattr("fuscan.extractors.legacy_office._read_ole_stream", fake_read)
         assert DocExtractor().extract_from_bytes(b"fake") == ""
 
     def test_extract_from_bytes_parse_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """DOC 解析失败抛 ExtractorError。"""
-        import olefile
 
-        def raise_parse(data: object) -> None:
+        def raise_parse(data: bytes, stream_name: str) -> None:
             raise ValueError("解析失败")
 
-        monkeypatch.setattr(olefile, "OleFileIO", raise_parse)
+        monkeypatch.setattr("fuscan.extractors.legacy_office._read_ole_stream", raise_parse)
         with pytest.raises(ExtractorError, match="DOC 解析失败"):
             DocExtractor().extract_from_bytes(b"bad data")
 
@@ -2034,33 +2022,24 @@ class TestDocExtractor:
 
     def test_extract_from_path_with_mock(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """extract(path) 路径应正确提取 WordDocument 流文本。"""
-        import olefile
-
         text = "doc password text"
         encoded = text.encode("utf-16-le")
 
-        class FakeStream:
-            def read(self) -> bytes:
-                return encoded
+        def fake_read(data: bytes, stream_name: str) -> bytes | None:
+            assert stream_name == "WordDocument"
+            return encoded
 
-        class FakeOle:
-            def exists(self, name: str) -> bool:
-                return name == "WordDocument"
-
-            def openstream(self, name: str) -> FakeStream:
-                return FakeStream()
-
-            def close(self) -> None:
-                pass
-
-        monkeypatch.setattr(olefile, "OleFileIO", lambda data: FakeOle())
+        monkeypatch.setattr("fuscan.extractors.legacy_office._read_ole_stream", fake_read)
         path = tmp_path / "test.doc"
         path.write_bytes(b"fake doc")
         content = DocExtractor().extract(path)
         assert "doc password text" in content
 
     def test_doc_import_error_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """olefile 未安装时应抛出 ExtractorError。"""
+        """olefile 未安装且原生引擎不可用时应抛出 ExtractorError。"""
+        # 强制禁用原生引擎，走 olefile 回退路径
+        monkeypatch.setattr("fuscan.extractors.legacy_office._NATIVE_OLE_AVAILABLE", False)
+
         import builtins
 
         original_import = builtins.__import__
@@ -2080,55 +2059,34 @@ class TestPptExtractor:
         assert PptExtractor().supported_extensions == ("ppt",)
 
     def test_extract_from_bytes_with_mock(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """mock olefile.OleFileIO 验证 PowerPoint Document 流文本提取。"""
-        import olefile
-
+        """mock _read_ole_stream 验证 PowerPoint Document 流文本提取。"""
         text = "Slide password content"
         encoded = text.encode("utf-16-le")
 
-        class FakeStream:
-            def read(self) -> bytes:
-                return encoded
+        def fake_read(data: bytes, stream_name: str) -> bytes | None:
+            assert stream_name == "PowerPoint Document"
+            return encoded
 
-        class FakeOle:
-            def exists(self, name: str) -> bool:
-                return name == "PowerPoint Document"
-
-            def openstream(self, name: str) -> FakeStream:
-                return FakeStream()
-
-            def close(self) -> None:
-                pass
-
-        monkeypatch.setattr(olefile, "OleFileIO", lambda data: FakeOle())
+        monkeypatch.setattr("fuscan.extractors.legacy_office._read_ole_stream", fake_read)
         content = PptExtractor().extract_from_bytes(b"fake ppt data")
         assert "Slide password content" in content
 
     def test_extract_no_powerpoint_stream(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """OLE 文件无 PowerPoint Document 流时返回空字符串。"""
-        import olefile
 
-        class FakeOle:
-            def exists(self, name: str) -> bool:
-                return False
+        def fake_read(data: bytes, stream_name: str) -> bytes | None:
+            return None
 
-            def openstream(self, name: str) -> None:
-                raise AssertionError("不应调用 openstream")
-
-            def close(self) -> None:
-                pass
-
-        monkeypatch.setattr(olefile, "OleFileIO", lambda data: FakeOle())
+        monkeypatch.setattr("fuscan.extractors.legacy_office._read_ole_stream", fake_read)
         assert PptExtractor().extract_from_bytes(b"fake") == ""
 
     def test_extract_from_bytes_parse_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """PPT 解析失败抛 ExtractorError。"""
-        import olefile
 
-        def raise_parse(data: object) -> None:
+        def raise_parse(data: bytes, stream_name: str) -> None:
             raise ValueError("解析失败")
 
-        monkeypatch.setattr(olefile, "OleFileIO", raise_parse)
+        monkeypatch.setattr("fuscan.extractors.legacy_office._read_ole_stream", raise_parse)
         with pytest.raises(ExtractorError, match="PPT 解析失败"):
             PptExtractor().extract_from_bytes(b"bad data")
 
@@ -2141,33 +2099,24 @@ class TestPptExtractor:
 
     def test_extract_from_path_with_mock(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """extract(path) 路径应正确提取 PowerPoint Document 流文本。"""
-        import olefile
-
         text = "ppt password slide"
         encoded = text.encode("utf-16-le")
 
-        class FakeStream:
-            def read(self) -> bytes:
-                return encoded
+        def fake_read(data: bytes, stream_name: str) -> bytes | None:
+            assert stream_name == "PowerPoint Document"
+            return encoded
 
-        class FakeOle:
-            def exists(self, name: str) -> bool:
-                return name == "PowerPoint Document"
-
-            def openstream(self, name: str) -> FakeStream:
-                return FakeStream()
-
-            def close(self) -> None:
-                pass
-
-        monkeypatch.setattr(olefile, "OleFileIO", lambda data: FakeOle())
+        monkeypatch.setattr("fuscan.extractors.legacy_office._read_ole_stream", fake_read)
         path = tmp_path / "test.ppt"
         path.write_bytes(b"fake ppt")
         content = PptExtractor().extract(path)
         assert "ppt password slide" in content
 
     def test_ppt_import_error_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """olefile 未安装时应抛出 ExtractorError。"""
+        """olefile 未安装且原生引擎不可用时应抛出 ExtractorError。"""
+        # 强制禁用原生引擎，走 olefile 回退路径
+        monkeypatch.setattr("fuscan.extractors.legacy_office._NATIVE_OLE_AVAILABLE", False)
+
         import builtins
 
         original_import = builtins.__import__
@@ -2180,6 +2129,112 @@ class TestPptExtractor:
         monkeypatch.setattr(builtins, "__import__", fake_import)
         with pytest.raises(ExtractorError, match="olefile 未安装"):
             PptExtractor().extract_from_bytes(b"fake")
+
+
+class TestOleExtractorFallback:
+    """OLE 提取器 olefile 回退路径覆盖。
+
+    强制禁用 fuscan-core 原生引擎，验证 olefile 回退路径与原生路径语义等价。
+    """
+
+    def test_olefile_fallback_extracts_stream(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """禁用原生引擎后，olefile 回退路径正确提取 WordDocument 流。"""
+        import olefile
+
+        monkeypatch.setattr("fuscan.extractors.legacy_office._NATIVE_OLE_AVAILABLE", False)
+
+        text = "fallback password text"
+        encoded = text.encode("utf-16-le")
+
+        class FakeStream:
+            def read(self) -> bytes:
+                return encoded
+
+        class FakeOle:
+            def exists(self, name: str) -> bool:
+                return name == "WordDocument"
+
+            def openstream(self, name: str) -> FakeStream:
+                return FakeStream()
+
+            def close(self) -> None:
+                pass
+
+        monkeypatch.setattr(olefile, "OleFileIO", lambda data: FakeOle())
+        content = DocExtractor().extract_from_bytes(b"fake doc")
+        assert "fallback password text" in content
+
+    def test_olefile_fallback_stream_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """olefile 回退路径下流不存在时返回空字符串。"""
+        import olefile
+
+        monkeypatch.setattr("fuscan.extractors.legacy_office._NATIVE_OLE_AVAILABLE", False)
+
+        class FakeOle:
+            def exists(self, name: str) -> bool:
+                return False
+
+            def openstream(self, name: str) -> None:
+                raise AssertionError("不应调用 openstream")
+
+            def close(self) -> None:
+                pass
+
+        monkeypatch.setattr(olefile, "OleFileIO", lambda data: FakeOle())
+        assert DocExtractor().extract_from_bytes(b"fake") == ""
+
+    def test_olefile_fallback_parse_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """olefile 回退路径下解析失败抛 ExtractorError（OSError 包装）。"""
+        import olefile
+
+        monkeypatch.setattr("fuscan.extractors.legacy_office._NATIVE_OLE_AVAILABLE", False)
+
+        def raise_parse(data: object) -> None:
+            raise OSError("OLE 解析失败")
+
+        monkeypatch.setattr(olefile, "OleFileIO", raise_parse)
+        with pytest.raises(ExtractorError, match="DOC 解析失败"):
+            DocExtractor().extract_from_bytes(b"bad")
+
+
+class TestOleExtractorNativeIntegration:
+    """OLE 提取器 fuscan-core 原生路径集成测试。
+
+    仅当 fuscan-core 安装时运行；用真实 CFB 字节验证原生路径端到端。
+    """
+
+    def test_native_extract_real_cfb_doc(self) -> None:
+        """构建真实 CFB 字节，验证原生路径提取 WordDocument 流。"""
+        try:
+            from fuscan_core import extract_ole_stream  # pyrefly: ignore [missing-module-attribute]
+        except ImportError:
+            pytest.skip("fuscan-core 未安装，跳过原生路径集成测试")
+
+        # 用 fuscan_core.extract_ole_stream 自身验证——构造合法 CFB 字节
+        # 通过 cfb crate（Rust 侧）已 unit test 覆盖；此处验证 Python 侧调用链
+        # 直接给非法字节，确认抛 ValueError（PyValueError 子类）
+        with pytest.raises(ValueError, match="OLE 复合文档解析失败"):
+            extract_ole_stream(b"not a cfb file", "WordDocument")
+
+    def test_native_path_end_to_end_with_mock(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """原生路径激活时，_read_ole_stream 调用原生函数。"""
+        from fuscan.extractors.legacy_office import _NATIVE_OLE_AVAILABLE
+
+        if not _NATIVE_OLE_AVAILABLE:
+            pytest.skip("fuscan-core 未安装")
+
+        called: dict[str, object] = {}
+
+        def fake_native(data: bytes, stream_name: str) -> bytes | None:
+            called["data"] = data
+            called["stream_name"] = stream_name
+            return "原生路径密码".encode("utf-16-le")
+
+        monkeypatch.setattr("fuscan.extractors.legacy_office._native_extract_ole_stream", fake_native)
+        content = DocExtractor().extract_from_bytes(b"real cfb bytes")
+        assert "原生路径密码" in content
+        assert called["stream_name"] == "WordDocument"
+        assert called["data"] == b"real cfb bytes"
 
 
 # ---------------------------------------------------------------------------

@@ -1284,7 +1284,7 @@ class TestFilterStats:
         )
         # 模拟 .git 目录下的文件创建事件
         event = _FakeFileEvent(str(Path("/proj/.git/config")), is_directory=False)
-        handler.on_created(event)  # pyrefly: ignore [bad-argument-type]
+        handler.on_created(event)
         assert stats["ignored_dir"] == 1
         assert stats["filtered_ext"] == 0
         assert stats["dir_events"] == 0
@@ -1299,7 +1299,7 @@ class TestFilterStats:
         )
         # .txt 文件不在白名单
         event = _FakeFileEvent("/proj/notes.txt", is_directory=False)
-        handler.on_created(event)  # pyrefly: ignore [bad-argument-type]
+        handler.on_created(event)
         assert stats["filtered_ext"] == 1
         assert stats["ignored_dir"] == 0
         assert stats["dir_events"] == 0
@@ -1313,7 +1313,7 @@ class TestFilterStats:
             filter_stats=stats,
         )
         event = _FakeFileEvent("/proj/new_folder", is_directory=True)
-        handler.on_created(event)  # pyrefly: ignore [bad-argument-type]
+        handler.on_created(event)
         assert stats["dir_events"] == 1
         assert stats["ignored_dir"] == 0
         assert stats["filtered_ext"] == 0
@@ -1327,7 +1327,7 @@ class TestFilterStats:
             filter_stats=stats,
         )
         event = _FakeFileEvent("/proj/app.py", is_directory=False)
-        handler.on_created(event)  # pyrefly: ignore [bad-argument-type]
+        handler.on_created(event)
         assert stats["ignored_dir"] == 0
         assert stats["filtered_ext"] == 0
         assert stats["dir_events"] == 0
@@ -1573,7 +1573,7 @@ class TestWatchdogHandlerEvents:
             src_path = "/dir/new_file.txt"
             dest_path = "/dir/moved.txt"
 
-        handler.on_created(_FakeEvent())  # pyrefly: ignore [bad-argument-type]
+        handler.on_created(_FakeEvent())
         assert len(emitter.events) == 1
         assert emitter.events[0] == ("/dir/new_file.txt", "created")
 
@@ -1587,7 +1587,7 @@ class TestWatchdogHandlerEvents:
             src_path = "/dir/new_dir"
             dest_path = "/dir/moved.txt"
 
-        handler.on_created(_FakeEvent())  # pyrefly: ignore [bad-argument-type]
+        handler.on_created(_FakeEvent())
         assert len(emitter.events) == 0
 
     def test_on_modified_emits_event(self) -> None:
@@ -1600,7 +1600,7 @@ class TestWatchdogHandlerEvents:
             src_path = "/dir/file.txt"
             dest_path = "/dir/moved.txt"
 
-        handler.on_modified(_FakeEvent())  # pyrefly: ignore [bad-argument-type]
+        handler.on_modified(_FakeEvent())
         assert len(emitter.events) == 1
         assert emitter.events[0] == ("/dir/file.txt", "modified")
 
@@ -1614,7 +1614,7 @@ class TestWatchdogHandlerEvents:
             src_path = "/dir/old.txt"
             dest_path = "/dir/new.txt"
 
-        handler.on_moved(_FakeEvent())  # pyrefly: ignore [bad-argument-type]
+        handler.on_moved(_FakeEvent())
         assert len(emitter.events) == 1
         assert emitter.events[0] == ("/dir/new.txt", "moved")
 
@@ -1628,7 +1628,7 @@ class TestWatchdogHandlerEvents:
             src_path = "/dir/old.txt"
             dest_path = "/proj/.git/HEAD"
 
-        handler.on_moved(_FakeEvent())  # pyrefly: ignore [bad-argument-type]
+        handler.on_moved(_FakeEvent())
         assert len(emitter.events) == 0
 
 

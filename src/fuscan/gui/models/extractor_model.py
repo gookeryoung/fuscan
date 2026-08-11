@@ -223,7 +223,7 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
             # 返回 list（QML 端 Repeater 可直接用 modelData 访问）
             return list(row.format_tags)
         if role == Qt.UserRole + 10:
-            # 返回引擎信息字符串（如 "pdf_oxide" / "python-calamine"）
+            # 返回引擎信息字符串（如 "pypdfium2" / "python-calamine"）
             return row.engine_info
         return ""
 

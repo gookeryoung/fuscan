@@ -8,7 +8,7 @@
 - T1 极速（``VERY_FAST``）：< 10ms/MB，纯字节解码
   - 纯文本/源代码/配置文件/标记与数据/样式表 5 个子提取器
 - T2 快速（``FAST``）：10-50ms/MB，Rust 加速后端或 lxml C 扩展解析
-  - EML 邮件、PDF（pdf_oxide/pypdfium2）、XLSX/XLS（calamine）、
+  - EML 邮件、XLSX/XLS（calamine）、
     DOCX/PPTX/ODT/ODS（lxml 直接解析）
 - T3 中速（``MEDIUM``）：50-200ms/MB，单次 XML 解析 + 树遍历或正则扫描
   - WPS（委托 DOCX/XLSX/PPTX，综合 T3）、
@@ -17,7 +17,7 @@
 - T4 慢速（``SLOW``）：200-1000ms/MB，单元格遍历或字节级扫描
 
 注意：ODT/ODS 固定走 lxml（T2）；DOCX/PPTX 固定走 lxml（T2），
-DOC/PPT 固定走 olefile（T3），PDF 走 pdf_oxide（T2）/pypdfium2（T3）。
+DOC/PPT 固定走 olefile（T3），PDF 固定走 pypdfium2（T3）。
 
 基准测试设计原则：
 
@@ -284,28 +284,6 @@ class TestTier2Fast:
         content = extractor.extract_from_bytes(data)
         assert "password" in content
 
-    def test_pdf_extractor_tier_with_oxide(self) -> None:
-        """PdfExtractor 在 pdf_oxide 可用时声明为 T2 快速。"""
-        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
-
-        if not _PDF_OXIDE_AVAILABLE:
-            pytest.skip("pdf_oxide 未安装，PDF 走 pypdfium2 回退路径（T3）")
-        extractor = PdfExtractor()
-        _assert_tier(extractor, SpeedTier.FAST)
-
-    def test_pdf_extraction_speed_with_oxide(self) -> None:
-        """pdf_oxide 后端的 PDF 提取应在 1s 内完成（T2 快速基准）。"""
-        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
-
-        if not _PDF_OXIDE_AVAILABLE:
-            pytest.skip("pdf_oxide 未安装，PDF 走 pypdfium2 回退路径（T3）")
-        extractor = PdfExtractor()
-        data = _make_pdf_sample()
-        elapsed = _measure(extractor.extract_from_bytes, data, iterations=1)
-        _assert_time_within_tier(elapsed, SpeedTier.FAST, "PdfExtractor (pdf_oxide)")
-        content = extractor.extract_from_bytes(data)
-        assert "password" in content
-
     def test_xlsx_extractor_tier(self) -> None:
         """XlsxExtractor 声明为 T2 快速（iter-92 切换 calamine）。"""
         extractor = XlsxExtractor()
@@ -427,28 +405,20 @@ class TestTier4Slow:
         _assert_tier(extractor, SpeedTier.MEDIUM)
 
 
-# ----------------------------- PDF pypdfium2 回退路径 -----------------------------
+# ----------------------------- PDF pypdfium2 基准 -----------------------------
 
 
 @pytest.mark.slow
-class TestPdfPdfiumFallback:
-    """PDF pypdfium2 回退路径基准测试（pdf_oxide 不可用时）。"""
+class TestPdfPdfiumBenchmark:
+    """PDF pypdfium2 后端基准测试（唯一后端，T3 中速）。"""
 
-    def test_pdf_extractor_tier_pdfium_fallback(self) -> None:
-        """PdfExtractor 在 pypdfium2 回退模式下声明为 T3 中速。"""
-        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
-
-        if _PDF_OXIDE_AVAILABLE:
-            pytest.skip("pdf_oxide 已安装，PDF 走 T2 快速路径")
+    def test_pdf_extractor_tier(self) -> None:
+        """PdfExtractor 声明为 T3 中速。"""
         extractor = PdfExtractor()
         _assert_tier(extractor, SpeedTier.MEDIUM)
 
-    def test_pdf_extraction_speed_pdfium_fallback(self) -> None:
-        """pypdfium2 回退后端的 PDF 提取应在 2s 内完成（T3 中速基准）。"""
-        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
-
-        if _PDF_OXIDE_AVAILABLE:
-            pytest.skip("pdf_oxide 已安装，PDF 走 T2 快速路径")
+    def test_pdf_extraction_speed(self) -> None:
+        """pypdfium2 后端的 PDF 提取应在 2s 内完成（T3 中速基准）。"""
         extractor = PdfExtractor()
         data = _make_pdf_sample()
         elapsed = _measure(extractor.extract_from_bytes, data, iterations=1)

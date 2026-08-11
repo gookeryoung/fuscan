@@ -179,7 +179,7 @@ def engine_for_extension(extension: str) -> str:
     引擎名由扩展名静态决定（同一扩展名固定映射到同一提取器），故无需在
     提取流程中传递，扫描完成后按 ``entry.extension`` 反查即可：
 
-    - 已注册提取器：返回其 ``engine_info``（如 ``"pdf_oxide"``/``"lxml"``/
+    - 已注册提取器：返回其 ``engine_info``（如 ``"pypdfium2"``/``"lxml"``/
       ``"python-calamine"``/``"fuscan-core (cfb)"``）；``engine_info`` 为空串时
       回退到 :data:`_FALLBACK_ENGINE`（提取器未覆盖该属性的兜底）。
     - 无注册提取器：内容提供器走纯文本读取回退，返回 :data:`_FALLBACK_ENGINE`。
@@ -200,7 +200,7 @@ def engine_for_extension(extension: str) -> str:
 # 可真正并行、且不长时间独占 GIL，GUI 主线程仍能抢到锁保持响应。
 # 判据来源（见各 extractor 的 engine_info）：
 #
-# - ``pdf_oxide``（Rust + PyO3）/ ``pypdfium2``（pdfium C++）→ PDF
+# - ``pypdfium2``（pdfium C++）→ PDF
 # - ``python-calamine``（Rust + PyO3）→ XLSX/XLS
 # - ``lxml``（libxml2 C）→ DOCX/PPTX/ODT/ODS
 # - ``fuscan-core``（Rust + PyO3，encoding_rs+chardetng）→ 文本编码检测
@@ -212,7 +212,6 @@ def engine_for_extension(extension: str) -> str:
 # 是扫描期 GUI 冻结的主因。
 _NATIVE_ENGINES: frozenset[str] = frozenset(
     {
-        "pdf_oxide",
         "pypdfium2",
         "python-calamine",
         "lxml",

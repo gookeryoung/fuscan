@@ -743,7 +743,7 @@ class TestWpsExtractorErrorPaths:
 
 
 # ---------------------------------------------------------------------------
-# PdfExtractor（两层降级链：pdf_oxide → pypdfium2）
+# PdfExtractor（pypdfium2 后端，延迟导入）
 # ---------------------------------------------------------------------------
 
 
@@ -778,9 +778,12 @@ class TestPdfExtractor:
             PdfExtractor().extract(tmp_path / "missing.pdf")
 
     def test_no_backend_available_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """pdf_oxide 与 pypdfium2 均不可用时应抛出 ``ExtractorError``。"""
-        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
-        monkeypatch.setattr("fuscan.extractors.pdf._PDFIUM_AVAILABLE", False)
+        """pypdfium2 不可用时应抛出 ``ExtractorError``。"""
+
+        def _raise() -> None:
+            raise ExtractorError("无可用 PDF 引擎（pypdfium2 未安装）")
+
+        monkeypatch.setattr("fuscan.extractors.pdf._ensure_backend", _raise)
         path = tmp_path / "x.pdf"
         path.write_bytes(b"fake")
         with pytest.raises(ExtractorError, match="无可用 PDF 引擎"):
@@ -788,179 +791,45 @@ class TestPdfExtractor:
 
 
 # ---------------------------------------------------------------------------
-# PdfExtractor pdf_oxide 后端测试
-# ---------------------------------------------------------------------------
-
-
-class TestPdfExtractorOxideBackend:
-    """pdf_oxide（Rust + PyO3）后端测试。
-
-    仅在 pdf_oxide 已安装时运行，验证真实 PDF 提取与 speed_tier 动态返回。
-    不使用 mock，生成真实 PDF 样本验证端到端正确性。
-    """
-
-    @pytest.fixture()
-    def pdf_sample(self, tmp_path: Path) -> bytes:
-        """用 reportlab 生成含 password 关键词的 PDF 样本。"""
-        return _make_pdf_sample(tmp_path)
-
-    def test_oxide_speed_tier_is_fast_when_available(self) -> None:
-        """pdf_oxide 可用时 speed_tier 返回 T2 快速。"""
-        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
-
-        if not _PDF_OXIDE_AVAILABLE:
-            pytest.skip("pdf_oxide 未安装")
-        assert PdfExtractor().speed_tier == SpeedTier.FAST
-
-    def test_oxide_extract_real_pdf(self, pdf_sample: bytes) -> None:
-        """pdf_oxide 后端提取真实 PDF 应包含 password 关键词。"""
-        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
-
-        if not _PDF_OXIDE_AVAILABLE:
-            pytest.skip("pdf_oxide 未安装")
-        extractor = PdfExtractor()
-        content = extractor.extract_from_bytes(pdf_sample)
-        assert "password" in content.lower()
-
-    def test_oxide_extract_path_matches_bytes(self, pdf_sample: bytes, tmp_path: Path) -> None:
-        """pdf_oxide 从 path 与从 bytes 提取结果一致。"""
-        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
-
-        if not _PDF_OXIDE_AVAILABLE:
-            pytest.skip("pdf_oxide 未安装")
-        path = tmp_path / "sample.pdf"
-        path.write_bytes(pdf_sample)
-        extractor = PdfExtractor()
-        assert extractor.extract(path) == extractor.extract_from_bytes(pdf_sample)
-
-    def test_oxide_invalid_bytes_raises(self) -> None:
-        """pdf_oxide 后端对无效字节应抛出 ExtractorError。"""
-        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
-
-        if not _PDF_OXIDE_AVAILABLE:
-            pytest.skip("pdf_oxide 未安装")
-        with pytest.raises(ExtractorError, match="PDF 解析失败"):
-            PdfExtractor().extract_from_bytes(b"not a pdf")
-
-    def test_oxide_empty_bytes_raises(self) -> None:
-        """pdf_oxide 后端对空字节应抛出 ExtractorError（非加密异常）。"""
-        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
-
-        if not _PDF_OXIDE_AVAILABLE:
-            pytest.skip("pdf_oxide 未安装")
-        with pytest.raises(ExtractorError):
-            PdfExtractor().extract_from_bytes(b"")
-
-    def test_oxide_extract_missing_file_raises(self, tmp_path: Path) -> None:
-        """pdf_oxide 后端 extract() 读取缺失文件应抛出 ExtractorError。"""
-        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
-
-        if not _PDF_OXIDE_AVAILABLE:
-            pytest.skip("pdf_oxide 未安装")
-        with pytest.raises(ExtractorError, match="文件读取失败"):
-            PdfExtractor().extract(tmp_path / "missing.pdf")
-
-    def test_oxide_returns_empty_for_empty_pdf(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """pdf_oxide 后端 to_plain_text_all 返回空时返回空字符串。"""
-        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE
-
-        if not _PDF_OXIDE_AVAILABLE:
-            pytest.skip("pdf_oxide 未安装")
-        extractor = PdfExtractor()
-
-        class FakeDoc:
-            @staticmethod
-            def to_plain_text_all() -> str:
-                return ""
-
-        monkeypatch.setattr(
-            "fuscan.extractors.pdf._PdfOxideDocument.from_bytes",
-            lambda data: FakeDoc(),
-        )
-        assert extractor.extract_from_bytes(b"fake but callable") == ""
-
-
-# ---------------------------------------------------------------------------
-# PdfExtractor pypdfium2 回退层测试
+# PdfExtractor pypdfium2 后端测试
 # ---------------------------------------------------------------------------
 
 
 class TestPdfExtractorPdfiumBackend:
-    """pypdfium2（pdfium C++）回退层测试。
+    """pypdfium2（pdfium C++）后端测试。
 
-    当 pdf_oxide 不可用时，pypdfium2 作为 T3 中速回退。
-    仅在 pypdfium2 已安装且 pdf_oxide 未安装时运行。
+    pypdfium2 是唯一的 PDF 解析后端（Google pdfium C++ 引擎，cffi 绑定），
+    兼容 Win7。speed_tier 固定 T3 中速，engine_info 固定 "pypdfium2"。
+    通过 :func:`_ensure_backend` 延迟导入，未安装时抛 ``ExtractorError``。
     """
 
-    def test_pdfium_speed_tier_is_medium(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """pdf_oxide 不可用、pypdfium2 可用时 speed_tier 返回 T3 中速。"""
-        from fuscan.extractors.pdf import _PDFIUM_AVAILABLE
-
-        if not _PDFIUM_AVAILABLE:
-            pytest.skip("pypdfium2 未安装")
-        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
+    def test_pdfium_speed_tier_is_medium(self) -> None:
+        """pypdfium2 后端 speed_tier 返回 T3 中速。"""
         assert PdfExtractor().speed_tier == SpeedTier.MEDIUM
 
-    def test_pdfium_engine_info(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """pdf_oxide 不可用、pypdfium2 可用时 engine_info 返回 pypdfium2。"""
-        from fuscan.extractors.pdf import _PDFIUM_AVAILABLE
-
-        if not _PDFIUM_AVAILABLE:
-            pytest.skip("pypdfium2 未安装")
-        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
+    def test_pdfium_engine_info(self) -> None:
+        """engine_info 返回 pypdfium2。"""
         assert PdfExtractor().engine_info == "pypdfium2"
 
-    def test_pdfium_extract_real_pdf(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_pdfium_extract_real_pdf(self, tmp_path: Path) -> None:
         """pypdfium2 后端提取真实 PDF 应包含 password 关键词。"""
-        from fuscan.extractors.pdf import _PDFIUM_AVAILABLE
-
-        if not _PDFIUM_AVAILABLE:
-            pytest.skip("pypdfium2 未安装")
-        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
         pdf_sample = _make_pdf_sample(tmp_path)
         extractor = PdfExtractor()
         content = extractor.extract_from_bytes(pdf_sample)
         assert "password" in content.lower()
 
-    def test_pdfium_extract_path_matches_bytes(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_pdfium_extract_path_matches_bytes(self, tmp_path: Path) -> None:
         """pypdfium2 从 path 与从 bytes 提取结果一致。"""
-        from fuscan.extractors.pdf import _PDFIUM_AVAILABLE
-
-        if not _PDFIUM_AVAILABLE:
-            pytest.skip("pypdfium2 未安装")
-        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
         pdf_sample = _make_pdf_sample(tmp_path)
         path = tmp_path / "sample.pdf"
         path.write_bytes(pdf_sample)
         extractor = PdfExtractor()
         assert extractor.extract(path) == extractor.extract_from_bytes(pdf_sample)
 
-    def test_pdfium_invalid_bytes_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_pdfium_invalid_bytes_raises(self) -> None:
         """pypdfium2 无法打开无效字节时应抛出 ``ExtractorError``。"""
-        from fuscan.extractors.pdf import _PDFIUM_AVAILABLE
-
-        if not _PDFIUM_AVAILABLE:
-            pytest.skip("pypdfium2 未安装")
-        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
         with pytest.raises(ExtractorError, match="PDF 打开失败"):
             PdfExtractor().extract_from_bytes(b"not a valid pdf")
-
-
-class TestPdfExtractorEnginePriority:
-    """引擎优先级链测试：pdf_oxide → pypdfium2。"""
-
-    def test_engine_oxide_wins_when_available(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """pdf_oxide 可用时优先使用 pdf_oxide。"""
-        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", True)
-        monkeypatch.setattr("fuscan.extractors.pdf._PDFIUM_AVAILABLE", True)
-        assert PdfExtractor().engine_info == "pdf_oxide"
-
-    def test_engine_pdfium_when_oxide_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """pdf_oxide 不可用、pypdfium2 可用时使用 pypdfium2。"""
-        monkeypatch.setattr("fuscan.extractors.pdf._PDF_OXIDE_AVAILABLE", False)
-        monkeypatch.setattr("fuscan.extractors.pdf._PDFIUM_AVAILABLE", True)
-        assert PdfExtractor().engine_info == "pypdfium2"
-        assert PdfExtractor().speed_tier == SpeedTier.MEDIUM
 
 
 # ---------------------------------------------------------------------------
@@ -1259,8 +1128,8 @@ class TestExtractorRegistry:
         # XLSX/XLS 固定使用 calamine
         assert XlsxExtractor().engine_info == "python-calamine"
         assert XlsExtractor().engine_info == "python-calamine"
-        # PDF 在 pdf_oxide 与 pypdfium2 之间切换
-        assert PdfExtractor().engine_info in {"pdf_oxide", "pypdfium2"}
+        # PDF 固定使用 pypdfium2
+        assert PdfExtractor().engine_info == "pypdfium2"
         # DOC/PPT 在 fuscan-core (cfb) 与 olefile 之间切换
         assert DocExtractor().engine_info in {"fuscan-core (cfb)", "olefile"}
         assert PptExtractor().engine_info in {"fuscan-core (cfb)", "olefile"}
@@ -1429,10 +1298,6 @@ class TestExtractFromBytes:
 
     def test_pdf_extract_from_bytes_matches_path(self, tmp_path: Path) -> None:
         """PdfExtractor 从 bytes 提取与从 path 提取结果一致。"""
-        from fuscan.extractors.pdf import _PDF_OXIDE_AVAILABLE, _PDFIUM_AVAILABLE
-
-        if not (_PDF_OXIDE_AVAILABLE or _PDFIUM_AVAILABLE):
-            pytest.skip("pdf_oxide/pypdfium2 均未安装")
         data = _make_pdf_sample(tmp_path)
         path = tmp_path / "fake.pdf"
         path.write_bytes(data)

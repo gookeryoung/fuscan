@@ -36,6 +36,7 @@ import threading
 from collections import deque
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from typing_extensions import override
 
@@ -44,8 +45,15 @@ try:
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot  # pyrefly: ignore [missing-import]
 
-from watchdog.events import FileSystemEvent, FileSystemEventHandler
-from watchdog.observers import Observer
+if TYPE_CHECKING:
+    # watchdog 仅用于类型注解（注解因 from __future__ import annotations 为字符串，
+    # 运行时不求值）。运行时通过 _build_watchdog_handler_class / __init__ 内延迟导入，
+    # 避免 import fuscan.app 启动阶段加载 watchdog。
+    from watchdog.events import FileSystemEvent
+
+    # _WatchdogHandler 通过 PEP 562 __getattr__ 延迟创建（运行时动态），
+    # 此处仅声明类型供静态检查器识别，避免 F821。
+    _WatchdogHandler: type
 
 from fuscan.gui.models.file_monitor_model import FileMonitorModel
 from fuscan.gui.severity_utils import severity_text
@@ -106,89 +114,110 @@ class _EventEmitter(QObject):  # pyrefly: ignore [invalid-inheritance]
         super().__init__(parent)
 
 
-class _WatchdogHandler(FileSystemEventHandler):
-    """watchdog 事件处理器：过滤噪声目录后通过信号转发到主线程。
+def _build_watchdog_handler_class() -> type:
+    """构建 ``_WatchdogHandler`` 类（延迟导入 ``watchdog.events``）。
 
-    :param emitter: 跨线程信号桥
-    :param scan_extensions: 全局规则集的扩展名白名单；``None`` 表示不过滤，
-        空 tuple 表示都不扫描（与 Scanner ``_should_scan`` 语义一致）
-    :param filter_stats: 共享过滤统计字典（controller 持有，handler 累加）。
-        单写单读（handler 线程写，controller 线程读），GIL 保证安全。
-        仅做整数递增，不 emit 信号，避免逐事件信号开销。
+    ``_WatchdogHandler`` 继承 ``FileSystemEventHandler``，类定义时需要基类，
+    故整体延迟到首次访问 ``_WatchdogHandler`` 时（通过 PEP 562 ``__getattr__``）
+    才导入 watchdog 并创建类，避免 ``import fuscan.app`` 启动阶段加载 watchdog。
     """
+    from watchdog.events import FileSystemEventHandler
 
-    def __init__(
-        self,
-        emitter: _EventEmitter,
-        scan_extensions: tuple[str, ...] | None,
-        filter_stats: dict[str, int] | None = None,
-    ) -> None:
-        super().__init__()
-        self._emitter = emitter
-        self._filter_stats: dict[str, int] = filter_stats if filter_stats is not None else {}
-        # 三态语义（与 Scanner._should_scan 一致）：
-        # - None → 不过滤（扫描所有文件）
-        # - 空 frozenset → 全部跳过（用户取消所有扩展名勾选）
-        # - 非空 frozenset → 扩展名白名单
-        if scan_extensions is None:
-            self._scan_extensions: frozenset[str] | None = None
-        else:
-            self._scan_extensions = frozenset(ext.lower().lstrip(".") for ext in scan_extensions)
+    class _WatchdogHandler(FileSystemEventHandler):
+        """watchdog 事件处理器：过滤噪声目录后通过信号转发到主线程。
 
-    def _should_handle(self, path: str | bytes) -> bool:
-        """判断该路径是否需要触发扫描。
-
-        - 路径任一部分命中噪声目录名 → 跳过（计入 ignored_dir）
-        - ``scan_extensions`` 为 ``None`` → 通过（扫描所有文件）
-        - ``scan_extensions`` 为空 frozenset → 全部跳过（计入 filtered_ext）
-        - 否则按扩展名白名单过滤（不匹配计入 filtered_ext）
+        :param emitter: 跨线程信号桥
+        :param scan_extensions: 全局规则集的扩展名白名单；``None`` 表示不过滤，
+            空 tuple 表示都不扫描（与 Scanner ``_should_scan`` 语义一致）
+        :param filter_stats: 共享过滤统计字典（controller 持有，handler 累加）。
+            单写单读（handler 线程写，controller 线程读），GIL 保证安全。
+            仅做整数递增，不 emit 信号，避免逐事件信号开销。
         """
-        from pathlib import PurePath
 
-        if isinstance(path, bytes):
-            path = path.decode("utf-8", errors="replace")
-        p = PurePath(path)
-        for part in p.parts:
-            if part.lower() in _IGNORE_DIR_PARTS:
-                self._filter_stats["ignored_dir"] = self._filter_stats.get("ignored_dir", 0) + 1
+        def __init__(
+            self,
+            emitter: _EventEmitter,
+            scan_extensions: tuple[str, ...] | None,
+            filter_stats: dict[str, int] | None = None,
+        ) -> None:
+            super().__init__()
+            self._emitter = emitter
+            self._filter_stats: dict[str, int] = filter_stats if filter_stats is not None else {}
+            # 三态语义（与 Scanner._should_scan 一致）：
+            # - None → 不过滤（扫描所有文件）
+            # - 空 frozenset → 全部跳过（用户取消所有扩展名勾选）
+            # - 非空 frozenset → 扩展名白名单
+            if scan_extensions is None:
+                self._scan_extensions: frozenset[str] | None = None
+            else:
+                self._scan_extensions = frozenset(ext.lower().lstrip(".") for ext in scan_extensions)
+
+        def _should_handle(self, path: str | bytes) -> bool:
+            """判断该路径是否需要触发扫描。
+
+            - 路径任一部分命中噪声目录名 → 跳过（计入 ignored_dir）
+            - ``scan_extensions`` 为 ``None`` → 通过（扫描所有文件）
+            - ``scan_extensions`` 为空 frozenset → 全部跳过（计入 filtered_ext）
+            - 否则按扩展名白名单过滤（不匹配计入 filtered_ext）
+            """
+            from pathlib import PurePath
+
+            if isinstance(path, bytes):
+                path = path.decode("utf-8", errors="replace")
+            p = PurePath(path)
+            for part in p.parts:
+                if part.lower() in _IGNORE_DIR_PARTS:
+                    self._filter_stats["ignored_dir"] = self._filter_stats.get("ignored_dir", 0) + 1
+                    return False
+            if self._scan_extensions is None:
+                return True
+            if not self._scan_extensions:
+                self._filter_stats["filtered_ext"] = self._filter_stats.get("filtered_ext", 0) + 1
                 return False
-        if self._scan_extensions is None:
+            ext = p.suffix.lower().lstrip(".")
+            if ext not in self._scan_extensions:
+                self._filter_stats["filtered_ext"] = self._filter_stats.get("filtered_ext", 0) + 1
+                return False
             return True
-        if not self._scan_extensions:
-            self._filter_stats["filtered_ext"] = self._filter_stats.get("filtered_ext", 0) + 1
-            return False
-        ext = p.suffix.lower().lstrip(".")
-        if ext not in self._scan_extensions:
-            self._filter_stats["filtered_ext"] = self._filter_stats.get("filtered_ext", 0) + 1
-            return False
-        return True
 
-    @override
-    def on_created(self, event: FileSystemEvent) -> None:
-        """文件创建事件。"""
-        if event.is_directory:
-            self._filter_stats["dir_events"] = self._filter_stats.get("dir_events", 0) + 1
-            return
-        if self._should_handle(event.src_path):
-            self._emitter.event_received.emit(event.src_path, "created")  # pyrefly: ignore [missing-attribute]
+        @override
+        def on_created(self, event: FileSystemEvent) -> None:
+            """文件创建事件。"""
+            if event.is_directory:
+                self._filter_stats["dir_events"] = self._filter_stats.get("dir_events", 0) + 1
+                return
+            if self._should_handle(event.src_path):
+                self._emitter.event_received.emit(event.src_path, "created")  # pyrefly: ignore [missing-attribute]
 
-    @override
-    def on_modified(self, event: FileSystemEvent) -> None:
-        """文件修改事件。"""
-        if event.is_directory:
-            self._filter_stats["dir_events"] = self._filter_stats.get("dir_events", 0) + 1
-            return
-        if self._should_handle(event.src_path):
-            self._emitter.event_received.emit(event.src_path, "modified")  # pyrefly: ignore [missing-attribute]
+        @override
+        def on_modified(self, event: FileSystemEvent) -> None:
+            """文件修改事件。"""
+            if event.is_directory:
+                self._filter_stats["dir_events"] = self._filter_stats.get("dir_events", 0) + 1
+                return
+            if self._should_handle(event.src_path):
+                self._emitter.event_received.emit(event.src_path, "modified")  # pyrefly: ignore [missing-attribute]
 
-    @override
-    def on_moved(self, event: FileSystemEvent) -> None:
-        """文件移动事件（按目标路径扫描）。"""
-        if event.is_directory:
-            self._filter_stats["dir_events"] = self._filter_stats.get("dir_events", 0) + 1
-            return
-        if self._should_handle(event.dest_path):
-            self._emitter.event_received.emit(event.dest_path, "moved")  # pyrefly: ignore [missing-attribute]
+        @override
+        def on_moved(self, event: FileSystemEvent) -> None:
+            """文件移动事件（按目标路径扫描）。"""
+            if event.is_directory:
+                self._filter_stats["dir_events"] = self._filter_stats.get("dir_events", 0) + 1
+                return
+            if self._should_handle(event.dest_path):
+                self._emitter.event_received.emit(event.dest_path, "moved")  # pyrefly: ignore [missing-attribute]
+
+    return _WatchdogHandler
+
+
+# PEP 562: _WatchdogHandler 延迟创建，首次访问时导入 watchdog 并构建类，
+# 随后缓存到模块命名空间。import fuscan.app 不会触发 watchdog 加载。
+def __getattr__(name: str) -> object:
+    if name == "_WatchdogHandler":
+        cls = _build_watchdog_handler_class()
+        globals()[name] = cls  # 缓存，后续直接从 __dict__ 取
+        return cls
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -226,7 +255,13 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._model = FileMonitorModel(parent=self)
         # watchdog Observer 实例（启用监控时构造，关闭时 stop+join）
         self._observer: object | None = None
-        self._observer_factory: Callable[[], object] = _observer_factory or Observer
+        # Observer 工厂：测试注入用 _observer_factory；生产环境延迟导入 watchdog.observers.Observer
+        if _observer_factory is not None:
+            self._observer_factory: Callable[[], object] = _observer_factory
+        else:
+            from watchdog.observers import Observer
+
+            self._observer_factory = Observer
         # 当前是否启用监控
         self._monitoring_enabled: bool = False
         # 监控目录列表（path_str → watchdog watch handle）
@@ -239,7 +274,7 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._emitter = _EventEmitter(self)
         self._emitter.event_received.connect(self._on_event_received)  # pyrefly: ignore [missing-attribute]
         # 当前 watchdog handler（共享 scan_extensions；规则集变更时重建）
-        self._handler: _WatchdogHandler | None = None
+        self._handler: _WatchdogHandler | None = None  # noqa: F821
         # 防抖定时器：path_str → QTimer（单发，300ms）
         self._debounce_timers: dict[str, QTimer] = {}
         # 持久化文件锁（多线程写 monitor.json 互斥；测试并发用）
@@ -505,7 +540,13 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """根据当前规则集重建 watchdog handler（刷新 scan_extensions）。"""
         ruleset = self._rules_controller.ruleset  # pyrefly: ignore [missing-attribute]
         scan_extensions = ruleset.scan_extensions if ruleset is not None else None
-        self._handler = _WatchdogHandler(self._emitter, scan_extensions, self._filter_stats)
+        # 延迟导入 watchdog：首次调用时构建 handler 类，后续从模块全局缓存取。
+        # 不能用 PEP 562 __getattr__（函数内全局名查找不触发），需显式调用工厂。
+        handler_cls = globals().get("_WatchdogHandler")
+        if handler_cls is None:
+            handler_cls = _build_watchdog_handler_class()
+            globals()["_WatchdogHandler"] = handler_cls
+        self._handler = handler_cls(self._emitter, scan_extensions, self._filter_stats)
 
     def _on_ruleset_changed(self) -> None:
         """规则集变更：清空 Scanner 缓存，重建 handler，下次事件用新规则集。"""

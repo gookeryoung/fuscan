@@ -16,7 +16,6 @@ dependencies = [
     "PyYAML>=6.0",
     "typing-extensions>=4.0; python_version < '3.13'",
     "lxml>=4.9.0",
-    "pdf_oxide>=0.3",
     "pypdfium2>=4.0",
     "rarfile>=4.1",
     "charset-normalizer>=3.3.0",

@@ -1,53 +1,50 @@
 """PDF 提取器。
 
-优先使用 ``pdf_oxide``（Rust + PyO3，0.8ms/文档，释放 GIL），
-import 失败时回退到 ``pypdfium2``（Google pdfium C++ 引擎，通过 cffi 绑定）。
+使用 ``pypdfium2``（Google pdfium C++ 引擎，通过 cffi 绑定）提取 PDF 文本。
+pypdfium2 兼容 Win7（无 Rust 运行时依赖），且在原生代码内释放 GIL，
+多个 worker 线程可真正并行。
 
-pdf_oxide 在 Win7 等旧系统上可能因 Rust 运行时缺失而无法加载，
-pypdfium2 提供接近 pdf_oxide 的性能（C++ 原生），且兼容 Win7。
-
-两层降级链：pdf_oxide → pypdfium2
+pypdfium2 的 C 扩展在模块顶层 import 会增加启动耗时（约 64ms），
+故通过 :func:`_ensure_backend` 延迟到首次 :meth:`PdfExtractor.extract_from_bytes`
+调用时才加载，``import fuscan.app`` 启动阶段不触发 pypdfium2 加载。
 """
 
 from __future__ import annotations
 
 import io
 import logging
+from typing import TYPE_CHECKING
 
 from typing_extensions import override
 
 from fuscan.extractors.base import Extractor, ExtractorError, SpeedTier
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 __all__ = ["PdfExtractor"]
 
 logger = logging.getLogger(__name__)
 
-# 模块级检测 pdf_oxide 是否可用（仅 import 一次）
-try:
-    from pdf_oxide import PdfDocument as _PdfOxideDocument
 
-    _PDF_OXIDE_AVAILABLE = True
-except ImportError:  # pragma: no cover - 环境依赖：仅 pdf_oxide 未安装时执行
-    _PDF_OXIDE_AVAILABLE = False
-    _PdfOxideDocument = None  # type: ignore[assignment, unused-ignore]
+def _ensure_backend() -> Callable[..., object]:
+    """延迟导入 pypdfium2，返回 ``PdfDocument`` 类。
 
-# 模块级检测 pypdfium2 是否可用
-# pypdfium2 封装 Google pdfium C++ 引擎，性能接近 pdf_oxide 且兼容 Win7
-try:
-    from pypdfium2 import PdfDocument as _PdfiumDocument
-
-    _PDFIUM_AVAILABLE = True
-except ImportError:  # pragma: no cover - 环境依赖
-    _PDFIUM_AVAILABLE = False
-    _PdfiumDocument = None  # type: ignore[assignment, unused-ignore]
+    :raises ExtractorError: pypdfium2 未安装时抛出
+    :return: ``pypdfium2.PdfDocument`` 类
+    """
+    try:
+        from pypdfium2 import PdfDocument
+    except ImportError as exc:  # pragma: no cover - 环境依赖：仅 pypdfium2 未安装时执行
+        raise ExtractorError("无可用 PDF 引擎（pypdfium2 未安装）") from exc
+    return PdfDocument
 
 
 class PdfExtractor(Extractor):
     """PDF 文档文本提取器。
 
-    两层降级链：pdf_oxide（Rust + PyO3）→ pypdfium2（C++ cffi）。
-    :attr:`speed_tier` 根据可用后端动态返回：pdf_oxide → T2 快速，
-    pypdfium2 → T3 中速。
+    后端固定为 pypdfium2（Google pdfium C++ 引擎，cffi 绑定），
+    兼容 Win7。:attr:`speed_tier` 固定返回 T3 中速。
     """
 
     @property
@@ -61,11 +58,8 @@ class PdfExtractor(Extractor):
     def speed_tier(self) -> SpeedTier:
         """PDF 提取速度档次。
 
-        - pdf_oxide（Rust + PyO3）：0.8ms/文档 + 释放 GIL → T2 快速
-        - pypdfium2（pdfium C++）：接近原生性能 + 释放 GIL → T3 中速
+        pypdfium2（pdfium C++）：接近原生性能 + 释放 GIL → T3 中速
         """
-        if _PDF_OXIDE_AVAILABLE:
-            return SpeedTier.FAST
         return SpeedTier.MEDIUM
 
     @override
@@ -78,67 +72,36 @@ class PdfExtractor(Extractor):
     @property
     def engine_info(self) -> str:
         """实际使用的 PDF 解析引擎。"""
-        if _PDF_OXIDE_AVAILABLE:
-            return "pdf_oxide"
         return "pypdfium2"
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:
-        """从内存字节提取 PDF 文本，加密文档返回空字符串。
+        """从内存字节提取 PDF 文本，加密文档返回空字符串。"""
+        pdf_document = _ensure_backend()
+        return self._extract_with_pdfium2(data, pdf_document)
 
-        两层降级链 pdf_oxide → pypdfium2。
-        """
-        if _PDF_OXIDE_AVAILABLE:
-            return self._extract_with_pdf_oxide(data)
-        if _PDFIUM_AVAILABLE:
-            return self._extract_with_pdfium2(data)
-        raise ExtractorError("无可用 PDF 引擎（pdf_oxide/pypdfium2 均未安装）")
-
-    def _extract_with_pdf_oxide(self, data: bytes) -> str:
-        """使用 pdf_oxide（Rust + PyO3）提取 PDF 文本。
-
-        ``to_plain_text_all()`` 一次性提取全部页面纯文本，避免逐页调用的
-        Python 循环开销，Rust 侧批量处理 + 释放 GIL。
-        """
-        try:
-            doc = _PdfOxideDocument.from_bytes(data)  # type: ignore[union-attr]
-        except Exception as exc:
-            # 加密文档无密码时 from_bytes 可能抛异常
-            msg = str(exc).lower()
-            if "encrypt" in msg or "password" in msg:
-                logger.info("PDF 已加密，跳过")
-                return ""
-            raise ExtractorError(f"PDF 解析失败: {exc}") from exc
-
-        try:
-            return doc.to_plain_text_all() or ""
-        except Exception as exc:
-            msg = str(exc).lower()
-            if "encrypt" in msg or "password" in msg:
-                logger.info("PDF 已加密，跳过")
-                return ""
-            logger.warning("PDF 文本提取失败", exc_info=True)
-            return ""
-
-    def _extract_with_pdfium2(self, data: bytes) -> str:
+    def _extract_with_pdfium2(self, data: bytes, pdf_document: Callable[..., object]) -> str:
         """使用 pypdfium2（Google pdfium C++）提取 PDF 文本。
 
         pypdfium2 基于 Google pdfium C++ 引擎，通过 cffi 绑定，
-        性能接近 pdf_oxide 且兼容 Win7（无 Rust 依赖）。
-        当 pdf_oxide 不可用时作为回退。
+        性能接近原生且兼容 Win7（无 Rust 依赖）。在原生代码内释放 GIL，
+        多 worker 线程可真正并行。
+
+        :param data: PDF 文件字节内容
+        :param pdf_document: ``pypdfium2.PdfDocument`` 类（由 :func:`_ensure_backend` 提供）
         """
         try:
-            doc = _PdfiumDocument(io.BytesIO(data))  # type: ignore[union-attr]
+            doc = pdf_document(io.BytesIO(data))
         except Exception as exc:
             raise ExtractorError(f"PDF 打开失败: {exc}") from exc
 
         try:
             parts: list[str] = []
-            for page_index in range(len(doc)):
+            for page_index in range(len(doc)):  # type: ignore[arg-type]
                 try:
-                    page = doc.get_page(page_index)
-                    textpage = page.get_textpage()
-                    text = textpage.get_text_range() or ""
+                    page = doc.get_page(page_index)  # type: ignore[union-attr]
+                    textpage = page.get_textpage()  # type: ignore[union-attr]
+                    text = textpage.get_text_range() or ""  # type: ignore[union-attr]
                     if text:
                         parts.append(text)
                 except Exception:
@@ -152,4 +115,4 @@ class PdfExtractor(Extractor):
                 return ""
             raise ExtractorError(f"PDF 解析失败: {exc}") from exc
         finally:
-            doc.close()
+            doc.close()  # type: ignore[union-attr]

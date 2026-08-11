@@ -6041,7 +6041,7 @@ class TestIsNativeEngine:
         assert is_native_engine("py") is _NATIVE_DECODE_AVAILABLE
 
     def test_pdf_engine_native(self) -> None:
-        """PDF（pdf_oxide/pypdfium2 原生）为原生引擎。"""
+        """PDF（pypdfium2 原生）为原生引擎。"""
         from fuscan.scanner._helpers import is_native_engine
 
         assert is_native_engine("pdf") is True

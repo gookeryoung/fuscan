@@ -2911,7 +2911,7 @@ class TestIter143CoverageGaps:
                 current_file_size=2048,
                 current_file_ext="pdf",
                 current_file_elapsed_ms=1500.0,
-                current_file_engine="pdf_oxide",
+                current_file_engine="pypdfium2",
             )
         )
         item = controller.recentParsedFiles[0]
@@ -2922,7 +2922,7 @@ class TestIter143CoverageGaps:
         assert item["ext"] == "pdf"
         assert item["elapsedMs"] == 1500.0
         # engine 透传 ProgressInfo.current_file_engine，供明细行标注
-        assert item["engine"] == "pdf_oxide"
+        assert item["engine"] == "pypdfium2"
         # sizeText 复用 format_size，elapsedText 复用 format_elapsed(elapsedMs/1000)
         assert item["sizeText"] == "2.0 KB"
         assert item["elapsedText"] == "1.5s"

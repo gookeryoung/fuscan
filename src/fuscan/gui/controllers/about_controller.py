@@ -58,7 +58,7 @@ _DEPENDENCIES: tuple[str, ...] = (
     "PySide2/PySide6 - Qt GUI 框架",
     "PyYAML - 配置与规则文件解析",
     "lxml - DOCX/PPTX/ODF 文档提取",
-    "pdf_oxide / pypdfium2 - PDF 文本提取",
+    "pypdfium2 - PDF 文本提取",
     "python-calamine - XLSX/XLS 表格提取",
     "rarfile - RAR 压缩包读取",
     "py7zr - 7z 压缩包读取",

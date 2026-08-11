@@ -20,7 +20,7 @@ src/fuscan/
 │   ├── base.py     # Extractor ABC + ExtractorError
 │   ├── registry.py # ExtractorRegistry 注册机制
 │   ├── text.py     # 纯文本（fuscan-core 原生编码检测，回退 charset-normalizer）
-│   ├── pdf.py      # PDF（pdf_oxide Rust，回退 pypdfium2）
+│   ├── pdf.py      # PDF（pypdfium2，延迟导入）
 │   ├── office.py   # DOCX/PPTX（lxml 直接解析 XML）
 │   ├── spreadsheet.py  # XLSX/ODS（calamine Rust / lxml）
 │   ├── odf.py      # ODT（zipfile + lxml，iter-109 移除 odfpy）
@@ -227,7 +227,7 @@ GUI 默认 `max_workers=5`，CLI 保持单线程（兼容性优先）。
 
 ### 9. PDF 提取器测试用 mock PdfDocument
 
-pdf_oxide/pypdfium2 的 PdfDocument 需要真实 PDF 字节流。测试 PDF 提取器时
+pypdfium2 的 PdfDocument 需要真实 PDF 字节流。测试 PDF 提取器时
 用 mock PdfDocument 模拟 pages 列表和 extract_text()，覆盖正常/异常/加密路径。
 
 ### 10. PDF 日志噪音抑制

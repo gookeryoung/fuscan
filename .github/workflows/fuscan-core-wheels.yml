@@ -63,9 +63,13 @@ jobs:
             runner: windows-latest
             target: x86_64-win7-windows-msvc
             build_std: true
-          # macOS：Intel + Apple Silicon
+          # macOS：Intel + Apple Silicon。
+          # 两个 target 均在 macos-14（Apple Silicon）上构建：
+          # aarch64 native 编译；x86_64 交叉编译（x86_64-apple-darwin 是 Tier-2，
+          # rustup 有预编译 std）。macos-13（Intel runner）已逐步停用，排队时间极长。
+          # abi3 模式不绑定具体 Python 版本，交叉编译无需目标平台 Python。
           - os: macos
-            runner: macos-13
+            runner: macos-14
             target: x86_64
           - os: macos
             runner: macos-14

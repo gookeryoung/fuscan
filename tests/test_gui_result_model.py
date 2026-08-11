@@ -1465,25 +1465,32 @@ class TestIter159FlatData:
 
     def test_flat_data_filled_during_lazy_fill(self, qapp: QApplication, tmp_path: Path) -> None:
         """懒加载填充可见范围时，_flat_data 同步构造扁平元组。"""
+        from unittest.mock import patch
+
         from fuscan.gui.models.result_model import _VIRTUALIZE_THRESHOLD
 
         m = ResultListModel()
         # 使用足够大的 n，确保可见范围外有足够未填充行（即使 QTimer 填了 1 批 2000 行）
         n = _VIRTUALIZE_THRESHOLD + 2500  # 4500
         m.set_results(_build_large_results(tmp_path, n=n))
-        # 手动等待 worker 完成，但不取消懒填充
+        # 手动等待 worker 完成，但不取消懒填充。
+        # 关键：patch QTimer.singleShot 阻止懒填充分帧调度——
+        # processEvents() 会处理所有 pending 事件（含 chained singleShot(0)），
+        # 可能一次填完全部 4500 行导致 outside_none=0 断言 flaky。
+        # patch 后 _lazystate 仍设置但 _fill_next_chunk 永不触发，_flat_data 保持全 None。
         import time
 
         try:
             from PySide2.QtCore import QCoreApplication
         except ImportError:  # pragma: no cover
             from PySide6.QtCore import QCoreApplication  # pyrefly: ignore [missing-import]
-        elapsed = 0
-        while m._filter_worker is not None and elapsed < 5000:  # type: ignore[attr-defined]
+        with patch("fuscan.gui.models.result_model.QTimer.singleShot"):
+            elapsed = 0
+            while m._filter_worker is not None and elapsed < 5000:  # type: ignore[attr-defined]
+                QCoreApplication.processEvents()
+                time.sleep(0.005)
+                elapsed += 5
             QCoreApplication.processEvents()
-            time.sleep(0.005)
-            elapsed += 5
-        QCoreApplication.processEvents()
         flat = m._flat_data  # type: ignore[attr-defined]
         # 初始为幽灵行，flat 全为 None
         assert len(flat) == n

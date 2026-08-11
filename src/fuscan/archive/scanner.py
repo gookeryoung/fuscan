@@ -385,12 +385,15 @@ class ArchiveScanner:
         if entry.extension in _TEXT_EXTENSIONS:
             return _decode_bytes(data)
         if _has_extractor(entry.extension):
-            try:
-                from fuscan.extractors import (
-                    ExtractorError,
-                    extract_content_from_bytes_with_retry,
-                )
+            # 延迟导入避免循环依赖；放在 try 外确保 ExtractorError 在 except
+            # 子句中始终已绑定（pyrefly unbound-name 误报），ImportError 不在
+            # 捕获范围内，失败自然向上传播。
+            from fuscan.extractors import (
+                ExtractorError,
+                extract_content_from_bytes_with_retry,
+            )
 
+            try:
                 return extract_content_from_bytes_with_retry(data, entry.extension)
             except (ExtractorError, OSError, ValueError):
                 logger.warning("提取器提取失败，回退纯文本: %s", entry.display_path, exc_info=True)

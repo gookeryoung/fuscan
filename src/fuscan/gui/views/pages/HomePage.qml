@@ -35,9 +35,13 @@ Item {
         dropToast.show(msg, ok)
     }
 
-    // 对话框组：延迟加载，首帧后异步激活，避免启动时构造 1400+ 行不可见对话框
+    // 对话框组：延迟加载，首帧后异步激活，避免启动时构造 1400+ 行不可见对话框。
+    // anchors.fill: parent 让 Loader 拥有 HomePage 尺寸，进而使 dialogsRoot
+    // （通过 anchors.fill: parent）获得尺寸，Dialog 的 anchors.centerIn: parent
+    // 才能正确居中于页面而非 (0,0)。
     Loader {
         id: dialogsLoader
+        anchors.fill: parent
         active: false
         asynchronous: true
         source: "HomePageDialogs.qml"

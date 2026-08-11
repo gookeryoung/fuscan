@@ -45,6 +45,7 @@ OFFICE_NS = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
 TABLE_NS = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
 TEXT_NS = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
 
+
 # XXE 防护：禁用外部实体解析与网络访问，recover 容忍部分格式错误。
 # 解析器在 load_content_xml 内延迟创建（lxml 惰性导入，避免启动期加载 libxml2）。
 def _make_parser():

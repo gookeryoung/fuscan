@@ -12,11 +12,32 @@ import "../components"
 // 对话框内部通过 dialogsRoot.homePage 访问 HomePage 的属性与函数。
 Item {
     id: dialogsRoot
+    // 填满 Loader（HomePage 尺寸），使内部 Dialog 的 anchors.centerIn: parent
+    // 居中于页面而非 (0,0)。dialogsRoot 不可见（无非视觉子项），不捕获鼠标事件。
+    anchors.fill: parent
     property var homePage: null
     property ThemeController theme: Theme
     property WorkspaceControllerType workspaceController: WorkspaceController
     property ConfigControllerType configController: ConfigController
     property RulesControllerType rulesController: RulesController
+
+    // 暴露各对话框给 HomePage.qml 通过 dialogsLoader.item.xxx 访问。
+    // QML id 仅在所在文档内有效，Loader 加载的组件拥有独立上下文，
+    // 跨文件直接 dialogsLoader.item.someId 会返回 undefined（TypeError: Cannot call method 'open' of undefined）。
+    // 通过 property alias 将内部对话框显式暴露为根 Item 的属性，跨文件访问才生效。
+    property alias folderDialogForAdd: folderDialogForAdd
+    property alias clearConfirmDialog: clearConfirmDialog
+    property alias clearResultDialog: clearResultDialog
+    property alias exportCsvDialog: exportCsvDialog
+    property alias exportJsonDialog: exportJsonDialog
+    property alias exportPdfDialog: exportPdfDialog
+    property alias editTargetDialog: editTargetDialog
+    property alias folderDialogForEdit: folderDialogForEdit
+    property alias configureRulesDialog: configureRulesDialog
+    property alias previewRulesDialog: previewRulesDialog
+    property alias historyDialog: historyDialog
+    property alias loadGlobalRulesFileDialog: loadGlobalRulesFileDialog
+    property alias loadTempRulesFileDialog: loadTempRulesFileDialog
 
     // ========== 导出文件保存对话框 ==========
     Platform.FileDialog {

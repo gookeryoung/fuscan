@@ -47,6 +47,23 @@ Pane {
         anchors.margins: 24
         currentIndex: contentArea._pageIndex[contentArea.activePage] ?? 0
 
+        // 首次切换到非首页时命令式标记为已加载，之后常驻不卸载。
+        // 不能用 Loader.onLoaded 写回 _xxLoaded：active 绑定读取 _xxLoaded，
+        // onLoaded 又写回 _xxLoaded 会触发 binding loop（active 重新求值→
+        // onLoaded 再次触发）。改为在 StackLayout.onCurrentIndexChanged 中
+        // 命令式赋值，active 绑定只读 _xxLoaded，写入路径不再回到 active 绑定，
+        // 循环断开。Loader.active 一旦为 true 不会再变 false（_xxLoaded 单调
+        // 置位），页面常驻符合「复用控件」约束。
+        onCurrentIndexChanged: {
+            switch (currentIndex) {
+                case 1: contentArea._monitorLoaded = true; break
+                case 2: contentArea._resultsLoaded = true; break
+                case 3: contentArea._statsLoaded = true; break
+                case 4: contentArea._settingsLoaded = true; break
+                case 5: contentArea._aboutLoaded = true; break
+            }
+        }
+
         // HomePage：启动首屏，立即加载
         HomePage {
             onViewResultsRequested: contentArea.sidebarRef.currentPage = "results"
@@ -55,21 +72,19 @@ Pane {
 
         // FileMonitorPage：首次切换到时加载，之后常驻
         Loader {
-            active: contentArea._monitorLoaded || stack.currentIndex === 1
+            active: contentArea._monitorLoaded
             Layout.fillWidth: true
             Layout.fillHeight: true
             sourceComponent: FileMonitorPage {}
-            onLoaded: contentArea._monitorLoaded = true
         }
 
         // ResultsPage：首次切换到时加载，之后常驻
         Loader {
             id: resultsLoader
-            active: contentArea._resultsLoaded || stack.currentIndex === 2
+            active: contentArea._resultsLoaded
             Layout.fillWidth: true
             Layout.fillHeight: true
             sourceComponent: ResultsPage {}
-            onLoaded: contentArea._resultsLoaded = true
         }
         Connections {
             target: resultsLoader.item
@@ -79,11 +94,10 @@ Pane {
         // StatsPage：首次切换到时加载，之后常驻
         Loader {
             id: statsLoader
-            active: contentArea._statsLoaded || stack.currentIndex === 3
+            active: contentArea._statsLoaded
             Layout.fillWidth: true
             Layout.fillHeight: true
             sourceComponent: StatsPage {}
-            onLoaded: contentArea._statsLoaded = true
         }
         Connections {
             target: statsLoader.item
@@ -92,20 +106,18 @@ Pane {
 
         // SettingsPage：首次切换到时加载，之后常驻
         Loader {
-            active: contentArea._settingsLoaded || stack.currentIndex === 4
+            active: contentArea._settingsLoaded
             Layout.fillWidth: true
             Layout.fillHeight: true
             sourceComponent: SettingsPage {}
-            onLoaded: contentArea._settingsLoaded = true
         }
 
         // AboutPage：首次切换到时加载，之后常驻
         Loader {
-            active: contentArea._aboutLoaded || stack.currentIndex === 5
+            active: contentArea._aboutLoaded
             Layout.fillWidth: true
             Layout.fillHeight: true
             sourceComponent: AboutPage {}
-            onLoaded: contentArea._aboutLoaded = true
         }
     }
 }

@@ -33,7 +33,7 @@ license         = "MIT"
 name            = "fuscan"
 readme          = "README.md"
 requires-python = ">=3.10"
-version         = "0.3.0"
+version         = "0.3.1"
 
 [project.optional-dependencies]
 dev = [

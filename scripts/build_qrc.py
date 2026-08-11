@@ -36,6 +36,8 @@ ROOT = Path(__file__).resolve().parent.parent
 VIEWS_DIR = ROOT / "src" / "fuscan" / "gui" / "views"
 # 图标目录
 ICONS_DIR = ROOT / "src" / "fuscan" / "assets" / "icons"
+# 动画资源目录（PNG sprite sheet 等，供 AnimatedSprite 使用）
+ANIMATIONS_DIR = ROOT / "src" / "fuscan" / "assets" / "animations"
 # 输出文件
 QRC_FILE = ROOT / "src" / "fuscan" / "gui" / "resources.qrc"
 RC_FILE = ROOT / "src" / "fuscan" / "gui" / "resources_rc.py"
@@ -70,17 +72,36 @@ def collect_icon_files() -> list[tuple[str, Path]]:
     return files
 
 
-def write_qrc(qml_files: list[tuple[str, Path]], icon_files: list[tuple[str, Path]]) -> None:
+def collect_animation_files() -> list[tuple[str, Path]]:
+    """收集所有 .png 动画资源（sprite sheet），返回 (qrc_alias, abs_path) 列表。
+
+    :return: alias 形如 ``animations/spinner_primary.png``，
+             对应 qrc 内路径 ``qrc:/animations/spinner_primary.png``
+    """
+    files: list[tuple[str, Path]] = []
+    for png in sorted(ANIMATIONS_DIR.glob("*.png")):
+        alias = f"animations/{png.name}"
+        files.append((alias, png))
+    return files
+
+
+def write_qrc(
+    qml_files: list[tuple[str, Path]],
+    icon_files: list[tuple[str, Path]],
+    animation_files: list[tuple[str, Path]] | None = None,
+) -> None:
     """生成 .qrc 文件。
 
     :param qml_files: QML 文件 (alias, abs_path) 列表
     :param icon_files: 图标文件 (alias, abs_path) 列表
+    :param animation_files: 动画 PNG 文件 (alias, abs_path) 列表
     """
     rcc = ET.Element("RCC")
     # schema 版本声明，便于后续升级
     rcc.set("version", "1.0")
     qresource = ET.SubElement(rcc, "qresource", {"prefix": "/"})
-    for alias, path in qml_files + icon_files:
+    all_files = qml_files + icon_files + (animation_files or [])
+    for alias, path in all_files:
         # qrc 内 <file> 路径相对于 .qrc 文件所在目录解析
         # 用 os.path.relpath 处理跨目录的 ..（pathlib.relative_to 不支持）
         rel = os.path.relpath(path, QRC_FILE.parent).replace("\\", "/")
@@ -145,9 +166,10 @@ def main() -> int:
     """
     qml_files = collect_qml_files()
     icon_files = collect_icon_files()
-    print(f"收集 QML 文件 {len(qml_files)} 个，图标 {len(icon_files)} 个")
+    animation_files = collect_animation_files()
+    print(f"收集 QML 文件 {len(qml_files)} 个，图标 {len(icon_files)} 个，动画 {len(animation_files)} 个")
 
-    write_qrc(qml_files, icon_files)
+    write_qrc(qml_files, icon_files, animation_files)
     print(f"生成清单: {QRC_FILE.relative_to(ROOT)}")
 
     compile_qrc()

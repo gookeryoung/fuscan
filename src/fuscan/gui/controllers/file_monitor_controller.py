@@ -209,6 +209,10 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
     # 事件日志变更信号——收到任意文件变更事件时 emit，
     # 驱动 QML 刷新 eventCount / recentEvents 属性，让用户知道监控在工作
     eventLogChanged = Signal()
+    # model 属性变更信号——model 实例在 __init__ 后稳定不变，
+    # 实际不会 emit；声明仅为满足 QML「属性必须可 NOTIFY」要求，
+    # 避免 QML 绑定警告「depends on non-NOTIFYable properties」。
+    modelChanged = Signal()
 
     def __init__(
         self,
@@ -265,9 +269,18 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     # ----------------------------- 公共属性 -----------------------------
 
-    @Property(FileMonitorModel)  # pyrefly: ignore [not-callable]
+    @Property(QObject, notify=modelChanged)  # pyrefly: ignore [not-callable]
     def model(self) -> FileMonitorModel:
-        """命中记录列表模型（QML ListView 绑定）。"""
+        """命中记录列表模型（QML ListView 绑定）。
+
+        用 ``QObject`` 作为 Property 类型，避免 PySide2/6 元类型系统对
+        ``QAbstractListModel*`` 未注册导致的 ``QMetaProperty::read`` 警告
+        （``FileMonitorModel`` 继承 ``QAbstractListModel``，``@Property`` 会
+        生成 ``Q_PROPERTY(QAbstractListModel* model ...)``，该指针类型未
+        ``qRegisterMetaType``）。QML 侧仍可通过 ``model.count``/``model.time``
+        等 role 正常访问，因 ``FileMonitorModel`` 已通过 ``qmlRegisterType``
+        注册到 ``fuscan.models`` URI。
+        """
         return self._model
 
     @Property(bool, notify=monitorStateChanged)  # pyrefly: ignore [not-callable]

@@ -2242,14 +2242,14 @@ class TestArchiveScannerErrorPaths:
 
         rs = _build_ruleset(_content_rule("r", "password"))
 
-        import fuscan.archive.scanner as scanner_mod
         from fuscan.extractors import ExtractorError
 
         def fake_extract(data: bytes, extension: str) -> str:
             raise ExtractorError("模拟提取失败")
 
-        # iter-119：archive.scanner 已切换到 extract_content_from_bytes_with_retry
-        monkeypatch.setattr(scanner_mod, "extract_content_from_bytes_with_retry", fake_extract)
+        # archive.scanner 在提取时从 fuscan.extractors 实时获取该函数（惰性导入），
+        # 故 patch 其模块属性即可模拟提取失败。
+        monkeypatch.setattr("fuscan.extractors.extract_content_from_bytes_with_retry", fake_extract)
         scanner = ArchiveScanner(rs)
         results = scanner.scan_archive(zip_path)
         # 提取失败回退到解码，password 明文在字节中应被命中

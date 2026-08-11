@@ -301,8 +301,9 @@ class TestExtractWithCache:
         ) -> str:
             raise RuntimeError("simulated extractor failure")
 
-        # iter-119：_cache_phase 已切换到 extract_content_from_bytes_with_retry
-        monkeypatch.setattr("fuscan.scanner._cache_phase.extract_content_from_bytes_with_retry", boom)
+        # _cache_phase 在提取时从 fuscan.extractors 实时获取该函数（惰性导入），
+        # 故 patch 其模块属性即可模拟提取失败。
+        monkeypatch.setattr("fuscan.extractors.extract_content_from_bytes_with_retry", boom)
         content, _ = extract_with_cache(entry, cache, 0, perf)
         assert content == "fallback content"
         # 回退后仍写入缓存

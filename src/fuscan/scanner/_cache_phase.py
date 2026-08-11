@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING
 
 from fuscan.cache.hashes import hash_bytes
 from fuscan.cache.store import BatchWriteItem
-from fuscan.extractors import extract_content_from_bytes_with_retry
 from fuscan.scanner._helpers import BATCH_THRESHOLD, rebuild_hit_from_cache
 from fuscan.scanner.result import RuleHit
 
@@ -165,9 +164,11 @@ def extract_with_cache(
         cached_content = cache.get_extracted_content(file_hash)
     if cached_content is not None:
         return cached_content, file_hash
-    # 未命中，执行提取
+    # 未命中，执行提取（extractors 惰性导入，避免启动期加载注册链）
     try:
         with perf.measure("extract"):
+            from fuscan.extractors import extract_content_from_bytes_with_retry
+
             content = extract_content_from_bytes_with_retry(data, entry.extension)
     except Exception:
         logger.debug("提取器提取失败，回退到纯文本: %s", entry.path, exc_info=True)

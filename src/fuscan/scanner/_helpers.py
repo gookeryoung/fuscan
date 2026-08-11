@@ -30,11 +30,6 @@ from typing import TYPE_CHECKING, Any
 
 from fuscan.cache.hashes import hash_bytes
 from fuscan.config import DEFAULT_MAX_FILE_SIZE
-from fuscan.extractors import (
-    extract_content_from_bytes_with_retry,
-    extract_content_with_fallback,
-    get_extractor,
-)
 from fuscan.rules.model import MatchSpec, MatchTarget, Rule
 from fuscan.scanner.result import MatchResult, RuleHit
 
@@ -187,6 +182,8 @@ def engine_for_extension(extension: str) -> str:
     :param extension: 扩展名（不含点，大小写不敏感；空串表示无扩展名）
     :return: 引擎名字符串，始终非空
     """
+    from fuscan.extractors import get_extractor
+
     extractor = get_extractor(extension)
     if extractor is None:
         return _FALLBACK_ENGINE
@@ -289,6 +286,8 @@ def default_extract_content(entry: FileEntry) -> str:
 
     无注册提取器时回退到纯文本读取；提取失败返回空字符串。
     """
+    from fuscan.extractors import extract_content_with_fallback
+
     return extract_content_with_fallback(entry.path)
 
 
@@ -332,6 +331,8 @@ def default_extract_content_with_hash(entry: FileEntry) -> tuple[str, str]:
         return "", hash_bytes(b"")
     file_hash = hash_bytes(data)
     try:
+        from fuscan.extractors import extract_content_from_bytes_with_retry
+
         content = extract_content_from_bytes_with_retry(data, entry.extension)
     except Exception:
         logger.debug("提取器提取失败，回退到纯文本: %s", entry.path, exc_info=True)

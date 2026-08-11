@@ -19,7 +19,6 @@ from fuscan.archive.base import (
 )
 from fuscan.cache.hashes import hash_bytes
 from fuscan.config import DEFAULT_MAX_FILE_SIZE
-from fuscan.extractors import ExtractorError, extract_content_from_bytes_with_retry
 from fuscan.rules.model import Rule, RuleSet
 from fuscan.scanner._helpers import (
     build_hit_from_match,
@@ -387,6 +386,11 @@ class ArchiveScanner:
             return _decode_bytes(data)
         if _has_extractor(entry.extension):
             try:
+                from fuscan.extractors import (
+                    ExtractorError,
+                    extract_content_from_bytes_with_retry,
+                )
+
                 return extract_content_from_bytes_with_retry(data, entry.extension)
             except (ExtractorError, OSError, ValueError):
                 logger.warning("提取器提取失败，回退纯文本: %s", entry.display_path, exc_info=True)

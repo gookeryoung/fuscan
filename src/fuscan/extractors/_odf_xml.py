@@ -5,7 +5,8 @@ XML 文件。本模块用标准库 ``zipfile`` + ``lxml`` (libxml2 C 扩展) 解
 ODT/ODS/ODP 等 ODF 文档，替代 odfpy 依赖（odfpy 在 PyPI 上仅有 sdist，
 无预编译 wheel，与 fspack 的 ``--only-binary=:all:`` 打包策略冲突）。
 
-lxml 为必需依赖（python-docx/pptx 传递依赖），始终可用。
+lxml 为必需依赖（python-docx/pptx 传递依赖），始终可用；但为缩短 CLI/GUI
+启动时间，lxml 在模块内**惰性导入**（首次解析 ODF 时方加载 libxml2）。
 
 主要 API：
 
@@ -26,8 +27,6 @@ import zipfile
 from collections.abc import Iterable, Iterator
 from typing import Any
 
-from lxml import etree as _etree
-
 __all__ = [
     "NAMESPACES",
     "OfficeNS",
@@ -46,8 +45,13 @@ OFFICE_NS = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
 TABLE_NS = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
 TEXT_NS = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
 
-# XXE 防护：禁用外部实体解析与网络访问，recover 容忍部分格式错误
-_PARSER = _etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
+# XXE 防护：禁用外部实体解析与网络访问，recover 容忍部分格式错误。
+# 解析器在 load_content_xml 内延迟创建（lxml 惰性导入，避免启动期加载 libxml2）。
+def _make_parser():
+    """构建 XXE 防护的 lxml XMLParser（首次解析 ODF 时才导入 lxml）。"""
+    from lxml import etree
+
+    return etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
 
 
 class Namespaces:
@@ -140,7 +144,9 @@ def load_content_xml(data: bytes) -> Any:
     """
     with zipfile.ZipFile(io.BytesIO(data)) as zf, zf.open("content.xml") as content_file:
         xml_bytes = content_file.read()
-    return _etree.fromstring(xml_bytes, parser=_PARSER)
+    from lxml import etree
+
+    return etree.fromstring(xml_bytes, parser=_make_parser())
 
 
 def iter_text_paragraphs(root: Any) -> Iterable[Any]:

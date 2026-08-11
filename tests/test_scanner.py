@@ -2649,13 +2649,12 @@ class TestScannerCache:
                 return original_extract(data, extension, max_retries=max_retries, backoff_ms=backoff_ms)
 
             scanner2 = Scanner(rs, cache=cache)
-            # 注入计数器：通过 monkeypatch 替换模块级函数
-            # iter-109：extract_content_from_bytes 已迁移到 _cache_phase 子模块
-            # iter-119：_cache_phase 已切换到 extract_content_from_bytes_with_retry
-            import fuscan.scanner._cache_phase as cache_phase_module
+            # 注入计数器：_cache_phase 在提取时从 fuscan.extractors 实时获取该函数
+            # （惰性导入），故 patch fuscan.extractors 模块属性即可拦截。
+            import fuscan.extractors as extractors_module
 
             with pytest.MonkeyPatch.context() as mp:
-                mp.setattr(cache_phase_module, "extract_content_from_bytes_with_retry", counting_extract)
+                mp.setattr(extractors_module, "extract_content_from_bytes_with_retry", counting_extract)
                 result2 = scanner2.scan_file(p2)
             # 提取内容缓存应命中，extract 不应被调用
             assert extract_call_count == 0, "提取内容缓存未命中，extract 仍被调用"
@@ -2776,11 +2775,10 @@ class TestScannerCache:
         ) -> str:
             raise RuntimeError("模拟提取器失败")
 
-        # iter-109：default_extract_content_with_hash 在 _helpers 模块内调用
-        # iter-119：_helpers 已切换到 extract_content_from_bytes_with_retry，
-        # patch 目标须为 _helpers 模块的 extract_content_from_bytes_with_retry
+        # _helpers 在提取时从 fuscan.extractors 实时获取该函数（惰性导入），
+        # 故 patch fuscan.extractors 模块属性即可模拟提取器失败。
         monkeypatch.setattr(
-            "fuscan.scanner._helpers.extract_content_from_bytes_with_retry",
+            "fuscan.extractors.extract_content_from_bytes_with_retry",
             mock_extract_from_bytes,
         )
         content, file_hash = default_extract_content_with_hash(entry)

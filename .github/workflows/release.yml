@@ -200,17 +200,22 @@ jobs:
       - name: Install fspack & pip
         run: uv pip install git+https://github.com/gookeryoung/fspack.git pip
 
-      # fuscan-core 未发布到 PyPI，本地用 maturin 构建 wheel 到 fuscan-core-wheels/，
-      # fspack 通过 [tool.fspack] find-links 从该目录解析 fuscan-core 依赖。
-      - name: Setup Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
+      # fuscan-core 未发布到 PyPI，本地用 maturin-action 构建 manylinux wheel 到
+      # fuscan-core-wheels/，fspack 通过 [tool.fspack] find-links 从该目录解析依赖。
+      # 必须 manylinux 容器构建：直接 maturin build 生成 linux_x86_64 平台标签，
+      # fspack 的 pip download 要求 --platform manylinux2014_x86_64 / manylinux_2_28_x86_64，
+      # linux_x86_64 wheel 不匹配会导致 "No matching distribution" 失败。
+      - name: Build fuscan-core wheel (Linux manylinux)
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: packages/fuscan-core
+          args: --release --out dist --find-interpreter
+          manylinux: auto
 
-      - name: Build fuscan-core wheel (Linux x86_64)
+      - name: Copy fuscan-core wheel to find-links directory
         run: |
-          pip install maturin
           mkdir -p fuscan-core-wheels
-          cd packages/fuscan-core
-          maturin build --release --out ../../fuscan-core-wheels --find-interpreter
+          cp packages/fuscan-core/dist/*.whl fuscan-core-wheels/
 
       - name: Cache fspack assets
         uses: actions/cache@v5

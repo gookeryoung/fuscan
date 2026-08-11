@@ -168,13 +168,15 @@ stages:
             with:
               # fuscan-core 未发布到 PyPI，本地用 maturin 构建 wheel 到 fuscan-core-wheels/，
               # fspack 通过 [tool.fspack] find-links 从该目录解析 fuscan-core 依赖。
+              # --manylinux auto + auditwheel：直接 maturin build 生成 linux_x86_64 标签，
+              # fspack pip download 要求 manylinux 平台，auditwheel repair 打包依赖为 manylinux wheel。
               run: |
                 set -e
                 export PATH="$HOME/.local/bin:$HOME/.cargo/env:$PATH"
-                uv pip install maturin
+                uv pip install maturin auditwheel
                 mkdir -p fuscan-core-wheels
                 cd packages/fuscan-core
-                maturin build --release --out ../../fuscan-core-wheels --find-interpreter
+                maturin build --release --out ../../fuscan-core-wheels --find-interpreter --manylinux auto
 
           build_fuscan:
             step: Command

@@ -1506,6 +1506,10 @@ class TestIter159FlatData:
         # 不在可见范围的行仍有大量 None（懒填充未完成）
         outside_none = sum(1 for i in range(end + 1, n) if flat[i] is None)
         assert outside_none > 0, f"可见范围外应有未填充行，实际 outside_none={outside_none}"
+        # 显式调用 _fill_range_from_real 覆盖"已填充范围快速跳过"路径
+        # （segment>200 且首尾非 None 时 has_none=False 提前返回），
+        # 补回 patch QTimer.singleShot 阻止懒填充后丢失的覆盖路径。
+        assert not m._fill_range_from_real(0, end)  # type: ignore[attr-defined]
 
     def test_flat_data_rebuilt_on_cancel_lazy_fill(self, qapp: QApplication, tmp_path: Path) -> None:
         """cancel_lazy_fill(and_fill_rest=True) 后 _flat_data 全量重建。"""

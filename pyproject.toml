@@ -106,7 +106,7 @@ exclude = [
 
 [tool.fspack]
 include = ["rules"]
-exclude = [".trae", ".github", ".benchmarks", "tests", "docs", "scripts"]
+exclude = [".*", "tests", "docs", "scripts"]
 pyc_strip = true
 no_site = true
 

@@ -12,13 +12,11 @@
     DOCX/PPTX/ODT/ODS（lxml 直接解析）
 - T3 中速（``MEDIUM``）：50-200ms/MB，单次 XML 解析 + 树遍历或正则扫描
   - WPS（委托 DOCX/XLSX/PPTX，综合 T3）、
-    ODT/ODS 的 ElementTree 回退路径、
     DOC/PPT 的 olefile + UTF-16LE 正则扫描、
     PDF（pypdfium2）
 - T4 慢速（``SLOW``）：200-1000ms/MB，单元格遍历或字节级扫描
 
-注意：ODT/ODS 的 ``speed_tier`` 随 lxml 可用性动态变化，tier 声明测试用
-动态断言（根据依赖判断期望档位）；DOCX/PPTX 固定走 lxml（T2），
+注意：ODT/ODS 固定走 lxml（T2）；DOCX/PPTX 固定走 lxml（T2），
 DOC/PPT 固定走 olefile（T3），PDF 走 pdf_oxide（T2）/pypdfium2（T3）。
 
 基准测试设计原则：
@@ -351,12 +349,9 @@ class TestTier3Medium:
         assert "password" in content
 
     def test_odt_extractor_tier(self) -> None:
-        """OdtExtractor 声明为 T2 快速（lxml）或 T3 中速（ElementTree 回退）。"""
-        from fuscan.extractors._odf_xml import _LXML_AVAILABLE
-
-        expected = SpeedTier.FAST if _LXML_AVAILABLE else SpeedTier.MEDIUM
+        """OdtExtractor 声明为 T2 快速（lxml 解析 XML）。"""
         extractor = OdtExtractor()
-        _assert_tier(extractor, expected)
+        _assert_tier(extractor, SpeedTier.FAST)
 
     def test_odt_extraction_speed(self) -> None:
         """典型 ODT 文档提取应在 2s 内完成（T3 中速基准）。"""
@@ -368,12 +363,9 @@ class TestTier3Medium:
         assert "password" in content
 
     def test_ods_extractor_tier(self) -> None:
-        """OdsExtractor 声明为 T2 快速（lxml）或 T3 中速（ElementTree 回退，iter-109）。"""
-        from fuscan.extractors._odf_xml import _LXML_AVAILABLE
-
-        expected = SpeedTier.FAST if _LXML_AVAILABLE else SpeedTier.MEDIUM
+        """OdsExtractor 声明为 T2 快速（lxml 解析 XML）。"""
         extractor = OdsExtractor()
-        _assert_tier(extractor, expected)
+        _assert_tier(extractor, SpeedTier.FAST)
 
     def test_ods_extraction_speed(self) -> None:
         """典型 ODS 表格提取应在 2s 内完成（T3 中速基准）。"""

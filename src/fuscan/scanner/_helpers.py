@@ -203,8 +203,8 @@ def engine_for_extension(extension: str) -> str:
 # - ``python-calamine``（Rust + PyO3）→ XLSX/XLS
 # - ``lxml``（libxml2 C）→ DOCX/PPTX/ODT/ODS
 #
-# 反之，纯 Python 引擎（``charset-normalizer`` 文本解码、``olefile`` DOC/PPT、
-# ``ElementTree`` ODF 回退、``email（标准库）``、``纯文本`` 回退读取）在解析期
+# 反之，纯 Python 引擎（fuscan-core 缺失时回退的 ``charset-normalizer`` 文本解码、
+# ``olefile`` DOC/PPT、``email（标准库）``、``纯文本`` 回退读取）在解析期
 # 持 GIL，与同样持 GIL 的 CONTENT 正则 ``re.finditer`` 争抢主线程 GIL，
 # 是扫描期 GUI 冻结的主因。
 _NATIVE_ENGINES: frozenset[str] = frozenset(

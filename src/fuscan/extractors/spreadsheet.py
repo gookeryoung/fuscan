@@ -4,7 +4,7 @@ XLSX/XLSM 使用 calamine（Rust + PyO3）提取所有工作表单元格文本�
 openpyxl 的纯 Python 逐单元格遍历有 5-10 倍提速，且 Rust 侧执行期间释放
 GIL，避免阻塞 Qt 主线程。ODS 用 ``zipfile`` + ``lxml`` 解析
 ``content.xml``（已移除 odfpy 依赖以兼容 fspack 打包；lxml 比
-ElementTree 快 3-5x，不可用时回退 ElementTree）。
+ElementTree 快 3-5x）。
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ def _extract_calamine_workbook(
     """使用 calamine (Rust + PyO3) 提取工作簿所有工作表文本。
 
     支持 XLSX/XLSM/XLSB/XLS 等 Excel 格式。ODS 由 :class:`OdsExtractor`
-    用标准库 ``zipfile`` + ``xml.etree`` 独立解析（已移除 odfpy
+    用标准库 ``zipfile`` + ``lxml`` 独立解析（已移除 odfpy
     依赖）。calamine 在 Rust 侧完成全部解析与单元格遍历，PyO3 边界仅
     一次性返回二维列表，避免 Python 层逐单元格调用带来的 GIL 长期占用。
 
@@ -143,8 +143,7 @@ class OdsExtractor(Extractor):
     改用 ``zipfile`` + ``lxml`` 直接解析 ODS 的 ``content.xml``，
     移除 odfpy 依赖（odfpy 在 PyPI 上仅有 sdist，无预编译 wheel，与 fspack
     的 ``--only-binary=:all:`` 打包策略冲突）。lxml 比 ElementTree 快 3-5x，
-    不可用时回退 ElementTree。speed_tier 从 T4 慢速调整为 T2 快速（lxml）
-    或 T3 中速（ElementTree 回退）。
+    speed_tier 为 T2 快速。
     """
 
     @property
@@ -156,10 +155,8 @@ class OdsExtractor(Extractor):
     @property
     @override
     def speed_tier(self) -> SpeedTier:
-        """lxml 解析 XML 为 T2 快速；回退 ElementTree 为 T3 中速。"""
-        from fuscan.extractors._odf_xml import _LXML_AVAILABLE
-
-        return SpeedTier.FAST if _LXML_AVAILABLE else SpeedTier.MEDIUM
+        """lxml 解析 XML 为 T2 快速。"""
+        return SpeedTier.FAST
 
     @override
     @property
@@ -170,10 +167,8 @@ class OdsExtractor(Extractor):
     @override
     @property
     def engine_info(self) -> str:
-        """lxml 可用时优先使用，回退 ElementTree。"""
-        from fuscan.extractors._odf_xml import _LXML_AVAILABLE
-
-        return "lxml" if _LXML_AVAILABLE else "ElementTree"
+        """返回解析引擎名称。"""
+        return "lxml"
 
     @override
     def extract_from_bytes(self, data: bytes) -> str:

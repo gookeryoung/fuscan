@@ -5,12 +5,12 @@ XML 文件。本模块用标准库 ``zipfile`` + ``lxml`` (libxml2 C 扩展) 解
 ODT/ODS/ODP 等 ODF 文档，替代 odfpy 依赖（odfpy 在 PyPI 上仅有 sdist，
 无预编译 wheel，与 fspack 的 ``--only-binary=:all:`` 打包策略冲突）。
 
-lxml 不可用时回退到标准库 ``xml.etree.ElementTree``，性能略低但功能等价。
+lxml 为必需依赖（python-docx/pptx 传递依赖），始终可用。
 
 主要 API：
 
 - :func:`load_content_xml`：从 ODF 字节流读取 ``content.xml`` 并解析为
-  Element 树（lxml 或 ElementTree）。
+  lxml Element 树。
 - :func:`iter_elements`：按命名空间+本地名遍历元素。
 - :func:`local_name`：剥离 XML 命名前缀返回本地名。
 - :func:`element_text`：递归提取元素及子元素所有文本节点。
@@ -25,6 +25,8 @@ import logging
 import zipfile
 from collections.abc import Iterable, Iterator
 from typing import Any
+
+from lxml import etree as _etree
 
 __all__ = [
     "NAMESPACES",
@@ -44,18 +46,8 @@ OFFICE_NS = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
 TABLE_NS = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
 TEXT_NS = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
 
-# 优先 lxml（libxml2 C 扩展，性能 3-5x），回退标准库 ElementTree
-try:
-    from lxml import etree as _etree
-
-    _LXML_AVAILABLE = True
-    # XXE 防护：禁用外部实体解析与网络访问，recover 容忍部分格式错误
-    _PARSER = _etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
-except ImportError:  # pragma: no cover - lxml 为 python-docx/pptx 传递依赖，正常不会缺失
-    import xml.etree.ElementTree as _etree
-
-    _LXML_AVAILABLE = False
-    _PARSER = None  # type: ignore[assignment]
+# XXE 防护：禁用外部实体解析与网络访问，recover 容忍部分格式错误
+_PARSER = _etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
 
 
 class Namespaces:
@@ -84,30 +76,19 @@ def iter_elements(
 ) -> Iterator[Any]:
     """按命名空间+本地名遍历子树所有匹配元素（深度优先）。
 
-    :param root: XML 树根节点（lxml 或 ElementTree Element）
+    :param root: XML 树根节点（lxml Element）
     :param namespace: 命名空间 URN（如 :data:`TEXT_NS`）
     :param local_names: 待匹配的本地名元组（如 ``("p", "h")``）
     :return: 匹配元素的迭代器（文档顺序）
 
-    优先用 lxml 的 :meth:`xpath`（libxml2 C 层执行节点遍历与命名空间匹配），
+    用 lxml 的 :meth:`xpath`（libxml2 C 层执行节点遍历与命名空间匹配），
     相比 ``root.iter()`` + Python 层 ``tag.endswith`` 字符串匹配提速 2-5x。
-    lxml 不可用时回退到 ``Element.iter()`` + Python 层 ``endswith`` 过滤。
     """
-    if _LXML_AVAILABLE:
-        # XPath 在 libxml2 C 层完成节点遍历与命名空间匹配，避免 Python 层
-        # 对每个节点做 tag.startswith/endswith 字符串比较
-        ns_map = {"ns": namespace}
-        path = " | ".join(f".//ns:{name}" for name in local_names)
-        yield from root.xpath(path, namespaces=ns_map)
-        return
-
-    # ElementTree 回退路径：手写遍历 + 字符串匹配
-    targets = tuple(f"}}{name}" for name in local_names)
-    prefix = f"{{{namespace}}}"
-    for elem in root.iter():
-        tag = elem.tag
-        if isinstance(tag, str) and tag.startswith(prefix) and tag.endswith(targets):
-            yield elem
+    # XPath 在 libxml2 C 层完成节点遍历与命名空间匹配，避免 Python 层
+    # 对每个节点做 tag.startswith/endswith 字符串比较
+    ns_map = {"ns": namespace}
+    path = " | ".join(f".//ns:{name}" for name in local_names)
+    yield from root.xpath(path, namespaces=ns_map)
 
 
 def element_text(elem: Any) -> str:
@@ -147,22 +128,19 @@ def element_text(elem: Any) -> str:
 
 
 def load_content_xml(data: bytes) -> Any:
-    """从 ODF 字节流读取 ``content.xml`` 并解析为 Element 树。
+    """从 ODF 字节流读取 ``content.xml`` 并解析为 lxml Element 树。
 
-    优先使用 lxml（libxml2 C 扩展）解析，性能比标准库 ElementTree 快 3-5x；
-    lxml 不可用时回退到 ElementTree。
+    使用 lxml（libxml2 C 扩展）解析，性能比标准库 ElementTree 快 3-5x。
 
     :param data: ODF 文件完整字节内容（ZIP 格式）
-    :return: ``content.xml`` 的根 Element（lxml 或 ElementTree）
+    :return: ``content.xml`` 的根 Element（lxml）
     :raises zipfile.BadZipFile: 数据不是合法 ZIP
     :raises KeyError: ZIP 内未找到 ``content.xml``
-    :raises XMLSyntaxError/ParseError: content.xml 不是合法 XML
+    :raises XMLSyntaxError: content.xml 不是合法 XML
     """
     with zipfile.ZipFile(io.BytesIO(data)) as zf, zf.open("content.xml") as content_file:
         xml_bytes = content_file.read()
-    if _LXML_AVAILABLE:
-        return _etree.fromstring(xml_bytes, parser=_PARSER)
-    return _etree.fromstring(xml_bytes)
+    return _etree.fromstring(xml_bytes, parser=_PARSER)
 
 
 def iter_text_paragraphs(root: Any) -> Iterable[Any]:

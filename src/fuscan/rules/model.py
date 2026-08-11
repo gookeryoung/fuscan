@@ -151,8 +151,9 @@ class ScanParams:
     """扫描参数：线程数/深度/大文件阈值/压缩包/缓存/性能日志开关。
 
     所有字段为 ``None`` 表示「未设置」——合并时由后者非 ``None`` 字段覆盖前者，
-    最终生效值在 :class:`ScanController` 中按优先级（任务级覆盖 > RuleSet.scan_params >
-    内置规则默认值）解析。``None`` 与默认值的区别见各字段说明。
+    最终生效值在 :class:`ScanController` 中按优先级（RuleSet.scan_params >
+    内置规则默认值）解析。扫描参数**不再**支持任务级覆盖，统一由全局规则集决定。
+    ``None`` 与默认值的区别见各字段说明。
 
     - ``max_workers``：``None`` 时由 :class:`Scanner` 回退到内置默认 5
     - ``max_depth``：``None`` 表示无限深度（与 ``0`` 等价，walker 层归一化）

@@ -19,11 +19,11 @@ src/fuscan/
 ├── extractors/     # 多格式提取器
 │   ├── base.py     # Extractor ABC + ExtractorError
 │   ├── registry.py # ExtractorRegistry 注册机制
-│   ├── text.py     # 纯文本（charset-normalizer）
-│   ├── pdf.py      # PDF（pypdf）
-│   ├── office.py   # DOCX/PPTX（python-docx/python-pptx）
-│   ├── spreadsheet.py  # XLSX/ODS（calamine / zipfile+xml）
-│   ├── odf.py      # ODT（zipfile+xml，iter-109 移除 odfpy）
+│   ├── text.py     # 纯文本（fuscan-core 原生编码检测，回退 charset-normalizer）
+│   ├── pdf.py      # PDF（pdf_oxide Rust，回退 pypdfium2）
+│   ├── office.py   # DOCX/PPTX（lxml 直接解析 XML）
+│   ├── spreadsheet.py  # XLSX/ODS（calamine Rust / lxml）
+│   ├── odf.py      # ODT（zipfile + lxml，iter-109 移除 odfpy）
 │   └── wps.py      # WPS（OOXML 检测 + 复用 Office 库）
 ├── archive/        # 压缩文件扫描
 │   ├── base.py     # ArchiveReader ABC + ArchiveEntry
@@ -33,27 +33,43 @@ src/fuscan/
 ├── assets/         # 随包分发资源（图标/PDF/内置规则）
 │   ├── rules/builtin.yaml  # 内置通用规则（4 条安全规则 + ignore 配置）
 │   └── docs/       # 用户手册 PDF
-├── gui/            # PySide2/PySide6 GUI（GitHub Desktop 风格 5 区布局）
-│   ├── __main__.py         # `python -m fuscan.gui` 入口
-│   ├── app.py              # launch() 入口，构造 QApplication 与主窗口
-│   ├── main_window.py      # MainWindow（主窗口控制器）
-│   ├── main_window.ui      # 主窗口 UI 定义（Qt Designer XML）
-│   ├── main_window_ui.py   # uic 生成产物（勿手改）
-│   ├── worker.py           # ScanWorker(QThread，后台扫描多根路径)
-│   ├── detail_panel.py     # DetailPanel（右侧详情面板控制器）
-│   ├── result_tree.py      # ResultTreeView（Model/View 结果树）
-│   ├── preview_utils.py    # 预览区共用工具：关键词提取、HTML 构建、严重等级配色
-│   ├── icons.py            # 主题图标加载与图标资源常量
-│   ├── explorer.py         # 跨平台文件管理器集成（explorer/open -R/xdg-open）
-│   ├── export_worker.py    # ExportWorker(QThread，异步导出避免阻塞 UI)
-│   ├── perf.py             # 性能测量基础设施（FUSCAN_PERF=1 启用，零开销）
-│   ├── scan_path_history.py    # 扫描路径历史管理
-│   ├── scan_progress_lists.py  # 扫描中页跳过目录与命中文件列表增量更新器
-│   ├── rule_editor.py      # 规则文件编辑对话框
-│   ├── settings_dialog.py  # 设置对话框
-│   ├── *.ui / *_ui.py      # 对应 .ui 源与 uic 产物
-│   ├── styles.qss          # QSS 样式表（用 ${TOKEN} 引用 theme.py 令牌）
-│   └── resources_rc.py     # pyside2-rcc 编译产物（勿手改）
+├── gui/            # PySide2 + QML GUI（Sidebar + ContentArea 双区布局）
+│   ├── controllers/        # 控制器层（Python 侧业务逻辑）
+│   │   ├── app_controller.py       # 应用主控制器
+│   │   ├── scan_controller.py      # 扫描任务控制器
+│   │   ├── workspace_controller.py # 工作区管理
+│   │   ├── rules_controller.py     # 规则管理
+│   │   ├── config_controller.py    # 全局配置
+│   │   ├── whitelist_controller.py # 误报白名单
+│   │   ├── file_monitor_controller.py  # 文件监控
+│   │   ├── about_controller.py     # 关于页
+│   │   ├── splash_controller.py    # 启动画面
+│   │   └── _*.py                   # 控制器内部纯函数模块
+│   ├── models/             # QAbstractListModel 子类
+│   │   ├── workspace_model.py      # 工作区列表
+│   │   ├── result_model.py         # 扫描结果
+│   │   ├── rule_model.py           # 规则列表
+│   │   ├── extractor_model.py      # 提取器信息
+│   │   └── file_monitor_model.py   # 文件监控事件
+│   ├── views/              # QML 视图
+│   │   ├── Main.qml               # 根视图（Sidebar + ContentArea）
+│   │   ├── Sidebar.qml            # 侧边栏导航
+│   │   ├── ContentArea.qml        # 内容区 StackLayout
+│   │   ├── pages/                 # 页面（Home/Results/Stats/Settings/About/FileMonitor）
+│   │   └── components/            # 复用组件（WorkspaceCard/RulesPanel/ResultDetailPanel 等）
+│   ├── workers/           # QThread 后台任务
+│   │   ├── scan_worker.py         # 扫描线程
+│   │   ├── detail_worker.py      # 详情提取线程
+│   │   ├── export_worker.py      # 导出线程
+│   │   ├── filter_worker.py      # 结果过滤线程
+│   │   ├── restore_worker.py     # 结果恢复线程
+│   │   └── stats_worker.py       # 统计聚合线程
+│   ├── theme.py           # 主题令牌（QML 通过 QRC 引用）
+│   ├── explorer.py         # 跨平台文件管理器集成
+│   ├── scan_mode.py        # 扫描模式枚举
+│   ├── severity_utils.py   # 严重等级配色工具
+│   ├── resources.qrc       # Qt 资源清单
+│   └── resources_rc.py    # rcc 编译产物（勿手改）
 ├── config.py        # 配置持久化 + 内置规则加载（load_with_builtin/load_builtin_ruleset）
 └── cli.py          # CLI 入口（scan/rules/gui/cache/version）
 ```
@@ -156,14 +172,15 @@ ArchiveScanner 对压缩包内未知扩展名的文件，原逻辑调用 extract
 
 ### 1. 零运行时依赖原则 vs 实际需求
 
-项目规范要求零运行时依赖，但文件扫描器需要 pypdf、python-docx、openpyxl 等
+项目规范要求零运行时依赖，但文件扫描器需要 lxml、calamine、pypdfium2 等
 第三方库。用户确认"放宽规范，自由选型"后，引入按需的第三方依赖，但在
 extract() 方法内惰性导入，未安装时优雅降级。
 
-### 2. PySide2 vs PySide6
+### 2. PySide2 + QML 架构
 
-用户明确要求 PySide2（尽管 PySide6 是推荐选择）。PySide2 仅支持 Python 3.8-3.10，
-需创建专用 conda 环境。
+GUI 采用 PySide2 + QML（Qt Quick）而非传统 QWidget。QML 声明式 UI 更适合
+动态布局与动画，控制器层（Python）与视图层（QML）分离，通过 QAbstractListModel
+和 Q_PROPERTY 桥接数据。
 
 ### 3. 状态持久化位置
 
@@ -208,16 +225,15 @@ GUI 默认 `max_workers=5`，CLI 保持单线程（兼容性优先）。
 `description: 检测 privileged: true` 因冒号+空格被 YAML 解析器误认为嵌套映射而失败。
 解法：标量值含冒号时用引号包裹，如 `description: "检测 privileged: true"`。
 
-### 9. pypdf 不支持创建带文本的 PDF
+### 9. PDF 提取器测试用 mock PdfDocument
 
-pypdf 只能写 PDF 不能提取文本。测试 PDF 提取器时用 mock PdfReader
-模拟 pages 列表和 extract_text()，覆盖正常/异常/加密路径。
+pdf_oxide/pypdfium2 的 PdfDocument 需要真实 PDF 字节流。测试 PDF 提取器时
+用 mock PdfDocument 模拟 pages 列表和 extract_text()，覆盖正常/异常/加密路径。
 
 ### 10. PDF 日志噪音抑制
 
-pypdf 的 `MediaBox` 等重复定义会输出 WARNING 日志。
-解法：在模块级别将 pypdf logger 设为 ERROR 级别：
-`logging.getLogger("pypdf").setLevel(logging.ERROR)`。
+pypdfium2 的部分警告日志会干扰输出。解法：在模块级别将对应 logger 设为
+ERROR 级别。
 
 ## 设计决策（iter-06～10 补充）
 

@@ -178,7 +178,7 @@ class ProgressInfo:
     # 当前文件已解析耗时（毫秒）：scan 阶段填入，
     # 顺序扫描为单文件解析耗时，并发扫描为提交到完成的时间间隔
     current_file_elapsed_ms: float = 0.0
-    # 当前文件解析引擎名（如 ``"pdf_oxide"``/``"lxml"``/``"charset-normalizer"``）：
+    # 当前文件解析引擎名（如 ``"pdf_oxide"``/``"lxml"``/``"fuscan-core"``）：
     # scan 阶段按扩展名反查对应提取器 engine_info 填入，其余阶段为空串。
     # GUI 据此在明细行「文件名 · 大小 · 耗时」后追加引擎名，供用户了解各文件解析路径。
     current_file_engine: str = ""
@@ -292,7 +292,7 @@ class ScanResult:
     # 展示单文件耗时。并发模式下 submit_time≈扫描起点，now-submit_time 是
     # 累计耗时而非单文件耗时，故 collector 用本字段反推真实起点。
     elapsed_ms: float = 0.0
-    # 解析引擎名（如 ``"pdf_oxide"``/``"lxml"``/``"charset-normalizer"``）：
+    # 解析引擎名（如 ``"pdf_oxide"``/``"lxml"``/``"fuscan-core"``）：
     # _scan_entry 按扩展名反查对应提取器 engine_info 回填，供 GUI 明细行标注。
     # 属运行期展示信息，不参与 JSON/CSV 序列化（引擎由扩展名静态决定，可随时反查）。
     engine: str = ""

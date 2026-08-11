@@ -180,7 +180,7 @@ def engine_for_extension(extension: str) -> str:
     提取流程中传递，扫描完成后按 ``entry.extension`` 反查即可：
 
     - 已注册提取器：返回其 ``engine_info``（如 ``"pdf_oxide"``/``"lxml"``/
-      ``"python-calamine"``/``"olefile+ole"``）；``engine_info`` 为空串时
+      ``"python-calamine"``/``"fuscan-core (cfb)"``）；``engine_info`` 为空串时
       回退到 :data:`_FALLBACK_ENGINE`（提取器未覆盖该属性的兜底）。
     - 无注册提取器：内容提供器走纯文本读取回退，返回 :data:`_FALLBACK_ENGINE`。
 

@@ -122,8 +122,8 @@ class ScanWorker(QThread):  # pyrefly: ignore [invalid-inheritance]
     def start(self, priority: QThread.Priority = QThread.LowPriority) -> None:
         """以低优先级启动线程，缓解与 GUI 主线程的 GIL 争抢。
 
-        扫描 worker 内嵌套多个纯 Python CPU 密集任务（正则匹配、熵计算、
-        olefile/charset 检测），这些任务持 GIL 期间会与 GUI 主线程争抢同一把锁。
+        扫描 worker 内嵌套多个纯 Python CPU 密集任务（正则匹配、
+        olefile/email 回退路径），这些任务持 GIL 期间会与 GUI 主线程争抢同一把锁。
         默认 ``QThread.LowPriority`` 让 OS 调度天平偏向主线程，主线程更易抢到
         GIL 处理绘制/输入，显著改善解析大文档时的界面卡滞。
         """

@@ -474,9 +474,9 @@ class Scanner:
         - 规则以 **CONTENT 正则为主**（``_content_rule_names`` 非空）：CONTENT 匹配
           ``re.finditer`` 持 GIL，是主线程争抢的直接对手。
         - 扫描目标 **主要落在非原生引擎**（纯 Python 解析，持 GIL）：由 ``scan_extensions``
-          判断——``None``（扫描所有扩展名）以文本源码为主（``charset-normalizer`` 持 GIL），
-          视为非原生；显式白名单则看其中原生引擎（PDF/Excel/XML，解析期释放 GIL）扩展名
-          占比，占比不足半数视为非原生为主。
+          判断——``None``（扫描所有扩展名）混合原生与非原生引擎（email 标准库等持 GIL），
+          保守视为非原生为主；显式白名单则看其中原生引擎（PDF/Excel/XML/文本编码检测，
+          解析期释放 GIL）扩展名占比，占比不足半数视为非原生为主。
 
         原生引擎为主（如只扫 PDF/XLSX/DOCX）时保持用户配置的高并发——原生代码解析期
         释放 GIL，多线程可真正并行且不长时间独占 GIL，GUI 不受影响。

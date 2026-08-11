@@ -3,3 +3,8 @@ project-excludes = [".venv/**", "template/**", "ref/**", "**/*_ui.py", "**/resou
 project-includes = ["**/*.ipynb", "**/*.py*"]
 python-version   = "3.10"
 search-path      = ["."]
+
+[errors]
+# reportlab/openpyxl 等第三方库未随附类型存根（typeshed 限制，非代码问题），
+# 全局忽略「Cannot find type stubs」warning。受影响文件：src/fuscan/export/report.py
+untyped-import = "ignore"

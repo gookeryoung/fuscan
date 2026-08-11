@@ -28,6 +28,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# 强制 stdout/stderr 使用 UTF-8，避免 Windows CP936 环境下
+# bump-my-version (Python 3.14 UTF-8 mode, PEP 686) 捕获本脚本输出时
+# 因编码不匹配导致 UnicodeDecodeError（如「已生成: ...」的「已」字
+# 在 CP936 为 0xd2 0xd1，UTF-8 解码失败）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A3, landscape

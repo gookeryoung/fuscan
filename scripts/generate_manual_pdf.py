@@ -57,7 +57,7 @@ from reportlab.platypus import (
 
 # 项目根目录
 _ROOT = Path(__file__).resolve().parent.parent
-_OUTPUT_DIR = _ROOT / "src" / "fuscan" / "assets" / "docs"
+_OUTPUT_DIR = _ROOT / "src" / "fuscan" / "assets" / "manual"
 _OUTPUT_PDF = _OUTPUT_DIR / "fuscan-用户手册.pdf"
 _INIT_FILE = _ROOT / "src" / "fuscan" / "__init__.py"
 

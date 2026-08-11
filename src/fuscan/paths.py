@@ -37,8 +37,9 @@ BUILTIN_RULES_PATH: Path = ASSETS_DIR / "rules" / "builtin.yaml"
 # 与 BUILTIN_RULES_PATH 分离，职责单一：前者承载过滤与扫描参数，后者承载匹配规则。
 BUILTIN_PATTERNS_PATH: Path = ASSETS_DIR / "rules" / "builtin-patterns.yaml"
 
-# 用户手册 PDF：``assets/docs/fuscan-用户手册.pdf``，GUI 关于页打开
-MANUAL_PDF_PATH: Path = ASSETS_DIR / "docs" / "fuscan-用户手册.pdf"
+# 用户手册 PDF：``assets/manual/fuscan-用户手册.pdf``，GUI 关于页打开
+# 目录名用 manual 而非 docs，避免 fspack 打包时被内置 ``docs`` 排除规则剥离
+MANUAL_PDF_PATH: Path = ASSETS_DIR / "manual" / "fuscan-用户手册.pdf"
 
 # 应用图标：``assets/icons/favicon.ico`` 编译进 qrc，供 QGuiApplication.setWindowIcon 使用。
 # Windows 任务栏与窗口标题栏图标均依赖 setWindowIcon，缺失时显示为空白 exe 默认图标。

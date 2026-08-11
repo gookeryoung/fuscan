@@ -88,7 +88,7 @@ packages = ["src/fuscan"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/fuscan/py.typed" = "fuscan/py.typed"
-"src/fuscan/assets/docs/fuscan-用户手册.pdf" = "fuscan/assets/docs/fuscan-用户手册.pdf"
+"src/fuscan/assets/manual/fuscan-用户手册.pdf" = "fuscan/assets/manual/fuscan-用户手册.pdf"
 "src/fuscan/gui/resources_rc.py" = "fuscan/gui/resources_rc.py"
 "src/fuscan/gui/resources.qrc" = "fuscan/gui/resources.qrc"
 "src/fuscan/gui/qtquickcontrols2.conf" = "fuscan/gui/qtquickcontrols2.conf"
@@ -105,7 +105,14 @@ exclude = [
 ]
 
 [tool.fspack]
-include = ["rules"]
+# 启用 native 分组（fuscan-core 原生匹配引擎），fspack 解析 dependencies 时
+# 会展开 native extras，将 fuscan-core 纳入下载列表。
+# fuscan-core 是 PyO3 编译扩展，缺失时 fuscan 自动回退纯 Python（语义等价）。
+extras = ["native"]
+# fuscan-core 尚未发布到 PyPI，打包前需先用 maturin 构建 wheel 到
+# fuscan-core-wheels/ 目录，fspack 通过 --find-links 从该目录离线解析。
+# CI（release.yml）在每个平台的 fspack job 前均有 maturin build 步骤。
+find-links = ["fuscan-core-wheels"]
 exclude = [".*", "tests", "docs", "scripts"]
 pyc_strip = true
 no_site = true

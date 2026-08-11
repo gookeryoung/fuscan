@@ -14,6 +14,8 @@ wheels/
 packages/fuscan-core/target/
 packages/fuscan-core/dist/
 packages/fuscan-core/.venv*
+# fspack 打包前本地构建的 fuscan-core wheel（CI 临时产物，勿提交）
+fuscan-core-wheels/
 
 # 测试与覆盖率
 .coverage

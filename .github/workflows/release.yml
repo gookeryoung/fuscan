@@ -98,9 +98,29 @@ jobs:
       - name: Install fspack & pip
         run: uv pip install git+https://github.com/gookeryoung/fspack.git pip
 
-      # fuscan-core 由 fuscan-core-wheels.yml CI 独立发布到 PyPI
-      # （tag fuscan-core-v*.*.* 触发 OIDC trusted publisher 发布）。
-      # fspack 通过 [tool.fspack] extras=["native"] 从 PyPI 下载 fuscan-core wheel。
+      # fuscan-core 未发布到 PyPI，本地用 maturin 构建 wheel 到 fuscan-core-wheels/，
+      # fspack 通过 [tool.fspack] find-links 从该目录解析 fuscan-core 依赖。
+      # Windows 用 win7 target + nightly build-std 重建 std（Win7 SP1 兼容）。
+      - name: Setup Rust (nightly + rust-src for win7 build-std)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      - name: Build fuscan-core wheel (Windows win7)
+        shell: bash
+        env:
+          CARGO_UNSTABLE_BUILD_STD: std,panic_abort
+        run: |
+          # 假 rustup wrapper：跳过 win7 Tier-3 target 的 rustup target add
+          # （无预编译 artifacts，cargo 通过 build-std 从 rust-src 源码构建）
+          mkdir -p /tmp/fake-rustup
+          printf '@echo off\r\nif "%%~1"=="target" if "%%~2"=="add" (\r\n  echo %%* | findstr /C:"win7" >nul\r\n  if not errorlevel 1 (\r\n    echo skip rustup target add for win7 Tier-3 target\r\n    exit /b 0\r\n  )\r\n)\r\nrustup.exe %%*\r\n' > /tmp/fake-rustup/rustup.bat
+          export PATH="/tmp/fake-rustup:$PATH"
+          pip install maturin
+          mkdir -p fuscan-core-wheels
+          cd packages/fuscan-core
+          maturin build --release --out ../../fuscan-core-wheels --find-interpreter --target x86_64-win7-windows-msvc
+
       - name: Cache fspack assets
         uses: actions/cache@v5
         with:
@@ -180,9 +200,18 @@ jobs:
       - name: Install fspack & pip
         run: uv pip install git+https://github.com/gookeryoung/fspack.git pip
 
-      # fuscan-core 由 fuscan-core-wheels.yml CI 独立发布到 PyPI
-      # （tag fuscan-core-v*.*.* 触发 OIDC trusted publisher 发布）。
-      # fspack 通过 [tool.fspack] extras=["native"] 从 PyPI 下载 fuscan-core wheel。
+      # fuscan-core 未发布到 PyPI，本地用 maturin 构建 wheel 到 fuscan-core-wheels/，
+      # fspack 通过 [tool.fspack] find-links 从该目录解析 fuscan-core 依赖。
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build fuscan-core wheel (Linux x86_64)
+        run: |
+          pip install maturin
+          mkdir -p fuscan-core-wheels
+          cd packages/fuscan-core
+          maturin build --release --out ../../fuscan-core-wheels --find-interpreter
+
       - name: Cache fspack assets
         uses: actions/cache@v5
         with:

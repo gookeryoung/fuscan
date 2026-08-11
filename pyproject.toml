@@ -108,6 +108,9 @@ extras = ["native"]
 exclude = [".*", "tests", "benchmarks", "docs", "scripts", "packages"]
 pyc_strip = true
 no_site = true
+# fuscan-core 未发布到 PyPI，CI 中用 maturin 本地构建 wheel 到 fuscan-core-wheels/，
+# fspack 通过 find-links 从本地目录解析 fuscan-core 依赖，避免 PyPI 下载失败。
+find-links = ["fuscan-core-wheels"]
 
 [tool.fspack.entries]
 fuscan = "src/fuscan/app.py"

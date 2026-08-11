@@ -171,6 +171,7 @@ Item {
 
                         // 收集进度条
                         ProgressBar {
+                            id: walkBar
                             Layout.fillWidth: true
                             indeterminate: workspaceController.currentScanController.walkIndeterminate
                             from: 0
@@ -181,10 +182,13 @@ Item {
                                 color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                                 radius: 3
                             }
+                            // contentItem 内的 parent 是此 Item 自身，visualPosition 是
+                            // ProgressBar 的属性，须通过 id（walkBar）引用，否则
+                            // parent.visualPosition 为 undefined，填充宽度为 NaN（条为空）。
                             contentItem: Item {
                                 implicitHeight: 6
                                 Rectangle {
-                                    width: parent.visualPosition * parent.width
+                                    width: walkBar.visualPosition * parent.width
                                     height: parent.height
                                     radius: 3
                                     color: workspaceController.currentScanController.walkDone
@@ -303,6 +307,7 @@ Item {
 
                         // 解析进度条
                         ProgressBar {
+                            id: scanBar
                             Layout.fillWidth: true
                             indeterminate: workspaceController.currentScanController.progressIndeterminate
                             from: 0
@@ -313,10 +318,12 @@ Item {
                                 color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
                                 radius: 3
                             }
+                            // 同收集进度条：visualPosition 须通过 id（scanBar）引用，
+                            // 不能用 parent.visualPosition（parent 为内层 Item，无此属性）。
                             contentItem: Item {
                                 implicitHeight: 6
                                 Rectangle {
-                                    width: parent.visualPosition * parent.width
+                                    width: scanBar.visualPosition * parent.width
                                     height: parent.height
                                     radius: 3
                                     color: workspaceController.currentScanController.scanDone

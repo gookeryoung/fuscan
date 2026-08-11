@@ -87,7 +87,7 @@ class FileMonitorModel(QAbstractListModel):  # pyrefly: ignore [invalid-inherita
     def __init__(self, max_rows: int = _DEFAULT_MAX_ROWS, parent: object | None = None) -> None:
         super().__init__(parent)
         self._records: list[MonitorHitRecord] = []
-        self._max_rows: int = max(1, int(max_rows))
+        self._max_rows: int = max(1, max_rows)
 
     def rowCount(self, parent: QModelIndex = None) -> int:  # type: ignore[assignment]
         """返回当前记录数。"""

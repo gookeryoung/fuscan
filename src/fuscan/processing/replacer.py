@@ -36,7 +36,7 @@ import logging
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from fuscan.rules.model import LeafMatch, MatchMode, MatchTarget, Rule, RuleSet
 from fuscan.scanner.result import RuleHit
@@ -56,6 +56,16 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+# 排序键辅助：按元组首元素（关键词）长度排序，约束为 str/bytes 两种类型。
+# 用命名函数替代 lambda，让 pyrefly 能推断参数类型（lambda 参数无法标注）。
+_K = TypeVar("_K", str, bytes)
+
+
+def _by_first_len(item: tuple[_K, _K, int]) -> int:
+    """返回元组首元素长度，供 ``sort(key=...)`` 按关键词长度降序。"""
+    return len(item[0])
+
 
 # 可替换的纯文本扩展名白名单（小写，不含前导点）。
 # 二进制格式（PDF/DOCX/XLSX/PPT 等）不在此列，避免破坏文件结构。
@@ -522,7 +532,7 @@ def _apply_replace_text(
     if not indexed:
         return content, 0
     # 按关键词长度降序：长关键词优先，避免短关键词破坏长关键词匹配
-    indexed.sort(key=lambda x: len(x[0]), reverse=True)
+    indexed.sort(key=_by_first_len, reverse=True)
 
     new_content = content
     replaced_rule_indices: set[int] = set()
@@ -557,7 +567,7 @@ def _apply_replace_bytes(
                 continue
     if not indexed:
         return raw, 0
-    indexed.sort(key=lambda x: len(x[0]), reverse=True)
+    indexed.sort(key=_by_first_len, reverse=True)
 
     new_raw = raw
     replaced_rule_indices: set[int] = set()

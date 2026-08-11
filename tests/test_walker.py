@@ -366,8 +366,12 @@ class TestListDrives:
                 raise AttributeError(_name)
 
         monkeypatch.setattr(walker_mod.ctypes, "windll", _FakeWindll())
+
         # G:\\ 模拟为网络盘（GetDriveTypeW 返回 DRIVE_REMOTE=4）
-        monkeypatch.setattr(walker_mod, "_is_network_drive", lambda drive: str(drive).upper().startswith("G:"))
+        def _is_g_network(drive: Path) -> bool:
+            return str(drive).upper().startswith("G:")
+
+        monkeypatch.setattr(walker_mod, "_is_network_drive", _is_g_network)
         drives = walker_mod.list_drives()
         # 网络盘 G:\\ 应被过滤掉
         assert not any(str(d).upper().startswith("G:") for d in drives)

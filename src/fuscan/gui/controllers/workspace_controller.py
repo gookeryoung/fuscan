@@ -1132,9 +1132,15 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         logger.warning("工作区 %s 扫描结果后台恢复失败: %s", ws_id, error_msg)
 
     def _cleanup_restore_worker(self, ws_id: str) -> None:
-        """清理已完成的 ResultRestoreWorker（避免 QObject 泄漏）。"""
+        """清理已完成的 ResultRestoreWorker（避免 QObject 泄漏）。
+
+        由 ``finished`` 信号触发（``run()`` 已返回）。销毁前先 ``wait()`` 确保
+        线程完全终止，再 ``deleteLater``——避免线程仍在最终收尾阶段时对象被回收
+        导致的段错误（CI Linux exit 139 / Windows access violation）。
+        """
         worker = self._restore_workers.pop(ws_id, None)
         if worker is not None:
+            worker.wait()  # pyrefly: ignore [missing-attribute]
             worker.deleteLater()  # pyrefly: ignore [missing-attribute]
 
     def _delete_cached_results(self, ws_id: str) -> None:

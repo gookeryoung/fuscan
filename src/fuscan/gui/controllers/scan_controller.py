@@ -2144,6 +2144,17 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._last_report = report
         self._result_model.set_results(report.hits)
         self._sync_stats_from_report(report)
+        # 恢复 walk 阶段计数（双进度条「收集文件」节点）：ScanReport.stats 未单独
+        # 持久化 walk 的 discovered，但可反推——walk 发现总数 = 纳入扫描的
+        # total_files + 类型不符 skipped_files + 用户标记 user_skipped，三者
+        # 恰好覆盖 walk 阶段对每个发现文件的分类。不恢复则重启后「收集文件」
+        # 显示清零（walk 字段停留初始 0），与已恢复的解析统计不一致。
+        stats = report.stats
+        self._walk_skipped = stats.skipped_files
+        self._walk_user_skipped = stats.user_skipped
+        self._walk_discovered = stats.total_files + stats.skipped_files + stats.user_skipped
+        self._walk_done = True
+        self._walk_indeterminate = False
         # 标记 scan 阶段完成（恢复后的状态与正常扫描完成一致）
         self._scan_done = True
         self._scan_phase = PHASE_DONE
@@ -2157,6 +2168,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             summary,
         )
         self._set_scan_state(STATE_RESULTS if report.hits else STATE_SETUP)
+        # 恢复后显式通知 walk/scan 进度与阶段变更，确保 StatsPage 已绑定时
+        # 「收集文件」「解析文件」节点重算为恢复值（否则依赖首次绑定，若
+        # 恢复晚于页面显示则计数停留 0）。
+        self.walkProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
+        self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def _set_scan_state(self, state: str) -> None:
         """设置扫描状态并 emit 信号。

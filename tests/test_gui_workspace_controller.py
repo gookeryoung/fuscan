@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -66,19 +67,33 @@ def qapp() -> object:
 
 
 def _wait_for_restore(controller: WorkspaceController, ws_id: str, timeout_ms: int = 5000) -> None:
-    """等待异步恢复完成（处理 Qt 事件循环以接收 worker 信号）。"""
+    """等待异步恢复完成（处理 Qt 事件循环以接收 worker 信号）。
+
+    除等待 ``_restoring_workspaces`` 标志清除外，还须等待后台
+    :class:`ResultRestoreWorker` (QThread) 真正结束并被 ``deleteLater`` 清理。
+    ``restore_done`` 信号在 ``run()`` 内 emit（此时线程仍在运行），主线程槽
+    ``_on_restore_done`` 会先清除 ``_restoring_workspaces`` 标志，若仅等待该标志
+    退出，QThread 可能仍处于运行态，测试结束后对象析构会触发段错误
+    （CI Linux exit 139 / Windows access violation）。故循环需持续到
+    ``_restore_workers`` 也被清空（``finished`` → ``_cleanup_restore_worker``）。
+    """
     try:
         from PySide2.QtCore import QCoreApplication
     except ImportError:
         from PySide6.QtCore import QCoreApplication  # type: ignore[no-redef]
 
     elapsed = 0
-    while ws_id in controller._restoring_workspaces and elapsed < timeout_ms:  # type: ignore[attr-defined]
+    while (  # type: ignore[attr-defined]
+        ws_id in controller._restoring_workspaces or ws_id in controller._restore_workers
+    ) and elapsed < timeout_ms:
         QCoreApplication.processEvents()
-        import time
-
         time.sleep(0.01)
         elapsed += 10
+    # 兜底：即便超时，也主动 wait 残留 QThread，避免带着运行中的线程返回
+    worker = controller._restore_workers.get(ws_id)  # type: ignore[attr-defined]
+    if worker is not None:
+        worker.wait(1000)  # type: ignore[attr-defined]
+        QCoreApplication.processEvents()
 
 
 # ============================= fixtures =============================
@@ -114,8 +129,13 @@ def rules_controller(config_controller: ConfigController) -> RulesController:
 def controller(
     config_controller: ConfigController,
     rules_controller: RulesController,
-) -> WorkspaceController:
-    return WorkspaceController(config_controller, rules_controller)
+) -> Iterator[WorkspaceController]:
+    ctrl = WorkspaceController(config_controller, rules_controller)
+    yield ctrl
+    # 测试收尾统一清理，确保所有后台 QThread（ResultRestoreWorker 等）在
+    # 控制器被 GC 前 quit()+wait()，避免线程仍在运行时对象析构触发段错误
+    # （CI Linux exit 139 / Windows access violation 根因）。
+    ctrl.cleanup()
 
 
 # ============================= WorkspaceItem =============================
@@ -2658,6 +2678,9 @@ class TestLoadCachedResults:
         assert new_sc._last_report is not None  # type: ignore[attr-defined]
         assert new_sc._last_report.root == report.root  # type: ignore[attr-defined]
         assert new_sc._result_model.rowCount() == len(report.hits)  # type: ignore[attr-defined]
+        # 手动构造的 WorkspaceController 须显式清理，等待后台恢复线程终止，
+        # 避免线程仍运行时对象析构触发段错误。
+        new_controller.cleanup()
 
 
 class TestDeleteCachedResults:

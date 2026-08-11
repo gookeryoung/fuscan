@@ -919,6 +919,42 @@ class TestRestoreFromReport:
         # statusSummary 应包含速度信息
         assert "速度" in controller.statusSummary
 
+    def test_restores_walk_counts_from_stats(
+        self,
+        controller: ScanController,
+    ) -> None:
+        """恢复后应反推 walk 阶段计数，避免「收集文件」重启后清零。
+
+        walk 发现总数 = total_files（纳入扫描）+ skipped_files（类型不符）
+        + user_skipped（用户标记）。恢复后 walkDone=True、walkProgress=100。
+        """
+        report = ScanReport(
+            root=Path("/tmp"),
+            results=(),
+            stats=ScanStats(
+                total_files=10,
+                scanned_files=10,
+                matched_files=0,
+                skipped_files=3,
+                errors=0,
+                duration_seconds=1.0,
+                total_matches=0,
+                user_skipped=2,
+            ),
+            cancelled=False,
+        )
+        controller.restoreFromReport(report)
+
+        # walk 计数从 stats 反推：discovered = 10 + 3 + 2 = 15
+        assert controller.walkDiscovered == 15
+        assert controller.walkSkipped == 3
+        assert controller.walkUserSkipped == 2
+        # 纳入扫描（classified）= discovered - skipped - user_skipped = 10
+        assert controller.walkClassified == 10
+        # 恢复态标记 walk 已完成，进度条满格
+        assert controller.walkDone is True
+        assert controller.walkProgress == 100.0
+
 
 class TestIncrementalContextAfterRestore:
     """``restoreFromReport`` 与 ``startIncrementalScan`` 协作测试。

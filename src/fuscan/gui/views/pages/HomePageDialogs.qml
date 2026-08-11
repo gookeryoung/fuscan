@@ -2,7 +2,6 @@ import QtQuick 2.15
 import Qt.labs.platform 1.0 as Platform
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import QtQuick.Dialogs 1.3 as Dialogs
 import QtGraphicalEffects 1.15
 import fuscan.theme 1.0
 import fuscan.controllers 1.0
@@ -367,22 +366,20 @@ Item {
         }
     }
 
-    // 文件扫描页「添加文件夹」按钮用的文件夹选择器（多选，创建多个任务）
-    Dialogs.FileDialog {
+    // 文件扫描页「添加文件夹」按钮用的文件夹选择器（单选）。
+    // 改用 Qt.labs.platform FolderDialog（Windows 原生 IFileOpenDialog），
+    // 避免 QtQuick.Dialogs 1.3 DefaultFileDialog.qml 的 binding loop 警告。
+    // 多文件夹场景由用户多次点击「添加」按钮完成；addWorkspacesFromPaths
+    // 接受单元素列表，调用方式不变。
+    Platform.FolderDialog {
         id: folderDialogForAdd
         title: "选择要扫描的文件夹"
-        selectFolder: true
-        selectExisting: true
-        selectMultiple: true
-        folder: shortcuts.home
+        folder: Platform.StandardPaths.standardLocations(Platform.StandardPaths.HomeLocation)[0]
         onAccepted: {
             var paths = []
-            var urls = folderDialogForAdd.fileUrls
-            for (var i = 0; i < urls.length; i++) {
-                var url = urls[i].toString()
-                if (url.startsWith("file:///")) {
-                    paths.push(decodeURIComponent(url.substring(8)))
-                }
+            var url = folderDialogForAdd.folder.toString()
+            if (url.startsWith("file:///")) {
+                paths.push(decodeURIComponent(url.substring(8)))
             }
             if (paths.length > 0) {
                 var count = workspaceController.addWorkspacesFromPaths(paths)

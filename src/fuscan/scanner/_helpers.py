@@ -195,13 +195,16 @@ def engine_for_extension(extension: str) -> str:
 
 # 会在解析期释放 GIL 的原生引擎（Rust/C/C++ 扩展）引擎名集合。
 #
-# 这些引擎用原生扩展做重活（PDF 页面布局、Excel 单元格转换、XML libxml2 解析），
-# 在原生代码内会主动释放 GIL，故多个 worker 线程可真正并行、且不长时间独占 GIL，
-# GUI 主线程仍能抢到锁保持响应。判据来源（见各 extractor 的 engine_info）：
+# 这些引擎用原生扩展做重活（PDF 页面布局、Excel 单元格转换、XML libxml2 解析、
+# 文本编码检测、OLE 流解析），在原生代码内会主动释放 GIL，故多个 worker 线程
+# 可真正并行、且不长时间独占 GIL，GUI 主线程仍能抢到锁保持响应。
+# 判据来源（见各 extractor 的 engine_info）：
 #
 # - ``pdf_oxide``（Rust + PyO3）/ ``pypdfium2``（pdfium C++）→ PDF
 # - ``python-calamine``（Rust + PyO3）→ XLSX/XLS
 # - ``lxml``（libxml2 C）→ DOCX/PPTX/ODT/ODS
+# - ``fuscan-core``（Rust + PyO3，encoding_rs+chardetng）→ 文本编码检测
+# - ``fuscan-core (cfb)``（Rust + PyO3，cfb crate）→ DOC/PPT OLE 流解析
 #
 # 反之，纯 Python 引擎（fuscan-core 缺失时回退的 ``charset-normalizer`` 文本解码、
 # ``olefile`` DOC/PPT、``email（标准库）``、``纯文本`` 回退读取）在解析期
@@ -213,6 +216,8 @@ _NATIVE_ENGINES: frozenset[str] = frozenset(
         "pypdfium2",
         "python-calamine",
         "lxml",
+        "fuscan-core",
+        "fuscan-core (cfb)",
     }
 )
 

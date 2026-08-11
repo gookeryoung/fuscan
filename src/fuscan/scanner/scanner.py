@@ -493,8 +493,8 @@ class Scanner:
         # 判断扫描目标是否以非原生（持 GIL）引擎为主
         exts = self._scan_extensions
         if exts is None:
-            # 扫描所有扩展名：以文本源码为绝对多数（charset-normalizer 持 GIL），
-            # 视为非原生为主，降档
+            # 扫描所有扩展名：混合原生与非原生引擎（email 标准库等持 GIL），
+            # 保守视为非原生为主，降档
             return _DOWNSCALED_MAX_WORKERS
         if not exts:
             # 空白名单（用户全部取消勾选）：无文件可扫，并发度无意义，保持原值

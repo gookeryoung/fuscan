@@ -6032,12 +6032,13 @@ class TestTuneGilSwitchInterval:
 class TestIsNativeEngine:
     """``is_native_engine`` 判断扩展名对应提取器是否使用释放 GIL 的原生引擎。"""
 
-    def test_text_engine_not_native(self) -> None:
-        """文本/源码（charset-normalizer 纯 Python）非原生。"""
+    def test_text_engine_native_status(self) -> None:
+        """文本/源码：fuscan-core 可用时为原生，否则回退 charset-normalizer 纯 Python。"""
+        from fuscan.extractors.text import _NATIVE_DECODE_AVAILABLE
         from fuscan.scanner._helpers import is_native_engine
 
-        assert is_native_engine("txt") is False
-        assert is_native_engine("py") is False
+        assert is_native_engine("txt") is _NATIVE_DECODE_AVAILABLE
+        assert is_native_engine("py") is _NATIVE_DECODE_AVAILABLE
 
     def test_pdf_engine_native(self) -> None:
         """PDF（pdf_oxide/pypdfium2 原生）为原生引擎。"""
@@ -6052,11 +6053,12 @@ class TestIsNativeEngine:
         assert is_native_engine("docx") is True
         assert is_native_engine("xlsx") is True
 
-    def test_legacy_office_engine_not_native(self) -> None:
-        """DOC/PPT（olefile 纯 Python）非原生。"""
+    def test_legacy_office_engine_native_status(self) -> None:
+        """DOC/PPT：fuscan-core 可用时为原生，否则回退 olefile 纯 Python。"""
+        from fuscan.extractors.legacy_office import _NATIVE_OLE_AVAILABLE
         from fuscan.scanner._helpers import is_native_engine
 
-        assert is_native_engine("doc") is False
+        assert is_native_engine("doc") is _NATIVE_OLE_AVAILABLE
 
     def test_unregistered_extension_not_native(self) -> None:
         """未注册扩展名回退纯文本读取，非原生。"""
@@ -6092,9 +6094,9 @@ class TestEffectiveMaxWorkers:
         assert scanner._effective_max_workers == 5
 
     def test_content_rule_non_native_extensions_downscaled(self) -> None:
-        """CONTENT 规则 + 只扫非原生扩展名（py/txt，持 GIL）→ 降档至 2。"""
+        """CONTENT 规则 + 只扫非原生扩展名（eml，email 标准库持 GIL）→ 降档至 2。"""
         rs = _build_ruleset(_content_rule("pwd", "password"))
-        scanner = Scanner(rs, max_workers=5, scan_extensions=("py", "txt"))
+        scanner = Scanner(rs, max_workers=5, scan_extensions=("eml",))
         assert scanner._effective_max_workers == 2
 
     def test_no_content_rule_kept(self) -> None:

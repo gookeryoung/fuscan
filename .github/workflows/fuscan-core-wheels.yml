@@ -56,10 +56,13 @@ jobs:
           # Windows：x64，用 win7 target + nightly -Z build-std 重建 std，
           # 使 .pyd 在 Win7 SP1 及更新版本均可加载（stable std 硬引用 Win8+ API）。
           # 跨编译器兼容：win7 target 构建物在 Win8/10/11 同样运行，无功能损失。
+          # build_std 标志：win7 target 是 Tier-3，rustup target add 无预编译 artifacts，
+          # 不能通过 maturin-action 的 target 输入传递（会触发 rustup target add 失败），
+          # 改用 args 传递 --target 给 maturin，cargo 通过 build-std 从 rust-src 源码构建。
           - os: windows
             runner: windows-latest
             target: x86_64-win7-windows-msvc
-            toolchain: nightly
+            build_std: true
           # macOS：Intel + Apple Silicon
           - os: macos
             runner: macos-13
@@ -77,34 +80,38 @@ jobs:
         with:
           python-version: "3.10"
 
-      # win7 target 是 Tier-3，无预编译 std，需 nightly -Z build-std 重建 std，
-      # 使 .pyd 在 Win7 SP1 及更新版本均可加载（stable std 硬引用 Win8+ API）。
-      # 跨编译器兼容：win7 target 构建物在 Win8/10/11 同样运行，无功能损失。
-      # 需额外安装 rust-src 组件供 build-std 使用。
-      #
-      # 仅 Windows win7 target 启用 CARGO_UNSTABLE_BUILD_STD：空字符串会被
-      # cargo 当作"启用 build-std"信号，导致非 Windows 平台误用 nightly
-      # 重建 std。用独立步骤设置环境变量，避免污染其他平台。
-      - name: Configure nightly build-std (Windows win7 only)
-        if: matrix.platform.os == 'windows'
+      # win7 target 是 Tier-3，无预编译 std，需 nightly -Z build-std 重建 std。
+      # rust-toolchain.toml 已声明 nightly + rust-src（build-std 必需），
+      # maturin-action 读取该文件自动安装工具链与组件，无需手动 rustup install。
+      # 仅 Windows 设置 CARGO_UNSTABLE_BUILD_STD；空字符串会误启用 build-std，
+      # 用 if 条件确保非 Windows 平台完全不设置该环境变量。
+      - name: Configure build-std env (Windows win7 only)
+        if: matrix.platform.build_std
         shell: bash
-        run: |
-          rustup toolchain install nightly --component rust-src --profile minimal
-          echo "CARGO_UNSTABLE_BUILD_STD=std,panic_abort" >> $GITHUB_ENV
+        run: echo "CARGO_UNSTABLE_BUILD_STD=std,panic_abort" >> $GITHUB_ENV
 
-      - name: Build wheels
+      # Windows win7 build-std 构建：不设 target 输入（避免 maturin-action 执行
+      # rustup target add x86_64-win7-windows-msvc，Tier-3 无预编译 artifacts 必失败），
+      # 通过 args 传递 --target 给 maturin，cargo 用 CARGO_UNSTABLE_BUILD_STD +
+      # rust-src 从源码构建 std。manylinux 仅 Linux 生效，此处省略。
+      - name: Build wheels (Windows win7 build-std)
+        if: matrix.platform.build_std
         uses: PyO3/maturin-action@v1
         with:
-          # monorepo：在子目录运行 maturin
+          working-directory: packages/fuscan-core
+          args: --release --out dist --find-interpreter --target ${{ matrix.platform.target }}
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+      # 标准目标构建：target 输入触发 rustup target add（Tier-1/2 有预编译 artifacts），
+      # maturin-action 自动安装对应 target。
+      - name: Build wheels (standard targets)
+        if: ${{ !matrix.platform.build_std }}
+        uses: PyO3/maturin-action@v1
+        with:
           working-directory: packages/fuscan-core
           target: ${{ matrix.platform.target }}
-          # Windows win7 target 需 nightly 工具链；其他平台用默认 stable
-          toolchain: ${{ matrix.platform.toolchain || 'stable' }}
-          # abi3 模式下 --find-interpreter 只找到一个 Python，构建单一 abi3 wheel
           args: --release --out dist --find-interpreter
-          # manylinux auto 让 maturin 选择最低兼容的 manylinux 标签
           manylinux: auto
-          # sccache 加速重复编译（tag 发布时禁用以避免缓存污染）
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
       - name: Upload wheels

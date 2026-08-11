@@ -238,9 +238,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         # 构造 Splash：在 QGuiApplication 与 QML 类型注册后立即加载，让用户尽早看到反馈。
         # Splash 用独立 engine + 仅 SplashController context property，不依赖 AppController。
-        with timed("构造 Splash 启动画面", level=logging.DEBUG, report=report):
+        _SKIP_SPLASH = os.environ.get("FUSCAN_NO_SPLASH")  # 临时实验开关
+        if _SKIP_SPLASH:
+            splash_engine = None
             splash_controller = SplashController()
-            splash_engine = _load_splash(app, splash_controller)
+        else:
+            with timed("构造 Splash 启动画面", level=logging.DEBUG, report=report):
+                splash_controller = SplashController()
+                splash_engine = _load_splash(app, splash_controller)
 
         with timed("迁移旧配置字段到规则集", level=logging.DEBUG, report=report):
             # 在 ConfigController 构造前执行迁移：将旧版 config.yaml 中的
@@ -282,7 +287,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         # 主窗口已加载显示，关闭并释放 Splash 资源
         splash_controller.setStage("就绪")
         app.processEvents()
-        splash_engine.deleteLater()
+        if splash_engine is not None:
+            splash_engine.deleteLater()
 
     # 启动成功后渲染单张 rich 汇总表（perf 未启用时内部即刻 return，零开销）
     render_startup_summary(report)

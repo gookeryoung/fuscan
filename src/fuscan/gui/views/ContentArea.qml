@@ -88,7 +88,7 @@ Pane {
         }
         Connections {
             target: resultsLoader.item
-            onBackRequested: contentArea.sidebarRef.currentPage = "home"
+            function onBackRequested() { contentArea.sidebarRef.currentPage = "home" }
         }
 
         // StatsPage：首次切换到时加载，之后常驻
@@ -101,7 +101,7 @@ Pane {
         }
         Connections {
             target: statsLoader.item
-            onBackRequested: contentArea.sidebarRef.currentPage = "home"
+            function onBackRequested() { contentArea.sidebarRef.currentPage = "home" }
         }
 
         // SettingsPage：首次切换到时加载，之后常驻

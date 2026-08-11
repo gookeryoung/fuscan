@@ -15,6 +15,7 @@
     <file alias="qml/pages/AboutPage.qml">views/pages/AboutPage.qml</file>
     <file alias="qml/pages/FileMonitorPage.qml">views/pages/FileMonitorPage.qml</file>
     <file alias="qml/pages/HomePage.qml">views/pages/HomePage.qml</file>
+    <file alias="qml/pages/HomePageDialogs.qml">views/pages/HomePageDialogs.qml</file>
     <file alias="qml/pages/ResultsPage.qml">views/pages/ResultsPage.qml</file>
     <file alias="qml/pages/SettingsPage.qml">views/pages/SettingsPage.qml</file>
     <file alias="qml/pages/StatsPage.qml">views/pages/StatsPage.qml</file>

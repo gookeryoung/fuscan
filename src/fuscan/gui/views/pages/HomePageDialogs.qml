@@ -1,5 +1,5 @@
 import QtQuick 2.15
-import QtQuick.Dialogs 1.3
+import Qt.labs.platform 1.0 as Platform
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Dialogs 1.3 as Dialogs
@@ -20,36 +20,36 @@ Item {
     property RulesControllerType rulesController: RulesController
 
     // ========== 导出文件保存对话框 ==========
-    FileDialog {
+    Platform.FileDialog {
         id: exportCsvDialog
         title: "导出扫描结果为 CSV"
-        selectExisting: false
+        fileMode: Platform.FileDialog.SaveFile
         defaultSuffix: "csv"
         nameFilters: ["CSV (*.csv)"]
         onAccepted: {
-            var path = exportCsvDialog.fileUrl.toString().replace(/^file:\/\/\//, "")
+            var path = exportCsvDialog.file.toString().replace(/^file:\/\/\//, "")
             workspaceController.exportResults(dialogsRoot.homePage._pendingExportWsId, "csv", path)
         }
     }
-    FileDialog {
+    Platform.FileDialog {
         id: exportJsonDialog
         title: "导出扫描结果为 JSON"
-        selectExisting: false
+        fileMode: Platform.FileDialog.SaveFile
         defaultSuffix: "json"
         nameFilters: ["JSON (*.json)"]
         onAccepted: {
-            var path = exportJsonDialog.fileUrl.toString().replace(/^file:\/\/\//, "")
+            var path = exportJsonDialog.file.toString().replace(/^file:\/\/\//, "")
             workspaceController.exportResults(dialogsRoot.homePage._pendingExportWsId, "json", path)
         }
     }
-    FileDialog {
+    Platform.FileDialog {
         id: exportPdfDialog
         title: "导出扫描结果为 PDF"
-        selectExisting: false
+        fileMode: Platform.FileDialog.SaveFile
         defaultSuffix: "pdf"
         nameFilters: ["PDF (*.pdf)"]
         onAccepted: {
-            var path = exportPdfDialog.fileUrl.toString().replace(/^file:\/\/\//, "")
+            var path = exportPdfDialog.file.toString().replace(/^file:\/\/\//, "")
             workspaceController.exportResults(dialogsRoot.homePage._pendingExportWsId, "pdf", path)
         }
     }
@@ -356,16 +356,14 @@ Item {
     }
 
     // 切换目标对话框用的文件夹选择器
-    Dialogs.FileDialog {
+    Platform.FolderDialog {
         id: folderDialogForEdit
         title: "选择扫描目录"
-        selectFolder: true
-        selectExisting: true
         folder: editTargetDialog.editFolder.length > 0
             ? "file:///" + editTargetDialog.editFolder
-            : shortcuts.home
+            : Platform.StandardPaths.standardLocations(Platform.StandardPaths.HomeLocation)[0]
         onAccepted: {
-            editTargetDialog.editFolder = folderDialogForEdit.fileUrl.toString().replace(/^file:\/\/\//, "")
+            editTargetDialog.editFolder = folderDialogForEdit.folder.toString().replace(/^file:\/\/\//, "")
         }
     }
 
@@ -1206,12 +1204,13 @@ Item {
     }
 
     // 全局规则文件选择器（加载到全局，立即生效）
-    Dialogs.FileDialog {
+    Platform.FileDialog {
         id: loadGlobalRulesFileDialog
         title: "选择规则文件（加载到全局）"
+        fileMode: Platform.FileDialog.OpenFile
         nameFilters: ["YAML 文件 (*.yaml *.yml)", "所有文件 (*.*)"]
         onAccepted: {
-            var pathStr = loadGlobalRulesFileDialog.fileUrl.toString()
+            var pathStr = loadGlobalRulesFileDialog.file.toString()
             if (pathStr.startsWith("file:///")) {
                 pathStr = decodeURIComponent(pathStr.substring(8))
             }
@@ -1220,12 +1219,13 @@ Item {
     }
 
     // 临时规则文件选择器（加载到当前工作区，立即生效）
-    Dialogs.FileDialog {
+    Platform.FileDialog {
         id: loadTempRulesFileDialog
         title: "选择规则文件（加载到临时）"
+        fileMode: Platform.FileDialog.OpenFile
         nameFilters: ["YAML 文件 (*.yaml *.yml)", "所有文件 (*.*)"]
         onAccepted: {
-            var pathStr = loadTempRulesFileDialog.fileUrl.toString()
+            var pathStr = loadTempRulesFileDialog.file.toString()
             if (pathStr.startsWith("file:///")) {
                 pathStr = decodeURIComponent(pathStr.substring(8))
             }

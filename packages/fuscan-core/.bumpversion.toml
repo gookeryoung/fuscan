@@ -1,0 +1,15 @@
+# fuscan-core 独立版本管理（与 fuscan 主包版本独立）
+# tag 格式 fuscan-core-v*.*.* 触发 fuscan-core-wheels.yml 构建多平台 wheel 并发布到 PyPI
+# 用法：make bump-core [patch|minor|major]
+[tool.bumpversion]
+current_version = "0.1.0"
+commit = true
+message = "chore: 更新 fuscan-core 版本 {current_version} → {new_version}"
+tag = true
+tag_name = "fuscan-core-v{new_version}"
+
+[[tool.bumpversion.files]]
+filename = "Cargo.toml"
+regex = true
+search = '(^version\s+=\s+)"{current_version}"'
+replace = '\1"{new_version}"'

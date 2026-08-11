@@ -9,7 +9,7 @@ TEST_MARKERS := "not slow and not gui_qml"
 PERF_TEST := tests/test_perf_regression.py
 PERF_THRESHOLD := 10
 
-.PHONY: help sync build b clean c test test-qml cov lint typecheck check doc tox bump patch minor major push perf perf-compare perf-list
+.PHONY: help sync build b clean c test test-qml cov lint typecheck check doc tox bump patch minor major push perf perf-compare perf-list bump-core
 
 help: ## 显示帮助信息
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z].*:.*##/ {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -21,7 +21,7 @@ build b: ## 构建分发包 (wheel + sdist)
 	uv build
 
 clean c: ## 清理构建产物与缓存
-	rm -rf build/ dist/ wheels/ *.egg-info htmlcov/ .coverage .coverage.* coverage.xml docs/_build/ .tox/
+	rm -rf build/ dist/ wheels/ fuscan-core-wheels/ *.egg-info htmlcov/ .coverage .coverage.* coverage.xml docs/_build/ .tox/
 	rm -rf .ruff_cache/ .pyrefly_cache/ .mypy_cache/
 	rm -rf packages/fuscan-core/target/ packages/fuscan-core/dist/
 	find src tests -type d -name __pycache__ -exec rm -rf {} +
@@ -76,4 +76,9 @@ pub:  ## 推送到pypi
 
 push: ## 推送代码到所有远程仓库
 	@uv run python -c "import subprocess as sp; [print(f'\u63a8\u9001 {r}...',flush=True) or (sp.run(['git','push',r],check=True) and sp.run(['git','push',r,'--tags'],check=True)) for r in sp.check_output(['git','remote'],text=True).split()]"
+
+CORE_BUMP_PART := $(filter-out bump-core,$(filter-out bump,$(MAKECMDGOALS)))
+
+bump-core: ## fuscan-core 版本 bump (默认 patch，用法: make bump-core [minor|major])
+	@uvx bump-my-version bump --config-file packages/fuscan-core/.bumpversion.toml $(if $(CORE_BUMP_PART),$(firstword $(CORE_BUMP_PART)),patch) --tag
 

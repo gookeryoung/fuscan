@@ -150,35 +150,13 @@ stages:
                 export PATH="$HOME/.local/bin:$PATH"
                 uv pip install fspack pip
 
-          setup_rust:
-            step: Command
-            name: 安装 Rust 工具链
-            with:
-              # fuscan-core 尚未发布到 PyPI，需本地构建 wheel
-              run: |
-                set -e
-                curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-                source "$HOME/.cargo/env"
-                rustc --version
-
-          build_fuscan_core_wheel:
-            step: Command
-            name: 构建 fuscan-core wheel
-            with:
-              # maturin 构建 fuscan-core（PyO3）wheel 到 fuscan-core-wheels/ 目录，
-              # fspack 通过 [tool.fspack] find-links 从该目录离线解析。
-              run: |
-                set -e
-                export PATH="$HOME/.local/bin:$HOME/.cargo/env:$PATH"
-                uv pip install maturin
-                cd packages/fuscan-core
-                maturin build --release --out ../../fuscan-core-wheels --find-interpreter
-                ls -la ../../fuscan-core-wheels/
-
           build_fuscan:
             step: Command
             name: fspack build (Linux)
             with:
+              # fuscan-core 由 fuscan-core-wheels.yml CI 独立发布到 PyPI
+              # （tag fuscan-core-v*.*.* 触发 OIDC trusted publisher 发布）。
+              # fspack 通过 [tool.fspack] extras=["native"] 从 PyPI 下载 fuscan-core wheel。
               run: |
                 set -e
                 export PATH="$HOME/.local/bin:$PATH"

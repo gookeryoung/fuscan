@@ -98,17 +98,9 @@ jobs:
       - name: Install fspack & pip
         run: uv pip install git+https://github.com/gookeryoung/fspack.git pip
 
-      # fuscan-core 尚未发布到 PyPI，需在打包前用 maturin 构建 wheel 到
-      # fuscan-core-wheels/ 目录，fspack 通过 [tool.fspack] find-links 离线解析。
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build fuscan-core wheel
-        uses: PyO3/maturin-action@v1
-        with:
-          working-directory: packages/fuscan-core
-          args: --release --out ../../fuscan-core-wheels --find-interpreter
-
+      # fuscan-core 由 fuscan-core-wheels.yml CI 独立发布到 PyPI
+      # （tag fuscan-core-v*.*.* 触发 OIDC trusted publisher 发布）。
+      # fspack 通过 [tool.fspack] extras=["native"] 从 PyPI 下载 fuscan-core wheel。
       - name: Cache fspack assets
         uses: actions/cache@v5
         with:
@@ -188,18 +180,9 @@ jobs:
       - name: Install fspack & pip
         run: uv pip install git+https://github.com/gookeryoung/fspack.git pip
 
-      # fuscan-core 尚未发布到 PyPI，需在打包前用 maturin 构建 wheel 到
-      # fuscan-core-wheels/ 目录，fspack 通过 [tool.fspack] find-links 离线解析。
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build fuscan-core wheel
-        uses: PyO3/maturin-action@v1
-        with:
-          working-directory: packages/fuscan-core
-          args: --release --out ../../fuscan-core-wheels --find-interpreter
-          manylinux: auto
-
+      # fuscan-core 由 fuscan-core-wheels.yml CI 独立发布到 PyPI
+      # （tag fuscan-core-v*.*.* 触发 OIDC trusted publisher 发布）。
+      # fspack 通过 [tool.fspack] extras=["native"] 从 PyPI 下载 fuscan-core wheel。
       - name: Cache fspack assets
         uses: actions/cache@v5
         with:

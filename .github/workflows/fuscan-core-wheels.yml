@@ -80,27 +80,31 @@ jobs:
         with:
           python-version: "3.10"
 
-      # win7 target 是 Tier-3，无预编译 std，需 nightly -Z build-std 重建 std。
-      # rust-toolchain.toml 已声明 nightly + rust-src（build-std 必需），
-      # maturin-action 读取该文件自动安装工具链与组件，无需手动 rustup install。
-      # 仅 Windows 设置 CARGO_UNSTABLE_BUILD_STD；空字符串会误启用 build-std，
-      # 用 if 条件确保非 Windows 平台完全不设置该环境变量。
-      - name: Configure build-std env (Windows win7 only)
-        if: matrix.platform.build_std
-        shell: bash
-        run: echo "CARGO_UNSTABLE_BUILD_STD=std,panic_abort" >> $GITHUB_ENV
-
-      # Windows win7 build-std 构建：不设 target 输入（避免 maturin-action 执行
-      # rustup target add x86_64-win7-windows-msvc，Tier-3 无预编译 artifacts 必失败），
-      # 通过 args 传递 --target 给 maturin，cargo 用 CARGO_UNSTABLE_BUILD_STD +
-      # rust-src 从源码构建 std。manylinux 仅 Linux 生效，此处省略。
+      # Windows win7 build-std 构建：不用 maturin-action（其 getRustTarget 会从
+      # args 解析 --target 并强制 rustup target add，Tier-3 target 无预编译 artifacts
+      # 必失败），改用 maturin 命令 + 假 rustup.bat wrapper 拦截 `target add *win7*`。
+      # wrapper 只跳过 win7 target 的 rustup target add（返回 exit 0），其他 rustup
+      # 命令（install nightly / component add rust-src 等）转发真实 rustup.exe。
+      # cargo 通过 CARGO_UNSTABLE_BUILD_STD + rust-src 从源码构建 std，不需要预编译 artifacts。
       - name: Build wheels (Windows win7 build-std)
         if: matrix.platform.build_std
-        uses: PyO3/maturin-action@v1
-        with:
-          working-directory: packages/fuscan-core
-          args: --release --out dist --find-interpreter --target ${{ matrix.platform.target }}
-          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        env:
+          CARGO_UNSTABLE_BUILD_STD: std,panic_abort
+        run: |
+          # 创建假 rustup wrapper（.bat），跳过 win7 Tier-3 target 的 rustup target add。
+          # 用 printf 确保 CRLF 换行（cmd.exe 要求 .bat 文件为 CRLF）。
+          # wrapper 逻辑：若参数为 `target add` 且含 `win7`，echo 提示并 exit 0；
+          # 否则转发给真实 rustup.exe（PATH 中 wrapper 目录无 rustup.exe，跳过递归）。
+          mkdir -p /tmp/fake-rustup
+          printf '@echo off\r\nif "%%~1"=="target" if "%%~2"=="add" (\r\n  echo %%* | findstr /C:"win7" >nul\r\n  if not errorlevel 1 (\r\n    echo skip rustup target add for win7 Tier-3 target\r\n    exit /b 0\r\n  )\r\n)\r\nrustup.exe %%*\r\n' > /tmp/fake-rustup/rustup.bat
+          export PATH="/tmp/fake-rustup:$PATH"
+
+          # 安装 maturin（不通过 maturin-action，避免其强制 rustup target add）
+          pip install maturin
+
+          cd packages/fuscan-core
+          maturin build --release --out dist --find-interpreter --target x86_64-win7-windows-msvc
 
       # 标准目标构建：target 输入触发 rustup target add（Tier-1/2 有预编译 artifacts），
       # maturin-action 自动安装对应 target。

@@ -1,6 +1,0 @@
-- [x] 编写现代风格 QSS（GitHub Desktop 风格：扁平、清爽、对比适中）
-- [x] 主功能按钮三级差异化设计：L1 主操作（48px 填充/主色边框）、L2 次要操作（40px 灰边框）、L3 辅助操作（32px 扁平）
-- [x] 引入设计令牌系统（theme.py）：色彩/排版/间距/圆角/按钮层级集中定义，QSS 通过 `${TOKEN}` 占位符引用
-- [x] .ui 文件 minimumSize 与 QSS 令牌保持一致（主操作 200x48 / 次要 140x40 / 辅助 32px）
-- [x] styles.qss 纳入 pyproject.toml force-include 确保随包分发
-- [x] 回退 iter-83 移除主题系统的决策，rule-12-pyside-dev.md 重新要求令牌与 QSS

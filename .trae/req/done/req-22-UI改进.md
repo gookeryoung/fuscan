@@ -1,6 +1,0 @@
-- [x] 去除设置对话框中重复的"扫描压缩包"全局开关，仅保留主界面文件类型树的"压缩包"勾选项
-- [x] 将全盘扫描/选择盘符/选择文件夹图标整合到 scan_mode_combo（QComboBox setItemIcon）
-- [x] 统一 select_path_btn 与同行 scan_mode_combo/path_combo 实际总高度（40px），调整 BTN_HEIGHT_* 与 BTN_PADDING_* 令牌语义
-- [x] 优化扫描结果详情 Content 区布局，使用 QSplitter 让 hits_table 与 preview 可垂直拉伸分配空间
-- [x] 结果树第 0 列从"路径"改为"文件名"（路径在右侧详情区可见，避免横向占用过多宽度），完整路径作为 tooltip
-- [x] 结果树"严重等级/命中数/条数"列设为 ResizeToContents，按内容自动收缩到最小所需宽度；"文件名/规则/详情"列保持 Interactive 用户可调

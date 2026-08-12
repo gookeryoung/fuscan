@@ -1,9 +1,0 @@
-- [x] 评估文档类提取器是否有 Rust/C 加速 Python 库可用
-- [x] 引入 `python-calamine==0.3.1`（Rust + PyO3）替代 openpyxl/xlrd
-- [x] XLSX/XLS/WPS 表格切换至 calamine 后端
-- [x] 保持 Python 3.8 兼容性（calamine 固定 0.3.1）
-- [x] XLSX/XLS 速度档次从 T4 慢速降至 T2 快速
-- [x] ODS 维持 odfpy 实现（calamine 0.3.1 ODS 解析不完整）
-- [x] 移除主依赖 openpyxl/xlrd，openpyxl 迁入 test 可选依赖
-- [x] 更新单元测试与基准测试档次断言
-- [x] 验证 ruff/format/pyrefly/pytest 全部门禁通过

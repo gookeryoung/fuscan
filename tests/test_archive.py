@@ -1517,6 +1517,118 @@ class TestScannerArchiveIntegration:
         assert report.stats.matched_files >= 1
 
 
+# ----------------------------- GBK ZIP 端到端回归 -----------------------------
+
+
+class TestGbkZipRegression:
+    """GBK 文件名 ZIP 端到端回归测试。
+
+    源自手动验证脚本 ``verify_gbk_zip.py``，覆盖多文件混合场景：单文件、
+    单层目录、多层目录、GBK 字节碰巧有效 UTF-8 的 ``凭证``、纯 ASCII 共存
+    于一个 ZIP。锁定 ZipReader 对各类 GBK 文件名的正确解码、内容读取与
+    Scanner 规则命中，防止修复退化。
+    """
+
+    @pytest.fixture
+    def gbk_zip(self, tmp_path: Path) -> Path:
+        """构造包含多种中文文件名/路径的 GBK ZIP（模拟 Windows 压缩工具产物）。"""
+        return _make_gbk_zip(
+            tmp_path / "gbk_demo.zip",
+            {
+                "密码.txt": "secret_password=AKIA1234567890\n",
+                "配置/config.json": '{"db": "mysql://root:pass@host:3306"}',
+                "文档/需求/readme.md": "# 项目需求\n包含敏感信息。",
+                "凭证/azure.env": "AZURE_KEY=abcdef1234567890abcdef1234567890ABCD\n",
+                "normal_ascii.txt": "no chinese here\n",
+            },
+        )
+
+    def test_stdlib_zipfile_produces_cp437_garbage(self, gbk_zip: Path) -> None:
+        """回归前提：标准库 zipfile 对未设置 UTF-8 标志位的 GBK ZIP 按 CP437 解码产生乱码。
+
+        锁定测试 ZIP 的有效性——确保构造的 ZIP 确实复现乱码场景
+        （``flag_bits`` 不含 0x800 且文件名为 GBK 字节），避免构造逻辑退化
+        （如误设 UTF-8 标志位）使后续回归测试空转。预期值用 ``GBK 编码 →
+        CP437 解码`` 动态生成，与 zipfile 实际解码结果对比。
+        """
+        expected_raw = {
+            "密码.txt".encode("gbk").decode("cp437"),
+            "配置/config.json".encode("gbk").decode("cp437"),
+            "文档/需求/readme.md".encode("gbk").decode("cp437"),
+            "凭证/azure.env".encode("gbk").decode("cp437"),
+            "normal_ascii.txt".encode("gbk").decode("cp437"),
+        }
+        with zipfile.ZipFile(str(gbk_zip)) as zf:
+            raw_names = {info.filename for info in zf.infolist()}
+        assert raw_names == expected_raw
+
+    def test_zip_reader_decodes_all_entries(self, gbk_zip: Path) -> None:
+        """ZipReader 正确解码所有 GBK 文件名（含凭证这种字节碰巧有效 UTF-8 的场景）。"""
+        expected = {
+            "密码.txt",
+            "配置/config.json",
+            "文档/需求/readme.md",
+            "凭证/azure.env",
+            "normal_ascii.txt",
+        }
+        reader = ZipReader(gbk_zip)
+        try:
+            entries = reader.list_entries()
+            assert {e.entry_name for e in entries} == expected
+        finally:
+            reader.close()
+
+    def test_read_entry_content_via_decoded_name(self, gbk_zip: Path) -> None:
+        """用解码后的中文文件名能正确读取所有条目内容（read_entry 回查映射）。"""
+        expected_content = {
+            "密码.txt": b"secret_password=AKIA1234567890\n",
+            "配置/config.json": b'{"db": "mysql://root:pass@host:3306"}',
+            "文档/需求/readme.md": ("# 项目需求\n包含敏感信息。").encode(),
+            "凭证/azure.env": b"AZURE_KEY=abcdef1234567890abcdef1234567890ABCD\n",
+            "normal_ascii.txt": b"no chinese here\n",
+        }
+        reader = ZipReader(gbk_zip)
+        try:
+            reader.list_entries()
+            for name, expected_bytes in expected_content.items():
+                assert reader.read_entry(name) == expected_bytes
+        finally:
+            reader.close()
+
+    def test_scanner_rules_hit_all_gbk_entries(self, gbk_zip: Path, tmp_path: Path) -> None:
+        """端到端：Scanner 规则能命中各类 GBK 中文文件名与路径。
+
+        覆盖验证脚本的规则匹配场景：密码（FILENAME）/配置（PATH）/凭证（PATH）
+        三类关键词分别命中对应条目。修复前因文件名乱码导致 contains 模式全部失效。
+        """
+        rules = RuleSet(
+            version="1.0",
+            rules=(
+                Rule(
+                    name="密码文件规则",
+                    severity=Severity.WARNING,
+                    match=LeafMatch(target=MatchTarget.FILENAME, mode=MatchMode.CONTAINS, pattern="密码"),
+                ),
+                Rule(
+                    name="配置目录规则",
+                    severity=Severity.WARNING,
+                    match=LeafMatch(target=MatchTarget.PATH, mode=MatchMode.CONTAINS, pattern="配置"),
+                ),
+                Rule(
+                    name="Azure凭证规则",
+                    severity=Severity.WARNING,
+                    match=LeafMatch(target=MatchTarget.PATH, mode=MatchMode.CONTAINS, pattern="凭证"),
+                ),
+            ),
+        )
+        scanner = Scanner(rules, scan_archives=True)
+        report = scanner.scan(tmp_path)
+        hit_paths = [str(r.path) for r in report.hits]
+        assert any("密码.txt" in p for p in hit_paths), f"密码规则未命中: {hit_paths}"
+        assert any("配置" in p for p in hit_paths), f"配置规则未命中: {hit_paths}"
+        assert any("凭证" in p for p in hit_paths), f"凭证规则未命中: {hit_paths}"
+
+
 # ----------------------------- 边界情况 -----------------------------
 
 

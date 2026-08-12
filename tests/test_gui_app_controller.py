@@ -222,6 +222,13 @@ class TestGuiPackageGetattr:
         with pytest.raises(AttributeError, match="nonexistent_attribute"):
             _ = gui_pkg.nonexistent_attribute  # type: ignore[attr-defined]
 
+    def test_controllers_getattr_unknown_attribute_raises(self) -> None:
+        """``fuscan.gui.controllers`` 模块访问不存在的属性应抛 AttributeError。"""
+        import fuscan.gui.controllers as ctrl_pkg
+
+        with pytest.raises(AttributeError, match="nonexistent_controller"):
+            _ = ctrl_pkg.nonexistent_controller  # type: ignore[attr-defined]
+
 
 class TestApplyGlobalFont:
     """``_apply_global_font`` 测试：用户配置覆盖与平台默认回退。

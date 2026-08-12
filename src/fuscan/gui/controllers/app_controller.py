@@ -23,28 +23,28 @@ from __future__ import annotations
 
 import logging
 from functools import cache
+from typing import TYPE_CHECKING
 
 try:
     from PySide2.QtCore import QObject
 except ImportError:  # pragma: no cover
     from PySide6.QtCore import QObject  # pyrefly: ignore [missing-import]
 
-from fuscan.gui.controllers.about_controller import AboutController
-from fuscan.gui.controllers.config_controller import ConfigController
-from fuscan.gui.controllers.file_monitor_controller import FileMonitorController
-from fuscan.gui.controllers.rules_controller import RulesController
-from fuscan.gui.controllers.scan_controller import ScanController
-from fuscan.gui.controllers.splash_controller import SplashController
-from fuscan.gui.controllers.whitelist_controller import WhitelistController
-from fuscan.gui.controllers.workspace_controller import WorkspaceController
-from fuscan.gui.models import (
-    ExtractorListModel,
-    FileMonitorModel,
-    ResultListModel,
-    RuleListModel,
-    WorkspaceListModel,
-)
-from fuscan.gui.theme import ThemeController
+if TYPE_CHECKING:
+    # 仅用于属性返回类型注解的 controller 类型（``from __future__ import annotations``
+    # 使注解为字符串，运行时不求值）。运行时在 register_qml_types / __init__ 内延迟导入，
+    # 使 ``from fuscan.gui.controllers import AppController`` 不触发任何 controller 模块加载：
+    # ScanController 顶层拉起 scanner 链（``from fuscan.scanner import ScanReport``），
+    # WorkspaceController 间接拉起（导入 scan_controller），FileMonitorController 拉起
+    # ``fuscan.scanner.scanner``。ScanController/SplashController/models 仅在
+    # register_qml_types 内运行时使用，不出现在类型注解中，故不在 TYPE_CHECKING 导入。
+    from fuscan.gui.controllers.about_controller import AboutController
+    from fuscan.gui.controllers.config_controller import ConfigController
+    from fuscan.gui.controllers.file_monitor_controller import FileMonitorController
+    from fuscan.gui.controllers.rules_controller import RulesController
+    from fuscan.gui.controllers.whitelist_controller import WhitelistController
+    from fuscan.gui.controllers.workspace_controller import WorkspaceController
+    from fuscan.gui.theme import ThemeController
 
 __all__ = ["AppController", "register_qml_types"]
 
@@ -66,6 +66,25 @@ def register_qml_types() -> None:
         from PySide2.QtQml import qmlRegisterType
     except ImportError:  # pragma: no cover
         from PySide6.QtQml import qmlRegisterType  # pyrefly: ignore [missing-import]
+
+    # 延迟导入所有 controller / model / theme 类型：register_qml_types 在 app.py 启动早期
+    # 被显式调用（已过 Splash 显示），此时加载全部 controller（含 scanner 链）合理。
+    from fuscan.gui.controllers.about_controller import AboutController
+    from fuscan.gui.controllers.config_controller import ConfigController
+    from fuscan.gui.controllers.file_monitor_controller import FileMonitorController
+    from fuscan.gui.controllers.rules_controller import RulesController
+    from fuscan.gui.controllers.scan_controller import ScanController
+    from fuscan.gui.controllers.splash_controller import SplashController
+    from fuscan.gui.controllers.whitelist_controller import WhitelistController
+    from fuscan.gui.controllers.workspace_controller import WorkspaceController
+    from fuscan.gui.models import (
+        ExtractorListModel,
+        FileMonitorModel,
+        ResultListModel,
+        RuleListModel,
+        WorkspaceListModel,
+    )
+    from fuscan.gui.theme import ThemeController
 
     # URI=fuscan.theme，QML 用 `import fuscan.theme 1.0` 后用 ThemeController 类型
     # ThemeController 类型名与 context property 名 "Theme" 不同，无冲突
@@ -97,6 +116,16 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
+        # 延迟导入：构造时才加载 controller 模块（含 scanner 链），避免类定义期触发。
+        # ScanController/WorkspaceController/FileMonitorController 均会拉起 scanner 链。
+        from fuscan.gui.controllers.about_controller import AboutController
+        from fuscan.gui.controllers.config_controller import ConfigController
+        from fuscan.gui.controllers.file_monitor_controller import FileMonitorController
+        from fuscan.gui.controllers.rules_controller import RulesController
+        from fuscan.gui.controllers.whitelist_controller import WhitelistController
+        from fuscan.gui.controllers.workspace_controller import WorkspaceController
+        from fuscan.gui.theme import ThemeController
+
         # 构造顺序：theme → config → rules → whitelist → workspace → about
         # theme 不依赖其他；config 不依赖其他；rules 依赖 config；
         # whitelist 独立（仅持有 WhitelistStore）；

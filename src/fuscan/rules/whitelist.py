@@ -22,43 +22,56 @@
 from __future__ import annotations
 
 import fnmatch
+import json
 import logging
 import sys
 import threading
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
-try:
-    import orjson
-
-    def _json_dumps(data: list[dict[str, Any]]) -> str:
-        """高性能 JSON 序列化（orjson，带缩进）。"""
-        return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode("utf-8")
-
-    def _json_loads(data: str | bytes) -> list[dict[str, Any]]:
-        """高性能 JSON 反序列化（orjson，接受 str 或 bytes）。"""
-        result = orjson.loads(data)
-        if not isinstance(result, list):
-            raise ValueError("JSON 顶层必须是列表")
-        return result
-
-except ImportError:  # pragma: no cover
-    import json
-
-    def _json_dumps(data: list[dict[str, Any]]) -> str:
-        return json.dumps(data, ensure_ascii=False, indent=2)
-
-    def _json_loads(data: str | bytes) -> list[dict[str, Any]]:
-        if isinstance(data, bytes):
-            data = data.decode("utf-8")
-        result = json.loads(data)
-        if not isinstance(result, list):
-            raise ValueError("JSON 顶层必须是列表")
-        return result
-
-
 from fuscan.utils.io import atomic_write_text
+
+
+@lru_cache(maxsize=1)
+def _get_orjson() -> ModuleType | None:
+    """惰性加载 orjson；不可用时返回 ``None``。
+
+    与 :func:`fuscan.scanner.manifest._get_orjson` 同样的惰性策略：
+    模块级**不**触发 ``import orjson``，首次序列化时才加载并经
+    ``lru_cache`` 缓存结果。回退到标准库 ``json`` 时语义等价，仅性能差异。
+    """
+    try:
+        import orjson
+
+        return orjson
+    except ImportError:  # pragma: no cover - orjson 为 fuscan 必需依赖，回退路径不期望触发
+        return None
+
+
+def _json_dumps(data: list[dict[str, Any]]) -> str:
+    """JSON 序列化为字符串（orjson 优先，回退标准库 json，带缩进）。"""
+    orjson = _get_orjson()
+    if orjson is not None:
+        return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode("utf-8")
+    return json.dumps(data, ensure_ascii=False, indent=2)  # pragma: no cover
+
+
+def _json_loads(data: str | bytes) -> list[dict[str, Any]]:
+    """JSON 反序列化（orjson 优先，回退标准库 json，接受 str 或 bytes）。"""
+    orjson = _get_orjson()
+    if orjson is not None:
+        result = orjson.loads(data)
+    else:
+        if isinstance(data, bytes):  # pragma: no cover
+            data = data.decode("utf-8")
+        result = json.loads(data)  # pragma: no cover
+    if not isinstance(result, list):
+        raise ValueError("JSON 顶层必须是列表")
+    return result
+
 
 __all__ = [
     "Whitelist",

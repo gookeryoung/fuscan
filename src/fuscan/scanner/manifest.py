@@ -20,40 +20,59 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
-try:
-    import orjson
 
-    def _json_dumps(data: dict[str, Any]) -> str:
-        """高性能 JSON 序列化（orjson，带缩进）。"""
+@lru_cache(maxsize=1)
+def _get_orjson() -> ModuleType | None:
+    """惰性加载 orjson；不可用时返回 ``None``。
+
+    orjson 为可选 C 扩展，仅用于增量清单 / 误报白名单 / 扫描报告序列化加速。
+    模块级**不**触发 ``import orjson``，避免 CLI/GUI 启动期加载 C 扩展；
+    首次序列化时才尝试加载并经 ``lru_cache`` 缓存结果（只导入一次，
+    后续为 O(1) 字典查找）。回退到标准库 ``json`` 时语义等价，仅性能差异。
+    """
+    try:
+        import orjson
+
+        return orjson
+    except ImportError:  # pragma: no cover - orjson 为 fuscan 必需依赖，回退路径不期望触发
+        return None
+
+
+def _json_dumps(data: dict[str, Any]) -> str:
+    """JSON 序列化为字符串（orjson 优先，回退标准库 json，带缩进）。"""
+    orjson = _get_orjson()
+    if orjson is not None:
         return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode("utf-8")
+    return json.dumps(data, ensure_ascii=False, indent=2)  # pragma: no cover
 
-    def _json_dumps_bytes(data: dict[str, Any]) -> bytes:
-        """高性能 JSON 序列化为字节串（避免 str 解码开销，直接写文件）。"""
+
+def _json_dumps_bytes(data: dict[str, Any]) -> bytes:
+    """JSON 序列化为字节串（orjson 优先，回退标准库 json）。
+
+    orjson 路径直接返回 ``bytes``，避免 str→bytes 解码开销；
+    标准库路径将 str 结果编码为 UTF-8 字节串。
+    """
+    orjson = _get_orjson()
+    if orjson is not None:
         return orjson.dumps(data, option=orjson.OPT_INDENT_2)
+    return json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")  # pragma: no cover
 
-    def _json_loads(data: str | bytes) -> dict[str, Any]:
-        """高性能 JSON 反序列化（orjson，接受 str 或 bytes）。"""
+
+def _json_loads(data: str | bytes) -> dict[str, Any]:
+    """JSON 反序列化（orjson 优先，回退标准库 json，接受 str 或 bytes）。"""
+    orjson = _get_orjson()
+    if orjson is not None:
         result = orjson.loads(data)
-        if not isinstance(result, dict):
-            raise ValueError("JSON 顶层必须是字典")
-        return result
-
-except ImportError:  # pragma: no cover
-
-    def _json_dumps(data: dict[str, Any]) -> str:
-        return json.dumps(data, ensure_ascii=False, indent=2)
-
-    def _json_dumps_bytes(data: dict[str, Any]) -> bytes:
-        return json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-
-    def _json_loads(data: str | bytes) -> dict[str, Any]:
-        result = json.loads(data)
-        if not isinstance(result, dict):
-            raise ValueError("JSON 顶层必须是字典")
-        return result
+    else:
+        result = json.loads(data)  # pragma: no cover
+    if not isinstance(result, dict):
+        raise ValueError("JSON 顶层必须是字典")
+    return result
 
 
 __all__ = [

@@ -32,14 +32,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fuscan import __version__
-from fuscan.benchmark import BaselineComparison, BenchmarkResult
-from fuscan.config import load_config
-from fuscan.export.cli_output import output_report
-from fuscan.rules import RuleError, RuleSet, load_ruleset, load_with_builtin, merge_multiple_rulesets
-from fuscan.scanner import Scanner, ScanReport
 
 if TYPE_CHECKING:
+    # 仅类型注解使用的重型模块：运行时不导入，避免 CLI 启动期加载 scanner/rules 链。
+    # 各 handler 在首次使用时按需延迟导入对应模块。
+    from fuscan.benchmark import BaselineComparison, BenchmarkResult
     from fuscan.perf import FilePerfRecorder
+    from fuscan.rules import RuleSet
+    from fuscan.scanner import Scanner, ScanReport
 
 __all__ = ["build_parser", "main"]
 
@@ -224,6 +224,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "cache": _cmd_cache,
     }
 
+    # 延迟导入 RuleError：仅 scan/benchmark/rules 子命令的规则加载路径会抛此异常，
+    # version/gui/cache 子命令无需加载 rules 包
+    from fuscan.rules import RuleError
+
     try:
         handler = command_handlers.get(args.command)
         if handler is not None:
@@ -251,6 +255,8 @@ def _load_ruleset_from_args(args: argparse.Namespace) -> RuleSet | None:
     - ``--no-builtin``：仅加载用户规则（需至少一个 -r），多个文件按顺序合并
     - 默认：内置规则 + 用户规则（按顺序合并，后者覆盖前者）
     """
+    from fuscan.rules import load_ruleset, load_with_builtin, merge_multiple_rulesets
+
     rules_paths: list[Path] | None = args.rules
 
     if args.no_builtin:
@@ -273,6 +279,10 @@ def _load_ruleset_from_args(args: argparse.Namespace) -> RuleSet | None:
 
 def _cmd_scan(args: argparse.Namespace) -> int:
     """执行 scan 子命令。"""
+    from fuscan.config import load_config
+    from fuscan.export.cli_output import output_report
+    from fuscan.scanner import Scanner
+
     scan_path: Path = args.path
 
     if not scan_path.exists():
@@ -410,6 +420,8 @@ def _run_scan(scanner: Scanner, scan_path: Path, args: argparse.Namespace) -> Sc
 def _cmd_benchmark(args: argparse.Namespace) -> int:
     """执行 benchmark 子命令：多轮扫描测量各阶段性能，支持导出/对比基准线。"""
     from fuscan.benchmark import compare_to_baseline, load_baseline, run_benchmark, save_baseline
+    from fuscan.config import load_config
+    from fuscan.scanner import Scanner
 
     scan_path: Path = args.path
     if not scan_path.exists():
@@ -568,6 +580,8 @@ def _benchmark_json(result: BenchmarkResult, comparison: BaselineComparison | No
 
 def _cmd_rules(args: argparse.Namespace) -> int:
     """执行 rules 子命令：校验规则文件。"""
+    from fuscan.rules import load_ruleset
+
     rules_path: Path = args.rules
     if not rules_path.exists():
         print(f"错误: 规则文件不存在: {rules_path}", file=sys.stderr)

@@ -12,19 +12,15 @@
 - :class:`WhitelistController`：误报白名单管理（路径 glob + 规则名）
 - :class:`AboutController`：关于页信息
 - :class:`FileMonitorController`：文件监控（watchdog 事件驱动 + 实时命中推送）
+
+子模块按需惰性加载（PEP 562 ``__getattr__``），避免 ``import fuscan.gui.controllers``
+触发全量 controller 链（FileMonitorController 会拉起 scanner 链；ScanController 会
+拉起 export.report 等）。与 :mod:`fuscan.gui` 顶层 ``__getattr__`` 同样的策略。
 """
 
 from __future__ import annotations
 
-from fuscan.gui.controllers.about_controller import AboutController
-from fuscan.gui.controllers.app_controller import AppController, register_qml_types
-from fuscan.gui.controllers.config_controller import ConfigController
-from fuscan.gui.controllers.file_monitor_controller import FileMonitorController
-from fuscan.gui.controllers.rules_controller import RulesController
-from fuscan.gui.controllers.scan_controller import ScanController
-from fuscan.gui.controllers.splash_controller import SplashController
-from fuscan.gui.controllers.whitelist_controller import WhitelistController
-from fuscan.gui.controllers.workspace_controller import WorkspaceController
+import importlib
 
 __all__ = [
     "AboutController",
@@ -38,3 +34,33 @@ __all__ = [
     "WorkspaceController",
     "register_qml_types",
 ]
+
+# 符号名 → 所在子模块路径。按名访问时惰性加载对应子模块并缓存到模块全局。
+_LAZY_MODULES: dict[str, str] = {
+    "AboutController": "fuscan.gui.controllers.about_controller",
+    "AppController": "fuscan.gui.controllers.app_controller",
+    "ConfigController": "fuscan.gui.controllers.config_controller",
+    "FileMonitorController": "fuscan.gui.controllers.file_monitor_controller",
+    "RulesController": "fuscan.gui.controllers.rules_controller",
+    "ScanController": "fuscan.gui.controllers.scan_controller",
+    "SplashController": "fuscan.gui.controllers.splash_controller",
+    "WhitelistController": "fuscan.gui.controllers.whitelist_controller",
+    "WorkspaceController": "fuscan.gui.controllers.workspace_controller",
+    "register_qml_types": "fuscan.gui.controllers.app_controller",
+}
+
+
+def __getattr__(name: str):  # type: ignore[no-untyped-def]
+    """惰性加载 controller 类，避免 ``import fuscan.gui.controllers`` 触发全量加载。
+
+    与 :mod:`fuscan.gui` 顶层 ``__getattr__`` 同样的 PEP 562 模式：仅在按名访问
+    具体符号时才加载对应子模块。使 ``from fuscan.gui.controllers import AppController``
+    不连带加载 FileMonitorController（拉起 scanner 链）等重型依赖，缩短 GUI 启动期
+    与测试导入耗时。首次访问后缓存到模块全局，后续为直接字典命中。
+    """
+    module_path = _LAZY_MODULES.get(name)
+    if module_path is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module_path), name)
+    globals()[name] = value  # 缓存到模块全局，后续访问直接命中
+    return value

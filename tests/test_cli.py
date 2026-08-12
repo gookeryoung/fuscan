@@ -503,7 +503,9 @@ class TestCliErrorPaths:
         def raise_keyboard_interrupt(*args, **kwargs):  # type: ignore[no-untyped-def]
             raise KeyboardInterrupt
 
-        monkeypatch.setattr(cli_mod, "load_with_builtin", raise_keyboard_interrupt)
+        # 注入到 _load_ruleset_from_args（模块级函数，由 _cmd_scan 直接调用），
+        # 避免 patch 延迟导入的 load_with_builtin（已非 cli 模块级属性）
+        monkeypatch.setattr(cli_mod, "_load_ruleset_from_args", raise_keyboard_interrupt)
         rc = main(["scan", str(scan_root), "-r", str(rules_file)])
         assert rc == 130
         err = capsys.readouterr().err
@@ -522,7 +524,7 @@ class TestCliErrorPaths:
         def raise_exception(*args, **kwargs):  # type: ignore[no-untyped-def]
             raise RuntimeError("模拟未知错误")
 
-        monkeypatch.setattr(cli_mod, "load_with_builtin", raise_exception)
+        monkeypatch.setattr(cli_mod, "_load_ruleset_from_args", raise_exception)
         rc = main(["scan", str(scan_root), "-r", str(rules_file)])
         assert rc == 1
         err = capsys.readouterr().err

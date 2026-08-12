@@ -128,6 +128,45 @@
    `extract_content_from_bytes`，删除原 `_extract_via_temp` 写临时文件再读回的逻辑，
    消除压缩包每个二进制条目的 2 次冗余磁盘 I/O
 
+## 启动/导入性能基线
+
+> 测量时间：2026-08-12（加载性能优化 P3-P5 后）
+> 测量方式：`python -c "..."` 子进程 5 次取中位数（含 Python 解释器启动开销 ~20ms）
+
+### 优化前后对比
+
+| 指标 | 优化前 (中位数) | 优化后 (中位数) | 改善 |
+|------|----------------:|----------------:|-----:|
+| `import fuscan` | 22ms | 20ms | -9% |
+| `import fuscan.cli` | 126ms | 47ms | -63% |
+| CLI `version` 子命令（含解释器启动） | 135ms | 84ms | -38% |
+| `from fuscan.gui.controllers import AppController` | 275ms | 105ms | -62% |
+
+### 启动期惰性加载验证
+
+`fuscan version` 子命令执行后 `sys.modules` 中**不**包含以下重型模块（全部延迟到首次使用时加载）：
+
+- `fuscan.scanner.scanner`（扫描引擎链）
+- `fuscan.extractors`（文件提取器）
+- `lxml`（Office XML 解析）
+- `orjson`（JSON 序列化 C 扩展）
+- `watchdog`（文件监控）
+
+验证方式：`uv run pytest -m slow tests/test_startup_imports.py`
+
+### 优化要点
+
+1. **P3 orjson 惰性加载**：`manifest.py` / `whitelist.py` 顶层 `import orjson` 改为
+   `_get_orjson()` + `lru_cache` 延迟加载，首次序列化时才加载 C 扩展。回退标准库 `json`
+   语义等价（`# pragma: no cover` 标记回退分支）
+2. **P4 CLI 子命令级延迟导入**：`cli.py` 顶层 `from fuscan.scanner import Scanner` /
+   `from fuscan.rules import ...` / `from fuscan.benchmark import ...` 等移入各 handler
+   函数体，`version` / `gui` / `cache` 子命令不触发 scanner/rules 链加载
+3. **P5 控制器惰性 `__getattr__`**：`controllers/__init__.py` 用 PEP 562 `__getattr__`
+   按名延迟加载各 controller 子模块；`app_controller.py` 顶层 controller 导入移入
+   `register_qml_types()` / `__init__`，使 `from fuscan.gui.controllers import AppController`
+   不连带加载 FileMonitorController（拉起 scanner + watchdog）等重型依赖
+
 ## slow 回归断言阈值
 
 | 测试 | 断言 | 基线值 |

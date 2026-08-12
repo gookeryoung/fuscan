@@ -1185,5 +1185,167 @@ class TestReplaceBatchAtomic:
         assert batch.rolled_back is False
 
 
+class TestReplaceRobustnessScenario:
+    """端到端组合场景：事务回滚 + 完整性校验 + 重复扫描检测。
+
+    将多个健壮性机制串联在一个测试中验证：
+
+    - 事务模式失败回滚（含 manifest 条目清理）
+    - 回滚后重新替换（manifest 无残留，可正常替换）
+    - 备份损坏时撤销完整性校验失败
+    - 已替换文件重复扫描检测
+    - 恢复备份后撤销成功
+    """
+
+    def test_rollback_then_corrupted_backup_then_already_replaced(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """组合场景：事务失败回滚 → 重试替换 → 备份损坏校验 → 重复扫描检测 → 恢复撤销。"""
+        from fuscan.processing import replacer as replacer_module
+
+        rule = _make_rule("token", "token", replace=True, replace_with="***")
+        ruleset = RuleSet(version="1.0", rules=(rule,))
+        manifest = BackupManifest(tmp_path / "manifest.json")
+        backup_root = tmp_path / "backup"
+        scan_root = tmp_path / "scan"
+        scan_root.mkdir()
+
+        # 准备 3 个源文件
+        src1 = scan_root / "a.txt"
+        src1.write_text("token=abc\n", encoding="utf-8")
+        src2 = scan_root / "b.txt"
+        src2.write_text("token=def\n", encoding="utf-8")
+        src3 = scan_root / "c.txt"
+        src3.write_text("token=ghi\n", encoding="utf-8")
+        results = (
+            _make_scan_result(src1, rule, ("token",)),
+            _make_scan_result(src2, rule, ("token",)),
+            _make_scan_result(src3, rule, ("token",)),
+        )
+        original_replace = replacer_module.replace_in_file
+
+        # === 场景1：事务模式下 src3 替换失败 → 回滚已替换的 src1/src2 ===
+        def _fake_replace_failure(
+            src: Path,
+            hits: tuple[RuleHit, ...],
+            ruleset: RuleSet | None,
+            backup_root: Path,
+            scan_root: Path,
+            preserve_relative: bool = True,
+            override_replace_with: str | None = None,
+            manifest: BackupManifest | None = None,
+        ) -> ReplaceResult:
+            if src == src3:
+                return ReplaceResult(
+                    status=ReplaceStatus.REPLACE_FAILED,
+                    message="模拟替换失败",
+                )
+            return original_replace(
+                src,
+                hits,
+                ruleset,
+                backup_root,
+                scan_root,
+                preserve_relative,
+                override_replace_with=override_replace_with,
+                manifest=manifest,
+            )
+
+        monkeypatch.setattr(replacer_module, "replace_in_file", _fake_replace_failure)
+
+        batch = replace_batch(
+            results,
+            ruleset,
+            backup_root,
+            scan_root,
+            preserve_relative=True,
+            manifest=manifest,
+            atomic=True,
+        )
+
+        # 验证回滚
+        assert batch.rolled_back is True
+        assert batch.succeeded == 0
+        assert batch.failed == 1
+        assert batch.backup_paths == ()
+        # src1/src2 恢复原始内容（回滚成功）
+        assert src1.read_text(encoding="utf-8") == "token=abc\n"
+        assert src2.read_text(encoding="utf-8") == "token=def\n"
+        # src3 未被修改（替换失败）
+        assert src3.read_text(encoding="utf-8") == "token=ghi\n"
+        # manifest 中所有条目已清理（回滚时删除 src1/src2 条目，src3 未记录）
+        assert manifest.find_by_src(src1) is None
+        assert manifest.find_by_src(src2) is None
+        assert manifest.find_by_src(src3) is None
+
+        # === 场景2：恢复原始函数后重新替换（全部成功） ===
+        monkeypatch.setattr(replacer_module, "replace_in_file", original_replace)
+
+        batch2 = replace_batch(
+            results,
+            ruleset,
+            backup_root,
+            scan_root,
+            preserve_relative=True,
+            manifest=manifest,
+            atomic=True,
+        )
+
+        assert batch2.succeeded == 3
+        assert batch2.rolled_back is False
+        assert len(batch2.backup_paths) == 3
+        # 源文件已被替换
+        assert src1.read_text(encoding="utf-8") == "***=abc\n"
+        assert src2.read_text(encoding="utf-8") == "***=def\n"
+        assert src3.read_text(encoding="utf-8") == "***=ghi\n"
+        # manifest 中有 3 个条目
+        assert manifest.find_by_src(src1) is not None
+        assert manifest.find_by_src(src2) is not None
+        assert manifest.find_by_src(src3) is not None
+
+        # === 场景3：篡改 src1 的备份文件 → 撤销时完整性校验失败 ===
+        entry1 = manifest.find_by_src(src1)
+        assert entry1 is not None
+        backup1 = Path(entry1.backup_path)
+        original_backup_bytes = backup1.read_bytes()
+        # 篡改备份（保持大小一致，改变 sha256）
+        backup1.write_bytes(b"x" * len(original_backup_bytes))
+
+        msg = restore_from_backup(backup1, src1, manifest=manifest)
+        assert msg.startswith("备份文件损坏")
+        # src1 仍为替换后内容（恢复被拒绝）
+        assert src1.read_text(encoding="utf-8") == "***=abc\n"
+        # manifest 条目仍保留（校验失败不删除）
+        assert manifest.find_by_src(src1) is not None
+
+        # === 场景4：src2 未被篡改 → 重复扫描检测返回 ALREADY_REPLACED ===
+        hit = _make_hit(rule, ("token",))
+        r = replace_in_file(
+            src2,
+            (hit,),
+            ruleset,
+            backup_root,
+            scan_root,
+            preserve_relative=True,
+            manifest=manifest,
+        )
+        assert r.status == ReplaceStatus.ALREADY_REPLACED
+        assert r.replaced_count == 0
+        # 返回的 backup_path 与 manifest 中记录的一致
+        entry2 = manifest.find_by_src(src2)
+        assert entry2 is not None
+        assert r.backup_path == Path(entry2.backup_path)
+
+        # === 场景5：恢复备份原始内容后撤销成功 ===
+        backup1.write_bytes(original_backup_bytes)
+        msg = restore_from_backup(backup1, src1, manifest=manifest)
+        assert msg.startswith("已从备份恢复")
+        assert src1.read_text(encoding="utf-8") == "token=abc\n"
+        # manifest 条目被删除（撤销成功后清理）
+        assert manifest.find_by_src(src1) is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

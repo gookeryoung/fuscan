@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+import struct
 import zipfile
+import zlib
 from collections.abc import Callable
 from concurrent.futures import Future
 from pathlib import Path
@@ -70,6 +72,88 @@ def _make_zip(zip_path: Path, files: dict[str, str], password: str | None = None
         # zipfile 标准库不支持写入加密，仅在读取端测试密码逻辑
         # 这里通过单独的加密 zip 创建流程（pyzipper 可选）跳过
         pytest.skip("标准库 zipfile 不支持写入加密 ZIP")
+    return zip_path
+
+
+def _make_gbk_zip(zip_path: Path, files: dict[str, str | bytes]) -> Path:
+    """构造 GBK 文件名 ZIP（模拟 Windows 压缩工具，不设置 UTF-8 标志位）。
+
+    手动构造 ZIP 字节流，绕过标准库 zipfile 对非 ASCII 文件名强制设置
+    UTF-8 标志位的行为，真实复现 WinRAR/好压/360 等工具产生的 GBK 乱码：
+    文件名以 GBK 字节存储且 ``flag_bits`` 不含 0x800，读取时 zipfile 按
+    CP437 解码产生乱码（如 ``密码.txt`` → ``├▄┬δ.txt``）。
+
+    采用 STORE 模式（无压缩）简化构造，不影响文件名编码场景验证。
+    """
+    central_dir: list[tuple[bytes, bytes]] = []
+    offset = 0
+    with zip_path.open("wb") as f:
+        for name, content in files.items():
+            name_bytes = name.encode("gbk")
+            content_bytes = content.encode("utf-8") if isinstance(content, str) else content
+            crc = zlib.crc32(content_bytes) & 0xFFFFFFFF
+            # Local file header：flag_bits = 0（不设置 UTF-8 标志位）
+            local_header = struct.pack(
+                "<4sHHHHHIIIHH",
+                b"PK\x03\x04",
+                20,  # version needed
+                0,  # flag_bits（不设置 0x800 → 按 CP437 解码 → GBK 乱码）
+                0,  # compression (store)
+                0,
+                0,  # mod time, mod date
+                crc,
+                len(content_bytes),
+                len(content_bytes),
+                len(name_bytes),
+                0,  # extra field length
+            )
+            f.write(local_header)
+            f.write(name_bytes)
+            f.write(content_bytes)
+            local_size = len(local_header) + len(name_bytes) + len(content_bytes)
+
+            central_header = struct.pack(
+                "<4sHHHHHHIIIHHHHHII",
+                b"PK\x01\x02",
+                20,  # version made by
+                20,  # version needed
+                0,  # flag_bits
+                0,  # compression
+                0,
+                0,  # time, date
+                crc,
+                len(content_bytes),
+                len(content_bytes),
+                len(name_bytes),
+                0,  # extra length
+                0,  # comment length
+                0,  # disk number
+                0,  # internal attrs
+                0,  # external attrs
+                offset,  # local header offset
+            )
+            central_dir.append((central_header, name_bytes))
+            offset += local_size
+
+        cd_offset = offset
+        cd_size = 0
+        for header, name_bytes in central_dir:
+            f.write(header)
+            f.write(name_bytes)
+            cd_size += len(header) + len(name_bytes)
+
+        eocd = struct.pack(
+            "<4sHHHHIIH",
+            b"PK\x05\x06",
+            0,
+            0,
+            len(central_dir),
+            len(central_dir),
+            cd_size,
+            cd_offset,
+            0,  # comment length
+        )
+        f.write(eocd)
     return zip_path
 
 
@@ -331,6 +415,107 @@ class TestZipReader:
             reader._zip.getinfo = fake_getinfo  # type: ignore[attr-defined]
             with pytest.raises(ArchiveError, match="未提供密码"):
                 reader.read_entry("a.txt")
+        finally:
+            reader.close()
+
+
+# ----------------------------- ZIP GBK 文件名乱码修复 -----------------------------
+
+
+class TestZipReaderGbkFilename:
+    """ZIP 文件名 GBK 乱码修复。
+
+    Windows 压缩工具（WinRAR/好压/360）默认用 GBK 编码中文文件名且不设置
+    UTF-8 标志位（flag_bits 0x800），导致 zipfile 按 CP437 解码产生乱码，
+    使下游 FILENAME/PATH 正则规则与扩展名白名单判断全部失效。
+    """
+
+    def test_list_entries_decodes_gbk_filename(self, tmp_path: Path) -> None:
+        """未设置 UTF-8 标志位的 GBK 文件名被正确解码为中文。"""
+        zip_path = _make_gbk_zip(tmp_path / "a.zip", {"密码.txt": "secret"})
+        reader = ZipReader(zip_path)
+        try:
+            entries = reader.list_entries()
+            names = {e.entry_name for e in entries}
+            assert names == {"密码.txt"}
+        finally:
+            reader.close()
+
+    def test_list_entries_decodes_gbk_path(self, tmp_path: Path) -> None:
+        """GBK 编码的中文路径（含目录层级）被正确解码。"""
+        zip_path = _make_gbk_zip(
+            tmp_path / "a.zip",
+            {"配置/config.json": "{}", "文档/readme.txt": "x"},
+        )
+        reader = ZipReader(zip_path)
+        try:
+            entries = reader.list_entries()
+            names = {e.entry_name for e in entries}
+            assert names == {"配置/config.json", "文档/readme.txt"}
+        finally:
+            reader.close()
+
+    def test_list_entries_preserves_utf8_filename(self, tmp_path: Path) -> None:
+        """UTF-8 标志位已设置的文件名保持不变（标准库 zipfile 写入路径）。"""
+        zip_path = _make_zip(tmp_path / "a.zip", {"密码.txt": "secret"})
+        reader = ZipReader(zip_path)
+        try:
+            entries = reader.list_entries()
+            names = {e.entry_name for e in entries}
+            assert names == {"密码.txt"}
+        finally:
+            reader.close()
+
+    def test_list_entries_ascii_filename_unchanged(self, tmp_path: Path) -> None:
+        """纯 ASCII 文件名不受解码逻辑影响。"""
+        zip_path = _make_gbk_zip(tmp_path / "a.zip", {"a.txt": "x", "README": "y"})
+        reader = ZipReader(zip_path)
+        try:
+            entries = reader.list_entries()
+            names = {e.entry_name for e in entries}
+            assert names == {"a.txt", "README"}
+        finally:
+            reader.close()
+
+    def test_read_entry_with_gbk_filename(self, tmp_path: Path) -> None:
+        """用解码后的中文文件名能正确读取条目内容。"""
+        zip_path = _make_gbk_zip(tmp_path / "a.zip", {"密码.txt": "secret"})
+        reader = ZipReader(zip_path)
+        try:
+            reader.list_entries()
+            assert reader.read_entry("密码.txt") == b"secret"
+        finally:
+            reader.close()
+
+    def test_read_entry_with_gbk_path(self, tmp_path: Path) -> None:
+        """GBK 中文路径条目可被正确读取。"""
+        zip_path = _make_gbk_zip(tmp_path / "a.zip", {"配置/config.json": "{}"})
+        reader = ZipReader(zip_path)
+        try:
+            reader.list_entries()
+            assert reader.read_entry("配置/config.json") == b"{}"
+        finally:
+            reader.close()
+
+    def test_read_entry_gbk_not_found(self, tmp_path: Path) -> None:
+        """GBK 文件名 ZIP 中查找不存在的条目抛 ArchiveError。"""
+        zip_path = _make_gbk_zip(tmp_path / "a.zip", {"密码.txt": "secret"})
+        reader = ZipReader(zip_path)
+        try:
+            reader.list_entries()
+            with pytest.raises(ArchiveError, match="条目不存在"):
+                reader.read_entry("不存在.txt")
+        finally:
+            reader.close()
+
+    def test_extension_parsed_from_gbk_filename(self, tmp_path: Path) -> None:
+        """GBK 文件名的扩展名被正确解析（ArchiveEntry.extension）。"""
+        zip_path = _make_gbk_zip(tmp_path / "a.zip", {"密码.txt": "x", "配置.json": "y"})
+        reader = ZipReader(zip_path)
+        try:
+            entries = {e.entry_name: e for e in reader.list_entries()}
+            assert entries["密码.txt"].extension == "txt"
+            assert entries["配置.json"].extension == "json"
         finally:
             reader.close()
 
@@ -1205,6 +1390,41 @@ class TestScannerArchiveIntegration:
         results = scanner.scan_archive(zip_path)
         assert len(results) == 1
         assert results[0].has_hit
+
+    def test_scan_archive_gbk_filename_hit(self, tmp_path: Path) -> None:
+        """GBK 文件名 ZIP 端到端：FILENAME 规则能命中中文文件名。
+
+        回归：未修复前 zipfile 按 CP437 解码产生乱码（密码.txt → ├▄┬δ.txt），
+        FILENAME 规则 contains 模式匹配 "密码" 必然失败。
+        """
+        _make_gbk_zip(tmp_path / "a.zip", {"密码.txt": "x"})
+        rs = _build_ruleset(_filename_rule("r", "密码"))
+        scanner = Scanner(rs, scan_archives=True)
+        report = scanner.scan(tmp_path)
+        hit_paths = [str(r.path) for r in report.hits]
+        assert any("密码.txt" in p for p in hit_paths)
+
+    def test_scan_archive_gbk_path_rule_hit(self, tmp_path: Path) -> None:
+        """GBK 中文路径 ZIP 端到端：PATH 规则能命中中文目录名。"""
+        _make_gbk_zip(tmp_path / "a.zip", {"配置/config.txt": "x"})
+        rule = Rule(
+            name="r",
+            severity=Severity.WARNING,
+            match=LeafMatch(target=MatchTarget.PATH, mode=MatchMode.CONTAINS, pattern="配置"),
+        )
+        rs = _build_ruleset(rule)
+        scanner = Scanner(rs, scan_archives=True)
+        report = scanner.scan(tmp_path)
+        hit_paths = [str(r.path) for r in report.hits]
+        assert any("配置" in p for p in hit_paths)
+
+    def test_scan_archive_gbk_content_rule_hit(self, tmp_path: Path) -> None:
+        """GBK 文件名 ZIP 端到端：CONTENT 规则能读取条目内容并命中。"""
+        _make_gbk_zip(tmp_path / "a.zip", {"密码.txt": "secret value"})
+        rs = _build_ruleset(_content_rule("r", "secret value"))
+        scanner = Scanner(rs, scan_archives=True)
+        report = scanner.scan(tmp_path)
+        assert report.stats.matched_files >= 1
 
 
 # ----------------------------- 边界情况 -----------------------------

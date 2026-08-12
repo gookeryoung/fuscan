@@ -129,8 +129,14 @@ def _decode_zip_filename(info: zipfile.ZipInfo) -> str:
     与 FILENAME/PATH 正则规则全部失效。
 
     本函数检测未设置 UTF-8 标志位的情况，将文件名编码回 CP437 字节后
-    依次尝试 UTF-8 → GBK 解码，全部失败则保留原始字符串（尽力而为）。
-    纯 ASCII 文件名不受影响（CP437 与 ASCII 兼容，UTF-8 解码即成功）。
+    依次尝试 UTF-8 → GBK 解码，并通过 :func:`_looks_like_real_filename`
+    校验解码结果合理性后采用，全部失败则保留原始字符串（尽力而为）。
+
+    合理性校验的必要性：GBK 双字节字符的两个字节都落在 0x80-0xFF，恰好
+    落在 UTF-8 2 字节序列的合法范围内（0xC2-0xDF + 0x80-0xBF），故 GBK
+    字节序列可能被 UTF-8 "成功"解码为亚美尼亚/希伯来等非 CJK 字符
+    （如 ``凭证`` 的 GBK 字节 ``c6 be d6 a4`` 会被 UTF-8 解码为 ``ƾ֤``）。
+    仅当解码结果含 CJK 字符或常见拉丁补充字符时才采用，避免此类误判。
     """
     if info.flag_bits & _UTF8_FLAG:
         return info.filename
@@ -139,11 +145,52 @@ def _decode_zip_filename(info: zipfile.ZipInfo) -> str:
     except (UnicodeEncodeError, LookupError):
         # filename 含 CP437 不支持的字符（zipfile 已按其他编码解码），保留原样
         return info.filename
+    # 优先 UTF-8：解码成功且结果通过合理性校验才采用
     try:
-        return raw_bytes.decode("utf-8")
+        utf8_decoded = raw_bytes.decode("utf-8")
+        if _looks_like_real_filename(utf8_decoded):
+            return utf8_decoded
     except UnicodeDecodeError:
         pass
+    # 回退 GBK（Windows 中文压缩工具默认）：同样需通过合理性校验
     try:
-        return raw_bytes.decode("gbk")
+        gbk_decoded = raw_bytes.decode("gbk")
+        if _looks_like_real_filename(gbk_decoded):
+            return gbk_decoded
     except UnicodeDecodeError:
-        return info.filename
+        pass
+    return info.filename
+
+
+def _looks_like_real_filename(text: str) -> bool:
+    """判断解码结果是否像真实文件名（含 CJK/拉丁补充/全角或全 ASCII）。
+
+    GBK 双字节字符的字节序列可能被 UTF-8 误判解码为亚美尼亚/希伯来/希腊等
+    罕见于文件名的字符，本函数通过要求非 ASCII 字符必须落在常见文件名字符
+    范围来过滤此类误判。
+
+    允许的字符范围：
+
+    - ASCII（``\\x00-\\x7F``）：文件名主体
+    - 拉丁补充（``U+0080-U+00FF``）：如 ``café.txt`` 的 ``é``
+    - CJK 统一表意文字（``U+4E00-U+9FFF``）与扩展 A（``U+3400-U+4DBF``）
+    - CJK 标点（``U+3000-U+303F``）与全角字符（``U+FF00-U+FFEF``）
+
+    拒绝亚美尼亚（``U+0530-U+058F``）、希伯来（``U+0590-U+05FF``）、
+    希腊（``U+0370-U+03FF``）、西里尔（``U+0400-U+04FF``）等不常见于
+    中文文件名字符，使 GBK 字节误判回退到 GBK 解码。
+    """
+    for ch in text:
+        if ch.isascii():
+            continue
+        cp = ord(ch)
+        if (
+            0x0080 <= cp <= 0x00FF  # 拉丁补充（café 等）
+            or 0x3000 <= cp <= 0x303F  # CJK 标点
+            or 0x3400 <= cp <= 0x4DBF  # CJK 扩展 A
+            or 0x4E00 <= cp <= 0x9FFF  # CJK 统一表意文字
+            or 0xFF00 <= cp <= 0xFFEF  # 全角字符
+        ):
+            continue
+        return False
+    return True

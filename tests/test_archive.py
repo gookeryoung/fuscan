@@ -519,6 +519,96 @@ class TestZipReaderGbkFilename:
         finally:
             reader.close()
 
+    def test_gbk_bytes_coincidentally_valid_utf8(self, tmp_path: Path) -> None:
+        """GBK 字节碰巧是有效 UTF-8 时仍正确按 GBK 解码。
+
+        回归：``凭证`` 的 GBK 字节 ``c6 be d6 a4`` 恰好是有效 UTF-8 序列
+        （解码为亚美尼亚字母 ``ƾ`` + 希伯来字母 ``֤``），初版实现直接采用
+        UTF-8 解码结果导致乱码。合理性校验通过要求非 ASCII 字符必须落在
+        CJK/拉丁补充范围来拒绝此类误判，回退到 GBK 解码得到正确中文。
+        """
+        zip_path = _make_gbk_zip(tmp_path / "a.zip", {"凭证/azure.env": "k=v"})
+        reader = ZipReader(zip_path)
+        try:
+            entries = reader.list_entries()
+            names = {e.entry_name for e in entries}
+            assert names == {"凭证/azure.env"}
+        finally:
+            reader.close()
+
+    def test_read_entry_gbk_coincidentally_valid_utf8(self, tmp_path: Path) -> None:
+        """``凭证`` 这类 GBK 字节有效 UTF-8 的条目也能被正确读取内容。"""
+        zip_path = _make_gbk_zip(tmp_path / "a.zip", {"凭证.txt": "secret"})
+        reader = ZipReader(zip_path)
+        try:
+            reader.list_entries()
+            assert reader.read_entry("凭证.txt") == b"secret"
+        finally:
+            reader.close()
+
+    def test_decodes_latin_supplement_filename(self, tmp_path: Path) -> None:
+        """含拉丁补充字符的 UTF-8 文件名（如 café.txt）被正确解码。
+
+        未设置 UTF-8 标志位但实际 UTF-8 编码的拉丁补充字符文件名，
+        通过合理性校验（U+0080-U+00FF 拉丁补充范围）采用 UTF-8 解码。
+        """
+        # 用 UTF-8 字节构造 ZIP（手动写 UTF-8 字节，flag_bits=0）
+        name = "café.txt"
+        name_bytes = name.encode("utf-8")
+        content = b"x"
+        crc = zlib.crc32(content) & 0xFFFFFFFF
+        zip_path = tmp_path / "a.zip"
+        with zip_path.open("wb") as f:
+            lh = struct.pack(
+                "<4sHHHHHIIIHH",
+                b"PK\x03\x04",
+                20,
+                0,
+                0,
+                0,
+                0,
+                crc,
+                1,
+                1,
+                len(name_bytes),
+                0,
+            )
+            f.write(lh)
+            f.write(name_bytes)
+            f.write(content)
+            local_size = len(lh) + len(name_bytes) + 1
+            ch = struct.pack(
+                "<4sHHHHHHIIIHHHHHII",
+                b"PK\x01\x02",
+                20,
+                20,
+                0,
+                0,
+                0,
+                0,
+                crc,
+                1,
+                1,
+                len(name_bytes),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            )
+            f.write(ch)
+            f.write(name_bytes)
+            cd_size = len(ch) + len(name_bytes)
+            eocd = struct.pack("<4sHHHHIIH", b"PK\x05\x06", 0, 0, 1, 1, cd_size, local_size, 0)
+            f.write(eocd)
+        reader = ZipReader(zip_path)
+        try:
+            entries = reader.list_entries()
+            assert {e.entry_name for e in entries} == {"café.txt"}
+        finally:
+            reader.close()
+
 
 # ----------------------------- RarReader -----------------------------
 

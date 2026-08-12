@@ -32,12 +32,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
+from fuscan.processing.backup_manifest import BackupManifest
 from fuscan.rules.model import LeafMatch, MatchMode, MatchTarget, Rule, RuleSet
 from fuscan.scanner.result import RuleHit
 from fuscan.utils.io import atomic_write_bytes, atomic_write_text
@@ -65,6 +67,19 @@ _K = TypeVar("_K", str, bytes)
 def _by_first_len(item: tuple[_K, _K, int]) -> int:
     """返回元组首元素长度，供 ``sort(key=...)`` 按关键词长度降序。"""
     return len(item[0])
+
+
+def _compute_sha256(data: bytes) -> str:
+    """计算字节流的 SHA-256 十六进制摘要（64 字符）。
+
+    与 :func:`fuscan.processing.backup_manifest._sha256_bytes` 算法一致，
+    用于重复扫描检测时计算当前源文件 sha256，与 manifest 中 ``post_sha256`` 比对。
+    统一用 SHA-256（而非按大小分流）以保证与 manifest 校验算法一致。
+
+    :param data: 任意字节流
+    :return: 64 字符十六进制字符串
+    """
+    return hashlib.sha256(data).hexdigest()
 
 
 # 可替换的纯文本扩展名白名单（小写，不含前导点）。
@@ -151,6 +166,12 @@ class ReplaceStatus:
     UNSUPPORTED_FILE_TYPE = "unsupported_file_type"
     BACKUP_FAILED = "backup_failed"
     REPLACE_FAILED = "replace_failed"
+    # 备份文件 .bak 完整性校验失败（size/sha256 与 manifest 不一致），
+    # 撤销操作前由 :func:`restore_from_backup` 返回此状态，避免恢复出损坏文件
+    BACKUP_CORRUPTED = "backup_corrupted"
+    # 重复扫描检测命中：当前源文件 sha256 与 manifest 中 post_sha256 一致，
+    # 表示文件已被替换且未修改 → 跳过替换，保留原始 .bak 避免覆盖
+    ALREADY_REPLACED = "already_replaced"
 
 
 @dataclass(frozen=True)
@@ -183,6 +204,7 @@ def replace_in_file(  # noqa: PLR0912
     scan_root: Path,
     preserve_relative: bool = True,
     override_replace_with: str | None = None,
+    manifest: BackupManifest | None = None,
 ) -> ReplaceResult:
     """对单文件执行备份 + 命中内容替换的原子操作。
 
@@ -197,8 +219,13 @@ def replace_in_file(  # noqa: PLR0912
        - ``override_replace_with`` 为空（规则驱动模式）：仅替换 ``replace=True``
          的规则，使用规则的 ``replace_with`` 字段
 
-    3. 计算备份路径（保留相对路径或仅文件名）并复制源文件为 ``.bak``
-    4. 读取源文件 → 按规则逐条替换 → 原子写回
+    3. ``manifest`` 非空时执行重复扫描检测：读取当前源文件 sha256，与 manifest
+       中记录的 ``post_sha256``（上次替换后 sha256）比对，一致 → 返回
+       :data:`ReplaceStatus.ALREADY_REPLACED`，跳过替换避免覆盖原始 ``.bak``
+    4. 计算备份路径（保留相对路径或仅文件名）并复制源文件为 ``.bak``
+    5. 读取源文件 → 按规则逐条替换 → 原子写回
+    6. ``manifest`` 非空时记录 :class:`BackupEntry`（src/backup 路径 +
+       替换前后 sha256 + 时间戳），供撤销前完整性校验与后续重复扫描检测
 
     :param src: 源文件路径
     :param hits: 该文件的规则命中记录
@@ -211,6 +238,8 @@ def replace_in_file(  # noqa: PLR0912
     :param override_replace_with: 用户自定义替换文本。非空时覆盖
         所有规则的 ``replace_with``，且不要求规则 ``replace=True``。默认 ``None``
         走规则驱动模式
+    :param manifest: 备份元数据存储。非空时启用重复扫描检测与完整性校验记录；
+        ``None`` 时跳过 manifest 相关逻辑（向后兼容）
     :return: :class:`ReplaceResult` 描述操作结果
     """
     if not is_text_file(src):
@@ -270,6 +299,31 @@ def replace_in_file(  # noqa: PLR0912
                 message=f"规则 {', '.join(missing)} 未定义替换内容（replace_with 为空）",
             )
 
+    # 重复扫描检测（manifest 非空时）—— 在备份前执行，避免覆盖原始 .bak。
+    # 读取当前源文件字节并计算 sha256，与 manifest 中 post_sha256（上次替换后
+    # sha256）比对：一致 → 文件已被替换且未修改 → 跳过替换，保留原始 .bak
+    src_bytes_cached: bytes | None = None
+    if manifest is not None:
+        try:
+            src_bytes_cached = src.read_bytes()
+        except OSError as exc:
+            logger.error("读取源文件失败（重复扫描检测）: %s", src, exc_info=True)
+            return ReplaceResult(
+                status=ReplaceStatus.REPLACE_FAILED,
+                message=f"读取源文件失败: {exc}",
+            )
+        existing_entry = manifest.find_by_src(src)
+        if existing_entry is not None:
+            current_sha = _compute_sha256(src_bytes_cached)
+            if current_sha == existing_entry.post_sha256:
+                logger.info("跳过重复替换（文件已替换且未修改）: %s", src)
+                return ReplaceResult(
+                    status=ReplaceStatus.ALREADY_REPLACED,
+                    message="文件已被替换且未修改，跳过替换以保留原始备份",
+                    backup_path=Path(existing_entry.backup_path),
+                    replaced_count=0,
+                )
+
     # 计算备份路径
     backup_path = _resolve_backup_path(src, backup_root, scan_root, preserve_relative)
     try:
@@ -283,12 +337,16 @@ def replace_in_file(  # noqa: PLR0912
         )
 
     # 读取源文件内容（UTF-8，失败则尝试二进制替换）
+    # 复用重复扫描检测时读取的 src_bytes_cached，避免二次 I/O
     try:
-        content = src.read_text(encoding="utf-8")
+        if src_bytes_cached is not None:
+            content = src_bytes_cached.decode("utf-8")
+        else:
+            content = src.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         # 非 UTF-8 文件按二进制读写，避免编码问题导致数据丢失
         try:
-            raw = src.read_bytes()
+            raw = src_bytes_cached if src_bytes_cached is not None else src.read_bytes()
             new_raw, count = _apply_replace_bytes(raw, replace_specs)
             if count == 0:
                 # 未替换任何内容：仍保留备份，但返回成功 0 次
@@ -299,6 +357,9 @@ def replace_in_file(  # noqa: PLR0912
                     message="未找到可替换的命中内容（备份已保留）",
                 )
             atomic_write_bytes(src, new_raw)
+            # 记录 manifest（替换前后字节内容，供撤销前校验与重复扫描检测）
+            if manifest is not None:
+                manifest.record(src, backup_path, raw, new_raw)
             logger.info("已替换 %s 中 %d 条规则命中（二进制模式）", src, count)
             return ReplaceResult(
                 status=ReplaceStatus.SUCCESS,
@@ -325,6 +386,13 @@ def replace_in_file(  # noqa: PLR0912
             backup_path=backup_path,
         )
 
+    # 记录 manifest（文本模式：优先用 src_bytes_cached 保证 sha256 与磁盘一致；
+    # 缓存缺失时用 content.encode("utf-8")，与 atomic_write_text 的 UTF-8 编码一致）
+    if manifest is not None:
+        src_bytes_for_manifest = src_bytes_cached if src_bytes_cached is not None else content.encode("utf-8")
+        post_bytes = new_content.encode("utf-8")
+        manifest.record(src, backup_path, src_bytes_for_manifest, post_bytes)
+
     logger.info("已替换 %s 中 %d 条规则命中，备份: %s", src, count, backup_path)
     return ReplaceResult(
         status=ReplaceStatus.SUCCESS,
@@ -342,11 +410,14 @@ class BatchReplaceResult:
 
     - ``total``：传入的结果总数
     - ``succeeded``：实际执行替换且成功的文件数（``status == SUCCESS``）
-    - ``skipped``：跳过的文件数（无 replace=True 规则 / 非文本文件 / 缺 replace_with）
+    - ``skipped``：跳过的文件数（无 replace=True 规则 / 非文本文件 / 缺 replace_with /
+      已替换且未修改的 ``ALREADY_REPLACED``）
     - ``failed``：失败的文件数（备份/替换 OSError）
     - ``total_replaced_count``：所有成功文件的实际替换规则条数总和
     - ``details``：每个文件的 ``(path, ReplaceResult)`` 元组列表，便于 UI 展示
     - ``backup_paths``：所有成功替换的备份路径列表，供 :func:`restore_from_backup` 撤销
+    - ``rolled_back``：``atomic=True`` 模式下任一文件失败触发回滚时为 ``True``，
+      此时 ``succeeded=0`` 且所有已替换文件已恢复到 ``.bak``，``backup_paths`` 为空
     """
 
     total: int
@@ -356,15 +427,19 @@ class BatchReplaceResult:
     total_replaced_count: int
     details: tuple[tuple[Path, ReplaceResult], ...] = field(default_factory=tuple)
     backup_paths: tuple[Path, ...] = field(default_factory=tuple)
+    rolled_back: bool = False
 
     @property
     def message(self) -> str:
         """聚合消息供 UI 显示。"""
-        return (
+        base = (
             f"批量替换完成：成功 {self.succeeded}/{self.total}，"
             f"跳过 {self.skipped}，失败 {self.failed}，"
             f"共替换 {self.total_replaced_count} 条规则"
         )
+        if self.rolled_back:
+            return f"{base}（已自动回滚所有替换）"
+        return base
 
 
 def replace_batch(
@@ -374,11 +449,19 @@ def replace_batch(
     scan_root: Path,
     preserve_relative: bool = True,
     override_replace_with: str | None = None,
+    manifest: BackupManifest | None = None,
+    atomic: bool = False,
 ) -> BatchReplaceResult:
     """对一组 :class:`ScanResult` 批量执行备份+替换，返回聚合结果。
 
-    单个文件失败不影响其他文件，最终汇总为 :class:`BatchReplaceResult`。
-    适合 UI「全部替换」按钮调用，传入过滤后的结果列表。
+    单个文件失败不影响其他文件（``atomic=False`` 默认行为），最终汇总为
+    :class:`BatchReplaceResult`。适合 UI「全部替换」按钮调用。
+
+    事务模式（``atomic=True``）：任一文件发生 ``BACKUP_FAILED`` / ``REPLACE_FAILED``
+    时自动回滚所有已成功替换的文件（从对应 ``.bak`` 恢复），返回
+    :class:`BatchReplaceResult` 含 ``rolled_back=True``。跳过类状态
+    （``NO_REPLACE_RULES`` / ``MISSING_REPLACE_WITH`` / ``UNSUPPORTED_FILE_TYPE`` /
+    ``ALREADY_REPLACED``）不触发回滚。
 
     :param results: 待替换的结果元组（通常来自 ``ResultListModel.filtered_results``）
     :param ruleset: 当前规则集（``override_replace_with`` 非空时可为 ``None``）
@@ -387,6 +470,10 @@ def replace_batch(
     :param preserve_relative: ``True`` 在备份区保留相对目录结构
     :param override_replace_with: 用户自定义替换文本。非空时覆盖
         所有规则的 ``replace_with``，不要求规则 ``replace=True``。默认 ``None``
+    :param manifest: 备份元数据存储。非空时传给 :func:`replace_in_file` 启用
+        重复扫描检测与完整性记录；``None`` 时跳过 manifest 相关逻辑
+    :param atomic: ``True`` 启用事务模式，任一文件失败自动回滚所有已替换文件。
+        默认 ``False`` 保持向后兼容
     :return: :class:`BatchReplaceResult` 含每个文件的详情
     """
     details: list[tuple[Path, ReplaceResult]] = []
@@ -395,6 +482,8 @@ def replace_batch(
     skipped = 0
     failed = 0
     total_replaced = 0
+    # 事务模式下记录已成功替换的 (src, backup) 配对，用于回滚
+    replaced_pairs: list[tuple[Path, Path]] = []
 
     for result in results:
         # 压缩包内部条目不支持替换
@@ -419,6 +508,7 @@ def replace_batch(
             scan_root=scan_root,
             preserve_relative=preserve_relative,
             override_replace_with=override_replace_with,
+            manifest=manifest,
         )
         details.append((result.path, replace_result))
 
@@ -427,14 +517,38 @@ def replace_batch(
             total_replaced += replace_result.replaced_count
             if replace_result.backup_path is not None:
                 backup_paths.append(replace_result.backup_path)
+                replaced_pairs.append((result.path, replace_result.backup_path))
         elif replace_result.status in (
             ReplaceStatus.NO_REPLACE_RULES,
             ReplaceStatus.MISSING_REPLACE_WITH,
             ReplaceStatus.UNSUPPORTED_FILE_TYPE,
+            ReplaceStatus.ALREADY_REPLACED,
         ):
             skipped += 1
         else:
             failed += 1
+            # 事务模式下任一失败立即回滚所有已替换文件
+            if atomic and replaced_pairs:
+                logger.warning(
+                    "事务模式检测到失败 (%s)，回滚 %d 个已替换文件",
+                    result.path,
+                    len(replaced_pairs),
+                )
+                for src_path, backup_path in replaced_pairs:
+                    rollback_msg = restore_from_backup(backup_path, src_path, manifest=manifest)
+                    if not rollback_msg.startswith("已从备份恢复"):
+                        logger.error("回滚失败: %s -> %s: %s", backup_path, src_path, rollback_msg)
+                # 回滚后：succeeded=0，backup_paths 清空，标记 rolled_back
+                return BatchReplaceResult(
+                    total=len(results),
+                    succeeded=0,
+                    skipped=skipped,
+                    failed=failed,
+                    total_replaced_count=0,
+                    details=tuple(details),
+                    backup_paths=(),
+                    rolled_back=True,
+                )
 
     return BatchReplaceResult(
         total=len(results),
@@ -447,26 +561,59 @@ def replace_batch(
     )
 
 
-def restore_from_backup(backup_path: Path, dest: Path) -> str:
+def restore_from_backup(
+    backup_path: Path,
+    dest: Path,
+    manifest: BackupManifest | None = None,
+) -> str:
     """从 ``.bak`` 备份恢复源文件，撤销最近一次替换。
 
     流程：
 
     1. 校验备份文件存在
-    2. ``shutil.copy2`` 覆盖源文件（保留备份文件本身，便于多次撤销）
-    3. 返回操作消息供 UI 显示
+    2. ``manifest`` 非空时校验 ``.bak`` 完整性（size + sha256 与 manifest 一致），
+       校验失败 → 返回 ``备份文件损坏: <path>``，拒绝恢复以避免文件损坏
+    3. ``shutil.copy2`` 覆盖源文件（保留备份文件本身，便于多次撤销）
+    4. ``manifest`` 非空时从 manifest 删除该 src 条目（撤销后不再需要校验信息）
+    5. 返回操作消息供 UI 显示
 
     :param backup_path: ``.bak`` 备份文件路径
     :param dest: 源文件路径（被恢复的目标）
+    :param manifest: 备份元数据存储。非空时启用完整性校验与条目清理；
+        ``None`` 时跳过校验（向后兼容）
     :return: 操作消息字符串
+
+    返回值语义：
+
+    - ``备份文件不存在: <path>`` —— ``.bak`` 不存在
+    - ``备份文件损坏: <path>`` —— manifest 校验失败（size/sha256 不匹配）
+    - ``备份元数据缺失: <path>`` —— manifest 中无对应条目（manifest 非空但找不到记录）
+    - ``恢复失败: <error>`` —— ``shutil.copy2`` 抛 OSError
+    - ``已从备份恢复: <dest>`` —— 成功
     """
     if not backup_path.exists():
         return f"备份文件不存在: {backup_path}"
+
+    # manifest 完整性校验：撤销前确认 .bak 未被外部修改/损坏
+    if manifest is not None and not manifest.verify(backup_path):
+        # 区分"manifest 无条目"与"size/sha256 不匹配"两种情况
+        entry = manifest.find_by_src(dest)
+        if entry is None:
+            logger.warning("manifest 中无备份条目: %s", backup_path)
+            return f"备份元数据缺失: {backup_path}"
+        logger.warning("备份文件完整性校验失败: %s", backup_path)
+        return f"备份文件损坏: {backup_path}"
+
     try:
         shutil.copy2(backup_path, dest)
     except OSError as exc:
         logger.error("从备份恢复失败: %s -> %s", backup_path, dest, exc_info=True)
         return f"恢复失败: {exc}"
+
+    # 撤销成功后从 manifest 删除条目（撤销后不再需要校验信息）
+    if manifest is not None:
+        manifest.remove(dest)
+
     logger.info("已从备份恢复: %s -> %s", backup_path, dest)
     return f"已从备份恢复: {dest}"
 

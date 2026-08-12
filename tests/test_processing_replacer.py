@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from fuscan.processing.backup_manifest import BackupManifest
 from fuscan.processing.replacer import (
     BatchReplaceResult,
     ReplaceResult,
@@ -600,6 +601,7 @@ class TestReplaceBatch:
             scan_root: Path,
             preserve_relative: bool = True,
             override_replace_with: str | None = None,
+            manifest: BackupManifest | None = None,
         ) -> ReplaceResult:
             if src == src3:
                 return ReplaceResult(
@@ -614,6 +616,7 @@ class TestReplaceBatch:
                 scan_root,
                 preserve_relative,
                 override_replace_with=override_replace_with,
+                manifest=manifest,
             )
 
         monkeypatch.setattr(replacer_module, "replace_in_file", _fake_replace)
@@ -739,6 +742,447 @@ class TestBatchReplaceResult:
         result = BatchReplaceResult(total=0, succeeded=0, skipped=0, failed=0, total_replaced_count=0)
         assert result.details == ()
         assert result.backup_paths == ()
+
+
+# ----------------------------- iter-01 manifest 校验与事务模式 -----------------------------
+
+
+class TestReplaceWithManifest:
+    """manifest 集成：备份后记录、撤销前校验、重复扫描检测。"""
+
+    def test_replace_records_manifest_entry(self, tmp_path: Path) -> None:
+        """替换成功后 manifest 中存在对应条目（src_sha256/post_sha256）。"""
+        src = tmp_path / "a.txt"
+        src.write_text("token=abc\n", encoding="utf-8")
+        rule = _make_rule("token", "token", replace=True, replace_with="***")
+        hit = _make_hit(rule, ("token",))
+        ruleset = RuleSet(version="1.0", rules=(rule,))
+        manifest = BackupManifest(tmp_path / "manifest.json")
+
+        result = replace_in_file(
+            src,
+            (hit,),
+            ruleset,
+            tmp_path / "backup",
+            tmp_path,
+            manifest=manifest,
+        )
+
+        assert result.status == ReplaceStatus.SUCCESS
+        assert result.backup_path is not None
+        entry = manifest.find_by_src(src)
+        assert entry is not None
+        assert entry.backup_path == str(result.backup_path.resolve())
+        # src_sha256 应与原始内容一致，post_sha256 应与替换后内容一致
+        assert entry.src_sha256 != entry.post_sha256
+
+    def test_already_replaced_skips_replacement(self, tmp_path: Path) -> None:
+        """重复扫描检测：第二次替换同一文件返回 ALREADY_REPLACED，不创建新备份。"""
+        src = tmp_path / "a.txt"
+        src.write_text("token=abc\n", encoding="utf-8")
+        rule = _make_rule("token", "token", replace=True, replace_with="***")
+        hit = _make_hit(rule, ("token",))
+        ruleset = RuleSet(version="1.0", rules=(rule,))
+        manifest = BackupManifest(tmp_path / "manifest.json")
+
+        # 第一次替换：成功
+        r1 = replace_in_file(
+            src,
+            (hit,),
+            ruleset,
+            tmp_path / "backup",
+            tmp_path,
+            manifest=manifest,
+        )
+        assert r1.status == ReplaceStatus.SUCCESS
+        assert r1.replaced_count == 1
+        first_backup = r1.backup_path
+        assert first_backup is not None
+        first_backup_content = first_backup.read_bytes()
+
+        # 第二次替换：文件未修改 → ALREADY_REPLACED
+        r2 = replace_in_file(
+            src,
+            (hit,),
+            ruleset,
+            tmp_path / "backup",
+            tmp_path,
+            manifest=manifest,
+        )
+        assert r2.status == ReplaceStatus.ALREADY_REPLACED
+        assert r2.replaced_count == 0
+        # 备份未被覆盖（内容一致）
+        assert first_backup.read_bytes() == first_backup_content
+
+    def test_restore_with_manifest_corrupted_backup(self, tmp_path: Path) -> None:
+        """撤销时 .bak 损坏（sha256 不匹配）→ 返回"备份文件损坏"。"""
+        src = tmp_path / "a.txt"
+        src.write_text("token=abc\n", encoding="utf-8")
+        rule = _make_rule("token", "token", replace=True, replace_with="***")
+        hit = _make_hit(rule, ("token",))
+        ruleset = RuleSet(version="1.0", rules=(rule,))
+        manifest = BackupManifest(tmp_path / "manifest.json")
+
+        result = replace_in_file(
+            src,
+            (hit,),
+            ruleset,
+            tmp_path / "backup",
+            tmp_path,
+            manifest=manifest,
+        )
+        assert result.status == ReplaceStatus.SUCCESS
+        backup_path = result.backup_path
+        assert backup_path is not None
+
+        # 篡改备份内容（保持大小一致，改变 sha256）
+        backup_path.write_bytes(b"x" * backup_path.stat().st_size)
+
+        msg = restore_from_backup(backup_path, src, manifest=manifest)
+        assert msg.startswith("备份文件损坏")
+
+    def test_restore_with_manifest_size_mismatch(self, tmp_path: Path) -> None:
+        """撤销时 .bak 大小不匹配 → 返回"备份文件损坏"。"""
+        src = tmp_path / "a.txt"
+        src.write_text("token=abc\n", encoding="utf-8")
+        rule = _make_rule("token", "token", replace=True, replace_with="***")
+        hit = _make_hit(rule, ("token",))
+        ruleset = RuleSet(version="1.0", rules=(rule,))
+        manifest = BackupManifest(tmp_path / "manifest.json")
+
+        result = replace_in_file(
+            src,
+            (hit,),
+            ruleset,
+            tmp_path / "backup",
+            tmp_path,
+            manifest=manifest,
+        )
+        backup_path = result.backup_path
+        assert backup_path is not None
+
+        # 改变备份大小
+        backup_path.write_bytes(b"different_size_content")
+
+        msg = restore_from_backup(backup_path, src, manifest=manifest)
+        assert msg.startswith("备份文件损坏")
+
+    def test_restore_success_removes_manifest_entry(self, tmp_path: Path) -> None:
+        """撤销成功后 manifest 中对应条目被删除。"""
+        src = tmp_path / "a.txt"
+        src.write_text("token=abc\n", encoding="utf-8")
+        rule = _make_rule("token", "token", replace=True, replace_with="***")
+        hit = _make_hit(rule, ("token",))
+        ruleset = RuleSet(version="1.0", rules=(rule,))
+        manifest = BackupManifest(tmp_path / "manifest.json")
+
+        result = replace_in_file(
+            src,
+            (hit,),
+            ruleset,
+            tmp_path / "backup",
+            tmp_path,
+            manifest=manifest,
+        )
+        assert manifest.find_by_src(src) is not None
+        assert result.backup_path is not None
+
+        msg = restore_from_backup(result.backup_path, src, manifest=manifest)
+        assert msg.startswith("已从备份恢复")
+        assert manifest.find_by_src(src) is None
+
+    def test_restore_missing_manifest_entry(self, tmp_path: Path) -> None:
+        """manifest 非空但无对应条目 → 返回"备份元数据缺失"。"""
+        backup = tmp_path / "a.txt.bak"
+        backup.write_text("original\n", encoding="utf-8")
+        dest = tmp_path / "a.txt"
+        dest.write_text("modified\n", encoding="utf-8")
+        manifest = BackupManifest(tmp_path / "manifest.json")
+
+        msg = restore_from_backup(backup, dest, manifest=manifest)
+
+        assert msg.startswith("备份元数据缺失")
+
+    def test_manifest_none_skips_verification(self, tmp_path: Path) -> None:
+        """manifest=None 时不校验，直接恢复（向后兼容）。"""
+        backup = tmp_path / "a.txt.bak"
+        backup.write_text("original\n", encoding="utf-8")
+        dest = tmp_path / "a.txt"
+        dest.write_text("modified\n", encoding="utf-8")
+
+        msg = restore_from_backup(backup, dest, manifest=None)
+
+        assert msg.startswith("已从备份恢复")
+        assert dest.read_text(encoding="utf-8") == "original\n"
+
+    def test_already_replaced_after_restore_allows_replacement(self, tmp_path: Path) -> None:
+        """撤销后再次替换：文件 hash 与 post_sha256 不一致 → 正常替换。"""
+        src = tmp_path / "a.txt"
+        src.write_text("token=abc\n", encoding="utf-8")
+        rule = _make_rule("token", "token", replace=True, replace_with="***")
+        hit = _make_hit(rule, ("token",))
+        ruleset = RuleSet(version="1.0", rules=(rule,))
+        manifest = BackupManifest(tmp_path / "manifest.json")
+
+        # 第一次替换
+        r1 = replace_in_file(
+            src,
+            (hit,),
+            ruleset,
+            tmp_path / "backup",
+            tmp_path,
+            manifest=manifest,
+        )
+        assert r1.status == ReplaceStatus.SUCCESS
+        assert r1.backup_path is not None
+
+        # 撤销
+        restore_from_backup(r1.backup_path, src, manifest=manifest)
+        # 撤销后 src 恢复为原始内容，manifest 条目被删除
+
+        # 再次替换：应成功（非 ALREADY_REPLACED）
+        r2 = replace_in_file(
+            src,
+            (hit,),
+            ruleset,
+            tmp_path / "backup",
+            tmp_path,
+            manifest=manifest,
+        )
+        assert r2.status == ReplaceStatus.SUCCESS
+        assert r2.replaced_count == 1
+
+
+class TestReplaceBatchAtomic:
+    """事务模式：atomic=True 任一失败回滚。"""
+
+    def test_atomic_all_success_no_rollback(self, tmp_path: Path) -> None:
+        """atomic=True 全部成功 → rolled_back=False。"""
+        rule = _make_rule("token", "token", replace=True, replace_with="***")
+        ruleset = RuleSet(version="1.0", rules=(rule,))
+        src1 = tmp_path / "scan" / "a.txt"
+        src1.parent.mkdir(parents=True)
+        src1.write_text("token=abc\n", encoding="utf-8")
+        src2 = tmp_path / "scan" / "b.txt"
+        src2.write_text("token=def\n", encoding="utf-8")
+        results = (
+            _make_scan_result(src1, rule, ("token",)),
+            _make_scan_result(src2, rule, ("token",)),
+        )
+        manifest = BackupManifest(tmp_path / "manifest.json")
+
+        batch = replace_batch(
+            results,
+            ruleset,
+            tmp_path / "backup",
+            tmp_path / "scan",
+            preserve_relative=True,
+            manifest=manifest,
+            atomic=True,
+        )
+
+        assert batch.succeeded == 2
+        assert batch.failed == 0
+        assert batch.rolled_back is False
+        assert len(batch.backup_paths) == 2
+        # 源文件已替换
+        assert src1.read_text(encoding="utf-8") == "***=abc\n"
+        assert src2.read_text(encoding="utf-8") == "***=def\n"
+
+    def test_atomic_failure_triggers_rollback(self, tmp_path: Path) -> None:
+        """atomic=True 任一失败 → 已替换文件回滚，rolled_back=True。"""
+        rule = _make_rule("token", "token", replace=True, replace_with="***")
+        ruleset = RuleSet(version="1.0", rules=(rule,))
+        src1 = tmp_path / "scan" / "a.txt"
+        src1.parent.mkdir(parents=True)
+        src1.write_text("token=abc\n", encoding="utf-8")
+        src2 = tmp_path / "scan" / "b.txt"
+        src2.write_text("token=def\n", encoding="utf-8")
+        results = (
+            _make_scan_result(src1, rule, ("token",)),
+            _make_scan_result(src2, rule, ("token",)),
+        )
+        manifest = BackupManifest(tmp_path / "manifest.json")
+
+        # 拦截 replace_in_file：src2 失败
+        from fuscan.processing import replacer as replacer_module
+
+        original_replace = replacer_module.replace_in_file
+
+        def _fake_replace(
+            src: Path,
+            hits: tuple[RuleHit, ...],
+            ruleset: RuleSet | None,
+            backup_root: Path,
+            scan_root: Path,
+            preserve_relative: bool = True,
+            override_replace_with: str | None = None,
+            manifest: BackupManifest | None = None,
+        ) -> ReplaceResult:
+            if src == src2:
+                return ReplaceResult(
+                    status=ReplaceStatus.REPLACE_FAILED,
+                    message="模拟失败",
+                )
+            return original_replace(
+                src,
+                hits,
+                ruleset,
+                backup_root,
+                scan_root,
+                preserve_relative,
+                override_replace_with=override_replace_with,
+                manifest=manifest,
+            )
+
+        # 注意：replace_batch 内部直接调用 replacer_module.replace_in_file
+        # 但实际是通过 from fuscan.processing.replacer import replace_in_file 导入的
+        # 所以需要 patch replacer_module.replace_in_file
+        import fuscan.processing.replacer as replacer_mod
+
+        original_fn = replacer_mod.replace_in_file
+        replacer_mod.replace_in_file = _fake_replace  # type: ignore[assignment]
+        try:
+            batch = replace_batch(
+                results,
+                ruleset,
+                tmp_path / "backup",
+                tmp_path / "scan",
+                preserve_relative=True,
+                manifest=manifest,
+                atomic=True,
+            )
+        finally:
+            replacer_mod.replace_in_file = original_fn  # type: ignore[assignment]
+
+        assert batch.rolled_back is True
+        assert batch.succeeded == 0
+        assert batch.failed == 1
+        assert batch.backup_paths == ()
+        # src1 已被回滚恢复为原始内容
+        assert src1.read_text(encoding="utf-8") == "token=abc\n"
+        # 回滚后 src1 的 manifest 条目也被清除
+        assert manifest.find_by_src(src1) is None
+
+    def test_atomic_false_no_rollback_on_failure(self, tmp_path: Path) -> None:
+        """atomic=False（默认）失败不影响其他文件，不回滚。"""
+        rule = _make_rule("token", "token", replace=True, replace_with="***")
+        ruleset = RuleSet(version="1.0", rules=(rule,))
+        src1 = tmp_path / "scan" / "a.txt"
+        src1.parent.mkdir(parents=True)
+        src1.write_text("token=abc\n", encoding="utf-8")
+        src2 = tmp_path / "scan" / "b.txt"
+        src2.write_text("token=def\n", encoding="utf-8")
+        results = (
+            _make_scan_result(src1, rule, ("token",)),
+            _make_scan_result(src2, rule, ("token",)),
+        )
+        manifest = BackupManifest(tmp_path / "manifest.json")
+
+        # 拦截 src2 失败
+        import fuscan.processing.replacer as replacer_mod
+
+        original_fn = replacer_mod.replace_in_file
+
+        def _fake_replace(
+            src: Path,
+            hits: tuple[RuleHit, ...],
+            ruleset: RuleSet | None,
+            backup_root: Path,
+            scan_root: Path,
+            preserve_relative: bool = True,
+            override_replace_with: str | None = None,
+            manifest: BackupManifest | None = None,
+        ) -> ReplaceResult:
+            if src == src2:
+                return ReplaceResult(
+                    status=ReplaceStatus.REPLACE_FAILED,
+                    message="模拟失败",
+                )
+            return original_fn(
+                src,
+                hits,
+                ruleset,
+                backup_root,
+                scan_root,
+                preserve_relative,
+                override_replace_with=override_replace_with,
+                manifest=manifest,
+            )
+
+        replacer_mod.replace_in_file = _fake_replace  # type: ignore[assignment]
+        try:
+            batch = replace_batch(
+                results,
+                ruleset,
+                tmp_path / "backup",
+                tmp_path / "scan",
+                preserve_relative=True,
+                manifest=manifest,
+                atomic=False,
+            )
+        finally:
+            replacer_mod.replace_in_file = original_fn  # type: ignore[assignment]
+
+        assert batch.rolled_back is False
+        assert batch.succeeded == 1
+        assert batch.failed == 1
+        # src1 保持已替换状态（未回滚）
+        assert src1.read_text(encoding="utf-8") == "***=abc\n"
+
+    def test_batch_message_with_rolled_back(self) -> None:
+        """rolled_back=True 时 message 包含"已自动回滚"提示。"""
+        result = BatchReplaceResult(
+            total=3,
+            succeeded=0,
+            skipped=0,
+            failed=1,
+            total_replaced_count=0,
+            rolled_back=True,
+        )
+        assert "已自动回滚" in result.message
+
+    def test_batch_message_without_rolled_back(self) -> None:
+        """rolled_back=False 时 message 不包含"已自动回滚"。"""
+        result = BatchReplaceResult(
+            total=3,
+            succeeded=2,
+            skipped=0,
+            failed=1,
+            total_replaced_count=5,
+        )
+        assert "已自动回滚" not in result.message
+
+    def test_batch_already_replaced_counted_as_skipped(self, tmp_path: Path) -> None:
+        """ALREADY_REPLACED 状态计入 skipped（非 failed）。"""
+        rule = _make_rule("token", "token", replace=True, replace_with="***")
+        ruleset = RuleSet(version="1.0", rules=(rule,))
+        src = tmp_path / "a.txt"
+        src.write_text("token=abc\n", encoding="utf-8")
+        results = (_make_scan_result(src, rule, ("token",)),)
+        manifest = BackupManifest(tmp_path / "manifest.json")
+
+        # 第一次替换
+        replace_batch(
+            results,
+            ruleset,
+            tmp_path / "backup",
+            tmp_path,
+            manifest=manifest,
+        )
+        # 第二次替换：应返回 ALREADY_REPLACED，计入 skipped
+        batch = replace_batch(
+            results,
+            ruleset,
+            tmp_path / "backup",
+            tmp_path,
+            manifest=manifest,
+        )
+
+        assert batch.succeeded == 0
+        assert batch.skipped == 1
+        assert batch.failed == 0
+        assert batch.rolled_back is False
 
 
 if __name__ == "__main__":

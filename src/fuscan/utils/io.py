@@ -24,8 +24,10 @@ def atomic_write_text(path: Path, content: str) -> None:
     """原子写入文本文件：写入同目录临时文件后 ``Path.replace`` 覆盖目标。
 
     父目录不存在时自动创建（``mkdir(parents=True, exist_ok=True)``）。
-    写入使用 UTF-8 编码。临时文件命名为 ``<原名>.tmp``，与目标同目录
-    以保证 ``Path.replace`` 的原子性（同文件系统内 rename 是原子操作）。
+    写入使用 UTF-8 编码，``newline=""`` 禁用换行符转换——保证磁盘字节与
+    ``content.encode("utf-8")`` 完全一致，避免 Windows 上 ``\\n → \\r\\n``
+    隐式转换导致 sha256 校验失败与内容损坏。临时文件命名为 ``<原名>.tmp``，
+    与目标同目录以保证 ``Path.replace`` 的原子性（同文件系统内 rename 是原子操作）。
 
     :param path: 目标文件路径。
     :param content: 文本内容。
@@ -33,7 +35,7 @@ def atomic_write_text(path: Path, content: str) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
+    tmp.write_text(content, encoding="utf-8", newline="")
     tmp.replace(path)
 
 

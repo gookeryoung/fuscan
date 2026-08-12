@@ -81,6 +81,7 @@ from fuscan.gui.scan_mode import (
     scan_mode_index_to_str,
 )
 from fuscan.gui.workers import DetailWorker, FileStatsWorker, ScanWorker
+from fuscan.processing.backup_manifest import BackupManifest
 from fuscan.processing.skip_store import SkipStore
 from fuscan.rules import (
     RuleError,
@@ -245,6 +246,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 存储 (src, backup) 配对而非仅 backup_path，因为 backup_path 与 src 不在同一目录，
         # 直接 with_suffix('') 会得到备份区下的路径而非源文件路径。
         self._last_batch_backup_paths: tuple[tuple[Path, Path], ...] = ()
+        # 备份元数据存储：跨会话持久化备份 .bak 的 size+sha256，供撤销前完整性校验
+        # 与重复扫描检测（避免覆盖原始备份）。在 ~/.fuscan/state/backup_manifest.json
+        # 持久化，所有替换/撤销操作共享同一实例。
+        self._backup_manifest: BackupManifest = BackupManifest()
         # 增量扫描上下文（由 startIncrementalScan 设置，_on_stats_finished/
         # _on_scan_finished 读取）。_pending_manifest 由 stats worker 完成后填入，
         # _pending_prev_report 传给 ScanWorker 供 Scanner 合并未变更文件命中结果，
@@ -1145,6 +1150,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             backup_preserve_relative=self._config.backup_preserve_relative_path,
             last_report_root=last_root,
             override_replace_with=replace_with if replace_with else None,
+            manifest=self._backup_manifest,
         )
 
     # ----------------------------- 批量替换与撤销 -----------------------------
@@ -1185,6 +1191,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             scan_root=self._resolve_scan_root(),
             backup_preserve_relative=self._config.backup_preserve_relative_path,
             override_replace_with=replace_with if replace_with else None,
+            manifest=self._backup_manifest,
         )
         # 前置校验失败时 last_batch 为 None，保留既有撤销记录不清空
         if last_batch is not None:
@@ -1201,7 +1208,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         :return: 操作消息字符串
         """
-        summary = undo_last_batch_replace(self._last_batch_backup_paths)
+        summary = undo_last_batch_replace(self._last_batch_backup_paths, manifest=self._backup_manifest)
         # 清除撤销记录，避免重复撤销（空记录清除为 no-op）
         self._last_batch_backup_paths = ()
         return summary
@@ -1220,6 +1227,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             backup_dir=self._resolve_backup_dir(),
             scan_root=self._resolve_scan_root(),
             backup_preserve_relative=self._config.backup_preserve_relative_path,
+            manifest=self._backup_manifest,
         )
 
     @Property(bool, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
@@ -1959,6 +1967,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 backup_root=backup_dir,
                 scan_root=scan_root,
                 preserve_relative=preserve_relative,
+                manifest=self._backup_manifest,
             )
             if result.status == ReplaceStatus.SUCCESS and result.replaced_count > 0:
                 new_sr = dataclasses.replace(sr, replaced=True, replaced_count=result.replaced_count)
@@ -1966,6 +1975,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 auto_replaced_count += 1
                 if result.backup_path is not None:
                     backup_pairs.append((sr.path, result.backup_path))
+            elif result.status == ReplaceStatus.ALREADY_REPLACED:
+                # 文件已被替换且未修改 → 标记为已替换状态（replaced_count=0 表示本次未替换），
+                # 不计入 auto_replaced_count，也不加入 backup_pairs（无需撤销）
+                new_sr = dataclasses.replace(sr, replaced=True, replaced_count=0)
+                new_hits.append(new_sr)
             else:
                 # 替换失败/未替换到内容：保留原结果（replaced=False），用户可在 Tab 中手动处理
                 new_hits.append(sr)

@@ -19,6 +19,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from fuscan.processing.backup_manifest import BackupManifest
 from fuscan.processing.replacer import ReplaceStatus, replace_batch, restore_from_backup
 
 if TYPE_CHECKING:
@@ -42,6 +43,8 @@ def replace_all_filtered_results(
     scan_root: Path,
     backup_preserve_relative: bool,
     override_replace_with: str | None,
+    manifest: BackupManifest | None = None,
+    atomic: bool = False,
 ) -> tuple[str, tuple[tuple[Path, Path], ...] | None]:
     """对过滤后的所有结果执行批量替换。
 
@@ -56,12 +59,18 @@ def replace_all_filtered_results(
     :param backup_preserve_relative: 是否保留相对路径备份
     :param override_replace_with: 用户自定义替换文本；非空时覆盖所有规则的
         ``replace_with``，不要求规则 ``replace=True``。``None`` 走规则驱动模式
-    :return: ``(消息, 撤销配对)``。前置校验失败时撤销配对为 ``None``
+    :param manifest: 备份元数据存储。非空时传给 :func:`replace_batch` 启用
+        重复扫描检测与完整性校验；``None`` 时跳过 manifest 相关逻辑
+    :param atomic: ``True`` 启用事务模式，任一文件失败自动回滚已替换文件。
+        默认 ``False``
+    :return: ``(消息, 撤销配对)``。前置校验失败时撤销配对为 ``None``；事务模式
+        触发回滚时撤销配对为 ``None``（已自动恢复，无需调用方再撤销）
 
     返回值语义：
 
     - 规则集未加载且无自定义替换 → ``("规则集未加载", None)``
     - 无待替换结果 → ``("无待替换的结果", None)``
+    - 事务模式触发回滚 → ``(message, None)``（已自动恢复）
     - 其他 → ``(BatchReplaceResult.message, ((src, backup), ...))``
     """
     if ruleset is None and not override_replace_with:
@@ -76,14 +85,20 @@ def replace_all_filtered_results(
         scan_root=scan_root,
         preserve_relative=backup_preserve_relative,
         override_replace_with=override_replace_with,
+        manifest=manifest,
+        atomic=atomic,
     )
     logger.info(
-        "批量替换完成: 成功 %d/%d, 跳过 %d, 失败 %d",
+        "批量替换完成: 成功 %d/%d, 跳过 %d, 失败 %d, 回滚 %s",
         batch_result.succeeded,
         batch_result.total,
         batch_result.skipped,
         batch_result.failed,
+        batch_result.rolled_back,
     )
+    # 事务模式触发回滚时返回 None（已自动恢复，调用方无需再撤销）
+    if batch_result.rolled_back:
+        return batch_result.message, None
     # 从 batch_result.details 提取成功项的 (源, 备份) 配对，供 undoLastBatchReplace 撤销
     last_batch_backup_paths = tuple(
         (src, result.backup_path)
@@ -93,13 +108,18 @@ def replace_all_filtered_results(
     return batch_result.message, last_batch_backup_paths
 
 
-def undo_last_batch_replace(last_batch_backup_paths: tuple[tuple[Path, Path], ...]) -> str:
+def undo_last_batch_replace(
+    last_batch_backup_paths: tuple[tuple[Path, Path], ...],
+    manifest: BackupManifest | None = None,
+) -> str:
     """撤销最近一次批量替换，从 ``.bak`` 备份恢复所有文件。
 
     逐个调用 :func:`fuscan.replacer.restore_from_backup`，按 ``(源, 备份)`` 配对
     从备份恢复到原源文件路径。无可撤销操作时返回提示。
 
     :param last_batch_backup_paths: 上次批量替换记录的 ``(源, 备份)`` 配对元组
+    :param manifest: 备份元数据存储。非空时传给 :func:`restore_from_backup`
+        启用完整性校验；``None`` 时跳过校验
     :return: 操作消息字符串
 
     返回值语义：
@@ -113,7 +133,7 @@ def undo_last_batch_replace(last_batch_backup_paths: tuple[tuple[Path, Path], ..
     succeeded = 0
     failed = 0
     for src_path, backup_path in last_batch_backup_paths:
-        msg = restore_from_backup(backup_path, src_path)
+        msg = restore_from_backup(backup_path, src_path, manifest=manifest)
         if msg.startswith("已从备份恢复"):
             succeeded += 1
         else:
@@ -131,6 +151,7 @@ def undo_selected_replace(
     backup_dir: Path,
     scan_root: Path,
     backup_preserve_relative: bool,
+    manifest: BackupManifest | None = None,
 ) -> str:
     """撤销当前选中结果的最近一次替换（从 ``.bak`` 恢复）。
 
@@ -141,6 +162,8 @@ def undo_selected_replace(
     :param backup_dir: 备份根目录
     :param scan_root: 扫描根目录（用于相对路径计算）
     :param backup_preserve_relative: 是否保留相对路径备份
+    :param manifest: 备份元数据存储。非空时传给 :func:`restore_from_backup`
+        启用完整性校验；``None`` 时跳过校验
     :return: 操作消息字符串
     """
     if result is None:
@@ -154,7 +177,7 @@ def undo_selected_replace(
         scan_root=scan_root,
         preserve_relative=backup_preserve_relative,
     )
-    return restore_from_backup(backup_path, result.path)
+    return restore_from_backup(backup_path, result.path, manifest=manifest)
 
 
 def mark_as_false_positive(

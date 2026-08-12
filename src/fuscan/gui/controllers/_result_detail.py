@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fuscan.gui.severity_utils import severity_color_hex, severity_text
+from fuscan.processing.backup_manifest import BackupManifest
 from fuscan.processing.replacer import ReplaceStatus, replace_in_file
 from fuscan.processing.storage import default_backup_dir, detect_default_staging_dir
 
@@ -227,6 +228,7 @@ def replace_selected(
     backup_preserve_relative: bool,
     last_report_root: Path | None,
     override_replace_with: str | None = None,
+    manifest: BackupManifest | None = None,
 ) -> str:
     """替换当前选中结果的命中内容。
 
@@ -241,6 +243,8 @@ def replace_selected(
     :param override_replace_with: 用户自定义替换文本。非空时覆盖
         所有规则的 ``replace_with``，不要求规则 ``replace=True``。默认 ``None``
         走规则驱动模式（要求 ``replace=True`` + ``replace_with``）
+    :param manifest: 备份元数据存储。非空时传给 :func:`replace_in_file` 启用
+        重复扫描检测与完整性记录；``None`` 时跳过 manifest 相关逻辑
     :return: 操作消息字符串
 
     返回值语义：
@@ -265,8 +269,12 @@ def replace_selected(
         scan_root=scan_root,
         preserve_relative=backup_preserve_relative,
         override_replace_with=override_replace_with,
+        manifest=manifest,
     )
-    if replace_result.status == ReplaceStatus.SUCCESS:
+    if replace_result.status in (
+        ReplaceStatus.SUCCESS,
+        ReplaceStatus.ALREADY_REPLACED,
+    ):
         logger.info(
             "已替换 %s 中 %d 条规则命中，备份: %s",
             result.path,

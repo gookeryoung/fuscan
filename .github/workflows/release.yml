@@ -130,11 +130,6 @@ jobs:
             fuscan-windows-
             fuscan-
 
-      # OCR 模型 gitignored，下载真实模型替换占位文件；
-      # fspack 通过 [tool.fspack] data-dirs 将模型打入便携包
-      - name: Download OCR models
-        run: uv run python scripts/download_ocr_models.py
-
       - name: Build fuscan with fspack
         env:
           PYTHONIOENCODING: utf-8
@@ -146,18 +141,18 @@ jobs:
         run: uv run fspack p . --target windows --format all --no-build
 
       # fuscan 是 GUI 应用，CI 无显示器无法做运行时 smoke test，仅校验产物存在
-      # + OCR 模型/依赖已打入便携包（确保 fspack 打包版本含 OCR）
+      # + OCR 引擎与模型已打入便携包（exe+模型入仓，fspack data-dirs 打包）
       - name: Assert artifacts
         shell: bash
         run: |
           test -f dist/release/fuscan-*-windows-*-setup.exe
           test -f dist/release/fuscan-*-windows-*.zip
           zip_path=$(ls dist/release/fuscan-*-windows-*.zip)
-          for needle in ch_PP-OCRv4_det_mobile.onnx rapidocr onnxruntime; do
+          for needle in RapidOCR-json.exe ch_PP-OCRv3_det_infer.onnx; do
             unzip -l "$zip_path" | grep -q "$needle" \
               || { echo "::error::fspack 便携包缺失 $needle"; exit 1; }
           done
-          echo "fspack 便携包含 OCR 模型与依赖"
+          echo "fspack 便携包含 OCR 引擎与模型"
 
       - name: Upload failure artifacts
         if: failure()
@@ -238,11 +233,6 @@ jobs:
             fuscan-linux-
             fuscan-
 
-      # OCR 模型 gitignored，下载真实模型替换占位文件；
-      # fspack 通过 [tool.fspack] data-dirs 将模型打入便携包
-      - name: Download OCR models
-        run: uv run python scripts/download_ocr_models.py
-
       - name: Build fuscan with fspack
         run: uv run fspack b . --target linux
 
@@ -250,18 +240,19 @@ jobs:
         run: uv run fspack p . --target linux --format all --no-build
 
       # fuscan 是 GUI 应用，CI 无显示器无法做运行时 smoke test，仅校验产物存在
-      # + OCR 模型/依赖已打入便携包（确保 fspack 打包版本含 OCR）
+      # + OCR 引擎与模型已打入便携包（exe 为 Windows PE 格式，Linux 含但不可执行，
+      # is_ocr_available 平台门禁拦截）
       - name: Assert artifacts
         run: |
           test -f dist/release/fuscan-*-linux-*.tar.gz
           test -f dist/release/fuscan_*-slim_amd64.deb
           test -f dist/release/fuscan-*-linux-*.zip
           zip_path=$(ls dist/release/fuscan-*-linux-*.zip)
-          for needle in ch_PP-OCRv4_det_mobile.onnx rapidocr onnxruntime; do
+          for needle in RapidOCR-json.exe ch_PP-OCRv3_det_infer.onnx; do
             unzip -l "$zip_path" | grep -q "$needle" \
               || { echo "::error::fspack 便携包缺失 $needle"; exit 1; }
           done
-          echo "fspack 便携包含 OCR 模型与依赖"
+          echo "fspack 便携包含 OCR 引擎与模型（仅 Windows 可用）"
 
       - name: Upload failure artifacts
         if: failure()

@@ -59,8 +59,9 @@ perf-compare: ## 与基线对比性能，mean 退化 >$(PERF_THRESHOLD)% 失败
 perf-list: ## 列出已保存的性能基线
 	uv run pytest --benchmark-list
 
-doc: ## 构建 Sphinx 文档
-	uv run sphinx-build -b html docs docs/_build/html
+doc: ## 构建 Sphinx 文档（HTML + PDF 速查表）
+	uv run --extra docs sphinx-build -b html docs docs/_build/html
+	uv run python scripts/generate_manual_pdf.py
 
 
 tox: ## 多版本测试 (tox)

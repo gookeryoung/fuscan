@@ -345,32 +345,45 @@ def _build_mid_col(s: dict[str, ParagraphStyle], w: float) -> Table:
     items.append(Paragraph("备份目录：<font face='Courier'>~/.fuscan/backup/</font>；压缩包条目不支持替换", s["hint"]))
     items.append(_gap(2))
 
-    items.append(_section("6. 任务级配置覆盖", s))
+    items.append(_section("6. OCR 识别", s))
     items.append(_gap())
-    items.append(Paragraph("入口：工作区卡片 → 展开 → 设置（仅对该工作区生效，未覆盖回退全局）", s["body"]))
-    items.append(
-        _kv_table(
+    items.extend(
+        _bullets(
             [
-                ("扫描压缩包", "ZIP/RAR/7Z 内文件"),
-                ("并发线程数", "1-16，0=单线程"),
-                ("大文件跳过阈值", "1B - 500MB"),
-                ("扫描深度", "空=不限"),
-                ("忽略目录", "每行一个目录名"),
-                ("压缩包密码", "加密包专属密码"),
+                "<b>图片 OCR</b>：PNG/JPG/TIFF/BMP/WEBP/GIF，设置页勾选「图片」启用",
+                "<b>扫描版 PDF</b>：文本层为空时自动 OCR 回退（逐页识别）",
+                "引擎：RapidOCR + ONNX Runtime，PP-OCRv4 模型离线内置",
+                "图片 >10MB 跳过；PDF >50 页跳过 OCR 回退",
+                "解析引擎标注：pypdfium2 / lxml / olefile / rapidocr-onnxruntime",
+                "关于页「引擎状态」查看 OCR 依赖就位情况",
             ],
             s,
-            col_widths=[36 * mm, w - 36 * mm],
         )
     )
+    items.append(_gap(2))
+
+    items.append(_section("7. 文件监控", s))
     items.append(_gap())
-    items.append(Paragraph("持久化到 <font face='Courier'>~/.fuscan/workspaces.json</font>，重启自动恢复", s["hint"]))
+    items.extend(
+        _bullets(
+            [
+                "侧边栏「文件监控」→ 添加目录实时监控",
+                "文件创建/修改/移动自动触发单文件扫描",
+                "命中规则 → 系统托盘通知 + 声音提示",
+                "规则来源：全局规则集（与工作区无关）",
+                "防抖：同文件 300ms 内合并；噪声目录自动过滤",
+                "持久化 <font face='Courier'>~/.fuscan/monitor.json</font>",
+            ],
+            s,
+        )
+    )
     return _col(w, items)
 
 
 def _build_right_col(s: dict[str, ParagraphStyle], w: float) -> Table:
     """右栏：规则 / 字体 / 快捷键 / FAQ / 关于。"""
     items: list[Any] = []
-    items.append(_section("7. 规则管理", s))
+    items.append(_section("8. 规则管理", s))
     items.append(_gap())
     items.extend(
         _bullets(
@@ -385,7 +398,7 @@ def _build_right_col(s: dict[str, ParagraphStyle], w: float) -> Table:
     )
     items.append(_gap(2))
 
-    items.append(_section("8. 字体设置", s))
+    items.append(_section("9. 字体设置", s))
     items.append(_gap())
     items.extend(
         _bullets(
@@ -399,7 +412,7 @@ def _build_right_col(s: dict[str, ParagraphStyle], w: float) -> Table:
     )
     items.append(_gap(2))
 
-    items.append(_section("9. 快捷键", s))
+    items.append(_section("10. 快捷键", s))
     items.append(_gap())
     items.append(
         _kv_table(
@@ -417,7 +430,7 @@ def _build_right_col(s: dict[str, ParagraphStyle], w: float) -> Table:
     )
     items.append(_gap(2))
 
-    items.append(_section("10. 常见问题", s))
+    items.append(_section("11. 常见问题", s))
     items.append(_gap())
     items.append(
         _kv_table(
@@ -425,10 +438,10 @@ def _build_right_col(s: dict[str, ParagraphStyle], w: float) -> Table:
                 ("扫描慢", "缩范围 / 加并发 / 忽略目录 / 降大文件阈值"),
                 ("界面卡顿", "超大文件读取，降大文件阈值"),
                 ("找不到文件", "查忽略目录 / 深度 / 压缩包开关 / 大文件阈值"),
-                ("加密包", "任务级设置填密码"),
+                ("图片不扫", "设置页勾选「图片(OCR)」类别"),
+                ("加密包", "全局规则集 scan_params 配置密码"),
                 ("规则不生效", "定义规则检查加载 / 正则面板测试"),
                 ("撤销替换", "详情底部撤销按钮，从 .bak 恢复"),
-                ("重启后", "工作区持久化，运行时状态重置为就绪"),
                 ("归档结果", "展开区 CSV / JSON 导出"),
             ],
             s,
@@ -437,13 +450,14 @@ def _build_right_col(s: dict[str, ParagraphStyle], w: float) -> Table:
     )
     items.append(_gap(2))
 
-    items.append(_section("11. 关于页", s))
+    items.append(_section("12. 关于页", s))
     items.append(_gap())
     items.extend(
         _bullets(
             [
                 "版本 / 作者 / License / 第三方依赖",
                 "「用户手册」打开本 PDF，「配置目录」打开 ~/.fuscan",
+                "引擎状态：fuscan-core 原生引擎 + OCR 引擎依赖明细",
             ],
             s,
         )

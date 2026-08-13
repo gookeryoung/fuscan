@@ -595,10 +595,10 @@ class TestImageExtractorDefault:
         pytest.fail("ImageExtractor 应在默认注册表中")
 
     def test_image_extractor_engine_info(self, model: ExtractorListModel) -> None:
-        """ImageExtractor engineInfo 应为 rapidocr-onnxruntime。"""
+        """ImageExtractor engineInfo 应为 rapidocr-json。"""
         for i in range(model.rowCount()):
             if model.data(model.index(i), Qt.UserRole + 1) == "ImageExtractor":
-                assert model.data(model.index(i), Qt.UserRole + 10) == "rapidocr-onnxruntime"
+                assert model.data(model.index(i), Qt.UserRole + 10) == "rapidocr-json"
                 return
         pytest.fail("ImageExtractor 应在默认注册表中")
 

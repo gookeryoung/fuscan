@@ -43,8 +43,7 @@ coverage.json
 docs/_build/
 .trae/ref
 
-# OCR 模型文件（PP-OCRv4 mobile，约 17MB，不入仓）
-# 由打包脚本/CI 从 RapidOCR Release 下载到 src/fuscan/assets/ocr/models/
-# 本地开发可用占位文件（hatchling force-include 需文件存在），真实模型下载后替换
-src/fuscan/assets/ocr/models/*.onnx
-src/fuscan/assets/ocr/models/ppocr_keys_v1.txt
+# OCR 引擎与模型文件随软件内置入仓（约 30MB 合计）：
+# RapidOCR-json 预编译 exe（16MB，C++ 静态链接 onnxruntime+opencv，兼容 Win7）
+# + PP-OCRv3 简中模型（det/cls/rec + keys，约 14MB）
+# 仅 Windows 可执行；Linux 便携包含但运行时不可用（is_ocr_available 平台门禁拦截）

@@ -161,7 +161,7 @@ Item {
                                 wrapMode: Text.WordWrap
                             }
                         }
-                        // OCR 引擎状态：展示启用情况与未启用原因（库缺失/模型文件缺失）
+                        // OCR 引擎状态：展示启用情况与未启用原因（exe 缺失/模型文件缺失）
                         Label {
                             text: aboutController.ocrEngine
                             font.pixelSize: 11

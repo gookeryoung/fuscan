@@ -46,19 +46,14 @@ lint = ["pyrefly>=1.1.1", "ruff>=0.8.0"]
 # native：Rust + PyO3 原生匹配引擎，缺失时回退纯 Python 路径（语义等价）
 # pip install fuscan[native] 获得原生加速；pip install fuscan 走纯 Python
 native = ["fuscan-core>=0.1.0"]
-# ocr：图片 OCR + 扫描版 PDF OCR 回退（rapidocr 缺失时 ImageExtractor 抛 ExtractorError 降级）
-# opencv 由 rapidocr 传递依赖（opencv_python>=4.5.1.48）引入，不在此显式声明：
-# opencv 5.x 的 Qt 已静态链接进 opencv_world*.dll，无独立 Qt DLL，不与 PySide2 二进制冲突；
-# 且若同时声明 opencv-python-headless 会与 rapidocr 拉入的 opencv-python 形成「双 cv2 wheel」，
-# fspack 并行解包时 cv2/videoio_registry 目录创建竞态（FileExistsError）。
+# ocr：图片 OCR + 扫描版 PDF OCR 回退。
+# OCR 引擎为 RapidOCR-json 预编译 exe（C++ 静态链接 onnxruntime+opencv，单文件 16MB，
+# 无外部 DLL，兼容 Win7 x64），随软件内置分发（非 pip 依赖，见 fspack data-dirs），
+# 绕过 Python onnxruntime wheel 的 Win7 兼容性死结。
+# Pillow 仅用于扫描版 PDF OCR 回退时将渲染页保存为 PNG 字节喂 exe；缺失时 PDF OCR
+# 回退静默降级（图片 OCR 不依赖 Pillow——exe 内部 opencv 解码图片字节）。
 ocr = [
-    "rapidocr>=3.4.0",
-    # onnxruntime 1.24+ 上游 requires-python 标注为 >=3.10 但实际只发布 cp311+ wheel
-    # （microsoft/onnxruntime#27653），3.10 环境无法安装。PySide2 锁定 Python 3.10，
-    # 故上界 <1.24 使 uv 在 3.10 下解析到 1.23.1（最后的 cp310 wheel 版本）。
-    "onnxruntime>=1.16.0,<1.24",
     "Pillow>=10.0.0",
-    "numpy>=1.24.0",
 ]
 # perf：启动性能汇总表（rich 惰性导入，缺失时回退纯文本），核心库不强依赖
 perf = ["rich>=13.0.0"]
@@ -115,8 +110,9 @@ exclude = [
     "packages/fuscan-core/dist",
     "packages/fuscan-core/.venv*",
     "packages/fuscan-core/Cargo.lock",
-    # OCR 模型文件（~17MB）不进 sdist，避免源码包体积膨胀；
-    # wheel 通过 force-include 内置模型，sdist 用户用 rapidocr 联网下载或从 cache 拷贝。
+    # OCR 引擎 exe（16MB）与 PP-OCRv3 模型文件（~14MB）已入仓但不进 sdist/wheel，
+    # 避免源码包体积膨胀；二者随 fspack 便携包离线分发（见 [tool.fspack] data-dirs）。
+    "src/fuscan/assets/ocr/RapidOCR-json.exe",
     "src/fuscan/assets/ocr/models/*.onnx",
     "src/fuscan/assets/ocr/models/ppocr_keys_v1.txt",
 ]
@@ -124,11 +120,10 @@ exclude = [
 [tool.fspack]
 extras = ["native", "ocr"]
 exclude = [".*", "tests", "benchmarks", "docs", "scripts", "packages"]
-# OCR 模型为非 .py 数据文件（.onnx/.txt），显式声明数据目录确保 fspack
-# 源码拷贝阶段原样保留（pyc_strip 跳过其下 .py 剥离）；模型随软件离线分发，
-# 运行时由 importlib.resources.files("fuscan.assets.ocr.models") 加载。
-# CI 构建前须先跑 scripts/download_ocr_models.py 下载真实模型替换占位文件。
-data-dirs = ["src/fuscan/assets/ocr/models"]
+# OCR 引擎 exe（RapidOCR-json.exe）与 PP-OCRv3 模型文件为非 .py 数据文件，
+# 显式声明数据目录确保 fspack 源码拷贝阶段原样保留（pyc_strip 跳过其下 .pyc 剥离）；
+# 二者已入仓，fspack 直接从源码拷贝，运行时由 importlib.resources.files("fuscan.assets.ocr") 加载。
+data-dirs = ["src/fuscan/assets/ocr", "src/fuscan/assets/ocr/models"]
 pyc_strip = true
 no_site = true
 # fuscan-core 未发布到 PyPI，CI 中用 maturin 本地构建 wheel 到 fuscan-core-wheels/，

@@ -4,8 +4,9 @@
 pypdfium2 兼容 Win7（无 Rust 运行时依赖），且在原生代码内释放 GIL，
 多个 worker 线程可真正并行。
 
-扫描版 PDF（文本层为空）回退 OCR：逐页渲染为位图后用 RapidOCR 识别，
-覆盖扫描件、拍照文档等无文本层的 PDF。rapidocr 缺失时静默降级为空内容。
+扫描版 PDF（文本层为空）回退 OCR：逐页渲染为位图（PIL）→ PNG 字节 →
+RapidOCR-json 预编译 exe 识别，覆盖扫描件、拍照文档等无文本层的 PDF。
+OCR 引擎（exe/模型）缺失时静默降级为空内容。
 
 pypdfium2 的 C 扩展在模块顶层 import 会增加启动耗时（约 64ms），
 故通过 :func:`_ensure_backend` 延迟到首次 :meth:`PdfExtractor.extract_from_bytes`
@@ -54,9 +55,10 @@ class PdfExtractor(Extractor):
     后端固定为 pypdfium2（Google pdfium C++ 引擎，cffi 绑定），
     兼容 Win7。:attr:`speed_tier` 固定返回 T3 中速。
 
-    扫描版 PDF（文本层为空）回退 OCR：逐页渲染为位图后用 RapidOCR 识别。
-    :attr:`last_engine_info` 反映上次提取实际使用的引擎，供扫描器级上报；
-    :attr:`engine_info` 静态保持 ``"pypdfium2"`` 供 GUI tooltip（不破坏现有断言）。
+    扫描版 PDF（文本层为空）回退 OCR：逐页渲染为位图（PIL）→ PNG 字节 →
+    RapidOCR-json 预编译 exe 识别。:attr:`last_engine_info` 反映上次提取实际
+    使用的引擎，供扫描器级上报；:attr:`engine_info` 静态保持 ``"pypdfium2"``
+    供 GUI tooltip（不破坏现有断言）。
     """
 
     def __init__(self) -> None:
@@ -67,7 +69,7 @@ class PdfExtractor(Extractor):
         """上次提取实际使用的引擎（供扫描器级引擎上报）。
 
         纯文本提取返回 ``"pypdfium2"``，OCR 回退返回
-        ``"pypdfium2 + rapidocr-onnxruntime"``。
+        ``"pypdfium2 + rapidocr-json"``。
         """
         return self._last_engine_info
 
@@ -117,7 +119,7 @@ class PdfExtractor(Extractor):
         # 文本层为空 → 尝试 OCR 回退（扫描版 PDF）
         ocr_text = self._ocr_fallback(data, pdf_document)
         if ocr_text:
-            self._last_engine_info = "pypdfium2 + rapidocr-onnxruntime"
+            self._last_engine_info = "pypdfium2 + rapidocr-json"
             return ocr_text
         return ""
 
@@ -159,11 +161,14 @@ class PdfExtractor(Extractor):
             doc.close()  # type: ignore[union-attr]
 
     def _ocr_fallback(self, data: bytes, pdf_document: Callable[..., object]) -> str:
-        """扫描版 PDF OCR 回退：逐页渲染为位图 → OCR。
+        """扫描版 PDF OCR 回退：逐页渲染为位图（PIL）→ PNG 字节 → OCR。
 
-        页数超过 :data:`_MAX_PDF_OCR_PAGES` 或 rapidocr 缺失时返回空字符串
-        （降级为纯文本层结果）。加密 PDF 的页面渲染会失败，被 except 吞掉
-        后返回空。
+        页数超过 :data:`_MAX_PDF_OCR_PAGES` 或 OCR 引擎（exe/模型）缺失时返回
+        空字符串（降级为纯文本层结果）。加密 PDF 的页面渲染会失败，被 except
+        吞掉后返回空。
+
+        渲染得到的 PIL 图片保存为 PNG 字节后传给常驻 exe（exe 内部 opencv 解码），
+        无需 numpy 转 ndarray。PNG 无损，保证 OCR 精度。
 
         :param data: PDF 文件字节内容
         :param pdf_document: ``pypdfium2.PdfDocument`` 类（由 :func:`_ensure_backend` 提供）
@@ -180,11 +185,10 @@ class PdfExtractor(Extractor):
                 logger.info("PDF 页数 %d 超过 OCR 上限 %d，跳过 OCR", n_pages, _MAX_PDF_OCR_PAGES)
                 return ""
             try:
-                engine = get_ocr_engine()
+                engine = get_ocr_engine()  # 启动常驻 exe；缺失/失败抛 ExtractorError
             except ExtractorError:
-                logger.info("rapidocr 未安装，跳过 PDF OCR 回退")
+                logger.info("OCR 引擎未就位，跳过 PDF OCR 回退")
                 return ""
-            import numpy as np  # pyrefly: ignore [missing-import]
 
             parts: list[str] = []
             for i in range(n_pages):
@@ -193,11 +197,17 @@ class PdfExtractor(Extractor):
                     pil_img = page.render(scale=_PDF_RENDER_SCALE).to_pil()  # type: ignore[union-attr]
                     if pil_img.mode != "RGB":
                         pil_img = pil_img.convert("RGB")
-                    arr = np.asarray(pil_img)
-                    result = engine(arr)
-                    txts = getattr(result, "txts", None) or ()
-                    if txts:
-                        parts.append("\n".join(t for t in txts if t))
+                    # PIL → PNG 字节（无损，喂 exe 内部 opencv 解码）
+                    buf = io.BytesIO()
+                    pil_img.save(buf, format="PNG")  # type: ignore[union-attr]
+                    text = engine.recognize(buf.getvalue())
+                    if text:
+                        parts.append(text)
+                except ExtractorError:
+                    # 引擎级错误（子进程崩溃等）向上传播需由调用方决定；
+                    # 但单页通信失败更可能是该页问题，记录后继续后续页
+                    logger.warning("PDF 页 %d OCR 通信失败", i, exc_info=True)
+                    continue
                 except Exception:
                     logger.warning("PDF 页 %d OCR 失败", i, exc_info=True)
                     continue

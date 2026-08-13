@@ -14,14 +14,6 @@ from typing import Any
 from fuscan.paths import ICON_QRC_URL, MAIN_QML_URL, QML_IMPORT_PATH, SPLASH_QML_URL
 from fuscan.perf import PerfReport, render_startup_summary, timed
 
-# 预导入 onnxruntime：PySide2/shiboken2 安装的 import hook（__feature__.py）会
-# 干扰 C 扩展模块加载，导致 onnxruntime_pybind11_state.pyd 的 DLL 初始化失败
-# （ImportError: DLL load failed）。在 PySide2 导入前预加载 onnxruntime，使其
-# 在 shiboken2 hook 安装前完成加载；后续 __import__ 直接命中 sys.modules 绕过
-# hook 干扰。onnxruntime 为可选 ocr 依赖，缺失时静默跳过不影响启动。
-with contextlib.suppress(ImportError):
-    import onnxruntime  # noqa: F401  # pyrefly: ignore [missing-import]
-
 try:
     from PySide2.QtCore import QUrl
     from PySide2.QtGui import QFont, QGuiApplication, QIcon

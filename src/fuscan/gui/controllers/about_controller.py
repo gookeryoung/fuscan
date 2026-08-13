@@ -85,15 +85,15 @@ def _detect_native_matcher_status() -> str:
 def _detect_ocr_status() -> str:
     """检测 OCR 引擎状态，返回展示字符串。
 
-    调用 :func:`fuscan.extractors.ocr.get_ocr_status` 探测完整运行链
-    （rapidocr/onnxruntime/Pillow/numpy + 模型文件），在关于页展示
-    启用情况与未启用原因，便于用户定位是库缺失还是模型文件缺失。
+    调用 :func:`fuscan.extractors.ocr.get_ocr_status` 探测预编译 exe 与
+    PP-OCRv3 模型文件是否就位（不启动子进程），在关于页展示启用情况与
+    未启用原因，便于用户定位是 exe 缺失还是模型文件缺失。
     """
     status = get_ocr_status()
     if status.available:
         v = f" {status.version}" if status.version else ""
-        return f"RapidOCR{v} - OCR 引擎（已启用）"
-    return f"RapidOCR - OCR 引擎（未启用：{status.reason}）"
+        return f"RapidOCR-json{v} - OCR 引擎（已启用）"
+    return f"RapidOCR-json - OCR 引擎（未启用：{status.reason}）"
 
 
 class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -141,8 +141,8 @@ class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def ocrEngine(self) -> str:
         """OCR 引擎状态（启用情况 + 未启用原因）。
 
-        展示 RapidOCR 是否可用及未启用原因（库缺失或模型文件缺失），
-        便于用户在关于页一眼判断 OCR 是否就绪。
+        展示 RapidOCR-json 预编译 exe 是否可用及未启用原因（exe 缺失或
+        模型文件缺失），便于用户在关于页一眼判断 OCR 是否就绪。
         """
         return _detect_ocr_status()
 
@@ -150,8 +150,8 @@ class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def ocrDependencies(self) -> list[dict[str, object]]:
         """OCR 各依赖项状态（供关于页逐项展示绿勾/红叉）。
 
-        返回 rapidocr/onnxruntime/Pillow/numpy/模型文件 各项的就位状态与版本，
-        QML 用 Repeater 渲染：已安装绿色勾 + 版本号，未安装红色叉。
+        返回 RapidOCR-json 引擎与 PP-OCRv3 模型文件两项的就位状态与版本，
+        QML 用 Repeater 渲染：已就位绿色勾 + 版本号，未就位红色叉。
         """
         status = get_ocr_status()
         return [{"name": d.name, "installed": d.installed, "version": d.version} for d in status.dependencies]

@@ -237,7 +237,7 @@ def recognize(img: object) -> str:
     """
     engine = get_ocr_engine()
     try:
-        result = engine(img)
+        result = engine(img)  # pyrefly: ignore [bad-argument-type]
     except Exception as exc:  # onnxruntime/rapidocr 异常类型不可控，统一包装
         raise ExtractorError(f"OCR 推理失败: {exc}") from exc
     txts = getattr(result, "txts", None) or ()

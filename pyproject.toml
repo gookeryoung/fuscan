@@ -53,7 +53,10 @@ native = ["fuscan-core>=0.1.0"]
 # fspack 并行解包时 cv2/videoio_registry 目录创建竞态（FileExistsError）。
 ocr = [
     "rapidocr>=3.4.0",
-    "onnxruntime>=1.16.0",
+    # onnxruntime 1.24+ 上游 requires-python 标注为 >=3.10 但实际只发布 cp311+ wheel
+    # （microsoft/onnxruntime#27653），3.10 环境无法安装。PySide2 锁定 Python 3.10，
+    # 故上界 <1.24 使 uv 在 3.10 下解析到 1.23.1（最后的 cp310 wheel 版本）。
+    "onnxruntime>=1.16.0,<1.24",
     "Pillow>=10.0.0",
     "numpy>=1.24.0",
 ]

@@ -8,3 +8,12 @@ search-path      = ["."]
 # reportlab/openpyxl 等第三方库未随附类型存根（typeshed 限制，非代码问题），
 # 全局忽略「Cannot find type stubs」warning。受影响文件：src/fuscan/export/report.py
 untyped-import = "ignore"
+# OCR 依赖（onnxruntime/rapidocr/numpy/Pillow）为可选 ocr extra：
+# CI typecheck 用 --extra lint（不含 ocr）→ 报 missing-import，需 # pyrefly: ignore 注释；
+# 本地装了 ocr extra → 同一注释变 unused-ignore。二者互斥，全局忽略 unused-ignore
+# 使注释在两端都通过（missing-import 被 ignore 抑制，unused-ignore 被本配置抑制）。
+unused-ignore = "ignore"
+# numpy 等第三方库的泛型类（ndarray[ShapeT_co, DType_co]）在 strict 模式下要求
+# 显式类型参数。实际注解多为 ndarray[Any, Any]，强制写出类型参数是噪音且不影响
+# 正确性，全局忽略。仅 numpy 安装时触发（CI 无 numpy 不触发）。
+implicit-any-type-argument = "ignore"

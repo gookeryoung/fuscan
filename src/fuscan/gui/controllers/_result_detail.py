@@ -67,10 +67,15 @@ def _extract_contexts_batch(path: Path, match_texts: list[str]) -> dict[str, str
     带 ``>>> `` 前缀标记的上下文文本。相比逐条 :func:`_extract_context`
     重复读盘/分行/搜索，复杂度从 O(命中数 × 行数) 降至 O(行数)。
 
+    内容读取使用 :func:`extract_content_with_fallback`（与扫描器同一提取链），
+    确保 PDF/DOCX/XLSX 等提取器文件的上下文从**提取后的文本**中定位——
+    正则匹配跑在提取后文本上，若用 ``read_text`` 读原始字节，提取器文件的
+    match_text 在原始字节中不存在，上下文无法定位（曾导致正则匹配上下文不显示）。
+    纯文本文件无注册提取器时回退到 UTF-8 读取，行为与扫描器一致。
+
     文件不存在、超过 :data:`_MAX_CONTEXT_FILE_SIZE`、读取失败时返回空 dict
     （调用方回退 ``hit.detail``）。不按扩展名白名单过滤——上下文提取只读
-    不写，不会破坏文件；二进制文件经 ``errors="replace"`` 解码后
-    ``match_text in line`` 通常找不到匹配，自然返回空。
+    不写，不会破坏文件。
 
     :param path: 文件路径
     :param match_texts: 待定位的匹配文本列表（可含空串/重复，内部去空去重）
@@ -86,7 +91,16 @@ def _extract_contexts_batch(path: Path, match_texts: list[str]) -> dict[str, str
         size = path.stat().st_size
         if size > _MAX_CONTEXT_FILE_SIZE:
             return {}
-        content = path.read_text(encoding="utf-8", errors="replace")
+        # 用提取器读取内容（与扫描器同一提取链），确保提取器文件的上下文
+        # 从提取后文本定位。提取器失败时 extract_content_with_fallback 内部
+        # 回退到 UTF-8 纯文本读取；纯文本回退失败时抛 OSError 由下方捕获。
+        from fuscan.extractors import extract_content_with_fallback
+
+        content = extract_content_with_fallback(path)
+        # 提取器对未注册扩展名（如 LICENSE/Makefile 无扩展名）返回空串而非抛异常，
+        # 此时回退到 read_text 直接读取原始文本，保证无提取器文件也能提取上下文。
+        if not content:
+            content = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return {}
 

@@ -1,6 +1,7 @@
 """``SplashController`` 单元测试。
 
-验证初始阶段文本、``setStage`` 更新行为与 ``stageChanged`` 信号触发条件。
+验证初始阶段文本、``setStage`` 更新行为与 ``stageChanged`` 信号触发条件，
+以及确定性进度（``progress``）的单调递增与 ``progressChanged`` 信号触发。
 """
 
 from __future__ import annotations
@@ -95,3 +96,58 @@ class TestStageTransition:
         splash.setStage("加载主界面...")
 
         assert received == ["加载主界面..."]
+
+
+class TestProgress:
+    """确定性进度（progress）单调递增与信号触发测试。"""
+
+    def test_initial_progress_is_zero(self, splash: SplashController) -> None:
+        """构造后默认进度为 0.0。"""
+        assert splash.progress == 0.0
+
+    def test_set_stage_with_progress_updates_property(self, splash: SplashController) -> None:
+        """setStage 传入进度应更新 progress 属性。"""
+        splash.setStage("迁移配置...", 0.15)
+        assert splash.progress == 0.15
+
+    def test_progress_emits_signal_when_increased(self, splash: SplashController) -> None:
+        """进度递增时应触发 progressChanged 信号。"""
+        received: list[float] = []
+        splash.progressChanged.connect(lambda: received.append(splash.progress))  # pyrefly: ignore [missing-attribute]
+        splash.setStage("迁移配置...", 0.15)
+        splash.setStage("加载主界面...", 0.65)
+        assert received == [0.15, 0.65]
+
+    def test_progress_monotonic_never_decreases(self, splash: SplashController) -> None:
+        """进度单调递增：传入更小值不应回退进度条。"""
+        splash.setStage("加载主界面...", 0.65)
+        # 传入更小进度值，progress 不应回退
+        splash.setStage("回退阶段...", 0.2)
+        assert splash.progress == 0.65
+        assert splash.stage == "回退阶段..."
+
+    def test_progress_does_not_emit_when_decreasing(self, splash: SplashController) -> None:
+        """进度回退值不应触发 progressChanged 信号。"""
+        received: list[float] = []
+        splash.progressChanged.connect(lambda: received.append(splash.progress))  # pyrefly: ignore [missing-attribute]
+        splash.setStage("阶段一", 0.5)
+        splash.setStage("阶段二", 0.3)  # 回退，不应触发
+        assert received == [0.5]
+
+    def test_set_stage_without_progress_keeps_progress(self, splash: SplashController) -> None:
+        """setStage 不传进度（默认 -1.0）时 progress 保持不变。"""
+        splash.setStage("迁移配置...", 0.15)
+        splash.setStage("仅文本更新...")
+        assert splash.progress == 0.15
+        assert splash.stage == "仅文本更新..."
+
+    def test_progress_full_sequence_monotonic(self, splash: SplashController) -> None:
+        """模拟完整启动序列，进度应单调递增到 1.0。"""
+        received: list[float] = []
+        splash.progressChanged.connect(lambda: received.append(splash.progress))  # pyrefly: ignore [missing-attribute]
+        splash.setStage("迁移配置...", 0.15)
+        splash.setStage("加载规则与工作区...", 0.35)
+        splash.setStage("加载主界面...", 0.65)
+        splash.setStage("就绪", 1.0)
+        assert received == [0.15, 0.35, 0.65, 1.0]
+        assert splash.progress == 1.0

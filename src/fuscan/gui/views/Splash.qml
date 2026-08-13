@@ -77,7 +77,7 @@ Window {
         }
     }
 
-    // indeterminate 进度条：圆角 + 主色 + 左右往返动画
+    // 确定性进度条：宽度按 splashController.progress 比例填充，单调递增不回退
     Rectangle {
         id: progressTrack
         width: parent.width - 64
@@ -89,17 +89,13 @@ Window {
         anchors.topMargin: 16
 
         Rectangle {
-            width: progressTrack.width * 0.3
+            // 宽度绑定 progress（0.0-1.0），平滑过渡避免突变
+            width: progressTrack.width * splashController.progress
             height: progressTrack.height
             color: "#0366D6"
             radius: 3
-            // 进度条左右往返动画
-            XAnimator on x {
-                from: -progressTrack.width * 0.3
-                to: progressTrack.width
-                duration: 1200
-                loops: Animation.Infinite
-                running: true
+            Behavior on width {
+                NumberAnimation { duration: 250; easing.type: Easing.OutCubic }
             }
         }
     }

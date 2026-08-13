@@ -191,10 +191,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     """启动 QML GUI 应用。
 
     启动流程采用**渐进式 Splash 反馈**：在 QGuiApplication 构造后立即加载独立
-    的 :file:`Splash.qml`（无边框圆角窗口 + logo + 阶段文本 + 进度条），让用户
+    的 :file:`Splash.qml`（无边框圆角窗口 + logo + 阶段文本 + 确定性进度条），让用户
     在数百毫秒内看到反馈；后续各阶段（迁移配置 / 构造主控制器 / 加载主 QML）
-    通过 :meth:`SplashController.setStage` 更新文本，并调用
+    通过 :meth:`SplashController.setStage` 更新文本与单调递增的进度值，并调用
     :meth:`QGuiApplication.processEvents` 让 Splash 重绘，缓解"应用启动卡顿"的观感。
+    进度条按阶段比例填充且只增不减，避免 indeterminate 往返动画造成的"反复前进后退"。
     主窗口 QML 加载完成后关闭 Splash 并进入事件循环。
 
     各启动阶段通过 :class:`~fuscan.perf.timed` 分段计时并登记到 :class:`~fuscan.perf.PerfReport`；
@@ -247,12 +248,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             # scan_archives/max_workers/ignore_dirs/disabled_extractors 等字段
             # 搬到 ~/.fuscan/rules/user-scan.yaml，并从 config.yaml 中清除。
             # 幂等：无迁移字段时 no-op。
-            splash_controller.setStage("迁移配置...")
-            app.processEvents()  # 让 Splash 立即刷新阶段文本
+            splash_controller.setStage("迁移配置...", 0.15)
+            app.processEvents()  # 让 Splash 立即刷新阶段文本与进度
             migrate_config_to_rules()
 
         with timed("构造主控制器", level=logging.DEBUG, report=report):
-            splash_controller.setStage("加载规则与工作区...")
+            splash_controller.setStage("加载规则与工作区...", 0.35)
             app.processEvents()
             controller = AppController()
 
@@ -263,7 +264,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             engine.addImportPath(QML_IMPORT_PATH)
 
         with timed("加载主 QML", level=logging.DEBUG, report=report):
-            splash_controller.setStage("加载主界面...")
+            splash_controller.setStage("加载主界面...", 0.65)
             app.processEvents()
             logger.info("加载主 QML：%s", MAIN_QML_URL)
             engine.load(QUrl(MAIN_QML_URL))  # pyrefly: ignore [missing-argument]
@@ -280,7 +281,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _setup_file_monitor_tray(app, controller)
 
         # 主窗口已加载显示，关闭并释放 Splash 资源
-        splash_controller.setStage("就绪")
+        splash_controller.setStage("就绪", 1.0)
         app.processEvents()
         splash_engine.deleteLater()
 

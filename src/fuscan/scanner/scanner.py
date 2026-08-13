@@ -32,6 +32,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from fuscan.cache.hashes import hash_bytes
 from fuscan.cache.store import BatchWriteItem
 from fuscan.perf import FilePerfRecorder, PerfStats
 from fuscan.rules.model import (
@@ -444,6 +445,16 @@ class Scanner:
         # 键为 str(Path)，值为 file_hash（64 hex，None 表示未登记/不适用）。
         # _scan_entry_cached 优先查本 dict，省掉 SQLite/路径 LRU 查询。
         self._precomputed_file_hashes: dict[str, str | None] = {}
+        # 单次扫描内文件内容去重 memo：(file_hash, extension) → (match_content, bucket_hits)
+        # 同内容同扩展名的重复文件复用内容提取与 CONTENT 桶匹配结果，
+        # 仅重算路径相关规则（FILENAME/PATH）。扫描结束后随 Scanner 实例释放，
+        # 不跨扫描复用（跨扫描由 CacheStore 负责）。
+        # 线程安全：并发模式多 worker 共享，用 _dedup_memo_lock 保护 dict 读写。
+        self._content_dedup_memo: dict[tuple[str, str], tuple[str, list[RuleHit]]] = {}
+        self._dedup_memo_lock = threading.Lock()
+        # 仅在默认内容提供器时启用去重：自定义提供器的非确定性内容
+        # （如 source_files 映射）无法按 file_hash 安全复用。
+        self._dedup_enabled: bool = content_provider is None or content_provider is default_extract_content
         # 当前扫描文件元信息缓存：_pipeline_phase 在调 _scan_entry 前设置，
         # _emit_progress 读取以填充 ProgressInfo 的单文件字段（size/ext/elapsed_ms）。
         # _current_file_start_time 为 perf_counter 基线，0 表示未设置（walk/archive 阶段）
@@ -615,6 +626,8 @@ class Scanner:
         self._matched_files.clear()
         # 重置性能统计，使每次调用的汇总独立
         self._perf.reset()
+        # 重置内容去重 memo，避免跨多次扫描累积
+        self._content_dedup_memo.clear()
         # 重置增量扫描统计
         self._unchanged_count = 0
         # 构建本次扫描的新 manifest（供下次增量扫描用）
@@ -1187,6 +1200,46 @@ class Scanner:
             self._global_native_engine,
         )
 
+    def _match_buckets_cached_dedup(
+        self,
+        content: str,
+        file_hash: str | None,
+        extension: str,
+    ) -> tuple[list[RuleHit], int]:
+        """缓存模式下执行 CONTENT 桶匹配，支持单次扫描内同 file_hash 去重。
+
+        ``file_hash`` 非 None 时先查去重 memo，命中直接复用 ``bucket_hits``；
+        未命中则跑 :meth:`_match_content_via_buckets` 并存入 memo。
+
+        :param content: 文件提取内容（缓存模式用原始 content，非 minified 版本）
+        :param file_hash: 文件内容哈希；None 表示不去重
+        :param extension: 文件扩展名（去重键组成部分）
+        :return: ``(bucket_hits, rule_errors)``
+        """
+        # 先查去重 memo
+        if file_hash is not None:
+            dedup_key = (file_hash, extension)
+            with self._dedup_memo_lock:
+                memo_entry = self._content_dedup_memo.get(dedup_key)
+            if memo_entry is not None:
+                return memo_entry[1], 0
+
+        # 去重未命中：跑桶匹配
+        try:
+            with self._perf.measure("match"):
+                matched = self._match_content_via_buckets(content)
+        except Exception:
+            logger.warning("CONTENT 合并桶(缓存模式)匹配失败", exc_info=True)
+            return [], 1
+
+        # 存入去重 memo（仅在桶匹配成功时，避免异常结果被复用）
+        if file_hash is not None:
+            dedup_key = (file_hash, extension)
+            with self._dedup_memo_lock:
+                self._content_dedup_memo[dedup_key] = (content, matched)
+
+        return matched, 0
+
     def _run_cached_applicable_bucket_pass(
         self,
         content: str,
@@ -1194,10 +1247,16 @@ class Scanner:
         cached: dict[str, RuleHit | None],
         hits: list[RuleHit],
         batch_hits: list[tuple[str, RuleHit | None]],
+        file_hash: str | None = None,
+        extension: str = "",
     ) -> int:
         """对 bucket_applicable（被 CONTENT 桶覆盖的规则集）执行：
         缓存命中先取，再跑一次 `_match_content_via_buckets(content)` 拿命中，
         最后对未缓存 + 未命中规则写 ``None`` 缓存占位。
+
+        内容去重：``file_hash`` 非 None 时，同 ``(file_hash, extension)`` 的
+        重复文件复用桶匹配结果，跳过 ``_match_content_via_buckets`` 的 finditer 开销。
+        与无缓存模式的 :meth:`_resolve_content_and_buckets` 共享同一去重 memo。
 
         直接改写入参 ``hits`` / ``batch_hits``，返回本 pass 中发生的 rule_errors 数。
         """
@@ -1213,18 +1272,11 @@ class Scanner:
                 if cached_hit is not None:
                     hits.append(rebuild_hit_from_cache(rule, cached_hit))
                 processed_hashes.add(rule_hash)
-        # ----------- 2 阶段：跑一次 content 桶匹配 --------------------
+        # ----------- 2 阶段：跑一次 content 桶匹配（或命中去重 memo 直接复用） ----
         bucket_hits_by_name: dict[str, list[RuleHit]] = {}
         if len(processed_hashes) < len(bucket_applicable):
-            # 至少有 1 条未缓存，跑桶匹配
-            try:
-                with self._perf.measure("match"):
-                    matched = self._match_content_via_buckets(content)
-            except Exception:
-                # 桶匹配异常：fallback 到逐条 remaining 处理
-                errors += 1
-                logger.warning("CONTENT 合并桶(缓存模式)匹配失败 %s", bucket_applicable[0][0].name, exc_info=True)
-                matched: list[RuleHit] = []
+            matched, match_errors = self._match_buckets_cached_dedup(content, file_hash, extension)
+            errors += match_errors
             for hit in matched:
                 bucket_hits_by_name.setdefault(hit.rule_name, []).append(hit)
         # ----------- 3 阶段：分发桶结果到未处理的 rule_hash --------------------
@@ -1298,6 +1350,10 @@ class Scanner:
         通过 ``_get_effective_buckets_and_rules`` 仅取当前 entry.extension
         真正需要的 CONTENT 桶 + remaining 规则，减少 60%+ 非必要 CONTENT re 调用。
 
+        内容去重：默认内容提供器时，同内容同扩展名的重复文件复用
+        ``(match_content, bucket_hits)``，跳过内容提取与 CONTENT 桶匹配，
+        仅重算路径相关规则。去重键为 ``(file_hash, extension)``。
+
         .. note::
             ``max_file_size`` 大文件跳过逻辑已前移到 filter 阶段（:func:`run_filter_phase`），
             超限文件不会进入 ``entries`` 清单，故本方法不再做 size 检查。``scan_file``
@@ -1307,48 +1363,24 @@ class Scanner:
         # 是否需要读取内容：含 CONTENT 规则时才读取
         need_content = bool(self._content_rule_names)
         skip_content = not need_content
+        # 仅取当前 entry.ext 真需要的 buckets + remaining
+        effective_buckets, effective_remaining = self._get_effective_buckets_and_rules(entry)
+
+        hits: list[RuleHit] = []
+        rule_errors = 0
+
         if skip_content:
             context = MatchContext(entry, content_provider=empty_content_provider)
         else:
-            # 先取一次内容并检测是否为压缩/打包产物（min.js/chunk.js/bundle 等）。
-            # 命中则以空内容做 CONTENT 匹配——超长单行的正则 finditer 是解析耗时的
-            # 根源，跳过后 CONTENT 规则对空串瞬间返回不命中；用静态 provider 复用
-            # 已读内容（或替换为空串），避免二次文件 I/O。FILENAME/PATH 规则不依赖
-            # 内容，仍正常评估。
-            raw_content = self._content_provider(entry)
-            match_content = "" if is_minified_content(raw_content) else raw_content
+            # 读取内容 + CONTENT 桶匹配（支持单次扫描内同 file_hash 去重）
+            match_content, bucket_hits, bucket_errors = self._resolve_content_and_buckets(entry, effective_buckets)
+            hits.extend(bucket_hits)
+            rule_errors += bucket_errors
 
             def _static_provider(_fe: FileEntry, _c: str = match_content) -> str:
                 return _c
 
             context = MatchContext(entry, content_provider=_static_provider)
-        hits: list[RuleHit] = []
-        rule_errors = 0
-
-        # 仅取当前 entry.ext 真需要的 buckets + remaining
-        effective_buckets, effective_remaining = self._get_effective_buckets_and_rules(entry)
-
-        # 对不 skip_content 且有桶的情况，先走合并 CONTENT 桶匹配
-        # （一次 finditer + 分派取代 N 次独立 re 调用）
-        if not skip_content and effective_buckets:
-            # 原生引擎查找：优先按 ext 取专属引擎（覆盖 global + ext 桶），
-            # 否则回退到 global 引擎；引擎为 None 时 match_content_via_buckets
-            # 自动走 Python 路径
-            ext = entry.extension
-            native_engine = (self._ext_native_engines.get(ext) if ext else None) or self._global_native_engine
-            try:
-                with self._perf.measure("match"):
-                    bucket_hits = self._match_content_via_buckets_impl(
-                        context.content,
-                        effective_buckets,
-                        native_engine,
-                    )
-                hits.extend(bucket_hits)
-            except Exception:
-                # 桶匹配失败：记录为规则错误，但不要阻断后续 remaining 规则。
-                # 具体哪条规则出错在 compile 阶段已通过降级避免，这里兜底捕获异常。
-                logger.warning("CONTENT 合并桶匹配失败 %s", entry.path, exc_info=True)
-                rule_errors += 1
 
         # 全局 scan_extensions 已在 _should_scan 阶段按白名单统一过滤，
         # 此处对进入扫描队列的文件应用剩余规则（组合型 / FILENAME/PATH /
@@ -1372,6 +1404,105 @@ class Scanner:
                 time.sleep(0)
 
         return ScanResult(path=entry.path, size=entry.size, hits=tuple(hits), errors=rule_errors)
+
+    def _resolve_content_and_buckets(
+        self,
+        entry: FileEntry,
+        effective_buckets: list[_ContentRuleBucket],
+    ) -> tuple[str, list[RuleHit], int]:
+        """读取文件内容并执行 CONTENT 桶匹配，支持单次扫描内同内容去重。
+
+        去重键为 ``(file_hash, extension)``：同内容同扩展名的重复文件复用
+        ``(match_content, bucket_hits)``，跳过内容提取与桶匹配。
+        路径相关规则（FILENAME/PATH）由调用方逐文件求值，不受去重影响。
+
+        仅在内容提供器为默认 (:func:`default_extract_content`) 时启用去重，
+        避免自定义提供器的非确定性内容影响去重正确性。去重未命中或不可用时
+        回退到原始路径（``content_provider`` 读取 + 桶匹配）。
+
+        :param entry: 文件元信息
+        :param effective_buckets: 当前扩展名对应的 CONTENT 桶列表
+        :return: ``(match_content, bucket_hits, rule_errors)``
+        """
+        # 尝试读取字节 + 计算 file_hash（用于去重键）
+        data: bytes | None = None
+        dedup_key: tuple[str, str] | None = None
+        if self._dedup_enabled:
+            data = self._read_bytes_for_content(entry)
+            if data is not None:
+                file_hash = hash_bytes(data)
+                dedup_key = (file_hash, entry.extension)
+                with self._dedup_memo_lock:
+                    cached = self._content_dedup_memo.get(dedup_key)
+                if cached is not None:
+                    # 命中去重：复用 (match_content, bucket_hits)，跳过提取 + 桶匹配
+                    return cached[0], cached[1], 0
+
+        # 去重未命中或不可用：提取内容
+        if data is not None:
+            raw_content = self._extract_content_from_bytes(data, entry.extension)
+        else:
+            raw_content = self._content_provider(entry)
+        match_content = "" if is_minified_content(raw_content) else raw_content
+
+        # CONTENT 桶匹配（一次 finditer + 分派取代 N 次独立 re 调用）
+        bucket_hits: list[RuleHit] = []
+        rule_errors = 0
+        if effective_buckets:
+            ext = entry.extension
+            native_engine = (self._ext_native_engines.get(ext) if ext else None) or self._global_native_engine
+            try:
+                with self._perf.measure("match"):
+                    bucket_hits = self._match_content_via_buckets_impl(
+                        match_content,
+                        effective_buckets,
+                        native_engine,
+                    )
+            except Exception:
+                # 桶匹配失败：记录为规则错误，但不要阻断后续 remaining 规则。
+                logger.warning("CONTENT 合并桶匹配失败 %s", entry.path, exc_info=True)
+                rule_errors = 1
+
+        # 存入去重 memo（仅在桶匹配成功时，避免异常结果被复用）
+        if dedup_key is not None and rule_errors == 0:
+            with self._dedup_memo_lock:
+                self._content_dedup_memo[dedup_key] = (match_content, bucket_hits)
+
+        return match_content, bucket_hits, rule_errors
+
+    def _read_bytes_for_content(self, entry: FileEntry) -> bytes | None:
+        """读取文件字节用于内容提取与哈希计算。
+
+        超过 ``max_file_size`` 或读取失败时返回 None，调用方回退到 content_provider。
+
+        :param entry: 文件元信息
+        :return: 文件完整字节内容；超限/不可读时返回 None
+        """
+        if entry.is_dir or (self._max_file_size > 0 and entry.size > self._max_file_size):
+            return None
+        try:
+            return entry.path.read_bytes()
+        except OSError:
+            logger.debug("读取文件失败: %s", entry.path, exc_info=True)
+            return None
+
+    def _extract_content_from_bytes(self, data: bytes, extension: str) -> str:
+        """从内存字节提取文件内容，提取器失败时回退到 UTF-8 纯文本。
+
+        与 :func:`extract_content_with_fallback` 等价，但从内存字节提取
+        避免二次磁盘 I/O（去重模式下已读字节算哈希）。
+
+        :param data: 文件完整字节内容
+        :param extension: 扩展名（不含点，小写）
+        :return: 提取的文本内容；提取器失败时返回 UTF-8 解码文本
+        """
+        try:
+            from fuscan.extractors import extract_content_from_bytes_with_retry
+
+            return extract_content_from_bytes_with_retry(data, extension)
+        except Exception:
+            logger.debug("提取器提取失败，回退到纯文本", exc_info=True)
+            return data.decode("utf-8", errors="ignore")
 
     def _extract_with_cache(self, entry: FileEntry) -> tuple[str, str]:
         """缓存模式的提取+哈希（委托 :func:`extract_with_cache`）。
@@ -1540,7 +1671,9 @@ class Scanner:
                     remaining_applicable.append(triplet)
         else:
             remaining_applicable = applicable
-        rule_errors += self._run_cached_applicable_bucket_pass(content, bucket_applicable, cached, hits, batch_hits)
+        rule_errors += self._run_cached_applicable_bucket_pass(
+            content, bucket_applicable, cached, hits, batch_hits, file_hash, entry.extension
+        )
         # GIL 让步基线（函数局部，多 worker 各自持有不竞争）：remaining 规则逐条
         # matcher.matches 含持 GIL 的纯 Python re 调用，在 worker 线程内按时间式
         # 让步给 GUI 主线程让出 GIL。缓存命中的 continue 分支开销极小、不持 GIL 太久，

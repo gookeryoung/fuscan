@@ -933,7 +933,11 @@ class TestBuildDetailHitsFull:
         assert build_detail_hits_full(None) == []
 
     def test_same_file_multi_hits_reads_once(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """同一文件多条命中只读文件一次（批处理）。"""
+        """同一文件多条命中只读文件一次（批处理）。
+
+        上下文提取走提取器链（TextExtractor 用 read_bytes），同一文件多条命中
+        仅调用一次提取器（批处理），不随命中数线性增长读盘次数。
+        """
         src = tmp_path / "a.txt"
         src.write_text(
             "line0\napi_key=AAA\nline2\ntoken=BBB\nline4\n",
@@ -941,14 +945,14 @@ class TestBuildDetailHitsFull:
         )
 
         read_calls = 0
-        real_read_text = Path.read_text
+        real_read_bytes = Path.read_bytes
 
-        def counting_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        def counting_read_bytes(self: Path, *args: object, **kwargs: object) -> bytes:
             nonlocal read_calls
             read_calls += 1
-            return real_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+            return real_read_bytes(self, *args, **kwargs)  # type: ignore[arg-type]
 
-        monkeypatch.setattr(Path, "read_text", counting_read_text)
+        monkeypatch.setattr(Path, "read_bytes", counting_read_bytes)
 
         hit1 = RuleHit(
             rule_name="密钥",
@@ -965,7 +969,7 @@ class TestBuildDetailHitsFull:
         result = _make_result(src, hits=(hit1, hit2))
         model = build_detail_hits_full(result)
 
-        # 同文件两命中只读一次
+        # 同文件两命中只读一次（提取器内部 read_bytes 调用一次）
         assert read_calls == 1
         assert len(model) == 2
         # 各命中上下文独立定位
@@ -1047,6 +1051,47 @@ class TestBuildDetailHitsFull:
         assert ">>> password=secret" in context
         assert "    line1" in context
         assert "    line3" in context
+
+    def test_extractor_file_context_from_extracted_text(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """提取器文件（PDF/DOCX 等）的上下文从提取后文本定位，而非原始字节。
+
+        回归测试：``_extract_contexts_batch`` 曾用 ``read_text`` 读原始字节，
+        但正则匹配跑在提取器输出的文本上，PDF/DOCX 等二进制文件的 match_text
+        在原始字节中不存在，导致上下文无法定位、回退到 ``hit.detail`` 描述性
+        文本而非文件上下文。改用 ``extract_content_with_fallback`` 后，上下文
+        从提取后文本定位，与扫描器看到的内容一致。
+        """
+        # 构造一个 .pdf 文件，原始字节为二进制垃圾（不含 match_text 可读文本）
+        src = tmp_path / "a.pdf"
+        src.write_bytes(b"\x89PNG\r\n\x00\x01\x02\x03\xff\xfe\xfd")
+
+        # monkeypatch 提取器返回模拟的提取后文本（含 match_text）
+        extracted_text = "header line\napi_key=AKIAIOSFODNN7EXAMPLE\nfooter line\n"
+
+        def fake_extract(path: Path) -> str:
+            return extracted_text if path == src else ""
+
+        import fuscan.extractors as extractors_mod
+
+        monkeypatch.setattr(extractors_mod, "extract_content_with_fallback", fake_extract)
+
+        hit = RuleHit(
+            rule_name="AWS 密钥",
+            severity=Severity.CRITICAL,
+            detail="正则命中: 'AKIAIOSFODNN7EXAMPLE'",
+            match_text="AKIAIOSFODNN7EXAMPLE",
+        )
+        result = _make_result(src, hits=(hit,))
+        model = build_detail_hits_full(result)
+        context = str(model[0]["context"])
+        # 上下文应来自提取后文本（带 >>> 标记），而非回退到 detail 或原始字节
+        assert ">>> api_key=AKIAIOSFODNN7EXAMPLE" in context
+        assert "    header line" in context
+        assert "    footer line" in context
 
     def test_empty_match_text_uses_detail(self, tmp_path: Path) -> None:
         """空 match_text 不定位上下文，直接用 detail。"""

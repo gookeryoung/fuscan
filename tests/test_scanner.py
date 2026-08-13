@@ -6304,3 +6304,183 @@ class TestScannerRemainingRuleYield:
 
         assert result.has_hit
         assert sleep_calls == []
+
+
+class TestContentDedup:
+    """单次扫描内文件内容去重：同内容同扩展名的重复文件复用 (match_content, bucket_hits)。"""
+
+    def test_uncached_duplicate_files_reuse_content(self, tmp_path: Path) -> None:
+        """无缓存模式：同内容不同路径的文件复用内容提取与桶匹配结果。"""
+        content = "password=AKIAIOSFODNN7EXAMPLE\nsecret=abc123\n"
+        (tmp_path / "a.txt").write_text(content, encoding="utf-8")
+        (tmp_path / "b.txt").write_text(content, encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "AKIAIOSFODNN7EXAMPLE"))
+        scanner = Scanner(rs)
+        report = scanner.scan(tmp_path)
+        # 两个文件都命中
+        assert report.stats.scanned_files == 2
+        assert report.stats.matched_files == 2
+        # 去重 memo 已填充（1 条：同内容同扩展名）
+        assert len(scanner._content_dedup_memo) == 1
+        # 两个文件的命中相同
+        hits_a = [r for r in report.results if r.path.name == "a.txt"]
+        hits_b = [r for r in report.results if r.path.name == "b.txt"]
+        assert len(hits_a) == 1 and len(hits_b) == 1
+        assert hits_a[0].hits[0].rule_name == "pwd"
+        assert hits_b[0].hits[0].rule_name == "pwd"
+
+    def test_uncached_dedup_skips_extraction_for_duplicate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """无缓存模式：重复文件跳过内容提取（去重命中后从 memo 复用 match_content）。
+
+        read_bytes 仍需调用以计算 file_hash（内容去重必须读文件算哈希），
+        但 extract_content_from_bytes_with_retry 仅对首个文件调用。
+        """
+        content = "api_key=AKIAIOSFODNN7EXAMPLE"
+        (tmp_path / "a.txt").write_text(content, encoding="utf-8")
+        (tmp_path / "b.txt").write_text(content, encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "AKIAIOSFODNN7EXAMPLE"))
+        scanner = Scanner(rs)
+
+        extract_count = 0
+        original_extract = extract_content_from_bytes_with_retry
+
+        def counting_extract(data: bytes, extension: str, **kwargs: object) -> str:
+            nonlocal extract_count
+            extract_count += 1
+            return original_extract(data, extension)
+
+        monkeypatch.setattr(
+            "fuscan.scanner.scanner.extract_content_from_bytes_with_retry",
+            counting_extract,
+            raising=False,
+        )
+        # 同时 patch 模块内惰性导入的提取器函数
+        import fuscan.extractors as extractors_mod
+
+        monkeypatch.setattr(extractors_mod, "extract_content_from_bytes_with_retry", counting_extract)
+        scanner.scan(tmp_path)
+        # 两个文件同内容，去重命中后第二个跳过提取 → extract 仅调用 1 次
+        assert extract_count == 1
+
+    def test_uncached_dedup_path_rules_still_evaluated(self, tmp_path: Path) -> None:
+        """无缓存模式：去重仅复用 CONTENT 结果，FILENAME 规则仍逐文件求值。"""
+        content = "api_key=AKIAIOSFODNN7EXAMPLE"
+        (tmp_path / "secret.txt").write_text(content, encoding="utf-8")
+        (tmp_path / "normal.txt").write_text(content, encoding="utf-8")
+        rs = _build_ruleset(
+            _content_rule("pwd", "AKIAIOSFODNN7EXAMPLE"),
+            _filename_rule("敏感名", "secret"),
+        )
+        scanner = Scanner(rs)
+        report = scanner.scan(tmp_path)
+        # 两个文件都命中 CONTENT 规则
+        assert report.stats.matched_files == 2
+        # FILENAME 规则仅命中 secret.txt（路径相关，不去重）
+        secret_result = next(r for r in report.results if r.path.name == "secret.txt")
+        normal_result = next(r for r in report.results if r.path.name == "normal.txt")
+        secret_rules = {h.rule_name for h in secret_result.hits}
+        normal_rules = {h.rule_name for h in normal_result.hits}
+        assert "pwd" in secret_rules and "敏感名" in secret_rules
+        assert "pwd" in normal_rules and "敏感名" not in normal_rules
+
+    def test_uncached_different_content_no_dedup(self, tmp_path: Path) -> None:
+        """无缓存模式：不同内容的文件不去重。"""
+        (tmp_path / "a.txt").write_text("password=abc", encoding="utf-8")
+        (tmp_path / "b.txt").write_text("password=xyz", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs)
+        scanner.scan(tmp_path)
+        # 两条不同的去重键
+        assert len(scanner._content_dedup_memo) == 2
+
+    def test_uncached_different_extension_no_dedup(self, tmp_path: Path) -> None:
+        """无缓存模式：同内容不同扩展名不去重（提取器可能不同）。"""
+        content = "password=abc"
+        (tmp_path / "a.txt").write_text(content, encoding="utf-8")
+        (tmp_path / "a.md").write_text(content, encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs)
+        scanner.scan(tmp_path)
+        # 不同扩展名 → 不同去重键
+        assert len(scanner._content_dedup_memo) == 2
+
+    def test_dedup_disabled_with_custom_provider(self, tmp_path: Path) -> None:
+        """自定义 content_provider 时不启用去重（非确定性内容不安全复用）。"""
+        content = "password=abc"
+        (tmp_path / "a.txt").write_text(content, encoding="utf-8")
+        (tmp_path / "b.txt").write_text(content, encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+
+        def custom_provider(entry: FileEntry) -> str:
+            return default_extract_content(entry)
+
+        scanner = Scanner(rs, content_provider=custom_provider)
+        assert not scanner._dedup_enabled
+        scanner.scan(tmp_path)
+        # 去重未启用 → memo 为空
+        assert len(scanner._content_dedup_memo) == 0
+
+    def test_dedup_memo_cleared_between_scans(self, tmp_path: Path) -> None:
+        """每次 collect_entries 清空去重 memo，避免跨扫描累积。"""
+        (tmp_path / "a.txt").write_text("password=abc", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs)
+        scanner.scan(tmp_path)
+        assert len(scanner._content_dedup_memo) == 1
+        # 第二次扫描前 memo 应被清空
+        scanner.scan(tmp_path)
+        assert len(scanner._content_dedup_memo) == 1  # 重新填充 1 条
+
+    def test_cached_duplicate_files_reuse_bucket_results(self, tmp_path: Path) -> None:
+        """缓存模式：同内容不同路径的文件复用 CONTENT 桶匹配结果。
+
+        使用 2 条 CONTENT 规则触发桶合并（单条规则不进桶）。
+        缓存 DB 放到 scan 子目录外，避免 .db/.db-wal 被扫描污染 memo 计数。
+        """
+        from fuscan.cache import CacheStore
+
+        scan_dir = tmp_path / "scan"
+        scan_dir.mkdir()
+        content = "api_key=AKIAIOSFODNN7EXAMPLE\ntoken=ghp_abc123"
+        (scan_dir / "a.txt").write_text(content, encoding="utf-8")
+        (scan_dir / "b.txt").write_text(content, encoding="utf-8")
+        rs = _build_ruleset(
+            _content_rule("aws_key", "AKIAIOSFODNN7EXAMPLE"),
+            _content_rule("github_token", "ghp_abc123"),
+        )
+        cache = CacheStore(tmp_path / "cache" / "test_cache.db")
+        try:
+            scanner = Scanner(rs, cache=cache)
+            report = scanner.scan(scan_dir)
+            # 两个文件都命中
+            assert report.stats.matched_files == 2
+            # 去重 memo 已填充（桶匹配结果复用）
+            assert len(scanner._content_dedup_memo) == 1
+        finally:
+            cache.close()
+
+    def test_uncached_dedup_concurrent_mode(self, tmp_path: Path) -> None:
+        """并发模式：同内容文件在多 worker 下安全去重。"""
+        content = "api_key=AKIAIOSFODNN7EXAMPLE"
+        for i in range(6):
+            (tmp_path / f"f_{i}.txt").write_text(content, encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "AKIAIOSFODNN7EXAMPLE"))
+        scanner = Scanner(rs, max_workers=4)
+        report = scanner.scan(tmp_path)
+        # 全部命中
+        assert report.stats.matched_files == 6
+        # 去重 memo 仅 1 条（同内容同扩展名）
+        assert len(scanner._content_dedup_memo) == 1
+
+    def test_uncached_dedup_minimal_content(self, tmp_path: Path) -> None:
+        """同内容（短文本）文件去重：两个内容相同的短文件复用结果。"""
+        (tmp_path / "a.txt").write_text("x", encoding="utf-8")
+        (tmp_path / "b.txt").write_text("x", encoding="utf-8")
+        (tmp_path / "c.txt").write_text("password=abc", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs)
+        scanner.scan(tmp_path)
+        # a.txt 和 b.txt 同内容去重为 1 条，c.txt 1 条 → 共 2 条
+        assert len(scanner._content_dedup_memo) == 2

@@ -33,10 +33,11 @@ __all__ = ["get_ocr_engine", "is_ocr_available", "recognize"]
 
 logger = logging.getLogger(__name__)
 
-# PP-OCRv4 mobile 模型文件名（中英文通用）
-_DET_MODEL = "ch_PP-OCRv4_det_infer.onnx"
-_CLS_MODEL = "ch_ppocr_mobile_v2.0_cls_infer.onnx"
-_REC_MODEL = "ch_PP-OCRv4_rec_infer.onnx"
+# PP-OCRv4 mobile 模型文件名（中英文通用，对齐 RapidOCR v3+ ModelScope 上游命名）
+# 由 scripts/download_ocr_models.py 从魔搭社区下载，脚本见该文件
+_DET_MODEL = "ch_PP-OCRv4_det_mobile.onnx"
+_CLS_MODEL = "ch_ppocr_mobile_v2.0_cls_mobile.onnx"
+_REC_MODEL = "ch_PP-OCRv4_rec_mobile.onnx"
 _REC_KEYS = "ppocr_keys_v1.txt"
 
 # 线程局部存储：每 worker 线程独立引擎实例

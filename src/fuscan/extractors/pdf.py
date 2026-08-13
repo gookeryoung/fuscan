@@ -140,16 +140,24 @@ class PdfExtractor(Extractor):
 
         try:
             parts: list[str] = []
-            for page_index in range(len(doc)):  # type: ignore[arg-type]
+            n_pages = len(doc)  # type: ignore[arg-type]
+            failed_pages = 0
+            for page_index in range(n_pages):
                 try:
                     page = doc.get_page(page_index)  # type: ignore[union-attr]
                     textpage = page.get_textpage()  # type: ignore[union-attr]
                     text = textpage.get_text_range() or ""  # type: ignore[union-attr]
                     if text:
                         parts.append(text)
-                except Exception:
-                    logger.warning("pypdfium2 页面提取失败", exc_info=True)
+                except Exception as exc:
+                    # 逐页失败常见于损坏 PDF（pdfium 无法加载某些页）。
+                    # 逐页 WARNING + traceback 在多页损坏时产生大量噪音，
+                    # 降为 DEBUG（仅页号 + 错误消息），循环结束汇总一条 WARNING。
+                    failed_pages += 1
+                    logger.debug("pypdfium2 页 %d 提取失败: %s", page_index, exc)
                     continue
+            if failed_pages:
+                logger.warning("pypdfium2 PDF 共 %d 页，其中 %d 页提取失败", n_pages, failed_pages)
             return "\n".join(parts)
         except Exception as exc:
             msg = str(exc).lower()
@@ -191,6 +199,7 @@ class PdfExtractor(Extractor):
                 return ""
 
             parts: list[str] = []
+            failed_pages = 0
             for i in range(n_pages):
                 try:
                     page = doc.get_page(i)  # type: ignore[union-attr]
@@ -203,14 +212,19 @@ class PdfExtractor(Extractor):
                     text = engine.recognize(buf.getvalue())
                     if text:
                         parts.append(text)
-                except ExtractorError:
+                except ExtractorError as exc:
                     # 引擎级错误（子进程崩溃等）向上传播需由调用方决定；
-                    # 但单页通信失败更可能是该页问题，记录后继续后续页
-                    logger.warning("PDF 页 %d OCR 通信失败", i, exc_info=True)
+                    # 但单页通信失败更可能是该页问题，记录后继续后续页。
+                    # 逐页 WARNING + traceback 噪音大，降为 DEBUG，循环结束汇总。
+                    failed_pages += 1
+                    logger.debug("PDF 页 %d OCR 通信失败: %s", i, exc)
                     continue
-                except Exception:
-                    logger.warning("PDF 页 %d OCR 失败", i, exc_info=True)
+                except Exception as exc:
+                    failed_pages += 1
+                    logger.debug("PDF 页 %d OCR 失败: %s", i, exc)
                     continue
+            if failed_pages:
+                logger.warning("PDF OCR 共 %d 页，其中 %d 页失败", n_pages, failed_pages)
             return "\n".join(parts)
         finally:
             doc.close()  # type: ignore[union-attr]

@@ -832,6 +832,54 @@ class TestPdfExtractorPdfiumBackend:
         with pytest.raises(ExtractorError, match="PDF 打开失败"):
             PdfExtractor().extract_from_bytes(b"not a valid pdf")
 
+    def test_pdfium_page_failures_aggregated_not_per_page(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """损坏 PDF 逐页失败应汇总为一条 WARNING，不逐页打印 traceback。
+
+        模拟 3 页 PDF 中第 0、2 页 ``get_page`` 抛异常（pdfium 无法加载），
+        验证：成功页文本正常返回；逐页失败仅 DEBUG；循环结束汇总一条 WARNING。
+        """
+        import logging
+
+        from fuscan.extractors import pdf as pdf_mod
+
+        class _TextPage:
+            def get_text_range(self) -> str:
+                return "正常页文本"
+
+        class _GoodPage:
+            def get_textpage(self) -> _TextPage:
+                return _TextPage()
+
+        class _MixedDoc:
+            def __len__(self) -> int:
+                return 3
+
+            def get_page(self, i: int) -> object:
+                if i == 1:
+                    return _GoodPage()
+                raise RuntimeError("Failed to load page.")
+
+            def close(self) -> None:
+                """无操作。"""
+
+        monkeypatch.setattr(pdf_mod, "_ensure_backend", lambda: lambda _data: _MixedDoc())
+        extractor = PdfExtractor()
+        with caplog.at_level(logging.DEBUG, logger="fuscan.extractors.pdf"):
+            content = extractor.extract_from_bytes(b"fake mixed pdf")
+        # 成功页文本正常返回
+        assert "正常页文本" in content
+        # 逐页失败仅 DEBUG（不产生逐页 WARNING）
+        debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
+        warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("页 0 提取失败" in m for m in debug_msgs)
+        assert any("页 2 提取失败" in m for m in debug_msgs)
+        # 汇总仅一条 WARNING（含总页数与失败页数）
+        assert len(warning_msgs) == 1
+        assert "3 页" in warning_msgs[0]
+        assert "2 页提取失败" in warning_msgs[0]
+
 
 # ---------------------------------------------------------------------------
 # OdtExtractor / OdsExtractor（用标准库 zipfile+xml 解析，无 odfpy 依赖）

@@ -18,7 +18,6 @@ sync: ## 安装开发依赖
 	uv sync --extra dev
 
 build b: ## 构建分发包 (wheel + sdist)
-	make download
 	uv build
 
 clean c: ## 清理构建产物与缓存

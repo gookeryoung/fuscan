@@ -114,14 +114,31 @@ class TestDependencies:
 
 
 class TestOcrEngine:
-    """``ocrEngine`` Property：OCR 引擎状态展示（启用情况 + 未启用原因）。"""
+    """``ocrEngine`` 与 ``ocrDependencies`` Property：OCR 引擎状态展示。"""
+
+    @staticmethod
+    def _make_status(
+        available: bool, reason: str = "", version: str = "", deps: tuple[object, ...] | None = None
+    ) -> object:
+        """构造 OcrStatus（含 5 项依赖明细），避免每个测试重复构建。"""
+        from fuscan.extractors.ocr import OcrDepStatus, OcrStatus
+
+        if deps is None:
+            v = version if available else ""
+            deps = (
+                OcrDepStatus("rapidocr", available, v),
+                OcrDepStatus("onnxruntime", available, "1.23.2" if available else ""),
+                OcrDepStatus("Pillow", available, "10.0.0" if available else ""),
+                OcrDepStatus("numpy", available, "2.2.6" if available else ""),
+                OcrDepStatus("模型文件", available, "4/4" if available else "0/4"),
+            )
+        return OcrStatus(available, reason, version, deps)  # type: ignore[arg-type]
 
     def test_ocr_engine_available_with_version(self, about: AboutController, monkeypatch: pytest.MonkeyPatch) -> None:
         """OCR 可用且版本元数据可读时显示版本号与'已启用'。"""
-        from fuscan.extractors.ocr import OcrStatus
         from fuscan.gui.controllers import about_controller
 
-        monkeypatch.setattr(about_controller, "get_ocr_status", lambda: OcrStatus(True, "", "3.4.0"))
+        monkeypatch.setattr(about_controller, "get_ocr_status", lambda: self._make_status(True, "", "3.4.0"))
         text = about.ocrEngine
         assert "已启用" in text
         assert "3.4.0" in text
@@ -129,27 +146,68 @@ class TestOcrEngine:
 
     def test_ocr_engine_unavailable(self, about: AboutController, monkeypatch: pytest.MonkeyPatch) -> None:
         """OCR 不可用时显示'未启用'与具体原因。"""
-        from fuscan.extractors.ocr import OcrStatus
         from fuscan.gui.controllers import about_controller
 
-        monkeypatch.setattr(about_controller, "get_ocr_status", lambda: OcrStatus(False, "rapidocr 未安装", ""))
+        monkeypatch.setattr(
+            about_controller,
+            "get_ocr_status",
+            lambda: self._make_status(False, "rapidocr 未就位", ""),
+        )
         text = about.ocrEngine
         assert "未启用" in text
-        assert "rapidocr 未安装" in text
+        assert "rapidocr 未就位" in text
 
     def test_ocr_engine_available_without_version(
         self, about: AboutController, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """OCR 可用但版本元数据缺失时不显示版本号，仍标'已启用'。"""
-        from fuscan.extractors.ocr import OcrStatus
         from fuscan.gui.controllers import about_controller
 
-        monkeypatch.setattr(about_controller, "get_ocr_status", lambda: OcrStatus(True, "", ""))
+        monkeypatch.setattr(about_controller, "get_ocr_status", lambda: self._make_status(True, "", ""))
         text = about.ocrEngine
         assert "已启用" in text
         assert "RapidOCR" in text
         # 版本号缺失时不应在 RapidOCR 后出现多余空格
         assert "RapidOCR  -" not in text
+
+    def test_ocr_dependencies_all_installed(self, about: AboutController, monkeypatch: pytest.MonkeyPatch) -> None:
+        """全部依赖就位时 ocrDependencies 各项 installed=True + 版本号。"""
+        from fuscan.gui.controllers import about_controller
+
+        monkeypatch.setattr(about_controller, "get_ocr_status", lambda: self._make_status(True, "", "3.4.0"))
+        deps = about.ocrDependencies
+        assert len(deps) == 5
+        assert all(d["installed"] for d in deps)
+        assert deps[0]["name"] == "rapidocr"
+        assert deps[0]["version"] == "3.4.0"
+        assert deps[4]["name"] == "模型文件"
+        assert deps[4]["version"] == "4/4"
+
+    def test_ocr_dependencies_partial_missing(self, about: AboutController, monkeypatch: pytest.MonkeyPatch) -> None:
+        """部分依赖缺失时 ocrDependencies 对应项 installed=False + 版本留空。"""
+        from fuscan.extractors.ocr import OcrDepStatus
+        from fuscan.gui.controllers import about_controller
+
+        deps = (
+            OcrDepStatus("rapidocr", True, "3.4.0"),
+            OcrDepStatus("onnxruntime", False, ""),
+            OcrDepStatus("Pillow", True, "10.0.0"),
+            OcrDepStatus("numpy", True, "2.2.6"),
+            OcrDepStatus("模型文件", True, "4/4"),
+        )
+        monkeypatch.setattr(
+            about_controller,
+            "get_ocr_status",
+            lambda: self._make_status(False, "onnxruntime 未就位", "3.4.0", deps),
+        )
+        result = about.ocrDependencies
+        assert len(result) == 5
+        assert result[1]["name"] == "onnxruntime"
+        assert result[1]["installed"] is False
+        assert result[1]["version"] == ""
+        # 其余依赖就位
+        assert result[0]["installed"] is True
+        assert result[4]["installed"] is True
 
 
 class TestOpenManual:

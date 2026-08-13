@@ -217,11 +217,12 @@ class TestModelsDir:
 
 
 class TestGetOcrStatus:
-    """``get_ocr_status`` 可用性检测测试。
+    """``get_ocr_status`` 可用性检测测试（含各依赖明细）。
 
     覆盖运行链各依赖缺失（rapidocr/onnxruntime/Pillow/numpy）、模型文件缺失/
-    部分缺失、全部就绪（含/不含版本元数据）等场景。通过 ``sys.modules`` 注入
-    假模块模拟已安装，置 ``None`` 模拟缺失，不依赖真实 OCR 依赖安装。
+    部分缺失、全部就绪（含/不含版本元数据）等场景，验证 ``dependencies`` 列表
+    各项就位状态。通过 ``sys.modules`` 注入假模块模拟已安装，置 ``None`` 模拟
+    缺失，不依赖真实 OCR 依赖安装。
     """
 
     @staticmethod
@@ -241,12 +242,15 @@ class TestGetOcrStatus:
             (tmp_path / name).write_bytes(b"fake")  # type: ignore[operator]
 
     def test_rapidocr_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """rapidocr 未安装时 unavailable，原因指向 rapidocr。"""
+        """rapidocr 未安装时 unavailable，原因指向 rapidocr，依赖明细标记未就位。"""
         self._remove_dep(monkeypatch, "rapidocr")
         status = ocr_mod.get_ocr_status()
         assert status.available is False
-        assert status.reason == "rapidocr 未安装"
+        assert status.reason == "rapidocr 未就位"
         assert status.version == ""
+        assert len(status.dependencies) == 5
+        assert status.dependencies[0].name == "rapidocr"
+        assert status.dependencies[0].installed is False
 
     def test_onnxruntime_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """rapidocr 就绪但 onnxruntime 缺失时原因指向 onnxruntime。"""
@@ -254,7 +258,9 @@ class TestGetOcrStatus:
         self._remove_dep(monkeypatch, "onnxruntime")
         status = ocr_mod.get_ocr_status()
         assert status.available is False
-        assert status.reason == "onnxruntime 未安装"
+        assert status.reason == "onnxruntime 未就位"
+        assert status.dependencies[0].installed is True  # rapidocr 就位
+        assert status.dependencies[1].installed is False  # onnxruntime 未就位
 
     def test_pillow_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Pillow（PIL）缺失时原因显示 Pillow（模块名 PIL → 展示名 Pillow）。"""
@@ -263,7 +269,9 @@ class TestGetOcrStatus:
         self._remove_dep(monkeypatch, "PIL")
         status = ocr_mod.get_ocr_status()
         assert status.available is False
-        assert status.reason == "Pillow 未安装"
+        assert status.reason == "Pillow 未就位"
+        assert status.dependencies[2].name == "Pillow"
+        assert status.dependencies[2].installed is False
 
     def test_numpy_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """numpy 缺失时原因指向 numpy。"""
@@ -272,27 +280,35 @@ class TestGetOcrStatus:
         self._remove_dep(monkeypatch, "numpy")
         status = ocr_mod.get_ocr_status()
         assert status.available is False
-        assert status.reason == "numpy 未安装"
+        assert status.reason == "numpy 未就位"
+        assert status.dependencies[3].name == "numpy"
+        assert status.dependencies[3].installed is False
 
     def test_model_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-        """依赖就绪但模型文件全部缺失时原因指向首个缺失模型文件。"""
+        """依赖就绪但模型文件全部缺失时原因指向模型文件，version 显示 0/4。"""
         for m in ocr_mod._OCR_RUNTIME_DEPS:
             self._install_dep(monkeypatch, m)
         monkeypatch.setattr(ocr_mod, "_models_dir", lambda: tmp_path)
         status = ocr_mod.get_ocr_status()
         assert status.available is False
-        assert status.reason == f"模型文件缺失: {ocr_mod._DET_MODEL}"
+        assert status.reason == "模型文件 未就位"
+        model_dep = status.dependencies[4]
+        assert model_dep.name == "模型文件"
+        assert model_dep.installed is False
+        assert model_dep.version == "0/4"
 
     def test_partial_model_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-        """仅部分模型文件存在时仍 unavailable，原因指向首个缺失项。"""
+        """仅部分模型文件存在时仍 unavailable，version 显示已就位数/4。"""
         for m in ocr_mod._OCR_RUNTIME_DEPS:
             self._install_dep(monkeypatch, m)
         monkeypatch.setattr(ocr_mod, "_models_dir", lambda: tmp_path)
-        # 仅创建 det 模型，cls 缺失 → 原因指向 cls
         (tmp_path / ocr_mod._DET_MODEL).write_bytes(b"fake")  # type: ignore[operator]
         status = ocr_mod.get_ocr_status()
         assert status.available is False
-        assert status.reason == f"模型文件缺失: {ocr_mod._CLS_MODEL}"
+        assert status.reason == "模型文件 未就位"
+        model_dep = status.dependencies[4]
+        assert model_dep.installed is False
+        assert model_dep.version == "1/4"
 
     def test_all_available_with_version(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
         """全部依赖 + 模型文件就绪且元数据可读时 available=True + 版本号。"""
@@ -305,6 +321,12 @@ class TestGetOcrStatus:
         assert status.available is True
         assert status.reason == ""
         assert status.version == "3.4.0"
+        # 全部依赖就位
+        assert all(d.installed for d in status.dependencies)
+        assert len(status.dependencies) == 5
+        # 模型文件 version 为 "4/4"
+        assert status.dependencies[4].name == "模型文件"
+        assert status.dependencies[4].version == "4/4"
 
     def test_all_available_without_version_metadata(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
         """依赖与模型就绪但 rapidocr 元数据缺失时仍 available，version 留空。"""
@@ -321,3 +343,6 @@ class TestGetOcrStatus:
         assert status.available is True
         assert status.reason == ""
         assert status.version == ""
+        # 依赖就位但版本号留空
+        assert all(d.installed for d in status.dependencies)
+        assert status.dependencies[0].version == ""

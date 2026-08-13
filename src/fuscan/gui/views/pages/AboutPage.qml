@@ -169,6 +169,27 @@ Item {
                             Layout.fillWidth: true
                             wrapMode: Text.WordWrap
                         }
+                        // OCR 各依赖项：已安装绿色勾 + 版本号，未安装红色叉
+                        Repeater {
+                            model: aboutController.ocrDependencies
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 4
+                                Label {
+                                    text: modelData.installed ? "✓" : "✗"
+                                    color: modelData.installed ? theme.colorSuccess : theme.colorDanger
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
+                                Label {
+                                    text: modelData.name + (modelData.version ? " " + modelData.version : "")
+                                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                    font.pixelSize: 11
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                        }
                     }
                 }
 

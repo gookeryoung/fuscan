@@ -147,6 +147,16 @@ class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
         return _detect_ocr_status()
 
     @Property("QVariantList", notify=infoChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
+    def ocrDependencies(self) -> list[dict[str, object]]:
+        """OCR 各依赖项状态（供关于页逐项展示绿勾/红叉）。
+
+        返回 rapidocr/onnxruntime/Pillow/numpy/模型文件 各项的就位状态与版本，
+        QML 用 Repeater 渲染：已安装绿色勾 + 版本号，未安装红色叉。
+        """
+        status = get_ocr_status()
+        return [{"name": d.name, "installed": d.installed, "version": d.version} for d in status.dependencies]
+
+    @Property("QVariantList", notify=infoChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
     def dependencies(self) -> list[str]:
         """第三方依赖列表。"""
         return list(_DEPENDENCIES)

@@ -3016,3 +3016,93 @@ class TestPdfExtractorOcrFallback:
         assert content == ""
         # OCR 无产出，last_engine_info 保持 pypdfium2
         assert extractor.last_engine_info == "pypdfium2"
+
+
+# ---------------------------------------------------------------------------
+# 真实 OCR 端到端测试（RapidOCR + 真实模型文件）
+#
+# 仅在 OCR 运行链就绪（rapidocr/onnxruntime/Pillow/numpy + 模型文件）时运行，
+# .venv（--extra test 无 OCR 依赖）与 CI 自动跳过；dist 打包环境可运行验证。
+# 用 Pillow 生成含文字图片、reportlab 生成图片型 PDF（无文本层），验证 OCR
+# 提取与 PDF OCR 回退的真实推理链路。
+# ---------------------------------------------------------------------------
+from fuscan.extractors.ocr import get_ocr_status as _get_ocr_status  # noqa: E402
+
+_OCR_READY = _get_ocr_status().available
+
+
+def _render_text_png(text: str, *, font_size: int = 40, width: int = 320, height: int = 90) -> bytes:
+    """用 Pillow 绘制黑字白底图片，返回 PNG bytes（供真实 OCR 识别）。
+
+    尝试 Windows arial / Linux DejaVuSans TrueType 字体，均不可用时跳过测试。
+    """
+    import io as _io
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(img)
+    font = None
+    for name in ("arial.ttf", "DejaVuSans.ttf"):
+        try:
+            font = ImageFont.truetype(name, font_size)
+            break
+        except OSError:
+            continue
+    if font is None:
+        pytest.skip("无可用 TrueType 字体，跳过真实 OCR 测试")
+    draw.text((20, 20), text, fill="black", font=font)
+    buf = _io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+@pytest.mark.skipif(not _OCR_READY, reason="OCR 运行链未就绪（rapidocr/onnxruntime/numpy/模型文件）")
+class TestImageExtractorRealOcr:
+    """图片 OCR 端到端测试（真实 RapidOCR 引擎，需 OCR 运行链就绪）。"""
+
+    def test_real_ocr_extracts_text_from_image(self) -> None:
+        """Pillow 绘制文字图片，真实 OCR 引擎识别出非空文本。"""
+        data = _render_text_png("Hello Fuscan")
+        content = ImageExtractor().extract_from_bytes(data)
+        # OCR 应识别出非空文本（不严格断言具体内容，避免识别率波动导致 flaky）
+        assert content.strip() != ""
+
+    def test_real_ocr_plain_color_image_returns_empty(self) -> None:
+        """纯色无文字图片，OCR 返回空字符串但不崩溃。"""
+        import io as _io
+
+        from PIL import Image
+
+        buf = _io.BytesIO()
+        Image.new("RGB", (60, 60), "white").save(buf, format="PNG")
+        content = ImageExtractor().extract_from_bytes(buf.getvalue())
+        assert content == ""
+
+
+@pytest.mark.skipif(not _OCR_READY, reason="OCR 运行链未就绪（rapidocr/onnxruntime/numpy/模型文件）")
+class TestPdfExtractorRealOcrFallback:
+    """PDF OCR 回退端到端测试（真实 RapidOCR 引擎，需 OCR 运行链就绪）。"""
+
+    def test_scanned_pdf_triggers_real_ocr(self) -> None:
+        """图片型 PDF（无文本层）触发真实 OCR 回退，last_engine_info 更新为复合引擎。"""
+        import io as _io
+
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib.utils import ImageReader
+        from reportlab.pdfgen import canvas
+
+        # 生成含文字 PNG 嵌入 PDF（无文本层 → 触发 OCR 回退）
+        img_data = _render_text_png("Scan PDF Test")
+        pdf_buf = _io.BytesIO()
+        c = canvas.Canvas(pdf_buf, pagesize=letter)
+        c.drawImage(ImageReader(_io.BytesIO(img_data)), 50, 700, width=320, height=90)
+        c.showPage()
+        c.save()
+
+        extractor = PdfExtractor()
+        content = extractor.extract_from_bytes(pdf_buf.getvalue())
+        # OCR 回退触发
+        assert extractor.last_engine_info == "pypdfium2 + rapidocr-onnxruntime"
+        # OCR 识别出非空文本
+        assert content.strip() != ""

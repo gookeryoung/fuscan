@@ -32,7 +32,14 @@ from fuscan.extractors.base import ExtractorError
 if TYPE_CHECKING:
     from rapidocr import RapidOCR  # pyrefly: ignore [missing-import]
 
-__all__ = ["OcrStatus", "get_ocr_engine", "get_ocr_status", "is_ocr_available", "recognize"]
+__all__ = [
+    "OcrDepStatus",
+    "OcrStatus",
+    "get_ocr_engine",
+    "get_ocr_status",
+    "is_ocr_available",
+    "recognize",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -139,48 +146,86 @@ def is_ocr_available() -> bool:
 # numpy：ndarray 转换。任一缺失则 OCR 无法运行，需在 GUI 明确展示原因。
 _OCR_RUNTIME_DEPS: tuple[str, ...] = ("rapidocr", "onnxruntime", "PIL", "numpy")
 
+# 依赖模块名 → 展示名映射（PIL 包展示为 Pillow，其余同名）
+_OCR_DEP_DISPLAY: dict[str, str] = {
+    "rapidocr": "rapidocr",
+    "onnxruntime": "onnxruntime",
+    "PIL": "Pillow",
+    "numpy": "numpy",
+}
+
+
+@dataclass(frozen=True)
+class OcrDepStatus:
+    """单个 OCR 依赖项的可用性状态（供 GUI 关于页逐项展示绿勾/红叉）。
+
+    :ivar name: 依赖展示名（rapidocr/onnxruntime/Pillow/numpy/模型文件）
+    :ivar installed: 是否就位（模块可导入或模型文件齐全）
+    :ivar version: 版本号或就位详情；未就位为空字符串
+    """
+
+    name: str
+    installed: bool
+    version: str
+
 
 @dataclass(frozen=True)
 class OcrStatus:
-    """OCR 引擎可用性状态（供 GUI 关于页展示启用情况与未启用原因）。
+    """OCR 引擎可用性状态（供 GUI 关于页展示启用情况与各依赖明细）。
 
     :ivar available: OCR 是否可用（所有依赖与模型文件就位）
-    :ivar reason: 不可用原因（首个缺失项的中文描述）；可用时为空字符串
+    :ivar reason: 不可用原因（首个缺失项）；可用时为空字符串
     :ivar version: rapidocr 版本号；不可用时为空字符串
+    :ivar dependencies: 各依赖项状态（rapidocr/onnxruntime/Pillow/numpy/模型文件）
     """
 
     available: bool
     reason: str
     version: str
+    dependencies: tuple[OcrDepStatus, ...]
 
 
 def get_ocr_status() -> OcrStatus:
-    """检测 OCR 完整可用性及未启用原因（不加载模型，供 GUI 展示）。
+    """检测 OCR 完整可用性及各依赖状态（不加载模型，供 GUI 展示）。
 
-    按运行链顺序逐项探测：rapidocr → onnxruntime → Pillow → numpy → 模型文件。
-    首个缺失项决定 ``reason``；全部通过返回 ``available=True`` 与 rapidocr 版本号。
-    不触发模型加载（约 200ms + 17MB 内存），仅做导入探测与文件存在性检查。
+    逐项探测运行链：rapidocr → onnxruntime → Pillow → numpy → 模型文件，
+    构建各依赖的 :class:`OcrDepStatus`。首个缺失项决定 ``reason``；全部通过
+    返回 ``available=True`` 与 rapidocr 版本号。不触发模型加载（约 200ms +
+    17MB 内存），仅做导入探测与文件存在性检查。
 
-    :return: :class:`OcrStatus` 状态对象
+    :return: :class:`OcrStatus` 状态对象（含各依赖明细）
     """
-    # 依赖模块：逐项导入探测，首个缺失项决定原因
-    _dep_display = {"rapidocr": "rapidocr", "onnxruntime": "onnxruntime", "PIL": "Pillow", "numpy": "numpy"}
+    deps: list[OcrDepStatus] = []
+    # 依赖模块：逐项导入探测，记录就位状态与版本号
     for mod_name in _OCR_RUNTIME_DEPS:
+        display = _OCR_DEP_DISPLAY[mod_name]
         try:
             __import__(mod_name)
         except ImportError:
-            return OcrStatus(False, f"{_dep_display[mod_name]} 未安装", "")
-    # 模型文件：4 个文件全部存在才可用
+            deps.append(OcrDepStatus(display, False, ""))
+            continue
+        # 取版本号（PIL 包元数据名为 Pillow；取不到留空，不影响 available 判定）
+        pkg = "Pillow" if mod_name == "PIL" else display
+        try:
+            v = version(pkg)
+        except PackageNotFoundError:  # 已通过导入探测，元数据异常属边缘情况
+            v = ""
+        deps.append(OcrDepStatus(display, True, v))
+    # 模型文件：4 个文件全部存在才就位
     models_dir = _models_dir()
-    for model_file in (_DET_MODEL, _CLS_MODEL, _REC_MODEL, _REC_KEYS):
-        if not (models_dir / model_file).exists():
-            return OcrStatus(False, f"模型文件缺失: {model_file}", "")
-    # 全部通过：取 rapidocr 版本号（取不到留空，不影响 available 判定）
-    try:
-        v = version("rapidocr")
-    except PackageNotFoundError:  # 已通过导入探测，元数据异常属边缘情况
-        v = ""
-    return OcrStatus(True, "", v)
+    model_files = (_DET_MODEL, _CLS_MODEL, _REC_MODEL, _REC_KEYS)
+    present = sum(1 for f in model_files if (models_dir / f).exists())
+    if present == len(model_files):
+        deps.append(OcrDepStatus("模型文件", True, f"{present}/{len(model_files)}"))
+    else:
+        deps.append(OcrDepStatus("模型文件", False, f"{present}/{len(model_files)}"))
+    # 汇总：首个缺失项决定 reason
+    first_missing = next((d for d in deps if not d.installed), None)
+    available = first_missing is None
+    reason = "" if available else f"{first_missing.name} 未就位"
+    # rapidocr 版本从依赖明细取（_OCR_RUNTIME_DEPS 首项为 rapidocr），避免重复探测
+    version_str = deps[0].version if deps[0].installed else ""
+    return OcrStatus(available, reason, version_str, tuple(deps))
 
 
 def recognize(img: object) -> str:

@@ -42,8 +42,25 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
+      # OCR 模型文件 gitignored，fresh checkout 不存在；wheel force-include 需文件就位，
+      # 故构建前先下载真实模型（脚本仅依赖标准库，用系统 python3 即可，无需 sync 项目）
+      - name: Download OCR models
+        run: python3 scripts/download_ocr_models.py
+
       - name: Build distributions
         run: uv build
+
+      # 校验 wheel 内置 4 个 OCR 模型文件（force-include 生效的证据），
+      # 失败即阻断发布——确保 PyPI wheel 是「打包版本」含 OCR
+      - name: Verify OCR models in wheel
+        run: |
+          whl=$(ls dist/fuscan-*.whl)
+          for m in ch_PP-OCRv4_det_mobile.onnx ch_ppocr_mobile_v2.0_cls_mobile.onnx \
+                   ch_PP-OCRv4_rec_mobile.onnx ppocr_keys_v1.txt; do
+            unzip -l "$whl" | grep -q "ocr/models/$m" \
+              || { echo "::error::wheel 缺失 OCR 模型 $m"; exit 1; }
+          done
+          echo "wheel 包含全部 OCR 模型"
 
       - name: Publish to PyPI (OIDC)
         run: uv publish
@@ -130,6 +147,11 @@ jobs:
             fuscan-windows-
             fuscan-
 
+      # OCR 模型 gitignored，下载真实模型替换占位文件；
+      # fspack 通过 [tool.fspack] data-dirs 将模型打入便携包
+      - name: Download OCR models
+        run: uv run python scripts/download_ocr_models.py
+
       - name: Build fuscan with fspack
         env:
           PYTHONIOENCODING: utf-8
@@ -141,11 +163,18 @@ jobs:
         run: uv run fspack p . --target windows --format all --no-build
 
       # fuscan 是 GUI 应用，CI 无显示器无法做运行时 smoke test，仅校验产物存在
+      # + OCR 模型/依赖已打入便携包（确保 fspack 打包版本含 OCR）
       - name: Assert artifacts
         shell: bash
         run: |
           test -f dist/release/fuscan-*-windows-*-setup.exe
           test -f dist/release/fuscan-*-windows-*.zip
+          zip_path=$(ls dist/release/fuscan-*-windows-*.zip)
+          for needle in ch_PP-OCRv4_det_mobile.onnx rapidocr onnxruntime; do
+            unzip -l "$zip_path" | grep -q "$needle" \
+              || { echo "::error::fspack 便携包缺失 $needle"; exit 1; }
+          done
+          echo "fspack 便携包含 OCR 模型与依赖"
 
       - name: Upload failure artifacts
         if: failure()
@@ -226,6 +255,11 @@ jobs:
             fuscan-linux-
             fuscan-
 
+      # OCR 模型 gitignored，下载真实模型替换占位文件；
+      # fspack 通过 [tool.fspack] data-dirs 将模型打入便携包
+      - name: Download OCR models
+        run: uv run python scripts/download_ocr_models.py
+
       - name: Build fuscan with fspack
         run: uv run fspack b . --target linux
 
@@ -233,11 +267,18 @@ jobs:
         run: uv run fspack p . --target linux --format all --no-build
 
       # fuscan 是 GUI 应用，CI 无显示器无法做运行时 smoke test，仅校验产物存在
+      # + OCR 模型/依赖已打入便携包（确保 fspack 打包版本含 OCR）
       - name: Assert artifacts
         run: |
           test -f dist/release/fuscan-*-linux-*.tar.gz
           test -f dist/release/fuscan_*-slim_amd64.deb
           test -f dist/release/fuscan-*-linux-*.zip
+          zip_path=$(ls dist/release/fuscan-*-linux-*.zip)
+          for needle in ch_PP-OCRv4_det_mobile.onnx rapidocr onnxruntime; do
+            unzip -l "$zip_path" | grep -q "$needle" \
+              || { echo "::error::fspack 便携包缺失 $needle"; exit 1; }
+          done
+          echo "fspack 便携包含 OCR 模型与依赖"
 
       - name: Upload failure artifacts
         if: failure()

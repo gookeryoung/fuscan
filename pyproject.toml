@@ -123,6 +123,11 @@ exclude = [
 [tool.fspack]
 extras = ["native", "ocr"]
 exclude = [".*", "tests", "benchmarks", "docs", "scripts", "packages"]
+# OCR 模型为非 .py 数据文件（.onnx/.txt），显式声明数据目录确保 fspack
+# 源码拷贝阶段原样保留（pyc_strip 跳过其下 .py 剥离）；模型随软件离线分发，
+# 运行时由 importlib.resources.files("fuscan.assets.ocr.models") 加载。
+# CI 构建前须先跑 scripts/download_ocr_models.py 下载真实模型替换占位文件。
+data-dirs = ["src/fuscan/assets/ocr/models"]
 pyc_strip = true
 no_site = true
 # fuscan-core 未发布到 PyPI，CI 中用 maturin 本地构建 wheel 到 fuscan-core-wheels/，

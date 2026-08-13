@@ -40,7 +40,7 @@ def _install_fake_rapidocr(monkeypatch: pytest.MonkeyPatch) -> list[object]:
     instances: list[object] = []
 
     class _FakeRapidOCR:
-        def __init__(self, params: dict[str, str]) -> None:
+        def __init__(self, params: dict[str, str] | None = None) -> None:
             self.params = params
             self.tid = threading.get_ident()
             instances.append(self)
@@ -77,21 +77,23 @@ class TestGetOcrEngine:
         with pytest.raises(ExtractorError, match="无可用 OCR 引擎"):
             ocr_mod.get_ocr_engine()
 
-    def test_model_missing_raises(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-        """rapidocr 可导入但模型文件缺失时抛 ExtractorError。"""
-        _install_fake_rapidocr(monkeypatch)
+    def test_model_missing_fallback_default(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+        """内置模型文件全部缺失时回退 rapidocr 默认模型（RapidOCR 无参构建）。"""
+        instances = _install_fake_rapidocr(monkeypatch)
         monkeypatch.setattr(ocr_mod, "_models_dir", lambda: tmp_path)
-        with pytest.raises(ExtractorError, match="OCR 模型文件缺失"):
-            ocr_mod.get_ocr_engine()
+        engine = ocr_mod.get_ocr_engine()
+        assert engine.params is None  # 无参构建（rapidocr 默认模型）
+        assert len(instances) == 1
 
-    def test_partial_model_missing_raises(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-        """仅部分模型文件存在时仍抛 ExtractorError。"""
-        _install_fake_rapidocr(monkeypatch)
+    def test_partial_model_missing_fallback_default(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+        """仅部分模型文件存在时仍回退 rapidocr 默认模型。"""
+        instances = _install_fake_rapidocr(monkeypatch)
         monkeypatch.setattr(ocr_mod, "_models_dir", lambda: tmp_path)
         # 仅创建 det 模型，其余缺失
         (tmp_path / ocr_mod._DET_MODEL).write_bytes(b"fake")  # type: ignore[operator]
-        with pytest.raises(ExtractorError, match="OCR 模型文件缺失"):
-            ocr_mod.get_ocr_engine()
+        engine = ocr_mod.get_ocr_engine()
+        assert engine.params is None  # 无参构建（rapidocr 默认模型）
+        assert len(instances) == 1
 
     def test_thread_local_singleton(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
         """同线程多次调用返回同一实例（线程局部单例）。"""
@@ -117,15 +119,14 @@ class TestGetOcrEngine:
         assert params["Rec.model_path"].endswith(ocr_mod._REC_MODEL)  # type: ignore[arg-type]
         assert params["Rec.rec_keys_path"].endswith(ocr_mod._REC_KEYS)  # type: ignore[arg-type]
 
-    def test_failure_not_cached(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+    def test_failure_not_cached(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """引擎构建失败不缓存异常，下次调用重新尝试（便于用户装依赖后重试）。"""
-        _install_fake_rapidocr(monkeypatch)
-        # 模型缺失 → 抛异常
-        monkeypatch.setattr(ocr_mod, "_models_dir", lambda: tmp_path)
-        with pytest.raises(ExtractorError, match="OCR 模型文件缺失"):
+        # rapidocr 未安装 → 抛异常
+        monkeypatch.setitem(sys.modules, "rapidocr", None)
+        with pytest.raises(ExtractorError, match="无可用 OCR 引擎"):
             ocr_mod.get_ocr_engine()
         # 仍未缓存，再次调用仍抛
-        with pytest.raises(ExtractorError, match="OCR 模型文件缺失"):
+        with pytest.raises(ExtractorError, match="无可用 OCR 引擎"):
             ocr_mod.get_ocr_engine()
 
     def test_thread_local_isolation(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
@@ -285,33 +286,33 @@ class TestGetOcrStatus:
         assert status.dependencies[3].installed is False
 
     def test_model_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-        """依赖就绪但模型文件全部缺失时原因指向模型文件，version 显示 0/4。"""
+        """依赖就绪但内置模型文件缺失时仍 available（回退 rapidocr 默认），version 显示 rapidocr 默认。"""
         for m in ocr_mod._OCR_RUNTIME_DEPS:
             self._install_dep(monkeypatch, m)
         monkeypatch.setattr(ocr_mod, "_models_dir", lambda: tmp_path)
         status = ocr_mod.get_ocr_status()
-        assert status.available is False
-        assert status.reason == "模型文件 未就位"
+        assert status.available is True
+        assert status.reason == ""
         model_dep = status.dependencies[4]
         assert model_dep.name == "模型文件"
-        assert model_dep.installed is False
-        assert model_dep.version == "0/4"
+        assert model_dep.installed is True
+        assert model_dep.version == "rapidocr 默认"
 
     def test_partial_model_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-        """仅部分模型文件存在时仍 unavailable，version 显示已就位数/4。"""
+        """仅部分模型文件存在时仍 available（回退 rapidocr 默认）。"""
         for m in ocr_mod._OCR_RUNTIME_DEPS:
             self._install_dep(monkeypatch, m)
         monkeypatch.setattr(ocr_mod, "_models_dir", lambda: tmp_path)
         (tmp_path / ocr_mod._DET_MODEL).write_bytes(b"fake")  # type: ignore[operator]
         status = ocr_mod.get_ocr_status()
-        assert status.available is False
-        assert status.reason == "模型文件 未就位"
+        assert status.available is True
+        assert status.reason == ""
         model_dep = status.dependencies[4]
-        assert model_dep.installed is False
-        assert model_dep.version == "1/4"
+        assert model_dep.installed is True
+        assert model_dep.version == "rapidocr 默认"
 
     def test_all_available_with_version(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-        """全部依赖 + 模型文件就绪且元数据可读时 available=True + 版本号。"""
+        """全部依赖 + 内置模型就绪且元数据可读时 available=True + 版本号。"""
         for m in ocr_mod._OCR_RUNTIME_DEPS:
             self._install_dep(monkeypatch, m)
         self._create_fake_models(tmp_path)
@@ -324,9 +325,9 @@ class TestGetOcrStatus:
         # 全部依赖就位
         assert all(d.installed for d in status.dependencies)
         assert len(status.dependencies) == 5
-        # 模型文件 version 为 "4/4"
+        # 模型文件 version 为 "内置"
         assert status.dependencies[4].name == "模型文件"
-        assert status.dependencies[4].version == "4/4"
+        assert status.dependencies[4].version == "内置"
 
     def test_all_available_without_version_metadata(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
         """依赖与模型就绪但 rapidocr 元数据缺失时仍 available，version 留空。"""

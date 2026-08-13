@@ -2,13 +2,19 @@
 
 懒加载 + 线程局部：每 worker 线程独立引擎实例，onnxruntime 推理释放 GIL
 时多 worker 真正并行（代价：N workers × ~17MB 模型内存）。rapidocr 缺失
-或模型文件缺失时抛 :class:`~fuscan.extractors.base.ExtractorError`，
-由 :class:`~fuscan.extractors.image.ImageExtractor` /
+时抛 :class:`~fuscan.extractors.base.ExtractorError`，由
+:class:`~fuscan.extractors.image.ImageExtractor` /
 :class:`~fuscan.extractors.pdf.PdfExtractor` 转换为降级（返回空内容）。
 
-模型文件随软件打包内置（``src/fuscan/assets/ocr/models/``），通过
-:func:`importlib.resources.files` 解析路径，PyInstaller/fspack 打包后
-仍能正确定位（避免 ``Path(__file__)`` 在打包后路径变化的问题）。
+模型加载策略（两级回退）：
+
+1. **内置模型**：``src/fuscan/assets/ocr/models/`` 存在模型文件时优先使用，
+   通过 :func:`importlib.resources.files` 解析路径，fspack 打包后仍能正确定位。
+   fspack 通过 ``[tool.fspack] data-dirs`` 将模型文件随 exe 分发，离线可用。
+2. **rapidocr 默认模型**：内置模型不存在时（如 PyPI wheel 不含模型），
+   ``RapidOCR()`` 无参构建，rapidocr 自动从网络下载或从 cache 加载默认模型。
+
+wheel 与 sdist 均不含模型文件（~17MB），仅 fspack 打包 exe 与 CI/CD 时下载。
 
 公共 API：
 
@@ -70,10 +76,22 @@ def _models_dir() -> Path:
     return Path(str(files("fuscan.assets.ocr.models")))
 
 
-def _build_engine() -> RapidOCR:
-    """构建 RapidOCR 引擎实例，从内置模型路径离线加载。
+def _has_builtin_models() -> bool:
+    """检查内置模型目录中 4 个模型文件是否全部存在。
 
-    :raises ExtractorError: rapidocr 未安装或模型文件缺失
+    fspack 打包 exe 时通过 data-dirs 内置模型；PyPI wheel/sdist 不含模型文件。
+    """
+    models_dir = _models_dir()
+    return all((models_dir / f).exists() for f in (_DET_MODEL, _CLS_MODEL, _REC_MODEL, _REC_KEYS))
+
+
+def _build_engine() -> RapidOCR:
+    """构建 RapidOCR 引擎实例（两级模型回退）。
+
+    1. 内置模型存在时从 ``src/fuscan/assets/ocr/models/`` 离线加载（fspack exe）
+    2. 内置模型不存在时用 ``RapidOCR()`` 无参构建，rapidocr 自动下载/从 cache 加载
+
+    :raises ExtractorError: rapidocr 未安装
     :return: :class:`rapidocr.RapidOCR` 引擎实例
     """
     try:
@@ -81,16 +99,16 @@ def _build_engine() -> RapidOCR:
     except ImportError as exc:  # pragma: no cover - 环境依赖：仅 rapidocr 未安装时执行
         raise ExtractorError("无可用 OCR 引擎（rapidocr 未安装）") from exc
 
+    if not _has_builtin_models():
+        # PyPI wheel 不含模型，rapidocr 自动从网络下载或从 cache 加载默认模型
+        logger.info("内置 OCR 模型不存在，使用 rapidocr 默认模型（联网下载或 cache）")
+        return RapidOCR()
+
     models_dir = _models_dir()
     det_path = models_dir / _DET_MODEL
     cls_path = models_dir / _CLS_MODEL
     rec_path = models_dir / _REC_MODEL
     keys_path = models_dir / _REC_KEYS
-
-    # 校验模型文件存在（打包缺失或用户未放置时给出明确错误，而非 rapidocr 内部晦涩报错）
-    for model_file in (det_path, cls_path, rec_path, keys_path):
-        if not model_file.exists():
-            raise ExtractorError(f"OCR 模型文件缺失: {model_file.name}")
 
     return RapidOCR(
         params={
@@ -211,14 +229,12 @@ def get_ocr_status() -> OcrStatus:
         except PackageNotFoundError:  # 已通过导入探测，元数据异常属边缘情况
             v = ""
         deps.append(OcrDepStatus(display, True, v))
-    # 模型文件：4 个文件全部存在才就位
-    models_dir = _models_dir()
-    model_files = (_DET_MODEL, _CLS_MODEL, _REC_MODEL, _REC_KEYS)
-    present = sum(1 for f in model_files if (models_dir / f).exists())
-    if present == len(model_files):
-        deps.append(OcrDepStatus("模型文件", True, f"{present}/{len(model_files)}"))
+    # 模型文件：内置模型存在时显示「内置」，不存在时显示「rapidocr 默认」（不影响 available）
+    # wheel/sdist 不含模型，仅 fspack exe 内置；PyPI 用户由 rapidocr 自动下载
+    if _has_builtin_models():
+        deps.append(OcrDepStatus("模型文件", True, "内置"))
     else:
-        deps.append(OcrDepStatus("模型文件", False, f"{present}/{len(model_files)}"))
+        deps.append(OcrDepStatus("模型文件", True, "rapidocr 默认"))
     # 汇总：首个缺失项决定 reason
     first_missing = next((d for d in deps if not d.installed), None)
     available = first_missing is None

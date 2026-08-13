@@ -64,6 +64,37 @@ __all__ = [
 ]
 
 
+# Rust ``regex`` crate（DFA + aho-corasick）不支持的 look-around 构造前缀。
+# 含此类构造的 REGEX 规则不进 CONTENT 桶（留在 remaining_pairs 走 Python ``re``
+# 逐条匹配），避免整个桶的原生引擎构建失败、拖累同桶其他规则的原生加速。
+# ``(?<name>...)`` 为 Python 命名组（非 look-behind），不在此列——仅 ``(?<=``
+# 与 ``(?<!`` 为 look-behind，``(?=`` / ``(?!`` 为 look-ahead。
+_LOOKAROUND_MARKERS: tuple[str, ...] = ("(?=", "(?!", "(?<=", "(?<!")
+
+
+def _has_rust_unsupported_lookaround(pattern: str) -> bool:
+    """检测正则是否含 Rust ``regex`` crate 不支持的 look-around 构造。
+
+    Rust ``regex`` crate 不支持 look-ahead/look-behind：
+    - ``(?=...)`` / ``(?!...)``：正向/负向 look-ahead
+    - ``(?<=...)`` / ``(?<!...)``：正向/负向 look-behind
+
+    含此类构造的 REGEX 规则不进 CONTENT 桶（留在 remaining_pairs 走 Python
+    ``re`` 逐条匹配），避免整个桶的原生引擎构建失败、拖累同桶其他规则的原生加速。
+    look-around 规则通常很少（银行卡/手机号/IP 段等 3-5 条），逐条匹配开销可忽略。
+
+    .. note::
+
+        ``(?<name>...)`` 是 Python 命名组语法，非 look-behind，不会被误判；
+        仅 ``(?<=`` 与 ``(?<!`` 为 look-behind。对转义后的字面量（如 CONTAINS
+        模式经 ``re.escape``）不会调用本函数，故无假阳性风险。
+
+    :param pattern: 正则模式字符串（REGEX 模式的原始 pattern）
+    :return: 含 look-around 返回 True
+    """
+    return any(marker in pattern for marker in _LOOKAROUND_MARKERS)
+
+
 def extract_required_exts(match: MatchSpec | None) -> frozenset[str] | None:  # noqa: PLR0912
     """从 MatchSpec 提取**必须匹配任一扩展名**的集合。
 
@@ -210,6 +241,12 @@ def build_content_buckets(  # noqa: PLR0912
             MatchMode.STARTSWITH,
             MatchMode.ENDSWITH,
         ):
+            continue
+        # Rust ``regex`` crate 不支持 look-around：含此构造的 REGEX 规则
+        # 不进桶（留 remaining_pairs 走 Python ``re`` 逐条匹配），避免整个
+        # 桶的原生引擎构建失败拖累同桶其他规则。CONTAINS/EQUALS 等模式经
+        # re.escape 转义后无 look-around 语义，无需检测。
+        if spec.mode is MatchMode.REGEX and _has_rust_unsupported_lookaround(spec.pattern):
             continue
         key = (spec.mode.value, spec.case_sensitive)
         if key not in grouped:

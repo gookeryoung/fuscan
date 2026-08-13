@@ -596,3 +596,111 @@ class TestNativeEngineFallback:
         bucket.rules = [and_rule]
         engine = build_native_engine([bucket])
         assert engine is None
+
+
+class TestLookaroundExclusion:
+    """含 look-around 的 REGEX 规则不进 CONTENT 桶，避免原生引擎构建失败。
+
+    Rust ``regex`` crate 不支持 look-ahead/look-behind。若此类规则进入桶，
+    会导致整个桶的原生引擎构建失败、同桶所有规则回退 Python。修复方案：
+    桶构建阶段检测 look-around，将含此构造的规则留在 remaining_pairs 走
+    Python ``re`` 逐条匹配。
+    """
+
+    def test_lookaround_rule_excluded_from_bucket(self) -> None:
+        """含 look-behind 的 REGEX 规则不进桶，进入 remaining_pairs。"""
+        from fuscan.scanner._content_buckets import _has_rust_unsupported_lookaround
+
+        rules = [
+            # 两条普通规则确保形成桶（build_content_buckets 需 ≥2 条同 mode/cs）
+            _content_rule("aws", r"AKIA[0-9A-Z]{16}", mode=MatchMode.REGEX),
+            _content_rule("ghp", r"ghp_[A-Za-z0-9]{20}", mode=MatchMode.REGEX),
+            # 含 look-behind + look-ahead 的银行卡规则
+            _content_rule("credit_card", r"(?<!\d)\d{16,19}(?!\d)", mode=MatchMode.REGEX),
+        ]
+        buckets, remaining = build_content_buckets(_build_pairs(rules))
+        # look-around 规则不在桶里
+        bucketed_names: set[str] = set()
+        for b in buckets:
+            for r in b.rules:
+                bucketed_names.add(r.name)
+        assert "aws" in bucketed_names
+        assert "credit_card" not in bucketed_names
+        # look-around 规则在 remaining_pairs 中
+        remaining_names = {r.name for r, _ in remaining}
+        assert "credit_card" in remaining_names
+        # 检测函数本身
+        assert _has_rust_unsupported_lookaround(r"(?<!\d)\d{16,19}(?!\d)") is True
+        assert _has_rust_unsupported_lookaround(r"AKIA[0-9A-Z]{16}") is False
+
+    def test_lookahead_excluded_too(self) -> None:
+        """含 look-ahead 的规则同样不进桶。"""
+        rules = [
+            _content_rule("a", r"foo\d+", mode=MatchMode.REGEX),
+            _content_rule("c", r"baz\d+", mode=MatchMode.REGEX),
+            _content_rule("b", r"bar(?=\d)", mode=MatchMode.REGEX),
+        ]
+        buckets, remaining = build_content_buckets(_build_pairs(rules))
+        bucketed_names = {r.name for b in buckets for r in b.rules}
+        assert "a" in bucketed_names
+        assert "c" in bucketed_names
+        assert "b" not in bucketed_names
+        assert "b" in {r.name for r, _ in remaining}
+
+    def test_named_group_not_misdetected_as_lookbehind(self) -> None:
+        """``(?<name>...)`` 命名组不应被误判为 look-behind。"""
+        from fuscan.scanner._content_buckets import _has_rust_unsupported_lookaround
+
+        # Perl 风格命名组（?<name>...）非 look-behind，不应触发排除
+        assert _has_rust_unsupported_lookaround(r"(?<word>\w+)") is False
+        # P 风格命名组亦非 look-behind
+        assert _has_rust_unsupported_lookaround(r"(?P<word>\w+)") is False
+
+    def test_native_engine_builds_with_lookaround_in_ruleset(self) -> None:
+        """规则集含 look-around 规则时，原生引擎仍能成功构建（针对非 look-around 桶）。"""
+        rules = [
+            _content_rule("aws", r"AKIA[0-9A-Z]{16}", mode=MatchMode.REGEX),
+            _content_rule("ghp", r"ghp_[A-Za-z0-9]{20}", mode=MatchMode.REGEX),
+            # look-around 规则不进桶，不影响原生引擎构建
+            _content_rule("credit_card", r"(?<!\d)\d{16,19}(?!\d)", mode=MatchMode.REGEX),
+        ]
+        buckets, _ = build_content_buckets(_build_pairs(rules))
+        engine = build_native_engine(buckets)
+        # 原生引擎成功构建（无 look-around 规则进入）
+        assert engine is not None
+        assert engine.bucket_count >= 1
+
+    def test_lookaround_rule_still_matches_via_remaining(self, tmp_path: Path) -> None:
+        """端到端：look-around 规则经 remaining_pairs 走 Python re 仍能命中。"""
+        rules = [
+            # 普通桶规则
+            _content_rule("aws", r"AKIA[0-9A-Z]{16}", mode=MatchMode.REGEX, severity=Severity.CRITICAL),
+            _content_rule("ghp", r"ghp_[A-Za-z0-9]{20}", mode=MatchMode.REGEX),
+            # look-around 规则（留 remaining_pairs）
+            _content_rule("credit_card", r"(?<!\d)\d{16,19}(?!\d)", mode=MatchMode.REGEX),
+        ]
+        rs = _build_ruleset(*rules)
+        sc = Scanner(rs, max_workers=1)
+        # 原生引擎成功构建
+        assert sc._global_native_engine is not None
+        # 写入含银行卡号的文件（前后无数字，应被 look-behind/look-ahead 接受）
+        (tmp_path / "a.txt").write_text("card=4111111111111111 end", encoding="utf-8")
+        report = sc.scan(tmp_path)
+        # look-around 规则经 Python re 命中
+        hit_names = {h.rule_name for r in report.results for h in r.hits}
+        assert "credit_card" in hit_names
+
+    def test_lookaround_boundary_not_matched(self, tmp_path: Path) -> None:
+        """look-around 语义正确：银行卡号前后有数字时不命中（Python re 行为）。"""
+        rules = [
+            _content_rule("credit_card", r"(?<!\d)\d{16,19}(?!\d)", mode=MatchMode.REGEX),
+            # 补一条普通规则确保 credit_card 即使被排除也有桶存在
+            _content_rule("aws", r"AKIA[0-9A-Z]{16}", mode=MatchMode.REGEX),
+        ]
+        rs = _build_ruleset(*rules)
+        sc = Scanner(rs, max_workers=1)
+        # 20 位数字（超过 19），look-around 应排除
+        (tmp_path / "a.txt").write_text("x=12345678901234567890 end", encoding="utf-8")
+        report = sc.scan(tmp_path)
+        hit_names = {h.rule_name for r in report.results for h in r.hits}
+        assert "credit_card" not in hit_names

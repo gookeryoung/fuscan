@@ -214,3 +214,110 @@ class TestModelsDir:
         assert isinstance(result, Path)
         # 资源目录名应为 models（位于 fuscan/assets/ocr/models）
         assert result.name == "models"
+
+
+class TestGetOcrStatus:
+    """``get_ocr_status`` 可用性检测测试。
+
+    覆盖运行链各依赖缺失（rapidocr/onnxruntime/Pillow/numpy）、模型文件缺失/
+    部分缺失、全部就绪（含/不含版本元数据）等场景。通过 ``sys.modules`` 注入
+    假模块模拟已安装，置 ``None`` 模拟缺失，不依赖真实 OCR 依赖安装。
+    """
+
+    @staticmethod
+    def _install_dep(monkeypatch: pytest.MonkeyPatch, mod_name: str) -> None:
+        """注入单个假模块模拟已安装。"""
+        monkeypatch.setitem(sys.modules, mod_name, types.ModuleType(mod_name))
+
+    @staticmethod
+    def _remove_dep(monkeypatch: pytest.MonkeyPatch, mod_name: str) -> None:
+        """置 ``None`` 模拟未安装（``__import__`` 随即抛 ``ImportError``）。"""
+        monkeypatch.setitem(sys.modules, mod_name, None)
+
+    @staticmethod
+    def _create_fake_models(tmp_path: object) -> None:
+        """在临时目录创建 4 个空模型文件（det/cls/rec/keys）。"""
+        for name in (ocr_mod._DET_MODEL, ocr_mod._CLS_MODEL, ocr_mod._REC_MODEL, ocr_mod._REC_KEYS):
+            (tmp_path / name).write_bytes(b"fake")  # type: ignore[operator]
+
+    def test_rapidocr_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """rapidocr 未安装时 unavailable，原因指向 rapidocr。"""
+        self._remove_dep(monkeypatch, "rapidocr")
+        status = ocr_mod.get_ocr_status()
+        assert status.available is False
+        assert status.reason == "rapidocr 未安装"
+        assert status.version == ""
+
+    def test_onnxruntime_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """rapidocr 就绪但 onnxruntime 缺失时原因指向 onnxruntime。"""
+        self._install_dep(monkeypatch, "rapidocr")
+        self._remove_dep(monkeypatch, "onnxruntime")
+        status = ocr_mod.get_ocr_status()
+        assert status.available is False
+        assert status.reason == "onnxruntime 未安装"
+
+    def test_pillow_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pillow（PIL）缺失时原因显示 Pillow（模块名 PIL → 展示名 Pillow）。"""
+        self._install_dep(monkeypatch, "rapidocr")
+        self._install_dep(monkeypatch, "onnxruntime")
+        self._remove_dep(monkeypatch, "PIL")
+        status = ocr_mod.get_ocr_status()
+        assert status.available is False
+        assert status.reason == "Pillow 未安装"
+
+    def test_numpy_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """numpy 缺失时原因指向 numpy。"""
+        for m in ("rapidocr", "onnxruntime", "PIL"):
+            self._install_dep(monkeypatch, m)
+        self._remove_dep(monkeypatch, "numpy")
+        status = ocr_mod.get_ocr_status()
+        assert status.available is False
+        assert status.reason == "numpy 未安装"
+
+    def test_model_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+        """依赖就绪但模型文件全部缺失时原因指向首个缺失模型文件。"""
+        for m in ocr_mod._OCR_RUNTIME_DEPS:
+            self._install_dep(monkeypatch, m)
+        monkeypatch.setattr(ocr_mod, "_models_dir", lambda: tmp_path)
+        status = ocr_mod.get_ocr_status()
+        assert status.available is False
+        assert status.reason == f"模型文件缺失: {ocr_mod._DET_MODEL}"
+
+    def test_partial_model_missing(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+        """仅部分模型文件存在时仍 unavailable，原因指向首个缺失项。"""
+        for m in ocr_mod._OCR_RUNTIME_DEPS:
+            self._install_dep(monkeypatch, m)
+        monkeypatch.setattr(ocr_mod, "_models_dir", lambda: tmp_path)
+        # 仅创建 det 模型，cls 缺失 → 原因指向 cls
+        (tmp_path / ocr_mod._DET_MODEL).write_bytes(b"fake")  # type: ignore[operator]
+        status = ocr_mod.get_ocr_status()
+        assert status.available is False
+        assert status.reason == f"模型文件缺失: {ocr_mod._CLS_MODEL}"
+
+    def test_all_available_with_version(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+        """全部依赖 + 模型文件就绪且元数据可读时 available=True + 版本号。"""
+        for m in ocr_mod._OCR_RUNTIME_DEPS:
+            self._install_dep(monkeypatch, m)
+        self._create_fake_models(tmp_path)
+        monkeypatch.setattr(ocr_mod, "_models_dir", lambda: tmp_path)
+        monkeypatch.setattr(ocr_mod, "version", lambda name: "3.4.0")
+        status = ocr_mod.get_ocr_status()
+        assert status.available is True
+        assert status.reason == ""
+        assert status.version == "3.4.0"
+
+    def test_all_available_without_version_metadata(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+        """依赖与模型就绪但 rapidocr 元数据缺失时仍 available，version 留空。"""
+        for m in ocr_mod._OCR_RUNTIME_DEPS:
+            self._install_dep(monkeypatch, m)
+        self._create_fake_models(tmp_path)
+        monkeypatch.setattr(ocr_mod, "_models_dir", lambda: tmp_path)
+
+        def _raise(name: str) -> str:
+            raise ocr_mod.PackageNotFoundError
+
+        monkeypatch.setattr(ocr_mod, "version", _raise)
+        status = ocr_mod.get_ocr_status()
+        assert status.available is True
+        assert status.reason == ""
+        assert status.version == ""

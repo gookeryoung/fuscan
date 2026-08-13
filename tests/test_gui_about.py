@@ -113,6 +113,45 @@ class TestDependencies:
         assert "纯 Python" in native_entry
 
 
+class TestOcrEngine:
+    """``ocrEngine`` Property：OCR 引擎状态展示（启用情况 + 未启用原因）。"""
+
+    def test_ocr_engine_available_with_version(self, about: AboutController, monkeypatch: pytest.MonkeyPatch) -> None:
+        """OCR 可用且版本元数据可读时显示版本号与'已启用'。"""
+        from fuscan.extractors.ocr import OcrStatus
+        from fuscan.gui.controllers import about_controller
+
+        monkeypatch.setattr(about_controller, "get_ocr_status", lambda: OcrStatus(True, "", "3.4.0"))
+        text = about.ocrEngine
+        assert "已启用" in text
+        assert "3.4.0" in text
+        assert "RapidOCR" in text
+
+    def test_ocr_engine_unavailable(self, about: AboutController, monkeypatch: pytest.MonkeyPatch) -> None:
+        """OCR 不可用时显示'未启用'与具体原因。"""
+        from fuscan.extractors.ocr import OcrStatus
+        from fuscan.gui.controllers import about_controller
+
+        monkeypatch.setattr(about_controller, "get_ocr_status", lambda: OcrStatus(False, "rapidocr 未安装", ""))
+        text = about.ocrEngine
+        assert "未启用" in text
+        assert "rapidocr 未安装" in text
+
+    def test_ocr_engine_available_without_version(
+        self, about: AboutController, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """OCR 可用但版本元数据缺失时不显示版本号，仍标'已启用'。"""
+        from fuscan.extractors.ocr import OcrStatus
+        from fuscan.gui.controllers import about_controller
+
+        monkeypatch.setattr(about_controller, "get_ocr_status", lambda: OcrStatus(True, "", ""))
+        text = about.ocrEngine
+        assert "已启用" in text
+        assert "RapidOCR" in text
+        # 版本号缺失时不应在 RapidOCR 后出现多余空格
+        assert "RapidOCR  -" not in text
+
+
 class TestOpenManual:
     def test_open_manual_no_exception_when_pdf_missing(
         self, about: AboutController, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

@@ -22,6 +22,7 @@ except ImportError:  # pragma: no cover
 
 from fuscan import __author__, __description__, __license__, __version__
 from fuscan.config import CONFIG_DIR
+from fuscan.extractors.ocr import get_ocr_status
 from fuscan.paths import MANUAL_PDF_PATH
 
 __all__ = ["AboutController"]
@@ -81,6 +82,20 @@ def _detect_native_matcher_status() -> str:
     return f"fuscan-core {v} - 原生引擎（已启用）"
 
 
+def _detect_ocr_status() -> str:
+    """检测 OCR 引擎状态，返回展示字符串。
+
+    调用 :func:`fuscan.extractors.ocr.get_ocr_status` 探测完整运行链
+    （rapidocr/onnxruntime/Pillow/numpy + 模型文件），在关于页展示
+    启用情况与未启用原因，便于用户定位是库缺失还是模型文件缺失。
+    """
+    status = get_ocr_status()
+    if status.available:
+        v = f" {status.version}" if status.version else ""
+        return f"RapidOCR{v} - OCR 引擎（已启用）"
+    return f"RapidOCR - OCR 引擎（未启用：{status.reason}）"
+
+
 class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
     """关于页控制器。"""
 
@@ -121,6 +136,15 @@ class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
         缺失时回退纯 Python，行为一致但性能较低。
         """
         return [_detect_native_matcher_status()]
+
+    @Property(str, notify=infoChanged)  # pyrefly: ignore [not-callable]
+    def ocrEngine(self) -> str:
+        """OCR 引擎状态（启用情况 + 未启用原因）。
+
+        展示 RapidOCR 是否可用及未启用原因（库缺失或模型文件缺失），
+        便于用户在关于页一眼判断 OCR 是否就绪。
+        """
+        return _detect_ocr_status()
 
     @Property("QVariantList", notify=infoChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
     def dependencies(self) -> list[str]:

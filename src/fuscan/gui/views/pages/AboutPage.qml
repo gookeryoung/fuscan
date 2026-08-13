@@ -137,17 +137,17 @@ Item {
                 }
             }
 
-            // 原生引擎 + 第三方依赖 左右并列
+            // 引擎状态 + 第三方依赖 左右并列
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 12
 
-                // 原生引擎（项目自身组件）
+                // 引擎状态（原生匹配引擎 fuscan-core + OCR 引擎 RapidOCR）
                 GroupBox {
                     Layout.fillWidth: true
                     Layout.preferredWidth: 0
                     Layout.alignment: Qt.AlignTop
-                    title: "原生引擎"
+                    title: "引擎状态"
                     ColumnLayout {
                         anchors.fill: parent
                         spacing: 4
@@ -160,6 +160,14 @@ Item {
                                 Layout.fillWidth: true
                                 wrapMode: Text.WordWrap
                             }
+                        }
+                        // OCR 引擎状态：展示启用情况与未启用原因（库缺失/模型文件缺失）
+                        Label {
+                            text: aboutController.ocrEngine
+                            font.pixelSize: 11
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
                         }
                     }
                 }

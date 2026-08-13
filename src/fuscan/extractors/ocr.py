@@ -14,6 +14,7 @@
 
 - :func:`get_ocr_engine`：返回当前线程的 OCR 引擎（线程局部单例）
 - :func:`is_ocr_available`：探测 rapidocr 是否可导入（不加载模型）
+- :func:`get_ocr_status`：检测 OCR 完整可用性及未启用原因（供 GUI 展示）
 - :func:`recognize`：对图像执行 OCR，返回拼接文本
 """
 
@@ -21,6 +22,8 @@ from __future__ import annotations
 
 import logging
 import threading
+from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,7 +32,7 @@ from fuscan.extractors.base import ExtractorError
 if TYPE_CHECKING:
     from rapidocr import RapidOCR  # pyrefly: ignore [missing-import]
 
-__all__ = ["get_ocr_engine", "is_ocr_available", "recognize"]
+__all__ = ["OcrStatus", "get_ocr_engine", "get_ocr_status", "is_ocr_available", "recognize"]
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +132,55 @@ def is_ocr_available() -> bool:
     except ImportError:
         return False
     return True
+
+
+# OCR 运行链全部必需的依赖模块名（按检测顺序排列）。
+# rapidocr：OCR 框架本体；onnxruntime：推理后端；Pillow：图片解码；
+# numpy：ndarray 转换。任一缺失则 OCR 无法运行，需在 GUI 明确展示原因。
+_OCR_RUNTIME_DEPS: tuple[str, ...] = ("rapidocr", "onnxruntime", "PIL", "numpy")
+
+
+@dataclass(frozen=True)
+class OcrStatus:
+    """OCR 引擎可用性状态（供 GUI 关于页展示启用情况与未启用原因）。
+
+    :ivar available: OCR 是否可用（所有依赖与模型文件就位）
+    :ivar reason: 不可用原因（首个缺失项的中文描述）；可用时为空字符串
+    :ivar version: rapidocr 版本号；不可用时为空字符串
+    """
+
+    available: bool
+    reason: str
+    version: str
+
+
+def get_ocr_status() -> OcrStatus:
+    """检测 OCR 完整可用性及未启用原因（不加载模型，供 GUI 展示）。
+
+    按运行链顺序逐项探测：rapidocr → onnxruntime → Pillow → numpy → 模型文件。
+    首个缺失项决定 ``reason``；全部通过返回 ``available=True`` 与 rapidocr 版本号。
+    不触发模型加载（约 200ms + 17MB 内存），仅做导入探测与文件存在性检查。
+
+    :return: :class:`OcrStatus` 状态对象
+    """
+    # 依赖模块：逐项导入探测，首个缺失项决定原因
+    _dep_display = {"rapidocr": "rapidocr", "onnxruntime": "onnxruntime", "PIL": "Pillow", "numpy": "numpy"}
+    for mod_name in _OCR_RUNTIME_DEPS:
+        try:
+            __import__(mod_name)
+        except ImportError:
+            return OcrStatus(False, f"{_dep_display[mod_name]} 未安装", "")
+    # 模型文件：4 个文件全部存在才可用
+    models_dir = _models_dir()
+    for model_file in (_DET_MODEL, _CLS_MODEL, _REC_MODEL, _REC_KEYS):
+        if not (models_dir / model_file).exists():
+            return OcrStatus(False, f"模型文件缺失: {model_file}", "")
+    # 全部通过：取 rapidocr 版本号（取不到留空，不影响 available 判定）
+    try:
+        v = version("rapidocr")
+    except PackageNotFoundError:  # 已通过导入探测，元数据异常属边缘情况
+        v = ""
+    return OcrStatus(True, "", v)
 
 
 def recognize(img: object) -> str:

@@ -265,7 +265,7 @@ def get_ocr_engine() -> OcrEngine:
     :raises ExtractorError: exe/模型缺失或启动失败
     :return: :class:`OcrEngine` 单例
     """
-    global _engine
+    global _engine  # noqa: PLW0603  # 单例模式需 global 更新模块级缓存
     if _engine is not None and _engine.is_alive():
         return _engine
     with _engine_lock:

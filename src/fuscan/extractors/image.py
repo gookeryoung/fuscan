@@ -18,7 +18,7 @@ import logging
 
 from typing_extensions import override
 
-from fuscan.extractors.base import Extractor, ExtractorError, SpeedTier
+from fuscan.extractors.base import Extractor, SpeedTier
 from fuscan.extractors.ocr import recognize
 
 __all__ = ["ImageExtractor"]

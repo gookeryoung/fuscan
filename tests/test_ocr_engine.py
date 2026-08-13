@@ -45,7 +45,7 @@ class _FakeStdin:
     def flush(self) -> None:
         req = bytes(self._buf)
         self._buf.clear()
-        self._proc._on_request(req)  # noqa: SLF001 - 测试替身内部协作
+        self._proc._on_request(req)
 
     def close(self) -> None:
         self._buf.clear()
@@ -58,7 +58,7 @@ class _FakeStdout:
         self._proc = proc
 
     def readline(self) -> bytes:
-        return self._proc._next_line()  # noqa: SLF001 - 测试替身内部协作
+        return self._proc._next_line()
 
     def close(self) -> None:
         pass
@@ -129,7 +129,7 @@ def _install_fake_popen(monkeypatch: pytest.MonkeyPatch, proc: _FakeProc) -> Non
 def _reset_engine() -> Iterator[None]:
     """每测试后清理全局引擎缓存，避免跨测试污染。"""
     yield
-    ocr_mod._engine = None  # noqa: SLF001 - 测试隔离需访问私有全局
+    ocr_mod._engine = None
 
 
 @pytest.fixture(autouse=True)
@@ -321,9 +321,7 @@ class TestOcrEngineRecognize:
 
     def test_code_100_filters_empty_text(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """data 中 text 为空字符串的项被过滤。"""
-        resp = (
-            json.dumps({"code": 100, "data": [{"text": "有效"}, {"text": ""}, {"text": "另一段"}]}).encode() + b"\n"
-        )
+        resp = json.dumps({"code": 100, "data": [{"text": "有效"}, {"text": ""}, {"text": "另一段"}]}).encode() + b"\n"
         engine, _ = self._make_engine(monkeypatch, tmp_path, _make_responder(resp))
         assert engine.recognize(b"x") == "有效\n另一段"
         engine.stop()
@@ -347,7 +345,7 @@ class TestOcrEngineRecognize:
     def test_proc_dead_before_send_raises(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """发送前子进程已退出 → 抛 ExtractorError。"""
         engine, proc = self._make_engine(monkeypatch, tmp_path, _make_responder(b'{"code":101}\n'))
-        proc._poll_value = 1  # 模拟子进程退出  # noqa: SLF001
+        proc._poll_value = 1  # 模拟子进程退出
         with pytest.raises(ExtractorError, match="子进程已退出"):
             engine.recognize(b"x")
         engine.stop()
@@ -386,9 +384,9 @@ class TestOcrEngineStop:
         proc = _FakeProc(poll_value=1)
         # 绕过 __init__ 直接构造 engine 验证 stop 对已退出进程安全
         engine = ocr_mod.OcrEngine.__new__(ocr_mod.OcrEngine)
-        engine._proc = proc  # noqa: SLF001
-        engine._stopped = False  # noqa: SLF001
-        engine._lock = threading.Lock()  # noqa: SLF001
+        engine._proc = proc  # pyrefly: ignore [bad-assignment]
+        engine._stopped = False
+        engine._lock = threading.Lock()
         engine.stop()
         assert proc.killed is False  # 已退出，无需 kill
 
@@ -412,7 +410,7 @@ class TestGetOcrEngine:
         proc1 = _FakeProc()
         _install_fake_popen(monkeypatch, proc1)
         e1 = ocr_mod.get_ocr_engine()
-        proc1._poll_value = 1  # 模拟崩溃  # noqa: SLF001
+        proc1._poll_value = 1  # 模拟崩溃
         # 第二次调用：e1 已死，重建
         proc2 = _FakeProc()
         _install_fake_popen(monkeypatch, proc2)

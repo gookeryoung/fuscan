@@ -7,7 +7,6 @@ PDF/ODT/ODS 等较难动态生成的格式，使用 mock 或跳过。
 from __future__ import annotations
 
 import io
-import sys
 import zipfile
 from pathlib import Path
 
@@ -2668,7 +2667,6 @@ class TestExtractorFailureDataclass:
         assert len(failures[0].error_message) == 200
 
 
-
 # ---------------------------------------------------------------------------
 # ImageExtractor / PdfExtractor OCR 回退（RapidOCR-json 预编译 exe）
 #
@@ -2711,7 +2709,7 @@ class _FakePilImage:
     def convert(self, mode: str) -> _FakePilImage:
         return _FakePilImage(mode)
 
-    def save(self, buf: object, format: str = "PNG") -> None:  # noqa: ARG002
+    def save(self, buf: object, format: str = "PNG") -> None:
         buf.write(b"FAKE_PNG_BYTES")  # type: ignore[union-attr]
 
 
@@ -2741,7 +2739,7 @@ class _FakePdfPage:
     def get_textpage(self) -> _FakeTextPage:
         return _FakeTextPage()
 
-    def render(self, scale: float = 1.0) -> _FakeRenderResult:  # noqa: ARG002
+    def render(self, scale: float = 1.0) -> _FakeRenderResult:
         return _FakeRenderResult(self._mode)
 
 
@@ -2754,7 +2752,7 @@ class _FakePdfDoc:
     def __len__(self) -> int:
         return self._n_pages
 
-    def get_page(self, i: int) -> _FakePdfPage:  # noqa: ARG002
+    def get_page(self, i: int) -> _FakePdfPage:
         return _FakePdfPage()
 
     def close(self) -> None:
@@ -2910,7 +2908,7 @@ class TestPdfExtractorOcrFallback:
             def get_textpage(self) -> _FakeTextPage:
                 return _FakeTextPage()
 
-            def render(self, scale: float = 1.0) -> object:  # noqa: ARG002
+            def render(self, scale: float = 1.0) -> object:
                 raise RuntimeError("渲染失败")
 
         class _MixedDoc:
@@ -2941,7 +2939,7 @@ class TestPdfExtractorOcrFallback:
             def __len__(self) -> int:
                 return 1
 
-            def get_page(self, i: int) -> _FakePdfPage:  # noqa: ARG002
+            def get_page(self, i: int) -> _FakePdfPage:
                 return _FakePdfPage(mode="RGBA")
 
             def close(self) -> None:
@@ -3056,4 +3054,3 @@ class TestPdfExtractorRealOcrFallback:
         assert extractor.last_engine_info == "pypdfium2 + rapidocr-json"
         # OCR 识别出非空文本
         assert content.strip() != ""
-

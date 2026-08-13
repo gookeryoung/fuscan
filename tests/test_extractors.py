@@ -7,6 +7,7 @@ PDF/ODT/ODS 等较难动态生成的格式，使用 mock 或跳过。
 from __future__ import annotations
 
 import io
+import sys
 import zipfile
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from fuscan.extractors import (
     ExtractorError,
     ExtractorFailure,
     ExtractorRegistry,
+    ImageExtractor,
     OdtExtractor,
     PdfExtractor,
     PptExtractor,
@@ -2664,3 +2666,353 @@ class TestExtractorFailureDataclass:
         assert len(failures) == 1
         # _retry_loop 中通过 str(exc)[:200] 截断
         assert len(failures[0].error_message) == 200
+
+
+# ---------------------------------------------------------------------------
+# ImageExtractor / PdfExtractor OCR 回退（RapidOCR + Pillow）
+#
+# RapidOCR/numpy 未安装时通过 fake 引擎与 fake PdfDocument 覆盖逻辑分支，
+# 不依赖真实模型文件（模型下载见 ocr-support-plan.md 遗留事项）。
+# ---------------------------------------------------------------------------
+
+
+class _FakeOcrResult:
+    """模拟 RapidOCR 推理结果（含 ``txts`` 属性）。"""
+
+    def __init__(self, txts: tuple[str, ...]) -> None:
+        self.txts = txts
+
+
+class _FakeOcrEngine:
+    """模拟 RapidOCR 引擎：``__call__`` 返回固定 ``txts``。
+
+    :ivar call_count: 推理调用次数（验证 OCR 是否被触发）
+    :ivar last_input: 最近一次推理输入（验证传入 ndarray）
+    """
+
+    def __init__(self, txts: tuple[str, ...] = ("扫描文本",), *, fail: bool = False) -> None:
+        self._txts = txts
+        self._fail = fail
+        self.call_count = 0
+        self.last_input: object = None
+
+    def __call__(self, img: object) -> _FakeOcrResult:
+        self.call_count += 1
+        self.last_input = img
+        if self._fail:
+            raise RuntimeError("onnxruntime 推理崩溃")
+        return _FakeOcrResult(self._txts)
+
+
+class _FakeTextPage:
+    """模拟 pypdfium2 文本页（空文本层，扫描版 PDF）。"""
+
+    def get_text_range(self) -> str:
+        return ""
+
+
+class _FakeRenderResult:
+    """模拟 pypdfium2 页面渲染结果（``to_pil`` 返回 8x8 RGB 位图）。"""
+
+    def to_pil(self) -> object:
+        from PIL import Image
+
+        return Image.new("RGB", (8, 8))
+
+
+class _FakePdfPage:
+    """模拟 pypdfium2 页面：空文本层 + 可渲染位图。"""
+
+    def get_textpage(self) -> _FakeTextPage:
+        return _FakeTextPage()
+
+    def render(self, scale: float = 1.0) -> _FakeRenderResult:
+        return _FakeRenderResult()
+
+
+class _FakePdfDoc:
+    """模拟 pypdfium2 ``PdfDocument``：可控页数 + 空文本层页面。"""
+
+    def __init__(self, n_pages: int = 1) -> None:
+        self._n_pages = n_pages
+
+    def __len__(self) -> int:
+        return self._n_pages
+
+    def get_page(self, i: int) -> _FakePdfPage:
+        return _FakePdfPage()
+
+    def close(self) -> None:
+        """模拟 PdfDocument.close（无操作）。"""
+
+
+def _install_fake_numpy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """注入假 numpy 模块（``asarray`` 返回占位对象），避免依赖真实 numpy。
+
+    ``_ocr_fallback`` 内 ``import numpy as np`` 从 ``sys.modules`` 取已注入的假模块，
+    ``np.asarray(pil_img)`` 返回占位字符串，供 fake 引擎接收。
+    """
+    import types
+
+    mod = types.ModuleType("numpy")
+    mod.asarray = lambda x: "fake_ndarray"  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "numpy", mod)
+
+
+class TestImageExtractor:
+    """图片 OCR 提取器测试。
+
+    RapidOCR/numpy 未安装时通过 fake 引擎与 mock 解码方法覆盖逻辑分支。
+    """
+
+    def test_supported_extensions(self) -> None:
+        assert ImageExtractor().supported_extensions == (
+            "png",
+            "jpg",
+            "jpeg",
+            "tiff",
+            "tif",
+            "bmp",
+            "webp",
+            "gif",
+        )
+
+    def test_speed_tier_is_very_slow(self) -> None:
+        """图片 OCR 神经网络推理（det+cls+rec 三阶段）→ T5 极慢。"""
+        assert ImageExtractor().speed_tier == SpeedTier.VERY_SLOW
+
+    def test_engine_info(self) -> None:
+        assert ImageExtractor().engine_info == "rapidocr-onnxruntime"
+
+    def test_display_name(self) -> None:
+        assert ImageExtractor().display_name == "图片（OCR）"
+
+    def test_large_image_skipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """超过 10MB 的图片跳过 OCR，返回空字符串且不加载引擎。"""
+        from fuscan.extractors import image as image_mod
+
+        engine = _FakeOcrEngine()
+        monkeypatch.setattr(image_mod, "get_ocr_engine", lambda: engine)
+        big_data = b"\x00" * (10 * 1024 * 1024 + 1)
+        assert ImageExtractor().extract_from_bytes(big_data) == ""
+        assert engine.call_count == 0
+
+    def test_extract_with_mock_engine(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """fake 引擎 + mock 解码方法，验证 OCR 文本拼接。"""
+        from fuscan.extractors import image as image_mod
+
+        engine = _FakeOcrEngine(txts=("第一行", "第二行"))
+        monkeypatch.setattr(image_mod, "get_ocr_engine", lambda: engine)
+        monkeypatch.setattr(ImageExtractor, "_decode_to_ndarray", staticmethod(lambda _data: "fake_arr"))
+        content = ImageExtractor().extract_from_bytes(b"fake image bytes")
+        assert content == "第一行\n第二行"
+        assert engine.call_count == 1
+        assert engine.last_input == "fake_arr"
+
+    def test_ocr_engine_missing_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """rapidocr 未安装时 get_ocr_engine 抛 ExtractorError。"""
+        from fuscan.extractors import image as image_mod
+
+        def _raise() -> None:
+            raise ExtractorError("无可用 OCR 引擎（rapidocr 未安装）")
+
+        monkeypatch.setattr(image_mod, "get_ocr_engine", _raise)
+        with pytest.raises(ExtractorError, match="无可用 OCR 引擎"):
+            ImageExtractor().extract_from_bytes(b"fake")
+
+    def test_inference_failure_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """OCR 推理异常应包装为 ExtractorError。"""
+        from fuscan.extractors import image as image_mod
+
+        engine = _FakeOcrEngine(fail=True)
+        monkeypatch.setattr(image_mod, "get_ocr_engine", lambda: engine)
+        monkeypatch.setattr(ImageExtractor, "_decode_to_ndarray", staticmethod(lambda _data: "fake_arr"))
+        with pytest.raises(ExtractorError, match="OCR 推理失败"):
+            ImageExtractor().extract_from_bytes(b"fake")
+
+    def test_empty_txts_returns_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """引擎返回空 txts 时提取结果为空字符串。"""
+        from fuscan.extractors import image as image_mod
+
+        engine = _FakeOcrEngine(txts=())
+        monkeypatch.setattr(image_mod, "get_ocr_engine", lambda: engine)
+        monkeypatch.setattr(ImageExtractor, "_decode_to_ndarray", staticmethod(lambda _data: "fake_arr"))
+        assert ImageExtractor().extract_from_bytes(b"fake") == ""
+
+    def test_decode_failure_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pillow 解码失败应抛 ExtractorError。"""
+        from fuscan.extractors import image as image_mod
+
+        def _raise(_data: bytes) -> None:
+            raise ExtractorError("图片解码失败: 损坏")
+
+        monkeypatch.setattr(image_mod, "get_ocr_engine", _FakeOcrEngine)
+        monkeypatch.setattr(ImageExtractor, "_decode_to_ndarray", staticmethod(_raise))
+        with pytest.raises(ExtractorError, match="图片解码失败"):
+            ImageExtractor().extract_from_bytes(b"corrupt")
+
+    def test_filter_empty_strings_in_txts(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """txts 含空字符串时应过滤，仅拼接非空文本。"""
+        from fuscan.extractors import image as image_mod
+
+        engine = _FakeOcrEngine(txts=("有效文本", "", "另一段", ""))
+        monkeypatch.setattr(image_mod, "get_ocr_engine", lambda: engine)
+        monkeypatch.setattr(ImageExtractor, "_decode_to_ndarray", staticmethod(lambda _data: "fake_arr"))
+        assert ImageExtractor().extract_from_bytes(b"fake") == "有效文本\n另一段"
+
+    def test_decode_to_ndarray_rgb_png(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """PIL 生成 RGB PNG，_decode_to_ndarray 真实解码并调用 np.asarray。"""
+        import io as _io
+
+        from PIL import Image
+
+        _install_fake_numpy(monkeypatch)
+        buf = _io.BytesIO()
+        Image.new("RGB", (4, 4), "white").save(buf, format="PNG")
+        assert ImageExtractor._decode_to_ndarray(buf.getvalue()) == "fake_ndarray"
+
+    def test_decode_to_ndarray_rgba_converts_to_rgb(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """RGBA 图片应 convert("RGB") 后再 asarray（覆盖非 RGB/L 分支）。"""
+        import io as _io
+
+        from PIL import Image
+
+        _install_fake_numpy(monkeypatch)
+        buf = _io.BytesIO()
+        Image.new("RGBA", (4, 4)).save(buf, format="PNG")
+        assert ImageExtractor._decode_to_ndarray(buf.getvalue()) == "fake_ndarray"
+
+    def test_decode_to_ndarray_animated_gif_seeks_first(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """动画 GIF 应 seek(0) 取首帧（覆盖 is_animated 分支）。"""
+        import io as _io
+
+        from PIL import Image
+
+        _install_fake_numpy(monkeypatch)
+        buf = _io.BytesIO()
+        frames = [Image.new("RGB", (4, 4), c) for c in ("red", "blue")]
+        frames[0].save(buf, format="GIF", save_all=True, append_images=frames[1:], duration=100, loop=0)
+        assert ImageExtractor._decode_to_ndarray(buf.getvalue()) == "fake_ndarray"
+
+    def test_decode_to_ndarray_corrupt_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """损坏数据应抛 ExtractorError（Pillow 解码失败，覆盖 except 分支）。"""
+        _install_fake_numpy(monkeypatch)
+        with pytest.raises(ExtractorError, match="图片解码失败"):
+            ImageExtractor._decode_to_ndarray(b"not an image")
+
+
+class TestPdfExtractorOcrFallback:
+    """PdfExtractor 扫描版 OCR 回退测试。
+
+    通过 fake ``PdfDocument`` 模拟空文本层 PDF，fake numpy 避免依赖真实 numpy，
+    fake OCR 引擎验证 OCR 回退触发与 ``last_engine_info`` 更新。
+    """
+
+    def test_last_engine_info_initial(self) -> None:
+        """新建实例 ``last_engine_info`` 初始为 ``pypdfium2``。"""
+        assert PdfExtractor().last_engine_info == "pypdfium2"
+
+    def test_text_layer_present_no_ocr(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """文本层非空时不触发 OCR 回退，``last_engine_info`` 保持 ``pypdfium2``。"""
+        from fuscan.extractors import pdf as pdf_mod
+
+        engine = _FakeOcrEngine()
+        monkeypatch.setattr(pdf_mod, "get_ocr_engine", lambda: engine)
+
+        def _fake_extract(_self: PdfExtractor, _data: bytes, _doc: object) -> str:
+            return "有文本层"
+
+        monkeypatch.setattr(PdfExtractor, "_extract_with_pdfium2", _fake_extract)
+        extractor = PdfExtractor()
+        content = extractor.extract_from_bytes(b"fake pdf")
+        assert content == "有文本层"
+        assert extractor.last_engine_info == "pypdfium2"
+        assert engine.call_count == 0
+
+    def test_scanned_pdf_triggers_ocr(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """空文本层 PDF 触发 OCR 回退，``last_engine_info`` 更新为复合引擎。"""
+        from fuscan.extractors import pdf as pdf_mod
+
+        _install_fake_numpy(monkeypatch)
+        engine = _FakeOcrEngine(txts=("OCR识别文本",))
+        monkeypatch.setattr(pdf_mod, "get_ocr_engine", lambda: engine)
+        monkeypatch.setattr(pdf_mod, "_ensure_backend", lambda: lambda _data: _FakePdfDoc(n_pages=1))
+        extractor = PdfExtractor()
+        content = extractor.extract_from_bytes(b"fake scanned pdf")
+        assert "OCR识别文本" in content
+        assert extractor.last_engine_info == "pypdfium2 + rapidocr-onnxruntime"
+        assert engine.call_count == 1
+
+    def test_ocr_engine_missing_silent_degrade(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """rapidocr 未安装时 OCR 回退静默降级，返回空字符串。"""
+        from fuscan.extractors import pdf as pdf_mod
+
+        def _raise() -> None:
+            raise ExtractorError("无可用 OCR 引擎（rapidocr 未安装）")
+
+        monkeypatch.setattr(pdf_mod, "get_ocr_engine", _raise)
+        monkeypatch.setattr(pdf_mod, "_ensure_backend", lambda: lambda _data: _FakePdfDoc(n_pages=1))
+        extractor = PdfExtractor()
+        content = extractor.extract_from_bytes(b"fake scanned pdf")
+        assert content == ""
+        # 引擎缺失降级，last_engine_info 保持 pypdfium2
+        assert extractor.last_engine_info == "pypdfium2"
+
+    def test_too_many_pages_skips_ocr(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """PDF 页数超过上限（>50）跳过 OCR。"""
+        from fuscan.extractors import pdf as pdf_mod
+
+        _install_fake_numpy(monkeypatch)
+        engine = _FakeOcrEngine()
+        monkeypatch.setattr(pdf_mod, "get_ocr_engine", lambda: engine)
+        monkeypatch.setattr(pdf_mod, "_ensure_backend", lambda: lambda _data: _FakePdfDoc(n_pages=51))
+        extractor = PdfExtractor()
+        content = extractor.extract_from_bytes(b"fake huge pdf")
+        assert content == ""
+        assert engine.call_count == 0  # 未触发推理
+
+    def test_page_render_failure_skipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """单页渲染失败被跳过，其他页正常 OCR。"""
+        from fuscan.extractors import pdf as pdf_mod
+
+        _install_fake_numpy(monkeypatch)
+        engine = _FakeOcrEngine(txts=("文本",))
+
+        class _BadPage:
+            def get_textpage(self) -> _FakeTextPage:
+                return _FakeTextPage()
+
+            def render(self, scale: float = 1.0) -> object:
+                raise RuntimeError("渲染失败")
+
+        class _MixedDoc:
+            def __len__(self) -> int:
+                return 2
+
+            def get_page(self, i: int) -> object:
+                return _BadPage() if i == 0 else _FakePdfPage()
+
+            def close(self) -> None:
+                """无操作。"""
+
+        monkeypatch.setattr(pdf_mod, "get_ocr_engine", lambda: engine)
+        monkeypatch.setattr(pdf_mod, "_ensure_backend", lambda: lambda _data: _MixedDoc())
+        extractor = PdfExtractor()
+        content = extractor.extract_from_bytes(b"fake mixed pdf")
+        # 第 0 页渲染失败跳过，第 1 页成功
+        assert "文本" in content
+        assert engine.call_count == 1
+
+    def test_empty_ocr_result_returns_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """OCR 返回空文本时 ``last_engine_info`` 保持 ``pypdfium2``（无 OCR 产出）。"""
+        from fuscan.extractors import pdf as pdf_mod
+
+        _install_fake_numpy(monkeypatch)
+        engine = _FakeOcrEngine(txts=())
+        monkeypatch.setattr(pdf_mod, "get_ocr_engine", lambda: engine)
+        monkeypatch.setattr(pdf_mod, "_ensure_backend", lambda: lambda _data: _FakePdfDoc(n_pages=1))
+        extractor = PdfExtractor()
+        content = extractor.extract_from_bytes(b"fake scanned pdf")
+        assert content == ""
+        # OCR 无产出，last_engine_info 保持 pypdfium2
+        assert extractor.last_engine_info == "pypdfium2"

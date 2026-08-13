@@ -44,6 +44,7 @@ from fuscan.extractors.base import (
 )
 from fuscan.extractors.cache import clear_content_cache, extract_content_cached
 from fuscan.extractors.email import EmlExtractor
+from fuscan.extractors.image import ImageExtractor
 from fuscan.extractors.legacy_office import DocExtractor, PptExtractor, XlsExtractor
 from fuscan.extractors.odf import OdtExtractor
 from fuscan.extractors.office import DocxExtractor, PptxExtractor
@@ -74,6 +75,7 @@ __all__ = [
     "ExtractorError",
     "ExtractorFailure",
     "ExtractorRegistry",
+    "ImageExtractor",
     "OdsExtractor",
     "OdtExtractor",
     "PdfExtractor",

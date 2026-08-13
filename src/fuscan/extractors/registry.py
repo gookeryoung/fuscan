@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from fuscan.extractors.base import default_registry
 from fuscan.extractors.email import EmlExtractor
+from fuscan.extractors.image import ImageExtractor
 from fuscan.extractors.legacy_office import DocExtractor, PptExtractor, XlsExtractor
 from fuscan.extractors.odf import OdtExtractor
 from fuscan.extractors.office import DocxExtractor, PptxExtractor
@@ -46,6 +47,8 @@ def register_all() -> None:
     default_registry.register(XlsExtractor())
     default_registry.register(DocExtractor())
     default_registry.register(PptExtractor())
+    # 图片 OCR 提取器（T5 极慢，默认不勾选）
+    default_registry.register(ImageExtractor())
 
 
 # 模块导入时自动注册

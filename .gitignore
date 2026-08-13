@@ -42,3 +42,9 @@ coverage.json
 # Sphinx 文档构建输出
 docs/_build/
 .trae/ref
+
+# OCR 模型文件（PP-OCRv4 mobile，约 17MB，不入仓）
+# 由打包脚本/CI 从 RapidOCR Release 下载到 src/fuscan/assets/ocr/models/
+# 本地开发可用占位文件（hatchling force-include 需文件存在），真实模型下载后替换
+src/fuscan/assets/ocr/models/*.onnx
+src/fuscan/assets/ocr/models/ppocr_keys_v1.txt

@@ -34,9 +34,15 @@ if not PYSIDE_AVAILABLE:
 
 @pytest.fixture()
 def model() -> ExtractorListModel:
-    """每个测试独立 ExtractorListModel 实例（默认全部勾选）。"""
+    """每个测试独立 ExtractorListModel 实例（空配置，全部勾选）。
+
+    用 ``disabled_extractors=[]``（非 None）避免触发 ``load_from_registry``
+    的首次加载默认行为（VERY_SLOW 提取器不勾选），确保 fixture 为「全部勾选」
+    干净基线。首次加载（None）的 VERY_SLOW 默认不勾选行为由
+    :class:`TestImageExtractorDefault` 专项覆盖。
+    """
     m = ExtractorListModel()
-    m.load_from_registry()
+    m.load_from_registry(disabled_extractors=[])
     return m
 
 
@@ -251,8 +257,9 @@ class TestLoadFromRegistry:
         m = ExtractorListModel()
         m.load_from_registry(disabled_extractors=["PlainTextExtractor"])
         m.load_from_registry()
-        # 重新加载后无 disabled
-        assert m.disabled_extractors() == []
+        # 重新加载（None 首次加载）后 PlainTextExtractor 已恢复勾选，
+        # 仅 VERY_SLOW 提取器（ImageExtractor）默认不勾选
+        assert m.disabled_extractors() == ["ImageExtractor"]
 
 
 class TestDisabledExtractors:
@@ -550,3 +557,68 @@ class TestArchiveVirtualRows:
                 assert label == expected_labels[class_name], (
                     f"{class_name} formatLabel 应为 {expected_labels[class_name]}，实际 {label}"
                 )
+
+
+class TestImageExtractorDefault:
+    """ImageExtractor（T5 极慢 OCR）默认勾选行为与元数据测试。
+
+    首次加载（``disabled_extractors=None``）时 VERY_SLOW 提取器默认不勾选，
+    避免首次扫描被 OCR 拖累；用户显式配置（非 None）后尊重其选择。
+    """
+
+    def test_first_load_very_slow_disabled(self) -> None:
+        """首次加载（None）时 ImageExtractor 默认不勾选。"""
+        m = ExtractorListModel()
+        m.load_from_registry()  # None → 首次加载
+        assert "ImageExtractor" in m.disabled_extractors()
+
+    def test_explicit_empty_config_enables_image(self) -> None:
+        """显式空配置（[]）时全部勾选（含 ImageExtractor）。"""
+        m = ExtractorListModel()
+        m.load_from_registry(disabled_extractors=[])
+        assert "ImageExtractor" not in m.disabled_extractors()
+
+    def test_image_extractor_category(self, model: ExtractorListModel) -> None:
+        """ImageExtractor 类别应为「图片」。"""
+        for i in range(model.rowCount()):
+            if model.data(model.index(i), Qt.UserRole + 1) == "ImageExtractor":
+                assert model.data(model.index(i), Qt.UserRole + 8) == "图片"
+                return
+        pytest.fail("ImageExtractor 应在默认注册表中")
+
+    def test_image_extractor_speed_tier(self, model: ExtractorListModel) -> None:
+        """ImageExtractor 速度档应为 T5 极慢。"""
+        for i in range(model.rowCount()):
+            if model.data(model.index(i), Qt.UserRole + 1) == "ImageExtractor":
+                assert model.data(model.index(i), Qt.UserRole + 4) == "T5 极慢"
+                return
+        pytest.fail("ImageExtractor 应在默认注册表中")
+
+    def test_image_extractor_engine_info(self, model: ExtractorListModel) -> None:
+        """ImageExtractor engineInfo 应为 rapidocr-onnxruntime。"""
+        for i in range(model.rowCount()):
+            if model.data(model.index(i), Qt.UserRole + 1) == "ImageExtractor":
+                assert model.data(model.index(i), Qt.UserRole + 10) == "rapidocr-onnxruntime"
+                return
+        pytest.fail("ImageExtractor 应在默认注册表中")
+
+    def test_image_extractor_extensions(self, model: ExtractorListModel) -> None:
+        """ImageExtractor 扩展名应含 png/jpg/jpeg 等图片格式。"""
+        for i in range(model.rowCount()):
+            if model.data(model.index(i), Qt.UserRole + 1) == "ImageExtractor":
+                exts = model.data(model.index(i), Qt.UserRole + 3)
+                assert isinstance(exts, str)
+                assert "png" in exts
+                assert "jpg" in exts
+                assert "jpeg" in exts
+                return
+        pytest.fail("ImageExtractor 应在默认注册表中")
+
+    def test_image_category_toggle(self, model: ExtractorListModel) -> None:
+        """图片类别可批量切换勾选状态。"""
+        # model fixture 用 [] 全部勾选，ImageExtractor 已勾选
+        assert model.category_enabled_state("图片") == 1
+        model.set_category_enabled("图片", False)
+        assert model.category_enabled_state("图片") == 0
+        model.set_category_enabled("图片", True)
+        assert model.category_enabled_state("图片") == 1

@@ -46,6 +46,15 @@ lint = ["pyrefly>=1.1.1", "ruff>=0.8.0"]
 # native：Rust + PyO3 原生匹配引擎，缺失时回退纯 Python 路径（语义等价）
 # pip install fuscan[native] 获得原生加速；pip install fuscan 走纯 Python
 native = ["fuscan-core>=0.1.0"]
+# ocr：图片 OCR + 扫描版 PDF OCR 回退（rapidocr 缺失时 ImageExtractor 抛 ExtractorError 降级）
+# opencv-python-headless 必须 headless，避免非 headless 版自带 Qt 与 PySide 二进制冲突
+ocr = [
+    "rapidocr>=3.4.0",
+    "onnxruntime>=1.16.0",
+    "Pillow>=10.0.0",
+    "opencv-python-headless>=4.5.0",
+    "numpy>=1.24.0",
+]
 # perf：启动性能汇总表（rich 惰性导入，缺失时回退纯文本），核心库不强依赖
 perf = ["rich>=13.0.0"]
 test = [
@@ -88,6 +97,10 @@ packages = ["src/fuscan"]
 [tool.hatch.build.targets.wheel.force-include]
 "src/fuscan/py.typed" = "fuscan/py.typed"
 "src/fuscan/assets/manual/fuscan-用户手册.pdf" = "fuscan/assets/manual/fuscan-用户手册.pdf"
+"src/fuscan/assets/ocr/models/ch_PP-OCRv4_det_infer.onnx" = "fuscan/assets/ocr/models/ch_PP-OCRv4_det_infer.onnx"
+"src/fuscan/assets/ocr/models/ch_ppocr_mobile_v2.0_cls_infer.onnx" = "fuscan/assets/ocr/models/ch_ppocr_mobile_v2.0_cls_infer.onnx"
+"src/fuscan/assets/ocr/models/ch_PP-OCRv4_rec_infer.onnx" = "fuscan/assets/ocr/models/ch_PP-OCRv4_rec_infer.onnx"
+"src/fuscan/assets/ocr/models/ppocr_keys_v1.txt" = "fuscan/assets/ocr/models/ppocr_keys_v1.txt"
 "src/fuscan/gui/resources_rc.py" = "fuscan/gui/resources_rc.py"
 "src/fuscan/gui/resources.qrc" = "fuscan/gui/resources.qrc"
 "src/fuscan/gui/qtquickcontrols2.conf" = "fuscan/gui/qtquickcontrols2.conf"
@@ -101,10 +114,14 @@ exclude = [
     "packages/fuscan-core/dist",
     "packages/fuscan-core/.venv*",
     "packages/fuscan-core/Cargo.lock",
+    # OCR 模型文件（~17MB）不进 sdist，避免源码包体积膨胀；
+    # wheel 通过 force-include 内置模型，sdist 用户用 rapidocr 联网下载或从 cache 拷贝。
+    "src/fuscan/assets/ocr/models/*.onnx",
+    "src/fuscan/assets/ocr/models/ppocr_keys_v1.txt",
 ]
 
 [tool.fspack]
-extras = ["native"]
+extras = ["native", "ocr"]
 exclude = [".*", "tests", "benchmarks", "docs", "scripts", "packages"]
 pyc_strip = true
 no_site = true

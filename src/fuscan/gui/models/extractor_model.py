@@ -61,8 +61,8 @@ _ROLES: dict[int, bytes] = {
 # 提取 display_name 中全角括号内的格式标签（如 "Word（DOCX）" → "DOCX"）
 _PAREN_RE = re.compile(r"（([^）]*)）")
 
-# 类别显示顺序（按用户勾选习惯排列：文档优先 → 文本 → 邮件 → 压缩包 → 其他）
-_CATEGORY_ORDER: tuple[str, ...] = ("Office 文档", "文本", "邮件", "压缩包", "其他")
+# 类别显示顺序（按用户勾选习惯排列：文档优先 → 文本 → 邮件 → 图片 → 压缩包 → 其他）
+_CATEGORY_ORDER: tuple[str, ...] = ("Office 文档", "文本", "邮件", "图片", "压缩包", "其他")
 
 # 按提取器 class_name 映射到类别（避免 display_name 字符串匹配的脆弱性）
 _CATEGORY_BY_CLASS: dict[str, str] = {
@@ -79,6 +79,7 @@ _CATEGORY_BY_CLASS: dict[str, str] = {
     "PlainTextExtractor": "文本",
     "SourceCodeExtractor": "文本",
     "EmlExtractor": "邮件",
+    "ImageExtractor": "图片",
     "ZipArchiveExtractor": "压缩包",
     "RarArchiveExtractor": "压缩包",
     "SevenZArchiveExtractor": "压缩包",
@@ -244,16 +245,24 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
         :param disabled_extractors: 未勾选的提取器类名列表（来自 ``Config.disabled_extractors``）
         """
         disabled_set = set(disabled_extractors or [])
+        # disabled_extractors 为 None 表示首次加载（未配置），VERY_SLOW 提取器
+        # （如 ImageExtractor）默认不勾选，避免 OCR 极慢（T5）拖累首次扫描。
+        # 用户显式配置后（非 None）尊重其选择。
+        use_default_disabled = disabled_extractors is None
         self.beginResetModel()
         rows: list[_ExtractorRow] = []
         for class_name, display_name, extensions, speed_tier, engine_info in default_registry.list_extractors():
+            if use_default_disabled and speed_tier == SpeedTier.VERY_SLOW:
+                enabled = False
+            else:
+                enabled = class_name not in disabled_set
             rows.append(
                 _ExtractorRow(
                     class_name=class_name,
                     display_name=display_name,
                     extensions=extensions,
                     speed_tier=speed_tier,
-                    enabled=class_name not in disabled_set,
+                    enabled=enabled,
                     engine_info=engine_info,
                 )
             )

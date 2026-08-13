@@ -18,6 +18,7 @@ sync: ## 安装开发依赖
 	uv sync --extra dev
 
 build b: ## 构建分发包 (wheel + sdist)
+	make download
 	uv build
 
 clean c: ## 清理构建产物与缓存
@@ -26,6 +27,9 @@ clean c: ## 清理构建产物与缓存
 	rm -rf packages/fuscan-core/target/ packages/fuscan-core/dist/
 	find src tests -type d -name __pycache__ -exec rm -rf {} +
 	find src tests -type f -name "*.py[oc]" -delete
+
+download: ## 下载 OCR 模型
+	python scripts/download_ocr_models.py
 
 test: ## 运行测试（不含覆盖率，与 CI 一致排除 gui_qml）
 	uv run pytest -m $(TEST_MARKERS)

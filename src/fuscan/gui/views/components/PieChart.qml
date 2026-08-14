@@ -71,7 +71,7 @@ Item {
                 // 主题切换时重绘（内圆填充色依赖 colorBgCard）
                 Connections {
                     target: root.theme
-                    onThemeChanged: pieCanvas.requestPaint()
+                    function onThemeChanged() { pieCanvas.requestPaint() }
                 }
                 onPaint: {
                     var ctx = getContext("2d")

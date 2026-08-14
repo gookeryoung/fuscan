@@ -161,23 +161,26 @@ Item {
                 }
 
                 // 开关项：扫描压缩包 / 内容缓存 / 性能日志
+                // 写回用 onToggled（仅用户点击触发）：onCheckedChanged 会在程序化
+                // 赋值时也触发，与 checked 绑定（读 effectiveConfigPreview）互写
+                // 形成 binding loop
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 16
                     CheckBox {
                         text: "扫描压缩包"
                         checked: rulesController.effectiveConfigPreview.scanArchives
-                        onCheckedChanged: rulesController.setScanArchives(checked)
+                        onToggled: rulesController.setScanArchives(checked)
                     }
                     CheckBox {
                         text: "内容缓存"
                         checked: rulesController.effectiveConfigPreview.cacheEnabled
-                        onCheckedChanged: rulesController.setCacheEnabled(checked)
+                        onToggled: rulesController.setCacheEnabled(checked)
                     }
                     CheckBox {
                         text: "性能日志"
                         checked: rulesController.effectiveConfigPreview.perfLogEnabled
-                        onCheckedChanged: rulesController.setPerfLogEnabled(checked)
+                        onToggled: rulesController.setPerfLogEnabled(checked)
                     }
                     Item { Layout.fillWidth: true }
                 }
@@ -623,7 +626,9 @@ Item {
                 RuleEditorForm {
                     Layout.fillWidth: true
                     visible: settingsPage.editingRule !== null
-                    rulesController: rulesController
+                    // 显式用页面 id 限定：裸名 rulesController 会解析到
+                    // RuleEditorForm 自身同名属性（未完成初始化）→ binding loop
+                    rulesController: settingsPage.rulesController
                     rule: settingsPage.editingRule
                     onSaveRequested: {
                         var raw = rulesController.updateRule(JSON.stringify(payload))

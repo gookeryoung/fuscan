@@ -205,14 +205,21 @@ Item {
                 }
                 // 过滤统计：仅当有过滤事件时显示
                 Label {
+                    id: filteredCountLabel
                     visible: monitorController.ignoredDirCount + monitorController.filteredExtCount + monitorController.dirEventCount > 0
                     text: "已过滤 " + (monitorController.ignoredDirCount + monitorController.filteredExtCount + monitorController.dirEventCount) + " 个"
                     font.pixelSize: 10
                     color: theme.colorTextSecondary
+                    // Label 无 hovered/hoverEnabled 属性（Qt 5.15），用 MouseArea 悬停驱动 ToolTip
+                    MouseArea {
+                        id: filteredHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                    }
                     ToolTip.text: "目录事件 " + monitorController.dirEventCount
                         + " / 噪声目录 " + monitorController.ignoredDirCount
                         + " / 扩展名不匹配 " + monitorController.filteredExtCount
-                    ToolTip.visible: hovered
+                    ToolTip.visible: filteredHover.containsMouse
                 }
                 Item { Layout.fillWidth: true }
                 IconButton {

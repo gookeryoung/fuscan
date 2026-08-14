@@ -926,6 +926,65 @@ class TestPdfExtractorPdfiumBackend:
         # 2 页 × (textpage + page) + 1 doc，子对象先于 doc 关闭
         assert closed == ["textpage", "page", "textpage", "page", "doc"]
 
+    def test_last_extract_engine_reflects_ocr_vs_text(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """提取后线程局部引擎信息反映 OCR vs 文本提取的动态选择。
+
+        PdfExtractor.last_engine_info 在纯文本层提取时为 "pypdfium2"，
+        OCR 回退时为 "pypdfium2 + rapidocr-json"。线程局部确保多 worker
+        线程各自读到自己的提取结果，扫描器据此在结果和进度中标注实际引擎。
+        """
+        from fuscan.extractors import (
+            extract_content_from_bytes,
+            get_last_extract_engine,
+            reset_last_extract_engine,
+        )
+        from fuscan.extractors import pdf as pdf_mod
+
+        # --- 纯文本层 PDF ---
+        # 走注册表路径（extract_content_from_bytes → registry.extract_from_bytes），
+        # 线程局部由注册表在提取后设置。直接调 PdfExtractor().extract_from_bytes
+        # 绕过注册表，线程局部不会被设置。
+        class _TextDoc:
+            def __len__(self) -> int:
+                return 1
+
+            def get_page(self, i: int) -> object:
+                class _P:
+                    def get_textpage(self) -> object:
+                        class _T:
+                            def get_text_range(self) -> str:
+                                return "有文本层"
+
+                            def close(self) -> None:
+                                pass
+
+                        return _T()
+
+                    def close(self) -> None:
+                        pass
+
+                return _P()
+
+            def close(self) -> None:
+                pass
+
+        monkeypatch.setattr(pdf_mod, "_ensure_backend", lambda: lambda _data: _TextDoc())
+        reset_last_extract_engine()
+        extract_content_from_bytes(b"fake text pdf", "pdf")
+        assert get_last_extract_engine() == "pypdfium2"
+
+        # --- OCR 回退 PDF ---
+        engine = _FakeOcrEngine(text="OCR识别文本")
+        monkeypatch.setattr(pdf_mod, "get_ocr_engine", lambda: engine)
+        monkeypatch.setattr(pdf_mod, "_ensure_backend", lambda: lambda _data: _FakePdfDoc(n_pages=1))
+        reset_last_extract_engine()
+        extract_content_from_bytes(b"fake scanned pdf", "pdf")
+        assert get_last_extract_engine() == "pypdfium2 + rapidocr-json"
+
+        # --- reset 后清空 ---
+        reset_last_extract_engine()
+        assert get_last_extract_engine() == ""
+
 
 # ---------------------------------------------------------------------------
 # OdtExtractor / OdsExtractor（用标准库 zipfile+xml 解析，无 odfpy 依赖）

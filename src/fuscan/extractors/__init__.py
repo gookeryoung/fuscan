@@ -40,7 +40,9 @@ from fuscan.extractors.base import (
     extract_content_with_fallback,
     extract_content_with_fallback_and_retry,
     get_extractor,
+    get_last_extract_engine,
     is_retriable_error,
+    reset_last_extract_engine,
 )
 from fuscan.extractors.cache import clear_content_cache, extract_content_cached
 from fuscan.extractors.email import EmlExtractor
@@ -97,6 +99,8 @@ __all__ = [
     "extract_content_with_fallback",
     "extract_content_with_fallback_and_retry",
     "get_extractor",
+    "get_last_extract_engine",
     "is_retriable_error",
     "register_all",
+    "reset_last_extract_engine",
 ]

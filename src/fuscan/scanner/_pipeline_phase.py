@@ -103,6 +103,9 @@ def _scan_sequential(
         scanner._current_file_size = entry.size
         scanner._current_file_ext = entry.extension
         scanner._current_file_start_time = time.perf_counter()
+        # 清空引擎信息：提取尚未完成，预扫描 emit 回退到 engine_for_extension 静态映射；
+        # 提取完成后由 result.engine 覆盖（反映 OCR vs 文本提取的动态选择）。
+        scanner._current_file_engine = ""
         # 预扫描 emit：距上次 emit 超过阈值时，在提取前先 emit 一次，
         # 让用户立即看到"正在扫描 xxx.pdf..."而非上一个文件的陈旧信息。
         # force=True 绕过节流，确保大文件提取前 UI 即时更新。
@@ -110,6 +113,9 @@ def _scan_sequential(
             scanner._emit_progress(str(entry.path), scanned, matched, errors, matches, force=True)
         try:
             result = scanner._scan_entry(entry)
+            # 同步实际使用的引擎信息（PdfExtractor.last_engine_info 反映 OCR vs 文本），
+            # 供后续 _emit_progress 的 current_file_engine 字段使用。
+            scanner._current_file_engine = result.engine
             scanned += 1
             _last_entry_path = str(entry.path)
             if result.has_hit:
@@ -302,6 +308,8 @@ def _collect_concurrent_results(  # noqa: PLR0912
                     scanner._current_file_size = if_size
                     scanner._current_file_ext = if_ext
                     scanner._current_file_start_time = if_submit_time
+                    # in-flight 文件提取未完成，引擎信息未知，清空回退到静态映射
+                    scanner._current_file_engine = ""
                 else:
                     in_flight_path = _last_entry_path
                 scanner._emit_progress(
@@ -324,8 +332,13 @@ def _collect_concurrent_results(  # noqa: PLR0912
             scanner._current_file_size = entry.size
             scanner._current_file_ext = entry.extension
             scanned += 1
+            # 清空引擎信息：提取结果未就绪，异常时保持空串回退到静态映射
+            scanner._current_file_engine = ""
             try:
                 result = future.result()
+                # 同步实际使用的引擎信息（PdfExtractor.last_engine_info 反映 OCR vs 文本），
+                # 供后续 _emit_progress 的 current_file_engine 字段使用。
+                scanner._current_file_engine = result.engine
                 if on_progress_active:
                     # 用 worker 实测的单文件耗时反推起点，令 _emit_progress 得到
                     # 单文件真实解析耗时（并发下 submit_time≈扫描起点，若用

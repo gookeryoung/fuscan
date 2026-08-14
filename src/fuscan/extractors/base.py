@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import enum
 import logging
+import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -37,10 +38,41 @@ __all__ = [
     "extract_content_with_fallback",
     "extract_content_with_fallback_and_retry",
     "get_extractor",
+    "get_last_extract_engine",
     "is_retriable_error",
+    "reset_last_extract_engine",
 ]
 
 logger = logging.getLogger(__name__)
+
+
+# 线程局部存储：记录当前线程最近一次提取实际使用的引擎信息。
+#
+# PdfExtractor 在提取后设置实例属性 ``last_engine_info``（"pypdfium2" 或
+# "pypdfium2 + rapidocr-json"，反映 OCR 回退 vs 纯文本层提取），其他提取器
+# 无此属性，回退到静态 ``engine_info``。提取器实例是单例（多 worker 线程共享），
+# 直接读取 ``last_engine_info`` 有竞态，故用线程局部确保每个 worker 读到自己的
+# 提取结果。扫描器在 ``_scan_entry`` 开头调 :func:`reset_last_extract_engine`
+# 清空，提取后调 :func:`get_last_extract_engine` 读取——缓存命中时提取被跳过，
+# 返回空串，回退到静态 ``engine_for_extension``。
+_engine_info_local = threading.local()
+
+
+def get_last_extract_engine() -> str:
+    """返回当前线程最近一次提取实际使用的引擎信息。
+
+    :return: 引擎信息字符串（如 ``"pypdfium2 + rapidocr-json"``）；未提取时返回空串
+    """
+    return getattr(_engine_info_local, "value", "")
+
+
+def reset_last_extract_engine() -> None:
+    """清空当前线程的引擎信息，避免上一文件的陈旧值。
+
+    在 :meth:`Scanner._scan_entry` 开头调用：缓存命中时提取被跳过，
+    :func:`get_last_extract_engine` 返回空串，扫描器回退到静态引擎名。
+    """
+    _engine_info_local.value = ""
 
 
 class SpeedTier(enum.Enum):
@@ -298,8 +330,12 @@ class ExtractorRegistry:
         extractor = self.get(ext)
         if extractor is None:
             logger.debug("扩展名 %s 无注册提取器，返回空内容", ext)
+            _engine_info_local.value = ""
             return ""
-        return extractor.extract(path)
+        _engine_info_local.value = ""
+        content = extractor.extract(path)
+        _engine_info_local.value = getattr(extractor, "last_engine_info", "") or extractor.engine_info
+        return content
 
     def extract_from_bytes(self, data: bytes, extension: str) -> str:
         """按扩展名从内存字节提取文件内容。
@@ -313,8 +349,12 @@ class ExtractorRegistry:
         extractor = self.get(normalized)
         if extractor is None:
             logger.debug("扩展名 %s 无注册提取器，返回空内容", normalized)
+            _engine_info_local.value = ""
             return ""
-        return extractor.extract_from_bytes(data)
+        _engine_info_local.value = ""
+        content = extractor.extract_from_bytes(data)
+        _engine_info_local.value = getattr(extractor, "last_engine_info", "") or extractor.engine_info
+        return content
 
     def extract_from_bytes_with_retry(
         self,
@@ -350,8 +390,10 @@ class ExtractorRegistry:
         extractor = self.get(normalized)
         if extractor is None:
             logger.debug("扩展名 %s 无注册提取器，返回空内容", normalized)
+            _engine_info_local.value = ""
             return ""
-        return self._retry_loop(
+        _engine_info_local.value = ""
+        content = self._retry_loop(
             lambda: extractor.extract_from_bytes(data),
             extractor_name=type(extractor).__name__,
             extension=normalized,
@@ -360,6 +402,8 @@ class ExtractorRegistry:
             backoff_ms=backoff_ms,
             on_failure=on_failure,
         )
+        _engine_info_local.value = getattr(extractor, "last_engine_info", "") or extractor.engine_info
+        return content
 
     def extract_with_retry(
         self,
@@ -388,8 +432,10 @@ class ExtractorRegistry:
         extractor = self.get(ext)
         if extractor is None:
             logger.debug("扩展名 %s 无注册提取器，返回空内容", ext)
+            _engine_info_local.value = ""
             return ""
-        return self._retry_loop(
+        _engine_info_local.value = ""
+        content = self._retry_loop(
             lambda: extractor.extract(path),
             extractor_name=type(extractor).__name__,
             extension=ext,
@@ -398,6 +444,8 @@ class ExtractorRegistry:
             backoff_ms=backoff_ms,
             on_failure=on_failure,
         )
+        _engine_info_local.value = getattr(extractor, "last_engine_info", "") or extractor.engine_info
+        return content
 
     def _retry_loop(
         self,

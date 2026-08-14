@@ -462,6 +462,10 @@ class Scanner:
         self._current_file_size: int = 0
         self._current_file_ext: str = ""
         self._current_file_start_time: float = 0.0
+        # 当前文件实际使用的解析引擎（由 _pipeline_phase 从 result.engine 同步）。
+        # 空串表示尚未提取（预扫描 emit / 超时 emit），_emit_progress 回退到
+        # engine_for_extension 静态映射。
+        self._current_file_engine: str = ""
         # 并发模式下正在扫描的文件元信息映射（仅主线程读写，无需锁）：
         # path → (size, ext, submit_time)。submit 时登记，future 完成时 pop。
         # wait 超时分支据此同步设置 _current_file_* 为真实 in-flight 文件元信息，
@@ -1042,7 +1046,9 @@ class Scanner:
         if phase == "scan" and current_file:
             current_file_size = self._current_file_size
             current_file_ext = self._current_file_ext
-            current_file_engine = engine_for_extension(current_file_ext)
+            # 优先用实际提取引擎（由 _pipeline_phase 从 result.engine 同步），
+            # 空串时（预扫描/超时 emit，提取尚未完成）回退到按扩展名静态反查。
+            current_file_engine = self._current_file_engine or engine_for_extension(current_file_ext)
             current_file_elapsed_ms = (
                 (now - self._current_file_start_time) * 1000.0 if self._current_file_start_time > 0 else 0.0
             )
@@ -1324,6 +1330,11 @@ class Scanner:
         """
         if self._cancel_event.is_set():
             return ScanResult(path=entry.path, size=entry.size, hits=(), errors=0)
+        # 清空线程局部引擎信息，避免上一文件的陈旧值（缓存命中时提取被跳过，
+        # get_last_extract_engine 返回空串，回退到静态 engine_for_extension）。
+        from fuscan.extractors import get_last_extract_engine, reset_last_extract_engine
+
+        reset_last_extract_engine()
         t0 = time.perf_counter()
         if self._cache is None:
             result = self._scan_entry_uncached(entry)
@@ -1338,8 +1349,11 @@ class Scanner:
                 total_ms=total_ms,
                 hit_count=len(result.hits),
             )
-        # 回填单文件耗时与解析引擎名（引擎按扩展名静态反查，供 GUI 明细行标注）。
-        return replace(result, elapsed_ms=total_ms, engine=engine_for_extension(entry.extension))
+        # 回填单文件耗时与解析引擎名。引擎优先取提取器实际使用的（PdfExtractor
+        # 的 last_engine_info 反映 OCR 回退 vs 纯文本层提取，经线程局部传递），
+        # 缓存命中或无提取器时回退到按扩展名静态反查。
+        engine = get_last_extract_engine() or engine_for_extension(entry.extension)
+        return replace(result, elapsed_ms=total_ms, engine=engine)
 
     def _scan_entry_uncached(self, entry: FileEntry) -> ScanResult:
         """对单个文件应用所有规则（无缓存）。

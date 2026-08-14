@@ -26,6 +26,9 @@ Pane {
     // ========== 当前选中页（供 ContentArea 读取） ==========
     property string currentPage: "home"
 
+    // ========== 侧边栏折叠状态（Ctrl+B 切换） ==========
+    property bool collapsed: false
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 0

@@ -163,8 +163,13 @@ ApplicationWindow {
         // ---------- 左侧侧边栏 ----------
         Sidebar {
             id: sidebar
-            Layout.preferredWidth: 200
+            Layout.preferredWidth: sidebar.collapsed ? 0 : 200
             Layout.fillHeight: true
+            // 折叠/展开宽度动画（Layout.preferredWidth 为附件属性，
+            // Behavior 在 Qt 5.15 支持附件属性动画）
+            Behavior on Layout.preferredWidth {
+                NumberAnimation { duration: 200; easing.type: Easing.OutQuad }
+            }
         }
 
         // ---------- 右侧主内容 ----------
@@ -173,5 +178,62 @@ ApplicationWindow {
             Layout.fillHeight: true
             sidebarRef: sidebar
         }
+    }
+
+    // ========== 全局快捷键 ==========
+    // 仅在无模态弹窗时生效，避免与弹窗操作冲突
+    property bool _anyModalVisible: exitPopup.visible || cancelPopup.visible
+
+    // Ctrl+1-6：切换页面（文件扫描/文件监控/扫描结果/统计/设置/关于）
+    Shortcut {
+        sequence: "Ctrl+1"
+        enabled: !root._anyModalVisible
+        onActivated: sidebar.currentPage = "home"
+    }
+    Shortcut {
+        sequence: "Ctrl+2"
+        enabled: !root._anyModalVisible
+        onActivated: sidebar.currentPage = "monitor"
+    }
+    Shortcut {
+        sequence: "Ctrl+3"
+        enabled: !root._anyModalVisible
+        onActivated: sidebar.currentPage = "results"
+    }
+    Shortcut {
+        sequence: "Ctrl+4"
+        enabled: !root._anyModalVisible
+        onActivated: sidebar.currentPage = "stats"
+    }
+    Shortcut {
+        sequence: "Ctrl+5"
+        enabled: !root._anyModalVisible
+        onActivated: sidebar.currentPage = "settings"
+    }
+    Shortcut {
+        sequence: "Ctrl+6"
+        enabled: !root._anyModalVisible
+        onActivated: sidebar.currentPage = "about"
+    }
+
+    // Ctrl+B：折叠/展开侧边栏
+    Shortcut {
+        sequence: "Ctrl+B"
+        enabled: !root._anyModalVisible
+        onActivated: sidebar.collapsed = !sidebar.collapsed
+    }
+
+    // Ctrl+R：重扫当前工作区（无选中工作区时禁用）
+    Shortcut {
+        sequence: "Ctrl+R"
+        enabled: !root._anyModalVisible && workspaceController.currentWorkspaceId !== ""
+        onActivated: workspaceController.startScan(workspaceController.currentWorkspaceId)
+    }
+
+    // Esc：返回首页
+    Shortcut {
+        sequence: "Escape"
+        enabled: !root._anyModalVisible
+        onActivated: sidebar.currentPage = "home"
     }
 }

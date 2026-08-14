@@ -215,6 +215,49 @@ Item {
                     }
                 }
             }
+
+            // 快捷键说明（与 Main.qml 全局 Shortcut 集中区一一对应）
+            GroupBox {
+                Layout.fillWidth: true
+                title: "快捷键"
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 4
+                    Repeater {
+                        // seq=快捷键序列，desc=功能说明；新增快捷键时同步更新此处
+                        model: ListModel {
+                            ListElement { seq: "Ctrl+1"; desc: "切换到文件扫描（首页）" }
+                            ListElement { seq: "Ctrl+2"; desc: "切换到文件监控" }
+                            ListElement { seq: "Ctrl+3"; desc: "切换到扫描结果" }
+                            ListElement { seq: "Ctrl+4"; desc: "切换到统计" }
+                            ListElement { seq: "Ctrl+5"; desc: "切换到设置" }
+                            ListElement { seq: "Ctrl+6"; desc: "切换到关于" }
+                            ListElement { seq: "Ctrl+B"; desc: "折叠/展开侧边栏" }
+                            ListElement { seq: "Ctrl+R"; desc: "重扫当前工作区" }
+                            ListElement { seq: "Esc"; desc: "返回首页" }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 12
+                            Label {
+                                text: model.seq
+                                font.pixelSize: 11
+                                font.bold: true
+                                font.family: theme.fontFamily
+                                color: theme.colorPrimary
+                                Layout.preferredWidth: 90
+                            }
+                            Label {
+                                text: model.desc
+                                font.pixelSize: 11
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                Layout.fillWidth: true
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

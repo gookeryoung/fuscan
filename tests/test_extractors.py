@@ -848,9 +848,15 @@ class TestPdfExtractorPdfiumBackend:
             def get_text_range(self) -> str:
                 return "正常页文本"
 
+            def close(self) -> None:
+                """无操作。"""
+
         class _GoodPage:
             def get_textpage(self) -> _TextPage:
                 return _TextPage()
+
+            def close(self) -> None:
+                """无操作。"""
 
         class _MixedDoc:
             def __len__(self) -> int:
@@ -879,6 +885,46 @@ class TestPdfExtractorPdfiumBackend:
         assert len(warning_msgs) == 1
         assert "3 页" in warning_msgs[0]
         assert "2 页提取失败" in warning_msgs[0]
+
+    def test_pdfium_child_objects_closed_each_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """每页提取后 textpage/page 应显式 close，避免 doc.close() 后 GC 终结触发断言。
+
+        pypdfium2 子对象（PdfTextPage/PdfPage）未显式关闭时，doc.close() 后 GC
+        终结子对象会触发 ``_close_template`` 的 ``assert not parent._tree_closed()``
+        断言失败及 "kids weakrefs not cleaned up" 警告。验证每页的 close 均被调用。
+        """
+        from fuscan.extractors import pdf as pdf_mod
+
+        closed: list[str] = []
+
+        class _TextPage:
+            def get_text_range(self) -> str:
+                return "text"
+
+            def close(self) -> None:
+                closed.append("textpage")
+
+        class _Page:
+            def get_textpage(self) -> _TextPage:
+                return _TextPage()
+
+            def close(self) -> None:
+                closed.append("page")
+
+        class _Doc:
+            def __len__(self) -> int:
+                return 2
+
+            def get_page(self, i: int) -> _Page:
+                return _Page()
+
+            def close(self) -> None:
+                closed.append("doc")
+
+        monkeypatch.setattr(pdf_mod, "_ensure_backend", lambda: lambda _data: _Doc())
+        PdfExtractor().extract_from_bytes(b"fake pdf")
+        # 2 页 × (textpage + page) + 1 doc，子对象先于 doc 关闭
+        assert closed == ["textpage", "page", "textpage", "page", "doc"]
 
 
 # ---------------------------------------------------------------------------
@@ -2767,6 +2813,9 @@ class _FakeTextPage:
     def get_text_range(self) -> str:
         return ""
 
+    def close(self) -> None:
+        """模拟 PdfTextPage.close（无操作）。"""
+
 
 class _FakeRenderResult:
     """模拟 pypdfium2 页面渲染结果（``to_pil`` 返回假 PIL 图片）。"""
@@ -2776,6 +2825,9 @@ class _FakeRenderResult:
 
     def to_pil(self) -> _FakePilImage:
         return _FakePilImage(self._mode)
+
+    def close(self) -> None:
+        """模拟 PdfBitmap.close（无操作）。"""
 
 
 class _FakePdfPage:
@@ -2789,6 +2841,9 @@ class _FakePdfPage:
 
     def render(self, scale: float = 1.0) -> _FakeRenderResult:
         return _FakeRenderResult(self._mode)
+
+    def close(self) -> None:
+        """模拟 PdfPage.close（无操作）。"""
 
 
 class _FakePdfDoc:

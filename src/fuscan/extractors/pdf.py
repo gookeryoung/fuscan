@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import io
 import logging
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
 from typing_extensions import override
@@ -143,6 +144,8 @@ class PdfExtractor(Extractor):
             n_pages = len(doc)  # type: ignore[arg-type]
             failed_pages = 0
             for page_index in range(n_pages):
+                page = None
+                textpage = None
                 try:
                     page = doc.get_page(page_index)  # type: ignore[union-attr]
                     textpage = page.get_textpage()  # type: ignore[union-attr]
@@ -155,7 +158,17 @@ class PdfExtractor(Extractor):
                     # 降为 DEBUG（仅页号 + 错误消息），循环结束汇总一条 WARNING。
                     failed_pages += 1
                     logger.debug("pypdfium2 页 %d 提取失败: %s", page_index, exc)
-                    continue
+                finally:
+                    # 显式关闭子对象（textpage → page），避免 doc.close() 后 GC
+                    # 终结子对象触发 pypdfium2 _close_template 的 AssertionError
+                    # （parent._tree_closed() 断言失败）及 "kids weakrefs not
+                    # cleaned up" 警告。close 自身异常（如双重关闭）静默吞掉。
+                    if textpage is not None:
+                        with suppress(Exception):
+                            textpage.close()  # type: ignore[union-attr]
+                    if page is not None:
+                        with suppress(Exception):
+                            page.close()  # type: ignore[union-attr]
             if failed_pages:
                 logger.warning("pypdfium2 PDF 共 %d 页，其中 %d 页提取失败", n_pages, failed_pages)
             return "\n".join(parts)
@@ -202,14 +215,7 @@ class PdfExtractor(Extractor):
             failed_pages = 0
             for i in range(n_pages):
                 try:
-                    page = doc.get_page(i)  # type: ignore[union-attr]
-                    pil_img = page.render(scale=_PDF_RENDER_SCALE).to_pil()  # type: ignore[union-attr]
-                    if pil_img.mode != "RGB":
-                        pil_img = pil_img.convert("RGB")
-                    # PIL → PNG 字节（无损，喂 exe 内部 opencv 解码）
-                    buf = io.BytesIO()
-                    pil_img.save(buf, format="PNG")  # type: ignore[union-attr]
-                    text = engine.recognize(buf.getvalue())
+                    text = self._ocr_single_page(doc, i, engine)
                     if text:
                         parts.append(text)
                 except ExtractorError as exc:
@@ -218,13 +224,43 @@ class PdfExtractor(Extractor):
                     # 逐页 WARNING + traceback 噪音大，降为 DEBUG，循环结束汇总。
                     failed_pages += 1
                     logger.debug("PDF 页 %d OCR 通信失败: %s", i, exc)
-                    continue
                 except Exception as exc:
                     failed_pages += 1
                     logger.debug("PDF 页 %d OCR 失败: %s", i, exc)
-                    continue
             if failed_pages:
                 logger.warning("PDF OCR 共 %d 页，其中 %d 页失败", n_pages, failed_pages)
             return "\n".join(parts)
         finally:
             doc.close()  # type: ignore[union-attr]
+
+    def _ocr_single_page(self, doc: object, page_index: int, engine: object) -> str:
+        """OCR 单页：渲染为位图（PIL）→ PNG 字节 → ``engine.recognize``。
+
+        子对象（bitmap/page）在 finally 中显式关闭，避免 ``doc.close()`` 后 GC
+        终结触发 pypdfium2 ``_close_template`` 断言失败及 weakref 警告。
+        异常向上传播由调用方分类处理（ExtractorError vs 其他）。
+
+        :param doc: pypdfium2 ``PdfDocument`` 实例
+        :param page_index: 页码（0-based）
+        :param engine: OCR 引擎（``get_ocr_engine()`` 返回值）
+        :return: OCR 识别文本（可能为空串）
+        """
+        page = None
+        bitmap = None
+        try:
+            page = doc.get_page(page_index)  # type: ignore[union-attr]
+            bitmap = page.render(scale=_PDF_RENDER_SCALE)  # type: ignore[union-attr]
+            pil_img = bitmap.to_pil()  # type: ignore[union-attr]
+            if pil_img.mode != "RGB":
+                pil_img = pil_img.convert("RGB")
+            # PIL → PNG 字节（无损，喂 exe 内部 opencv 解码）
+            buf = io.BytesIO()
+            pil_img.save(buf, format="PNG")  # type: ignore[union-attr]
+            return engine.recognize(buf.getvalue())  # type: ignore[union-attr]
+        finally:
+            if bitmap is not None:
+                with suppress(Exception):
+                    bitmap.close()  # type: ignore[union-attr]
+            if page is not None:
+                with suppress(Exception):
+                    page.close()  # type: ignore[union-attr]

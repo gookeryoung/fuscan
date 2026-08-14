@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RCC version="1.0">
   <qresource prefix="/">
+    <file alias="qml/components/BarChart.qml">views/components/BarChart.qml</file>
     <file alias="qml/components/FileMonitorPanel.qml">views/components/FileMonitorPanel.qml</file>
     <file alias="qml/components/IconButton.qml">views/components/IconButton.qml</file>
     <file alias="qml/components/PhaseNode.qml">views/components/PhaseNode.qml</file>
+    <file alias="qml/components/PieChart.qml">views/components/PieChart.qml</file>
     <file alias="qml/components/ResultDetailPanel.qml">views/components/ResultDetailPanel.qml</file>
     <file alias="qml/components/RulesPanel.qml">views/components/RulesPanel.qml</file>
     <file alias="qml/components/ScanProgressCard.qml">views/components/ScanProgressCard.qml</file>

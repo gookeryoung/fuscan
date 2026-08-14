@@ -438,6 +438,86 @@ Item {
                         }
                     }
                 }
+
+                // ---------- 命中分布图表 ----------
+                // 仅在扫描完成且有命中时展示，避免空态占用版面
+                GroupBox {
+                    Layout.fillWidth: true
+                    title: "命中分布"
+                    visible: workspaceController.currentScanController.scanDone
+                             && workspaceController.currentScanController.matchedCount > 0
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 16
+
+                        // 上排：严重度分布 + 扩展名分布 并排
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 2
+                            columnSpacing: 16
+                            rowSpacing: 12
+
+                            // 严重度分布饼图
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 4
+                                Label {
+                                    text: "严重度分布"
+                                    font.pixelSize: theme.fontSizeCaption
+                                    color: theme.colorTextSecondary
+                                }
+                                PieChart {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 220
+                                    chartData: workspaceController.currentScanController.severityChartData
+                                    centerTitle: "命中文件"
+                                }
+                            }
+
+                            // 扩展名分布饼图
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 4
+                                Label {
+                                    text: "扩展名分布"
+                                    font.pixelSize: theme.fontSizeCaption
+                                    color: theme.colorTextSecondary
+                                }
+                                PieChart {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 220
+                                    chartData: workspaceController.currentScanController.extensionChartData
+                                    centerTitle: "命中文件"
+                                }
+                            }
+                        }
+
+                        // 分隔线
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 1
+                            color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                        }
+
+                        // 下排：Top 规则条形图（全宽）
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+                            Label {
+                                text: "命中数 Top 10 规则"
+                                font.pixelSize: theme.fontSizeCaption
+                                color: theme.colorTextSecondary
+                            }
+                            BarChart {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Math.max(120, chartData.length * 34)
+                                chartData: workspaceController.currentScanController.topRulesChartData
+                                labelWidth: 160
+                            }
+                        }
+                    }
+                }
             }
         }
     }

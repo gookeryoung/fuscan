@@ -3716,3 +3716,249 @@ class TestDetailHitsModel:
         controller.cleanup()
         assert worker.wait_called is True
         assert controller._detail_worker is None
+
+
+class TestStatsChartData:
+    """统计页图表数据 Property 测试（severityChartData/topRulesChartData/extensionChartData）。
+
+    覆盖：空态、严重度分组与顺序、Top 规则排序与色值、扩展名分组与「其他」归并、
+    restoreFromReport 后数据刷新。图表数据由 :meth:`ScanReport.group_by_severity`/
+    :meth:`group_by_rule` 派生，本测试不重测 group_by 本身（已在 test_scanner 覆盖），
+    仅验证 controller 层聚合/排序/截断/色值映射逻辑。
+    """
+
+    def test_empty_when_no_report(self, controller: ScanController) -> None:
+        """未扫描时三个图表数据均为空列表。"""
+        assert controller.severityChartData == []
+        assert controller.topRulesChartData == []
+        assert controller.extensionChartData == []
+
+    def test_empty_when_no_hits(self, controller: ScanController) -> None:
+        """扫描完成但无命中时图表数据为空。"""
+        controller.restoreFromReport(_make_scan_report(results=()))
+        assert controller.severityChartData == []
+        assert controller.topRulesChartData == []
+        assert controller.extensionChartData == []
+
+    def test_severity_chart_orders_info_warning_critical(self, controller: ScanController) -> None:
+        """严重度图表按 INFO/WARNING/CRITICAL 固定顺序返回有命中的档位。"""
+        results = (
+            ScanResult(
+                path=Path("/tmp/c.txt"),
+                size=10,
+                hits=(RuleHit(rule_name="r3", severity=Severity.CRITICAL, detail=""),),
+            ),
+            ScanResult(
+                path=Path("/tmp/a.txt"),
+                size=10,
+                hits=(RuleHit(rule_name="r1", severity=Severity.INFO, detail=""),),
+            ),
+            ScanResult(
+                path=Path("/tmp/b.txt"),
+                size=10,
+                hits=(RuleHit(rule_name="r2", severity=Severity.WARNING, detail=""),),
+            ),
+        )
+        controller.restoreFromReport(_make_scan_report(results=results))
+        data = controller.severityChartData
+        # 顺序固定 INFO → WARNING → CRITICAL，不受结果顺序影响
+        assert [d["label"] for d in data] == ["信息", "警告", "严重"]
+        assert [d["value"] for d in data] == [1, 1, 1]
+        # 色值与 severity_utils 一致
+        assert data[0]["color"] == "#0366D6"  # INFO 蓝
+        assert data[1]["color"] == "#F0883E"  # WARNING 橙
+        assert data[2]["color"] == "#D73A49"  # CRITICAL 红
+
+    def test_severity_chart_skips_empty_severity(self, controller: ScanController) -> None:
+        """仅有 INFO 命中时图表只返回 INFO 档位（跳过空档）。"""
+        results = (
+            ScanResult(
+                path=Path("/tmp/a.txt"),
+                size=10,
+                hits=(RuleHit(rule_name="r1", severity=Severity.INFO, detail=""),),
+            ),
+        )
+        controller.restoreFromReport(_make_scan_report(results=results))
+        data = controller.severityChartData
+        assert len(data) == 1
+        assert data[0]["label"] == "信息"
+        assert data[0]["value"] == 1
+
+    def test_top_rules_chart_sorted_by_file_count_desc(self, controller: ScanController) -> None:
+        """Top 规则图表按命中文件数降序排列。"""
+        results = (
+            ScanResult(
+                path=Path("/tmp/a.txt"),
+                size=10,
+                hits=(RuleHit(rule_name="r1", severity=Severity.INFO, detail=""),),
+            ),
+            ScanResult(
+                path=Path("/tmp/b.txt"),
+                size=10,
+                hits=(RuleHit(rule_name="r1", severity=Severity.INFO, detail=""),),
+            ),
+            ScanResult(
+                path=Path("/tmp/c.txt"),
+                size=10,
+                hits=(RuleHit(rule_name="r1", severity=Severity.INFO, detail=""),),
+            ),
+            ScanResult(
+                path=Path("/tmp/d.txt"),
+                size=10,
+                hits=(RuleHit(rule_name="r2", severity=Severity.CRITICAL, detail=""),),
+            ),
+        )
+        controller.restoreFromReport(_make_scan_report(results=results))
+        data = controller.topRulesChartData
+        assert len(data) == 2
+        assert data[0]["label"] == "r1"
+        assert data[0]["value"] == 3
+        assert data[1]["label"] == "r2"
+        assert data[1]["value"] == 1
+
+    def test_top_rules_chart_color_by_max_severity(self, controller: ScanController) -> None:
+        """Top 规则颜色取该规则在所有命中中的最高严重度档位色值。"""
+        # 同一规则 r1 在不同文件有不同严重度（理论不会，但验证 max 聚合）
+        results = (
+            ScanResult(
+                path=Path("/tmp/a.txt"),
+                size=10,
+                hits=(RuleHit(rule_name="r1", severity=Severity.INFO, detail=""),),
+            ),
+            ScanResult(
+                path=Path("/tmp/b.txt"),
+                size=10,
+                hits=(RuleHit(rule_name="r1", severity=Severity.CRITICAL, detail=""),),
+            ),
+        )
+        controller.restoreFromReport(_make_scan_report(results=results))
+        data = controller.topRulesChartData
+        assert len(data) == 1
+        assert data[0]["value"] == 2  # 去重文件数
+        assert data[0]["color"] == "#D73A49"  # CRITICAL 红（最高档）
+
+    def test_top_rules_chart_dedup_same_file_multiple_hits(self, controller: ScanController) -> None:
+        """同一文件被同一规则多次命中，Top 规则计数仅计 1（去重文件数）。"""
+        results = (
+            ScanResult(
+                path=Path("/tmp/a.txt"),
+                size=10,
+                hits=(
+                    RuleHit(rule_name="r1", severity=Severity.INFO, detail=""),
+                    RuleHit(rule_name="r1", severity=Severity.INFO, detail=""),
+                ),
+            ),
+        )
+        controller.restoreFromReport(_make_scan_report(results=results))
+        data = controller.topRulesChartData
+        assert len(data) == 1
+        assert data[0]["value"] == 1  # 同文件去重，计 1
+
+    def test_top_rules_chart_limit_10(self, controller: ScanController) -> None:
+        """Top 规则图表最多返回 10 条。"""
+        results = tuple(
+            ScanResult(
+                path=Path(f"/tmp/{i}.txt"),
+                size=10,
+                hits=(RuleHit(rule_name=f"rule_{i}", severity=Severity.INFO, detail=""),),
+            )
+            for i in range(15)
+        )
+        controller.restoreFromReport(_make_scan_report(results=results))
+        data = controller.topRulesChartData
+        assert len(data) == 10
+
+    def test_extension_chart_groups_by_extension(self, controller: ScanController) -> None:
+        """扩展名图表按扩展名分组并按命中文件数降序排列。"""
+        results = (
+            ScanResult(
+                path=Path("/tmp/a.py"),
+                size=10,
+                hits=(RuleHit(rule_name="r1", severity=Severity.INFO, detail=""),),
+            ),
+            ScanResult(
+                path=Path("/tmp/b.py"),
+                size=10,
+                hits=(RuleHit(rule_name="r1", severity=Severity.INFO, detail=""),),
+            ),
+            ScanResult(
+                path=Path("/tmp/c.txt"),
+                size=10,
+                hits=(RuleHit(rule_name="r1", severity=Severity.INFO, detail=""),),
+            ),
+        )
+        controller.restoreFromReport(_make_scan_report(results=results))
+        data = controller.extensionChartData
+        assert data[0]["label"] == ".py"
+        assert data[0]["value"] == 2
+        assert data[1]["label"] == ".txt"
+        assert data[1]["value"] == 1
+
+    def test_extension_chart_other_bucket(self, controller: ScanController) -> None:
+        """超过 8 个扩展名时多余项归入「其他」桶。"""
+        results = tuple(
+            ScanResult(
+                path=Path(f"/tmp/file_{i}.ext{i}"),
+                size=10,
+                hits=(RuleHit(rule_name="r1", severity=Severity.INFO, detail=""),),
+            )
+            for i in range(10)
+        )
+        controller.restoreFromReport(_make_scan_report(results=results))
+        data = controller.extensionChartData
+        # 8 个 Top + 1 个「其他」
+        assert len(data) == 9
+        assert data[-1]["label"] == "其他"
+        assert data[-1]["value"] == 2  # 10 - 8 = 2
+
+    def test_extension_chart_case_insensitive(self, controller: ScanController) -> None:
+        """扩展名大小写归一（.PY 与 .py 合并）。"""
+        results = (
+            ScanResult(
+                path=Path("/tmp/a.PY"),
+                size=10,
+                hits=(RuleHit(rule_name="r1", severity=Severity.INFO, detail=""),),
+            ),
+            ScanResult(
+                path=Path("/tmp/b.py"),
+                size=10,
+                hits=(RuleHit(rule_name="r1", severity=Severity.INFO, detail=""),),
+            ),
+        )
+        controller.restoreFromReport(_make_scan_report(results=results))
+        data = controller.extensionChartData
+        assert len(data) == 1
+        assert data[0]["label"] == ".py"
+        assert data[0]["value"] == 2
+
+    def test_extension_chart_no_extension_bucket(self, controller: ScanController) -> None:
+        """无扩展名文件归入「(无扩展名)」档位。"""
+        results = (
+            ScanResult(
+                path=Path("/tmp/Makefile"),
+                size=10,
+                hits=(RuleHit(rule_name="r1", severity=Severity.INFO, detail=""),),
+            ),
+        )
+        controller.restoreFromReport(_make_scan_report(results=results))
+        data = controller.extensionChartData
+        assert len(data) == 1
+        assert data[0]["label"] == "(无扩展名)"
+
+    def test_restore_from_report_refreshes_chart_data(self, controller: ScanController) -> None:
+        """restoreFromReport 后图表数据应反映最新报告（覆盖旧数据）。"""
+        # 先恢复空报告
+        controller.restoreFromReport(_make_scan_report(results=()))
+        assert controller.severityChartData == []
+        # 再恢复有命中的报告
+        results = (
+            ScanResult(
+                path=Path("/tmp/a.txt"),
+                size=10,
+                hits=(RuleHit(rule_name="r1", severity=Severity.WARNING, detail=""),),
+            ),
+        )
+        controller.restoreFromReport(_make_scan_report(results=results))
+        data = controller.severityChartData
+        assert len(data) == 1
+        assert data[0]["label"] == "警告"

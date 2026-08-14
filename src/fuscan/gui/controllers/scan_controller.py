@@ -80,6 +80,7 @@ from fuscan.gui.scan_mode import (
     SCAN_MODE_STR_TO_INDEX,
     scan_mode_index_to_str,
 )
+from fuscan.gui.severity_utils import severity_color_hex, severity_text
 from fuscan.gui.workers import DetailWorker, FileStatsWorker, ScanWorker
 from fuscan.processing.backup_manifest import BackupManifest
 from fuscan.processing.skip_store import SkipStore
@@ -144,6 +145,30 @@ _RECENT_FILES_MAX: int = 50
 _RECENT_EMIT_INTERVAL: float = 0.5
 # 或累计新增 >= 该文件数即刻 emit（高速扫描时明细尽快填充；与时间阈值先到者触发）。
 _RECENT_EMIT_BATCH: int = 25
+
+# 严重度排序：用于「Top 规则」图表取每条规则最高严重度档位。
+# Severity 是 str Enum，字典序不稳定（未来新增档位可能破坏顺序），
+# 故显式定义数值映射，max(sev, key=...) 取最高档。
+_SEVERITY_RANK: dict[Severity, int] = {
+    Severity.INFO: 0,
+    Severity.WARNING: 1,
+    Severity.CRITICAL: 2,
+}
+
+# 扩展名分布饼图色板：10 色循环，前 8 个用于 Top 扩展名，第 9 个用于「其他」。
+# 色值取自 GitHub Primer 调色板，与严重度色（蓝/橙/红）区分避免视觉混淆。
+_EXTENSION_PALETTE: tuple[str, ...] = (
+    "#28A745",  # 绿
+    "#0366D6",  # 蓝
+    "#8957E5",  # 紫
+    "#F1E05A",  # 黄
+    "#56D4DD",  # 青
+    "#FFA657",  # 橙黄
+    "#F778BA",  # 粉
+    "#7EE787",  # 浅绿
+    "#6E7681",  # 灰（用于「其他」）
+    "#FF7B72",  # 浅红
+)
 
 
 class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -1138,6 +1163,105 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 if name not in seen:
                     seen.append(name)
         return seen
+
+    @Property("QVariantList", notify=scanStateChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
+    def severityChartData(self) -> list[dict[str, object]]:
+        """严重度分布饼图数据：``[{label, value, color}, ...]``。
+
+        按 INFO/WARNING/CRITICAL 顺序返回，仅含有命中的严重度档位。
+        ``label`` 为中文（信息/警告/严重），``value`` 为该档位命中文件数，
+        ``color`` 为与 :mod:`fuscan.gui.severity_utils` 一致的十六进制色值。
+
+        无命中或未扫描时返回空列表（QML 据此隐藏饼图）。
+        """
+        if self._last_report is None:
+            return []
+        groups = self._last_report.group_by_severity()
+        data: list[dict[str, object]] = []
+        for sev in (Severity.INFO, Severity.WARNING, Severity.CRITICAL):
+            files = groups.get(sev)
+            if not files:
+                continue
+            data.append(
+                {
+                    "label": severity_text(sev),
+                    "value": len(files),
+                    "color": severity_color_hex(sev),
+                }
+            )
+        return data
+
+    @Property("QVariantList", notify=scanStateChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
+    def topRulesChartData(self) -> list[dict[str, object]]:
+        """Top N 命中规则条形图数据：``[{label, value, color}, ...]``。
+
+        按命中文件数降序，最多 10 条。``value`` 为命中该规则的去重文件数
+        （同一文件被同一规则多次命中仅计 1）。``color`` 取该规则最高严重度
+        对应色值，便于用户从颜色快速识别高危规则。
+
+        无命中或未扫描时返回空列表。
+        """
+        if self._last_report is None:
+            return []
+        groups = self._last_report.group_by_rule()
+        # 每条规则聚合：去重文件数 + 最高严重度
+        rule_stats: list[tuple[str, int, Severity]] = []
+        for rule_name, pairs in groups.items():
+            file_count = len({sr.path for sr, _ in pairs})
+            max_sev = max(
+                (hit.severity for _, hit in pairs),
+                key=lambda s: _SEVERITY_RANK[s],
+            )
+            rule_stats.append((rule_name, file_count, max_sev))
+        rule_stats.sort(key=lambda x: x[1], reverse=True)
+        return [
+            {
+                "label": name,
+                "value": count,
+                "color": severity_color_hex(sev),
+            }
+            for name, count, sev in rule_stats[:10]
+        ]
+
+    @Property("QVariantList", notify=scanStateChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
+    def extensionChartData(self) -> list[dict[str, object]]:
+        """按扩展名分布饼图数据：``[{label, value, color}, ...]``。
+
+        按命中文件数降序，最多 8 条；其余扩展名归入「其他」合并显示。
+        ``color`` 顺序循环 :data:`_EXTENSION_PALETTE` 色板。无扩展名文件
+        归入 ``(无扩展名)`` 档位。
+
+        无命中或未扫描时返回空列表。
+        """
+        if self._last_report is None:
+            return []
+        counts: dict[str, int] = {}
+        for sr in self._last_report.hits:
+            ext = sr.path.suffix.lower() or "(无扩展名)"
+            counts[ext] = counts.get(ext, 0) + 1
+        items = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+        result: list[dict[str, object]] = []
+        other_count = 0
+        for i, (ext, count) in enumerate(items):
+            if i < 8:
+                result.append(
+                    {
+                        "label": ext,
+                        "value": count,
+                        "color": _EXTENSION_PALETTE[i % len(_EXTENSION_PALETTE)],
+                    }
+                )
+            else:
+                other_count += count
+        if other_count > 0:
+            result.append(
+                {
+                    "label": "其他",
+                    "value": other_count,
+                    "color": _EXTENSION_PALETTE[8 % len(_EXTENSION_PALETTE)],
+                }
+            )
+        return result
 
     @Slot(str, result=str)  # pyrefly: ignore [not-callable]
     def replaceSelectedResult(self, replace_with: str = "") -> str:

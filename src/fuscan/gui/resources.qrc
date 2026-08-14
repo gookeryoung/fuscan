@@ -10,6 +10,7 @@
     <file alias="qml/components/RuleEditorForm.qml">views/components/RuleEditorForm.qml</file>
     <file alias="qml/components/RulesPanel.qml">views/components/RulesPanel.qml</file>
     <file alias="qml/components/ScanProgressCard.qml">views/components/ScanProgressCard.qml</file>
+    <file alias="qml/components/TrendChart.qml">views/components/TrendChart.qml</file>
     <file alias="qml/components/WorkspaceCard.qml">views/components/WorkspaceCard.qml</file>
     <file alias="qml/ContentArea.qml">views/ContentArea.qml</file>
     <file alias="qml/inline_preview.qml">views/inline_preview.qml</file>

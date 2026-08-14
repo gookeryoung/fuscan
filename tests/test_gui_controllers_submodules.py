@@ -29,7 +29,9 @@ try:
     )
     from fuscan.gui.controllers._history import build_history_entry
     from fuscan.gui.controllers._history_view import (
+        build_arbitrary_comparison_json,
         build_scan_comparison_json,
+        build_scan_trend_json,
         build_workspace_history_json,
     )
     from fuscan.gui.controllers._manifest import (
@@ -2340,5 +2342,188 @@ class TestBuildScanComparisonJson:
         curr = _make_history_entry(scan_id="s2", hit_paths=("/a", "/b"))
         result = build_scan_comparison_json((curr, prev))
         # summary 中包含中文（"本次命中" / "上次命中"）
+        assert "本次命中" in result
+        assert "\\u" not in result
+
+
+class TestBuildScanTrendJson:
+    """测试 build_scan_trend_json 趋势 JSON 构造纯函数。"""
+
+    def test_empty_entries_returns_empty_array(self) -> None:
+        """空历史 → 返回 ``"[]"``。"""
+        assert build_scan_trend_json(()) == "[]"
+
+    def test_single_entry_payload_fields(self) -> None:
+        """单条历史 → 字段完整、类型正确。"""
+        import json as _json
+
+        entry = _make_history_entry(matched_files=5)
+        payload = _json.loads(build_scan_trend_json((entry,)))
+        assert len(payload) == 1
+        item = payload[0]
+        assert item["finished_at"] == "2026-07-27T10:00:00Z"
+        assert item["matched_files"] == 5
+        assert item["status"] == STATUS_COMPLETED
+        assert item["duration_seconds"] == 0.0
+        assert item["error_count"] == 0
+
+    def test_chronological_order_reversed(self) -> None:
+        """倒序输入（最新在前）→ 输出按时间正序（最旧在前）。"""
+        import json as _json
+
+        newest = _make_history_entry(scan_id="new", finished_at="2026-07-27T12:00:00Z")
+        middle = _make_history_entry(scan_id="mid", finished_at="2026-07-27T11:00:00Z")
+        oldest = _make_history_entry(scan_id="old", finished_at="2026-07-27T10:00:00Z")
+        # store 返回倒序（newest, middle, oldest），趋势图需正序
+        payload = _json.loads(build_scan_trend_json((newest, middle, oldest)))
+        # 按时间正序：old → mid → new
+        assert payload[0]["finished_at"] == "2026-07-27T10:00:00Z"
+        assert payload[1]["finished_at"] == "2026-07-27T11:00:00Z"
+        assert payload[2]["finished_at"] == "2026-07-27T12:00:00Z"
+
+    def test_top_n_limit(self) -> None:
+        """超过 top_n 条 → 仅取最近 top_n 条（最新 N 条）。"""
+        import json as _json
+
+        # 倒序构造（最新在前），与 HistoryStore.workspace_history 返回顺序一致
+        entries = tuple(
+            _make_history_entry(
+                scan_id=f"s{i}",
+                finished_at=f"2026-07-27T{14 - i:02d}:00:00Z",
+            )
+            for i in range(5)
+        )
+        payload = _json.loads(build_scan_trend_json(entries, top_n=3))
+        assert len(payload) == 3
+        # 取最新 3 条（14:00/13:00/12:00），正序输出为 12:00→13:00→14:00
+        assert payload[0]["finished_at"] == "2026-07-27T12:00:00Z"
+        assert payload[2]["finished_at"] == "2026-07-27T14:00:00Z"
+
+    def test_top_n_zero_clamped_to_one(self) -> None:
+        """top_n=0 → 至少取 1 条（max(1, 0) 兜底）。"""
+        import json as _json
+
+        entry = _make_history_entry()
+        payload = _json.loads(build_scan_trend_json((entry,), top_n=0))
+        assert len(payload) == 1
+
+    def test_duration_seconds_rounded(self) -> None:
+        """duration_seconds 应保留两位小数。"""
+        import json as _json
+
+        entry = ScanHistoryEntry(
+            scan_id="s1",
+            workspace_id="ws-1",
+            duration_seconds=2.567,
+            summary="",
+        )
+        payload = _json.loads(build_scan_trend_json((entry,)))
+        assert payload[0]["duration_seconds"] == 2.57
+
+    def test_status_preserved(self) -> None:
+        """status 字段应原样保留（含 cancelled/failed）。"""
+        import json as _json
+
+        entry = _make_history_entry(status=STATUS_CANCELLED)
+        payload = _json.loads(build_scan_trend_json((entry,)))
+        assert payload[0]["status"] == STATUS_CANCELLED
+
+
+class TestBuildArbitraryComparisonJson:
+    """测试 build_arbitrary_comparison_json 任意两次对比 JSON 构造纯函数。"""
+
+    def test_empty_entries_returns_empty_object(self) -> None:
+        """空历史 → 返回 ``"{}"``。"""
+        assert build_arbitrary_comparison_json((), "a", "b") == "{}"
+
+    def test_same_scan_id_returns_empty(self) -> None:
+        """两次 scan_id 相同 → 返回 ``"{}"``。"""
+        entry = _make_history_entry(scan_id="s1")
+        assert build_arbitrary_comparison_json((entry,), "s1", "s1") == "{}"
+
+    def test_empty_scan_id_returns_empty(self) -> None:
+        """scan_id 为空串 → 返回 ``"{}"``。"""
+        prev = _make_history_entry(scan_id="s1")
+        curr = _make_history_entry(scan_id="s2")
+        assert build_arbitrary_comparison_json((curr, prev), "", "s2") == "{}"
+        assert build_arbitrary_comparison_json((curr, prev), "s1", "") == "{}"
+
+    def test_not_found_returns_empty(self) -> None:
+        """任一 scan_id 未找到 → 返回 ``"{}"``。"""
+        prev = _make_history_entry(scan_id="s1")
+        curr = _make_history_entry(scan_id="s2")
+        assert build_arbitrary_comparison_json((curr, prev), "s1", "missing") == "{}"
+
+    def test_newer_arg_as_current(self) -> None:
+        """第一个参数较新 → 该条为 current，第二个为 previous。"""
+        import json as _json
+
+        prev = _make_history_entry(
+            scan_id="s1",
+            finished_at="2026-07-27T10:00:00Z",
+            matched_files=3,
+            hit_paths=("/a", "/b", "/c"),
+        )
+        curr = _make_history_entry(
+            scan_id="s2",
+            finished_at="2026-07-27T11:00:00Z",
+            matched_files=2,
+            hit_paths=("/a", "/d"),
+        )
+        payload = _json.loads(build_arbitrary_comparison_json((curr, prev), "s2", "s1"))
+        assert payload["current"]["scan_id"] == "s2"
+        assert payload["previous"]["scan_id"] == "s1"
+        assert payload["matched_delta"] == -1
+        assert payload["trend"] == "改善"
+
+    def test_older_arg_becomes_previous(self) -> None:
+        """第一个参数较旧 → 自动交换，较新者仍为 current。"""
+        import json as _json
+
+        prev = _make_history_entry(
+            scan_id="s1",
+            finished_at="2026-07-27T10:00:00Z",
+            matched_files=1,
+            hit_paths=("/a",),
+        )
+        curr = _make_history_entry(
+            scan_id="s2",
+            finished_at="2026-07-27T11:00:00Z",
+            matched_files=4,
+            hit_paths=("/a", "/b", "/c", "/d"),
+        )
+        # 传入顺序与时间顺序相反（旧在前），仍应以 s2 为 current
+        payload = _json.loads(build_arbitrary_comparison_json((curr, prev), "s1", "s2"))
+        assert payload["current"]["scan_id"] == "s2"
+        assert payload["previous"]["scan_id"] == "s1"
+        assert payload["matched_delta"] == 3
+        assert payload["trend"] == "恶化"
+
+    def test_payload_structure_matches_comparison(self) -> None:
+        """输出结构与 build_scan_comparison_json 一致（同一摘要展示组件可复用）。"""
+        import json as _json
+
+        prev = _make_history_entry(
+            scan_id="s1",
+            finished_at="2026-07-27T10:00:00Z",
+            hit_paths=("/a",),
+        )
+        curr = _make_history_entry(
+            scan_id="s2",
+            finished_at="2026-07-27T11:00:00Z",
+            hit_paths=("/a", "/b"),
+        )
+        arb = _json.loads(build_arbitrary_comparison_json((curr, prev), "s2", "s1"))
+        recent = _json.loads(build_scan_comparison_json((curr, prev)))
+        # 两次对比的 key 集合应完全一致
+        assert set(arb.keys()) == set(recent.keys())
+        for key in ("summary", "trend", "matched_delta", "new_hits_count"):
+            assert arb[key] == recent[key]
+
+    def test_chinese_summary_not_ascii_escaped(self) -> None:
+        r"""中文 summary 不应被 \uXXXX 转义。"""
+        prev = _make_history_entry(scan_id="s1", hit_paths=("/a",))
+        curr = _make_history_entry(scan_id="s2", hit_paths=("/a", "/b"))
+        result = build_arbitrary_comparison_json((curr, prev), "s2", "s1")
         assert "本次命中" in result
         assert "\\u" not in result

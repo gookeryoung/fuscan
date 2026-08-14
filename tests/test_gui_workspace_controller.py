@@ -2468,6 +2468,118 @@ class TestWorkspaceHistorySlots:
         # 无历史被添加
         assert controller.workspaceHistoryJson(ws_id) == "[]"
 
+    def test_scan_trend_json_empty(self, controller: WorkspaceController) -> None:
+        """无历史时趋势槽返回 ``"[]"``。"""
+        ws_id = controller.addWorkspace("任务G", "folder", "/tmp", "[]", True)
+        assert controller.scanTrendJson(ws_id) == "[]"
+
+    def test_scan_trend_json_chronological_order(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """趋势槽返回按时间正序的命中数序列（最旧在前）。"""
+        ws_id = controller.addWorkspace("任务H", "folder", "/tmp", "[]", True)
+        from fuscan.history import ScanHistoryEntry
+
+        controller._history_store.add(  # type: ignore[attr-defined]
+            ScanHistoryEntry(
+                scan_id="s1",
+                workspace_id=ws_id,
+                workspace_name="任务H",
+                finished_at="2026-07-27T10:00:00Z",
+                matched_files=3,
+            )
+        )
+        controller._history_store.add(  # type: ignore[attr-defined]
+            ScanHistoryEntry(
+                scan_id="s2",
+                workspace_id=ws_id,
+                workspace_name="任务H",
+                finished_at="2026-07-27T11:00:00Z",
+                matched_files=5,
+            )
+        )
+
+        payload = json.loads(controller.scanTrendJson(ws_id))
+        assert len(payload) == 2
+        # store 倒序（s2 在前），趋势需正序（s1 在前）
+        assert payload[0]["matched_files"] == 3
+        assert payload[1]["matched_files"] == 5
+
+    def test_compare_scans_arbitrary_two(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """任意两次对比槽应按 scan_id 定位并返回对比结果。"""
+        ws_id = controller.addWorkspace("任务I", "folder", "/tmp", "[]", True)
+        from fuscan.history import ScanHistoryEntry
+
+        controller._history_store.add(  # type: ignore[attr-defined]
+            ScanHistoryEntry(
+                scan_id="s1",
+                workspace_id=ws_id,
+                workspace_name="任务I",
+                finished_at="2026-07-27T10:00:00Z",
+                matched_files=3,
+                hit_paths=("/a", "/b", "/c"),
+                rule_names=("rule1",),
+            )
+        )
+        controller._history_store.add(  # type: ignore[attr-defined]
+            ScanHistoryEntry(
+                scan_id="s2",
+                workspace_id=ws_id,
+                workspace_name="任务I",
+                finished_at="2026-07-27T11:00:00Z",
+                matched_files=2,
+                hit_paths=("/a", "/d"),
+                rule_names=("rule1", "rule2"),
+            )
+        )
+
+        payload = json.loads(controller.compareScans(ws_id, "s1", "s2"))
+        # s2 较新 → current
+        assert payload["current"]["scan_id"] == "s2"
+        assert payload["previous"]["scan_id"] == "s1"
+        assert payload["trend"] == "改善"
+        assert payload["matched_delta"] == -1
+
+    def test_compare_scans_same_id_returns_empty(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """两次 scan_id 相同时对比槽返回 ``"{}"``。"""
+        ws_id = controller.addWorkspace("任务J", "folder", "/tmp", "[]", True)
+        from fuscan.history import ScanHistoryEntry
+
+        controller._history_store.add(  # type: ignore[attr-defined]
+            ScanHistoryEntry(
+                scan_id="s1",
+                workspace_id=ws_id,
+                workspace_name="任务J",
+                matched_files=1,
+            )
+        )
+        assert controller.compareScans(ws_id, "s1", "s1") == "{}"
+
+    def test_compare_scans_not_found_returns_empty(
+        self,
+        controller: WorkspaceController,
+    ) -> None:
+        """任一 scan_id 未找到时对比槽返回 ``"{}"``。"""
+        ws_id = controller.addWorkspace("任务K", "folder", "/tmp", "[]", True)
+        from fuscan.history import ScanHistoryEntry
+
+        controller._history_store.add(  # type: ignore[attr-defined]
+            ScanHistoryEntry(
+                scan_id="s1",
+                workspace_id=ws_id,
+                workspace_name="任务K",
+                matched_files=1,
+            )
+        )
+        assert controller.compareScans(ws_id, "s1", "missing") == "{}"
+
 
 # ============================= iter-123：扫描结果缓存 =============================
 

@@ -1258,7 +1258,7 @@ Item {
         modal: true
         anchors.centerIn: parent
         width: 640
-        height: 520
+        height: 620
         standardButtons: Dialog.Close
 
         // 历史列表（按时间倒序）
@@ -1266,6 +1266,32 @@ Item {
         // 对比结果对象（current/previous/summary/trend/...）
         // 用 ({}) 明确空对象字面量——裸 {} 会被 QML 解析为空块语句使属性为 undefined
         property var comparison: ({})
+        // 趋势数据（按时间正序，供 TrendChart 绘制）
+        property var trendData: []
+        // 任意两次对比的选中 scan_id 列表（最多 2 个）
+        property var selectedScanIds: []
+
+        // 切换某次扫描的选中状态（最多保留 2 个，超出时移除最早选中的）
+        function toggleSelect(scanId) {
+            var arr = historyDialog.selectedScanIds.slice()
+            var idx = arr.indexOf(scanId)
+            if (idx >= 0) {
+                arr.splice(idx, 1)
+            } else {
+                if (arr.length >= 2) arr.shift()
+                arr.push(scanId)
+            }
+            historyDialog.selectedScanIds = arr
+        }
+
+        // 对比选中的两次扫描：调用 compareScans Slot，结果写入 comparison 复用摘要区
+        function compareSelected() {
+            if (historyDialog.selectedScanIds.length !== 2) return
+            var wsId = dialogsRoot.homePage._pendingHistoryWsId
+            var raw = workspaceController.compareScans(
+                wsId, historyDialog.selectedScanIds[0], historyDialog.selectedScanIds[1])
+            try { historyDialog.comparison = JSON.parse(raw) } catch (e) { historyDialog.comparison = {} }
+        }
 
         contentItem: Rectangle {
             color: theme.isDark ? theme.colorBgCard : theme.colorBgCard
@@ -1277,6 +1303,38 @@ Item {
                 anchors.fill: parent
                 anchors.margins: 16
                 spacing: 12
+
+                // ---------- 命中趋势图区 ----------
+                Rectangle {
+                    Layout.fillWidth: true
+                    visible: historyDialog.trendData.length > 0
+                    color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                    border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                    border.width: 1
+                    radius: theme.radiusSm
+                    implicitHeight: trendColumn.implicitHeight + 16
+
+                    ColumnLayout {
+                        id: trendColumn
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 6
+
+                        Label {
+                            text: "命中趋势"
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        }
+                        TrendChart {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 130
+                            chartData: historyDialog.trendData
+                            metric: "matched_files"
+                            valueSuffix: ""
+                        }
+                    }
+                }
 
                 // ---------- 对比摘要区 ----------
                 Rectangle {
@@ -1373,6 +1431,14 @@ Item {
                                 anchors.margins: 10
                                 spacing: 10
 
+                                // 任意两次对比选择框（最多选 2 个）
+                                CheckBox {
+                                    checked: historyDialog.selectedScanIds.indexOf(modelData.scan_id) >= 0
+                                    onToggled: historyDialog.toggleSelect(modelData.scan_id)
+                                    // 已选满 2 个且当前未选时禁用，提示需先取消一个
+                                    enabled: checked || historyDialog.selectedScanIds.length < 2
+                                }
+
                                 // 状态色条
                                 Rectangle {
                                     width: 3
@@ -1441,9 +1507,25 @@ Item {
                     }
                 }
 
-                // ---------- 清空历史按钮 ----------
+                // ---------- 操作栏：任意两次对比 + 清空历史 ----------
                 RowLayout {
                     Layout.fillWidth: true
+
+                    // 选中计数 + 对比按钮（选中任意两次后可对比）
+                    Label {
+                        text: "已选 " + historyDialog.selectedScanIds.length + "/2"
+                        font.pixelSize: theme.fontSizeSmall
+                        color: theme.colorTextSecondary
+                        visible: historyDialog.historyList.length > 0
+                    }
+                    Button {
+                        text: "对比选中"
+                        font.pixelSize: theme.fontSizeSmall
+                        implicitHeight: 32
+                        enabled: historyDialog.selectedScanIds.length === 2
+                        onClicked: historyDialog.compareSelected()
+                    }
+
                     Item { Layout.fillWidth: true }
                     Button {
                         text: "清空历史"
@@ -1455,6 +1537,8 @@ Item {
                         onClicked: {
                             workspaceController.clearWorkspaceHistory(dialogsRoot.homePage._pendingHistoryWsId)
                             historyDialog.historyList = []
+                            historyDialog.trendData = []
+                            historyDialog.selectedScanIds = []
                             historyDialog.comparison = {}
                         }
                     }

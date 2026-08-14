@@ -326,14 +326,17 @@ Item {
                             dialogsLoader.item.editTargetDialog.open()
                         }
                     }
-                    // 扫描历史：加载历史 JSON 与对比 JSON
+                    // 扫描历史：加载历史列表、趋势数据与最近两次对比
                     onViewHistoryRequested: function(wsId) {
                         homePage._pendingHistoryWsId = wsId
                         var histJson = workspaceController.workspaceHistoryJson(wsId)
                         var cmpJson = workspaceController.compareWithPreviousScan(wsId)
+                        var trendJson = workspaceController.scanTrendJson(wsId)
                         if (dialogsLoader.item) {
                             try { dialogsLoader.item.historyDialog.historyList = JSON.parse(histJson) } catch(e) { dialogsLoader.item.historyDialog.historyList = [] }
                             try { dialogsLoader.item.historyDialog.comparison = JSON.parse(cmpJson) } catch(e) { dialogsLoader.item.historyDialog.comparison = {} }
+                            try { dialogsLoader.item.historyDialog.trendData = JSON.parse(trendJson) } catch(e) { dialogsLoader.item.historyDialog.trendData = [] }
+                            dialogsLoader.item.historyDialog.selectedScanIds = []
                             dialogsLoader.item.historyDialog.open()
                         }
                     }

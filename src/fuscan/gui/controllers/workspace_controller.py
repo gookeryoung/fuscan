@@ -32,7 +32,13 @@ except ImportError:  # pragma: no cover
 
 from fuscan import config as config_module
 from fuscan.gui.controllers._history_view import (
+    build_arbitrary_comparison_json as _build_arbitrary_comparison_json,
+)
+from fuscan.gui.controllers._history_view import (
     build_scan_comparison_json as _build_scan_comparison_json,
+)
+from fuscan.gui.controllers._history_view import (
+    build_scan_trend_json as _build_scan_trend_json,
 )
 from fuscan.gui.controllers._history_view import (
     build_workspace_history_json as _build_workspace_history_json,
@@ -1189,6 +1195,36 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             ``trend`` 字段；无历史返回 ``"{}"``
         """
         return _build_scan_comparison_json(self._history_store.workspace_history(ws_id, limit=2))
+
+    @Slot(str, result=str)  # pyrefly: ignore [not-callable]
+    def scanTrendJson(self, ws_id: str) -> str:
+        """返回指定工作区扫描趋势 JSON 字符串（供趋势图绘制）。
+
+        委托 :func:`._history_view.build_scan_trend_json`，取最近 20 条历史
+        并按时间正序排列（最旧在前），供 QML 趋势图从左到右绘制。
+
+        :param ws_id: 工作区 ID
+        :return: JSON 数组字符串，每个元素含 ``finished_at``/``matched_files``/
+            ``total_files``/``scanned_files``/``error_count``/``duration_seconds``/
+            ``status``；空历史返回 ``"[]"``
+        """
+        return _build_scan_trend_json(self._history_store.workspace_history(ws_id))
+
+    @Slot(str, str, str, result=str)  # pyrefly: ignore [not-callable]
+    def compareScans(self, ws_id: str, scan_id_a: str, scan_id_b: str) -> str:
+        """对比指定工作区任意两次扫描，返回对比结果 JSON。
+
+        委托 :func:`._history_view.build_arbitrary_comparison_json`，按
+        ``scan_id`` 在历史中定位两条，``finished_at`` 较新者为 ``current``。
+        输出结构与 :meth:`compareWithPreviousScan` 一致，QML 可复用同一对比
+        摘要展示组件。
+
+        :param ws_id: 工作区 ID
+        :param scan_id_a: 第一次扫描 ID
+        :param scan_id_b: 第二次扫描 ID
+        :return: JSON 对象字符串；``scan_id`` 相同、为空或任一未找到返回 ``"{}"``
+        """
+        return _build_arbitrary_comparison_json(self._history_store.workspace_history(ws_id), scan_id_a, scan_id_b)
 
     @Slot(str, result=int)  # pyrefly: ignore [not-callable]
     def clearWorkspaceHistory(self, ws_id: str) -> int:

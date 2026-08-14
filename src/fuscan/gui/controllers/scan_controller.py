@@ -999,6 +999,16 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         result = self._get_selected_result()
         return result is not None and result.archive_path is not None
 
+    @Property(str, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
+    def detailEngine(self) -> str:
+        """选中结果解析引擎名（如 ``pypdfium2`` 文本提取、``pypdfium2 + rapidocr-json`` OCR 回退）。
+
+        反映该文件实际使用的解析引擎，PDF 在扫描版 OCR 回退时与纯文本层提取
+        有别，供用户判断命中内容来源。空串表示无引擎信息（如纯文本文件）。
+        """
+        result = self._get_selected_result()
+        return result.engine if result is not None else ""
+
     @Property(bool, notify=selectedResultChanged)  # pyrefly: ignore [not-callable]
     def canSelectNext(self) -> bool:
         """是否可选中下一条结果。"""

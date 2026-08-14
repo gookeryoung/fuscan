@@ -330,6 +330,36 @@ class TestDetailPropertiesExtended:
         controller.setSelectedResultIndex(0)
         assert controller.detailIsArchiveEntry is True
 
+    def test_detail_engine_empty_when_no_selection(self, controller_with_results: ScanController) -> None:
+        """未选中时 detailEngine 为空串。"""
+        assert controller_with_results.detailEngine == ""
+
+    def test_detail_engine_empty_for_default_result(self, controller_with_results: ScanController) -> None:
+        """_make_scan_result 默认不设置 engine，选中后 detailEngine 为空串。"""
+        controller_with_results.setSelectedResultIndex(0)
+        assert controller_with_results.detailEngine == ""
+
+    def test_detail_engine_reflects_ocr_vs_text(self, controller: ScanController) -> None:
+        """PDF OCR 回退结果 detailEngine 返回 ``pypdfium2 + rapidocr-json``。"""
+        result = _make_scan_result(Path("/tmp/scan.pdf"))
+        # 模拟扫描器回填的动态引擎（OCR 回退）
+        from dataclasses import replace
+
+        result = replace(result, engine="pypdfium2 + rapidocr-json")
+        controller._result_model.set_results((result,))
+        controller.setSelectedResultIndex(0)
+        assert controller.detailEngine == "pypdfium2 + rapidocr-json"
+
+    def test_detail_engine_reflects_text_extraction(self, controller: ScanController) -> None:
+        """PDF 纯文本层提取结果 detailEngine 返回 ``pypdfium2``。"""
+        result = _make_scan_result(Path("/tmp/text.pdf"))
+        from dataclasses import replace
+
+        result = replace(result, engine="pypdfium2")
+        controller._result_model.set_results((result,))
+        controller.setSelectedResultIndex(0)
+        assert controller.detailEngine == "pypdfium2"
+
     def test_detail_hits_model_includes_extended_fields(self, controller_with_results: ScanController) -> None:
         """detailHitsModel 应包含 matchText/matchCount/target/description 字段。"""
         controller_with_results.setSelectedResultIndex(0)

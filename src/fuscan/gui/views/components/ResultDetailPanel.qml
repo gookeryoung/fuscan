@@ -160,7 +160,7 @@ Rectangle {
                         }
                     }
 
-                    // 元信息网格：大小 | 命中规则数
+                    // 元信息网格：大小 | 命中规则数 | 解析引擎（PDF 标注 OCR/文本提取）
                     GridLayout {
                         Layout.fillWidth: true
                         columns: 2
@@ -184,6 +184,19 @@ Rectangle {
                         }
                         Label {
                             text: workspaceController.currentScanController.detailHitsCount + " 条"
+                            font.pixelSize: 11
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                        }
+                        // 解析引擎：仅在有引擎信息时显示（PDF 区分 OCR 回退 vs 文本层提取）
+                        Label {
+                            visible: workspaceController.currentScanController.detailEngine !== ""
+                            text: "解析引擎"
+                            font.pixelSize: 10
+                            color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        }
+                        Label {
+                            visible: workspaceController.currentScanController.detailEngine !== ""
+                            text: workspaceController.currentScanController.detailEngine
                             font.pixelSize: 11
                             color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                         }

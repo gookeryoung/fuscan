@@ -872,8 +872,15 @@ class TestPdfExtractorPdfiumBackend:
 
         monkeypatch.setattr(pdf_mod, "_ensure_backend", lambda: lambda _data: _MixedDoc())
         extractor = PdfExtractor()
-        with caplog.at_level(logging.DEBUG, logger="fuscan.extractors.pdf"):
-            content = extractor.extract_from_bytes(b"fake mixed pdf")
+        # 模拟 scanner 设置线程局部文件路径：聚合 WARNING 应携带该路径
+        from fuscan.extractors import reset_current_extract_file, set_current_extract_file
+
+        set_current_extract_file("D:/docs/损坏文件.pdf")
+        try:
+            with caplog.at_level(logging.DEBUG, logger="fuscan.extractors.pdf"):
+                content = extractor.extract_from_bytes(b"fake mixed pdf")
+        finally:
+            reset_current_extract_file()
         # 成功页文本正常返回
         assert "正常页文本" in content
         # 逐页失败仅 DEBUG（不产生逐页 WARNING）
@@ -881,10 +888,66 @@ class TestPdfExtractorPdfiumBackend:
         warning_msgs = [r.message for r in caplog.records if r.levelno == logging.WARNING]
         assert any("页 0 提取失败" in m for m in debug_msgs)
         assert any("页 2 提取失败" in m for m in debug_msgs)
-        # 汇总仅一条 WARNING（含总页数与失败页数）
+        # 汇总仅一条 WARNING（含总页数与失败页数与具体文件路径）
         assert len(warning_msgs) == 1
         assert "3 页" in warning_msgs[0]
         assert "2 页提取失败" in warning_msgs[0]
+        assert "D:/docs/损坏文件.pdf" in warning_msgs[0]
+
+    def test_current_extract_file_thread_local(self, caplog: pytest.LogCaptureFixture) -> None:
+        """提取文件路径线程局部存储：设置/清空/未设时日志不含路径。"""
+        import logging
+
+        from fuscan.extractors import (
+            get_current_extract_file_label,
+            reset_current_extract_file,
+            set_current_extract_file,
+        )
+        from fuscan.extractors import pdf as pdf_mod
+
+        class _AllFailDoc:
+            def __len__(self) -> int:
+                return 2
+
+            def get_page(self, _i: int) -> object:
+                raise RuntimeError("page broken")
+
+            def close(self) -> None:
+                """无操作。"""
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(pdf_mod, "_ensure_backend", lambda: lambda _data: _AllFailDoc())
+
+        def _no_ocr() -> str:
+            raise ExtractorError("OCR 引擎未就位")
+
+        # 全页失败 → 文本层为空 → 触发 OCR 回退；mock 引擎缺失避免真实加载
+        monkeypatch.setattr(pdf_mod, "get_ocr_engine", _no_ocr)
+        extractor = PdfExtractor()
+        try:
+            # 未设置时：日志无路径后缀（独立调用场景）
+            with caplog.at_level(logging.INFO, logger="fuscan.extractors.pdf"):
+                extractor.extract_from_bytes(b"pdf without file context")
+            warn_no_file = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+            assert len(warn_no_file) == 1
+            assert "：" not in warn_no_file[0]
+
+            # 设置后：日志含路径
+            caplog.clear()
+            set_current_extract_file("C:/scan/报告.pdf")
+            with caplog.at_level(logging.INFO, logger="fuscan.extractors.pdf"):
+                extractor.extract_from_bytes(b"pdf with file context")
+            warn_with_file = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+            assert len(warn_with_file) == 1
+            assert "C:/scan/报告.pdf" in warn_with_file[0]
+
+            # 清空后：恢复无路径
+            caplog.clear()
+            reset_current_extract_file()
+            assert get_current_extract_file_label() == ""
+        finally:
+            monkeypatch.undo()
+            reset_current_extract_file()
 
     def test_pdfium_child_objects_closed_each_page(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """每页提取后 textpage/page 应显式 close，避免 doc.close() 后 GC 终结触发断言。

@@ -57,6 +57,12 @@ logger = logging.getLogger(__name__)
 # 返回空串，回退到静态 ``engine_for_extension``。
 _engine_info_local = threading.local()
 
+# 当前线程正在提取的文件路径：scanner 在 ``_scan_entry`` 开头设置，
+# 提取器内部（如 PdfExtractor 的聚合 WARNING）读取，把文件定位信息
+# 写进日志，便于按文件分析提取失败原因。提取器接口只收字节（不含路径），
+# 线程局部是传递定位信息的零侵入通道（与 _engine_info_local 同模式）。
+_current_file_local = threading.local()
+
 
 def get_last_extract_engine() -> str:
     """返回当前线程最近一次提取实际使用的引擎信息。
@@ -73,6 +79,30 @@ def reset_last_extract_engine() -> None:
     :func:`get_last_extract_engine` 返回空串，扫描器回退到静态引擎名。
     """
     _engine_info_local.value = ""
+
+
+def set_current_extract_file(path: object) -> None:
+    """设置当前线程正在提取的文件路径（供提取器日志定位文件）。
+
+    在 :meth:`Scanner._scan_entry` 开头调用；提取器的聚合日志通过
+    :func:`get_current_extract_file_label` 读取并拼入消息。
+    """
+    _current_file_local.value = str(path) if path else ""
+
+
+def reset_current_extract_file() -> None:
+    """清空当前线程的提取文件路径，避免上一文件的陈旧值。"""
+    _current_file_local.value = ""
+
+
+def get_current_extract_file_label() -> str:
+    """返回当前线程正在提取的文件路径（日志定位用）。
+
+    :return: 形如 ``"：C:/path/to/file.pdf"`` 的日志后缀；未设置时返回空串
+             （独立调用提取器的场景，如 GUI 规则测试沙盒）
+    """
+    value = getattr(_current_file_local, "value", "")
+    return f"：{value}" if value else ""
 
 
 def _sanitize_extracted_content(content: str) -> str:

@@ -1332,9 +1332,16 @@ class Scanner:
             return ScanResult(path=entry.path, size=entry.size, hits=(), errors=0)
         # 清空线程局部引擎信息，避免上一文件的陈旧值（缓存命中时提取被跳过，
         # get_last_extract_engine 返回空串，回退到静态 engine_for_extension）。
-        from fuscan.extractors import get_last_extract_engine, reset_last_extract_engine
+        # 同时设置当前文件路径，供提取器聚合日志定位具体文件（如 PDF 逐页
+        # 失败汇总 WARNING）。
+        from fuscan.extractors import (
+            get_last_extract_engine,
+            reset_last_extract_engine,
+            set_current_extract_file,
+        )
 
         reset_last_extract_engine()
+        set_current_extract_file(entry.path)
         t0 = time.perf_counter()
         if self._cache is None:
             result = self._scan_entry_uncached(entry)

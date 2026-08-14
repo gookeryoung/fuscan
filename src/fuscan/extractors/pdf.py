@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import override
 
-from fuscan.extractors.base import Extractor, ExtractorError, SpeedTier
+from fuscan.extractors.base import Extractor, ExtractorError, SpeedTier, get_current_extract_file_label
 from fuscan.extractors.ocr import get_ocr_engine
 
 if TYPE_CHECKING:
@@ -170,12 +170,17 @@ class PdfExtractor(Extractor):
                         with suppress(Exception):
                             page.close()  # type: ignore[union-attr]
             if failed_pages:
-                logger.warning("pypdfium2 PDF 共 %d 页，其中 %d 页提取失败", n_pages, failed_pages)
+                logger.warning(
+                    "pypdfium2 PDF 共 %d 页，其中 %d 页提取失败%s",
+                    n_pages,
+                    failed_pages,
+                    get_current_extract_file_label(),
+                )
             return "\n".join(parts)
         except Exception as exc:
             msg = str(exc).lower()
             if "encrypt" in msg or "password" in msg:
-                logger.info("PDF 已加密，跳过")
+                logger.info("PDF 已加密，跳过%s", get_current_extract_file_label())
                 return ""
             raise ExtractorError(f"PDF 解析失败: {exc}") from exc
         finally:
@@ -203,7 +208,12 @@ class PdfExtractor(Extractor):
         try:
             n_pages = len(doc)  # type: ignore[arg-type]
             if n_pages > _MAX_PDF_OCR_PAGES:
-                logger.info("PDF 页数 %d 超过 OCR 上限 %d，跳过 OCR", n_pages, _MAX_PDF_OCR_PAGES)
+                logger.info(
+                    "PDF 页数 %d 超过 OCR 上限 %d，跳过 OCR%s",
+                    n_pages,
+                    _MAX_PDF_OCR_PAGES,
+                    get_current_extract_file_label(),
+                )
                 return ""
             try:
                 engine = get_ocr_engine()  # 启动常驻 exe；缺失/失败抛 ExtractorError
@@ -228,7 +238,12 @@ class PdfExtractor(Extractor):
                     failed_pages += 1
                     logger.debug("PDF 页 %d OCR 失败: %s", i, exc)
             if failed_pages:
-                logger.warning("PDF OCR 共 %d 页，其中 %d 页失败", n_pages, failed_pages)
+                logger.warning(
+                    "PDF OCR 共 %d 页，其中 %d 页失败%s",
+                    n_pages,
+                    failed_pages,
+                    get_current_extract_file_label(),
+                )
             return "\n".join(parts)
         finally:
             doc.close()  # type: ignore[union-attr]

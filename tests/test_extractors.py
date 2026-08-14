@@ -1295,6 +1295,105 @@ class TestExtractorRegistry:
         assert OdtExtractor().engine_info in {"lxml", "ElementTree"}
 
 
+class _NullByteExtractor(Extractor):
+    """返回含 null 字节内容的测试用提取器（模拟 PDF/OCR 提取噪声）。"""
+
+    @property
+    @override
+    def supported_extensions(self) -> tuple[str, ...]:
+        return ("nullbyte",)
+
+    @property
+    @override
+    def speed_tier(self) -> SpeedTier:
+        return SpeedTier.VERY_FAST
+
+    @override
+    def extract_from_bytes(self, data: bytes) -> str:
+        # 模拟 pypdfium2/OCR 提取产生的 null 字节
+        return "line1\x00secret\x00line2"
+
+
+class TestNullByteSanitization:
+    """提取器注册表剥离 null 字节，防止 Qt 信号传递崩溃。
+
+    PDF 文本层提取（pypdfium2）与 OCR 回退（RapidOCR）可能产生 null 字节，
+    null 字节无法经 Qt 信号传递到 QML（C 字符串以 null 结尾），触发
+    ``ValueError: embedded null character`` 并连锁导致 shiboken 溢出。
+    """
+
+    def test_extract_from_bytes_strips_null(self) -> None:
+        """registry.extract_from_bytes 剥离提取器返回内容中的 null 字节。"""
+        registry = ExtractorRegistry()
+        registry.register(_NullByteExtractor())
+        content = registry.extract_from_bytes(b"fake", "nullbyte")
+        assert "\x00" not in content
+        assert content == "line1secretline2"
+
+    def test_extract_strips_null(self, tmp_path: Path) -> None:
+        """registry.extract（路径入口）剥离提取器返回内容中的 null 字节。"""
+        path = tmp_path / "test.nullbyte"
+        path.write_bytes(b"fake")
+        registry = ExtractorRegistry()
+        registry.register(_NullByteExtractor())
+        content = registry.extract(path)
+        assert "\x00" not in content
+        assert content == "line1secretline2"
+
+    def test_extract_from_bytes_with_retry_strips_null(self) -> None:
+        """registry.extract_from_bytes_with_retry 剥离 null 字节。"""
+        registry = ExtractorRegistry()
+        registry.register(_NullByteExtractor())
+        content = registry.extract_from_bytes_with_retry(b"fake", "nullbyte")
+        assert "\x00" not in content
+        assert content == "line1secretline2"
+
+    def test_extract_with_retry_strips_null(self, tmp_path: Path) -> None:
+        """registry.extract_with_retry 剥离 null 字节。"""
+        path = tmp_path / "test.nullbyte"
+        path.write_bytes(b"fake")
+        registry = ExtractorRegistry()
+        registry.register(_NullByteExtractor())
+        content = registry.extract_with_retry(path)
+        assert "\x00" not in content
+        assert content == "line1secretline2"
+
+    def test_content_without_null_unchanged(self) -> None:
+        """无 null 字节的内容原样返回（快速路径不分配新对象）。"""
+        registry = ExtractorRegistry()
+        registry.register(_NullByteExtractor())
+        # 用真实 TextExtractor 测试无 null 字节路径
+        registry.register(TextExtractor())
+        content = registry.extract_from_bytes(b"hello world", "txt")
+        assert content == "hello world"
+
+    def test_extract_content_with_fallback_strips_null_from_read_text(self, tmp_path: Path) -> None:
+        """extract_content_with_fallback 的 read_text 回退路径剥离 null 字节。
+
+        注册提取器抛异常时回退到 read_text，二进制文件误读为文本可能含 \x00，
+        回退路径经 _sanitize_extracted_content 剥离。用 .pdf 扩展名 + 无效内容
+        触发 PdfExtractor 抛 ExtractorError → read_text 回退。
+        """
+        path = tmp_path / "corrupt.pdf"
+        # 无效 PDF 字节（含 null），pypdfium2 打开失败抛 ExtractorError → read_text 回退
+        path.write_bytes(b"not a pdf\x00null byte")
+        content = extract_content_with_fallback(path)
+        assert "\x00" not in content
+
+    def test_sanitize_extracted_content_helper(self) -> None:
+        """_sanitize_extracted_content 直接验证：剥离 null 字节、无 null 时原样返回。"""
+        from fuscan.extractors.base import _sanitize_extracted_content
+
+        # 含 null 字节 → 剥离
+        assert _sanitize_extracted_content("abc\x00def") == "abcdef"
+        assert _sanitize_extracted_content("\x00start") == "start"
+        assert _sanitize_extracted_content("end\x00") == "end"
+        assert _sanitize_extracted_content("a\x00b\x00c") == "abc"
+        # 无 null 字节 → 原样返回（快速路径）
+        assert _sanitize_extracted_content("hello world") == "hello world"
+        assert _sanitize_extracted_content("") == ""
+
+
 # ---------------------------------------------------------------------------
 # 集成函数
 # ---------------------------------------------------------------------------

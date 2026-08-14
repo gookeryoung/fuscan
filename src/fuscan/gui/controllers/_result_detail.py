@@ -46,6 +46,21 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+
+def _strip_null(text: str) -> str:
+    """剥离 null 字节，防御性清洗经 Qt 信号传递到 QML 的文本。
+
+    根因修复在提取器注册表（:func:`fuscan.extractors.base._sanitize_extracted_content`）
+    已剥离提取内容的 null 字节，但本修复部署前已完成扫描的结果中，``RuleHit.match_text``
+    与 ``hit.detail`` 可能仍含 null 字节（PDF/OCR 提取噪声）。null 字节无法经 Qt
+    信号传递（C 字符串以 null 结尾），会触发 ``ValueError: embedded null character``
+    并连锁导致 shiboken 溢出。此处对传入 QML 的文本字段二次清洗作为兜底。
+    """
+    if "\x00" not in text:
+        return text
+    return text.replace("\x00", "")
+
+
 # 上下文提取：匹配行前后各保留的行数
 # 取 5 行（前后共 11 行）以提供足够的代码/配置上下文——多数源码一个
 # 逻辑块约 5-10 行，过窄（如 2 行）会让用户无法判断命中在文件中的位置
@@ -101,6 +116,10 @@ def _extract_contexts_batch(path: Path, match_texts: list[str]) -> dict[str, str
         # 此时回退到 read_text 直接读取原始文本，保证无提取器文件也能提取上下文。
         if not content:
             content = path.read_text(encoding="utf-8", errors="replace")
+        # 防御性剥离 null 字节：read_text 回退路径未经注册表清洗，
+        # 二进制文件误读为文本可能含 \x00，splitlines 后会污染上下文。
+        if "\x00" in content:
+            content = content.replace("\x00", "")
     except OSError:
         return {}
 
@@ -160,8 +179,8 @@ def build_detail_hits_light(result: ScanResult | None) -> list[dict[str, object]
                 "ruleName": hit.rule_name,
                 "severityText": severity_text(hit.severity),
                 "severityColor": severity_color_hex(hit.severity),
-                "context": hit.detail,
-                "matchText": hit.match_text,
+                "context": _strip_null(hit.detail),
+                "matchText": _strip_null(hit.match_text),
                 "matchCount": hit.match_count,
                 "target": hit.target,
                 "description": hit.match_description,
@@ -202,8 +221,8 @@ def build_detail_hits_full(result: ScanResult | None) -> list[dict[str, object]]
                 "ruleName": hit.rule_name,
                 "severityText": severity_text(hit.severity),
                 "severityColor": severity_color_hex(hit.severity),
-                "context": context,
-                "matchText": hit.match_text,
+                "context": _strip_null(context),
+                "matchText": _strip_null(hit.match_text),
                 "matchCount": hit.match_count,
                 "target": hit.target,
                 "description": hit.match_description,

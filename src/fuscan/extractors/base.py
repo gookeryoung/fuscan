@@ -75,6 +75,21 @@ def reset_last_extract_engine() -> None:
     _engine_info_local.value = ""
 
 
+def _sanitize_extracted_content(content: str) -> str:
+    """剥离提取文本中的 null 字节（``\\x00``）。
+
+    PDF 文本层提取（pypdfium2）与 OCR 回退（RapidOCR）可能产生 null 字节，
+    null 字节无法经 Qt 信号传递到 QML（C 字符串以 null 结尾），会触发
+    ``ValueError: embedded null character`` 并连锁导致 shiboken 溢出。
+    null 字节在文本内容中永远是提取噪声，剥离不影响语义。
+
+    无 null 字节时 ``str.replace`` 走 C 层快速扫描不分配新对象，开销可忽略。
+    """
+    if "\x00" not in content:
+        return content
+    return content.replace("\x00", "")
+
+
 class SpeedTier(enum.Enum):
     """提取器解析速度档次（5 档）。
 
@@ -335,7 +350,7 @@ class ExtractorRegistry:
         _engine_info_local.value = ""
         content = extractor.extract(path)
         _engine_info_local.value = getattr(extractor, "last_engine_info", "") or extractor.engine_info
-        return content
+        return _sanitize_extracted_content(content)
 
     def extract_from_bytes(self, data: bytes, extension: str) -> str:
         """按扩展名从内存字节提取文件内容。
@@ -354,7 +369,7 @@ class ExtractorRegistry:
         _engine_info_local.value = ""
         content = extractor.extract_from_bytes(data)
         _engine_info_local.value = getattr(extractor, "last_engine_info", "") or extractor.engine_info
-        return content
+        return _sanitize_extracted_content(content)
 
     def extract_from_bytes_with_retry(
         self,
@@ -403,7 +418,7 @@ class ExtractorRegistry:
             on_failure=on_failure,
         )
         _engine_info_local.value = getattr(extractor, "last_engine_info", "") or extractor.engine_info
-        return content
+        return _sanitize_extracted_content(content)
 
     def extract_with_retry(
         self,
@@ -445,7 +460,7 @@ class ExtractorRegistry:
             on_failure=on_failure,
         )
         _engine_info_local.value = getattr(extractor, "last_engine_info", "") or extractor.engine_info
-        return content
+        return _sanitize_extracted_content(content)
 
     def _retry_loop(
         self,
@@ -557,7 +572,7 @@ def extract_content_with_fallback(path: Path) -> str:
         return extract_content(path)
     except Exception:
         logger.debug("提取器提取失败，回退到纯文本: %s", path, exc_info=True)
-        return path.read_text(encoding="utf-8", errors="ignore")
+        return _sanitize_extracted_content(path.read_text(encoding="utf-8", errors="ignore"))
 
 
 def extract_content_from_bytes_with_retry(
@@ -624,4 +639,4 @@ def extract_content_with_fallback_and_retry(
         )
     except Exception:
         logger.debug("提取器提取失败，回退到纯文本: %s", path, exc_info=True)
-        return path.read_text(encoding="utf-8", errors="ignore")
+        return _sanitize_extracted_content(path.read_text(encoding="utf-8", errors="ignore"))

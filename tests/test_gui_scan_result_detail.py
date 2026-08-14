@@ -360,6 +360,58 @@ class TestDetailPropertiesExtended:
         controller.setSelectedResultIndex(0)
         assert controller.detailEngine == "pypdfium2"
 
+    def test_detail_hits_light_strips_null_bytes(self) -> None:
+        """build_detail_hits_light 剥离 matchText/context 中的 null 字节。
+
+        防御性兜底：本修复部署前已完成扫描的结果，RuleHit.match_text/detail
+        可能含 null 字节（PDF/OCR 提取噪声），传入 QML 前须清洗。
+        """
+        from fuscan.gui.controllers._result_detail import build_detail_hits_light
+
+        hit = RuleHit(
+            rule_name="测试规则",
+            severity=Severity.CRITICAL,
+            detail="命中\x00上下文",
+            match_text="sec\x00ret",
+            match_texts=("sec\x00ret",),
+            match_count=1,
+            target="content",
+            match_description="敏感密钥检测",
+        )
+        result = ScanResult(path=Path("/tmp/test.pdf"), size=100, hits=(hit,))
+        model = build_detail_hits_light(result)
+        assert len(model) == 1
+        match_text = str(model[0]["matchText"])
+        context = str(model[0]["context"])
+        assert "\x00" not in match_text
+        assert match_text == "secret"
+        assert "\x00" not in context
+        assert context == "命中上下文"
+
+    def test_detail_hits_full_strips_null_bytes(self, tmp_path: Path) -> None:
+        """build_detail_hits_full 剥离 matchText/context 中的 null 字节。"""
+        from fuscan.gui.controllers._result_detail import build_detail_hits_full
+
+        # 创建真实文件供上下文提取读取（内容含 null 字节，经注册表清洗后为纯文本）
+        path = tmp_path / "test.txt"
+        path.write_bytes(b"line1\nsec\x00ret\nline3")
+        hit = RuleHit(
+            rule_name="测试规则",
+            severity=Severity.CRITICAL,
+            detail="命中\x00占位",
+            match_text="secret",  # 注册表清洗后文件内容中的匹配文本（无 null）
+            match_texts=("secret",),
+            match_count=1,
+            target="content",
+            match_description="敏感密钥检测",
+        )
+        result = ScanResult(path=path, size=100, hits=(hit,))
+        model = build_detail_hits_full(result)
+        assert len(model) == 1
+        # matchText 与 context 均不含 null 字节
+        assert "\x00" not in str(model[0]["matchText"])
+        assert "\x00" not in str(model[0]["context"])
+
     def test_detail_hits_model_includes_extended_fields(self, controller_with_results: ScanController) -> None:
         """detailHitsModel 应包含 matchText/matchCount/target/description 字段。"""
         controller_with_results.setSelectedResultIndex(0)

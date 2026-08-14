@@ -414,6 +414,36 @@ Rectangle {
                                         anchors.leftMargin: 4
                                         anchors.rightMargin: 4
                                         spacing: 6
+                                        // 状态指示器：解析中转圈（AnimatedSprite 帧动画），
+                                        // 解析完成勾选（✓ 文本，成功色）。与 PhaseNode 的
+                                        // running/done 语义一致，列表场景用轻量文本避免
+                                        // ColorOverlay shader 开销。
+                                        Item {
+                                            Layout.preferredWidth: 16
+                                            Layout.preferredHeight: 16
+                                            // 转圈：复用 PhaseNode 同款 sprite sheet（24 帧 × 50ms）
+                                            AnimatedSprite {
+                                                anchors.fill: parent
+                                                visible: modelData.status === "scanning"
+                                                source: "qrc:/animations/spinner_primary.png"
+                                                frameWidth: 20
+                                                frameHeight: 20
+                                                frameCount: 24
+                                                frameDuration: 50
+                                                running: modelData.status === "scanning"
+                                            }
+                                            // 勾选：成功色 ✓ 文本
+                                            Label {
+                                                anchors.fill: parent
+                                                visible: modelData.status !== "scanning"
+                                                text: "✓"
+                                                font.pixelSize: 14
+                                                font.bold: true
+                                                color: card.theme.colorSuccess
+                                                horizontalAlignment: Text.AlignHCenter
+                                                verticalAlignment: Text.AlignVCenter
+                                            }
+                                        }
                                         // 文件名（后端已取路径末段）
                                         Label {
                                             Layout.fillWidth: true

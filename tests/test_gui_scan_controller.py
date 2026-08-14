@@ -2940,6 +2940,74 @@ class TestIter143CoverageGaps:
         )
         assert controller.recentParsedFiles[0]["name"] == "a.txt"
 
+    def test_recent_same_file_updates_not_duplicates(self, controller: ScanController) -> None:
+        """同一文件多次进度回调应更新末条而非反复新增条目。
+
+        大文件解析期间 150ms 节流会多次回调同一 current_file，原实现每次 append
+        导致同一文件在明细列表中反复出现。改为按路径去重：末条路径相同时就地
+        更新 elapsedMs/size/engine，status 保持 "scanning"。
+        """
+        path = "/big/report.pdf"
+        for ms in (100.0, 300.0, 600.0):
+            controller._on_scan_progress(
+                ProgressInfo(
+                    phase="scan",
+                    scanned=1,
+                    total=1,
+                    current_file=path,
+                    current_file_size=5_000_000,
+                    current_file_ext="pdf",
+                    current_file_elapsed_ms=ms,
+                    current_file_engine="pypdfium2",
+                )
+            )
+        recent = controller.recentParsedFiles
+        # 仅一条条目（不重复）
+        assert len(recent) == 1
+        assert recent[0]["path"] == path
+        # elapsedMs 为最后一次回调的值（实时增长）
+        assert recent[0]["elapsedMs"] == 600.0
+
+    def test_recent_status_scanning_for_current_file(self, controller: ScanController) -> None:
+        """当前正在解析的文件 status 为 "scanning"（QML 据此显示转圈）。"""
+        controller._on_scan_progress(
+            ProgressInfo(
+                phase="scan",
+                scanned=1,
+                total=1,
+                current_file="/a.txt",
+                current_file_size=100,
+            )
+        )
+        assert controller.recentParsedFiles[0]["status"] == "scanning"
+
+    def test_recent_status_done_when_new_file_arrives(self, controller: ScanController) -> None:
+        """新文件到来时前一条从 "scanning" 切换为 "done"（QML 据此显示勾选）。"""
+        controller._on_scan_progress(
+            ProgressInfo(phase="scan", scanned=1, total=2, current_file="/a.txt", current_file_size=100)
+        )
+        controller._on_scan_progress(
+            ProgressInfo(phase="scan", scanned=2, total=2, current_file="/b.txt", current_file_size=200)
+        )
+        recent = controller.recentParsedFiles
+        # 最新在前：b（scanning）→ a（done）
+        assert recent[0]["path"] == "/b.txt"
+        assert recent[0]["status"] == "scanning"
+        assert recent[1]["path"] == "/a.txt"
+        assert recent[1]["status"] == "done"
+
+    def test_recent_finalize_marks_last_done(self, controller: ScanController) -> None:
+        """_finalize_last_recent_file 将末条 scanning 标记为 done（扫描完成/暂停/取消时调用）。"""
+        controller._on_scan_progress(
+            ProgressInfo(phase="scan", scanned=1, total=1, current_file="/a.txt", current_file_size=100)
+        )
+        assert controller.recentParsedFiles[0]["status"] == "scanning"
+        controller._finalize_last_recent_file()
+        assert controller.recentParsedFiles[0]["status"] == "done"
+        # 无条目或已 done 时不重复操作
+        controller._finalize_last_recent_file()
+        assert controller.recentParsedFiles[0]["status"] == "done"
+
     def test_recent_emit_throttled_below_thresholds(
         self,
         controller: ScanController,

@@ -524,6 +524,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     "ext": entry.get("ext", ""),
                     "elapsedMs": elapsed_ms,
                     "engine": entry.get("engine", ""),
+                    "status": entry.get("status", "done"),
                     "sizeText": format_size(size),
                     "elapsedText": format_elapsed(elapsed_ms / 1000.0),
                 }
@@ -1564,6 +1565,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._set_status(STR_STATUS_PAUSED, STR_STATUS_PAUSED)
             # 暂停时强制刷新明细列表，让用户看到暂停瞬间的完整解析明细
             # （不受节流延迟影响，可能有 pending 未刷新）
+            self._finalize_last_recent_file()
             self._maybe_emit_recent(force=True)
         self.scanStateChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -1656,18 +1658,40 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 追加最近解析文件明细：仅在有实际文件路径且大小>0（真实解析了内容）时
         # 记录，避免 walk/archive 汇总回调污染明细列表。
         if info.current_file and info.current_file_size > 0:
-            self._recent_files.append(
-                {
-                    "path": info.current_file,
-                    "size": info.current_file_size,
-                    "ext": info.current_file_ext,
-                    "elapsedMs": info.current_file_elapsed_ms,
-                    "engine": info.current_file_engine,
-                }
-            )
+            # 同一文件解析期间进度回调多次触发（150ms 节流），若每次都 append
+            # 会导致同一文件在明细列表中反复新增条目。改为按路径去重：末条路径
+            # 相同时就地更新（elapsedMs 实时增长，status 保持 "scanning" 转圈）；
+            # 新文件到来时将末条标记为 "done"（勾选），再追加新 "scanning" 条目。
+            if self._recent_files and str(self._recent_files[-1].get("path", "")) == info.current_file:
+                last = self._recent_files[-1]
+                last["size"] = info.current_file_size
+                last["elapsedMs"] = info.current_file_elapsed_ms
+                last["engine"] = info.current_file_engine
+            else:
+                # 新文件：前一条（若仍在解析中）标记为完成
+                self._finalize_last_recent_file()
+                self._recent_files.append(
+                    {
+                        "path": info.current_file,
+                        "size": info.current_file_size,
+                        "ext": info.current_file_ext,
+                        "elapsedMs": info.current_file_elapsed_ms,
+                        "engine": info.current_file_engine,
+                        "status": "scanning",
+                    }
+                )
             # 累计待刷新计数，由 _maybe_emit_recent 按低频阈值择机 emit
             # recentParsedFilesChanged（不在此处直接 emit，避免高频全表重建）。
             self._recent_pending += 1
+
+    def _finalize_last_recent_file(self) -> None:
+        """将最近一条仍为 ``"scanning"`` 的明细标记为 ``"done"``。
+
+        新文件到来 / 扫描完成 / 暂停 / 取消时调用，使末条明细从转圈切换为勾选。
+        仅修改末条 status，不触发 emit（由调用方择机 ``_maybe_emit_recent`` 刷新）。
+        """
+        if self._recent_files and self._recent_files[-1].get("status") == "scanning":
+            self._recent_files[-1]["status"] = "done"
 
     def _maybe_emit_recent(self, *, force: bool = False) -> None:
         """按低频节流择机 emit ``recentParsedFilesChanged`` 刷新明细列表。
@@ -1906,6 +1930,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
         # 强制刷新明细列表定格最新状态（不受节流延迟影响，可能有 pending 未刷新）
+        self._finalize_last_recent_file()
         self._maybe_emit_recent(force=True)
 
     def _auto_replace_hits(
@@ -2007,6 +2032,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._set_status(STR_STATUS_CANCELLED, report.summary())
         self._set_scan_state(STATE_RESULTS if report.hits else STATE_SETUP)
         # 强制刷新明细列表定格取消时最新状态（可能有 pending 未刷新）
+        self._finalize_last_recent_file()
         self._maybe_emit_recent(force=True)
 
     # ----------------------------- 内部方法 -----------------------------

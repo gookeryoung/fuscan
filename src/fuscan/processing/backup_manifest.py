@@ -48,7 +48,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fuscan.config import CONFIG_DIR
+from fuscan import config as config_module
 
 __all__ = [
     "BackupEntry",
@@ -72,7 +72,8 @@ def default_state_dir() -> Path:
 
     :return: 状态目录路径（路径可能尚不存在，调用方按需 ``mkdir``）
     """
-    return CONFIG_DIR / "state"
+    # 运行时读取 ``config_module.CONFIG_DIR`` 当前值，支持测试 monkeypatch
+    return config_module.CONFIG_DIR / "state"
 
 
 def default_manifest_path() -> Path:

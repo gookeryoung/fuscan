@@ -15,7 +15,7 @@ import logging
 import shutil
 from pathlib import Path
 
-from fuscan.config import CONFIG_DIR
+from fuscan import config as config_module
 
 __all__ = ["default_backup_dir", "detect_default_staging_dir"]
 
@@ -66,4 +66,5 @@ def default_backup_dir() -> Path:
 
     :return: 默认备份区目录路径（路径可能尚不存在，调用方按需 ``mkdir``）
     """
-    return CONFIG_DIR / "backup"
+    # 运行时读取 ``config_module.CONFIG_DIR`` 当前值，支持测试 monkeypatch
+    return config_module.CONFIG_DIR / "backup"

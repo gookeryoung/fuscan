@@ -101,6 +101,25 @@ class TestExportPdf:
         data = export_pdf(report)
         assert data[:5] == b"%PDF-"
 
+    def test_export_pdf_with_engine_set(self, tmp_path: Path) -> None:
+        """result.engine 非空时 PDF 表格应含「引擎」列且正常生成（OCR 回退场景）。"""
+        results = (
+            ScanResult(
+                path=tmp_path / "scan.pdf",
+                size=100,
+                hits=(RuleHit("密钥", Severity.CRITICAL, "d", match_count=1),),
+                engine="pypdfium2 + rapidocr-json",
+            ),
+        )
+        report = ScanReport(
+            root=tmp_path,
+            results=results,
+            stats=ScanStats(total_files=1, scanned_files=1, matched_files=1, total_matches=1),
+        )
+        # 不应抛异常，应正常生成 PDF
+        data = export_pdf(report)
+        assert data[:5] == b"%PDF-"
+
     def test_truncate_text_helper(self) -> None:
         """iter-138：_truncate_text 辅助函数应正确截断超长文本。"""
         from fuscan.export.report import _truncate_text
@@ -145,9 +164,48 @@ class TestExportExcel:
         wb = load_workbook(_io.BytesIO(data))
         assert "扫描汇总" in wb.sheetnames
         assert "命中明细" in wb.sheetnames
-        # 命中明细表头应在第 1 行
+        # 命中明细表头应在第 1 行，含「解析引擎」列
         headers = [c.value for c in wb["命中明细"][1]]
-        assert headers == ["路径", "大小", "严重等级", "规则", "描述", "匹配数", "详情"]
+        assert headers == ["路径", "大小", "严重等级", "规则", "描述", "匹配数", "解析引擎", "详情"]
+
+    def test_export_excel_engine_from_result(self, tmp_path: Path) -> None:
+        """result.engine 非空时应写入运行期引擎名（如 OCR 回退）。"""
+        import io as _io
+
+        from openpyxl import load_workbook
+
+        results = (
+            ScanResult(
+                path=tmp_path / "scan.pdf",
+                size=100,
+                hits=(RuleHit("密钥", Severity.CRITICAL, "d", match_count=1),),
+                engine="pypdfium2 + rapidocr-json",
+            ),
+        )
+        report = ScanReport(
+            root=tmp_path,
+            results=results,
+            stats=ScanStats(total_files=1, scanned_files=1, matched_files=1, total_matches=1),
+        )
+        data = export_excel(report)
+        wb = load_workbook(_io.BytesIO(data))
+        # 第 2 行第 7 列（解析引擎）应为运行期引擎名
+        assert wb["命中明细"].cell(row=2, column=7).value == "pypdfium2 + rapidocr-json"
+
+    def test_export_excel_engine_fallback(self, tmp_path: Path) -> None:
+        """result.engine 为空时回退到 engine_for_extension 静态映射。"""
+        import io as _io
+
+        from openpyxl import load_workbook
+
+        from fuscan.scanner._helpers import engine_for_extension
+
+        report = _build_report(tmp_path)
+        data = export_excel(report)
+        wb = load_workbook(_io.BytesIO(data))
+        # _build_report 全部 .txt 文件，engine 为空 → 回退 engine_for_extension("txt")
+        expected = engine_for_extension("txt")
+        assert wb["命中明细"].cell(row=2, column=7).value == expected
 
 
 class TestSaveReport:

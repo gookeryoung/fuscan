@@ -26,6 +26,7 @@ import io
 from pathlib import Path
 
 from fuscan.rules.model import Severity
+from fuscan.scanner._helpers import engine_for_extension
 from fuscan.scanner.result import ScanReport, format_size
 
 __all__ = ["export_excel", "export_pdf", "export_report", "save_report"]
@@ -110,7 +111,9 @@ def export_pdf(report: ScanReport) -> bytes:
         story.append(Paragraph(f"命中文件 ({len(report.hits)})", heading_style))
         story.append(Spacer(1, 3 * mm))
         # 表头
-        header = [Paragraph(text, cell_style) for text in ["路径", "大小", "等级", "规则", "描述", "匹配数", "详情"]]
+        header = [
+            Paragraph(text, cell_style) for text in ["路径", "大小", "等级", "规则", "描述", "匹配数", "引擎", "详情"]
+        ]
         # 表格行含 Paragraph 与字符串混合，用 list[Any] 容纳
         rows: list[list[Any]] = [header]
         for result in report.hits:
@@ -118,6 +121,8 @@ def export_pdf(report: ScanReport) -> bytes:
                 rel = str(result.path.relative_to(report.root))
             except ValueError:
                 rel = str(result.path)
+            # 引擎名：优先取运行期记录的 result.engine（如 OCR 回退），空串回退静态映射
+            engine_name = result.engine or engine_for_extension(result.path.suffix.lstrip("."))
             for hit in result.hits:
                 rows.append(
                     [
@@ -127,10 +132,11 @@ def export_pdf(report: ScanReport) -> bytes:
                         Paragraph(_truncate_text(hit.rule_name), cell_style),
                         Paragraph(_truncate_text(hit.match_description or ""), cell_style),
                         Paragraph(str(hit.match_count), cell_style),
+                        Paragraph(_truncate_text(engine_name), cell_style),
                         Paragraph(_truncate_text(hit.detail), cell_style),
                     ]
                 )
-        col_widths = [50 * mm, 18 * mm, 14 * mm, 24 * mm, 24 * mm, 12 * mm, 32 * mm]
+        col_widths = [44 * mm, 16 * mm, 12 * mm, 22 * mm, 22 * mm, 11 * mm, 16 * mm, 27 * mm]
         table = Table(rows, colWidths=col_widths, repeatRows=1)
         table.setStyle(
             TableStyle(
@@ -191,7 +197,7 @@ def export_excel(report: ScanReport) -> bytes:
 
     # Sheet2: 命中明细
     ws2 = wb.create_sheet("命中明细")
-    headers = ["路径", "大小", "严重等级", "规则", "描述", "匹配数", "详情"]
+    headers = ["路径", "大小", "严重等级", "规则", "描述", "匹配数", "解析引擎", "详情"]
     for col_idx, header in enumerate(headers, start=1):
         cell = ws2.cell(row=1, column=col_idx, value=header)
         cell.font = bold_font
@@ -210,6 +216,8 @@ def export_excel(report: ScanReport) -> bytes:
             rel = str(result.path.relative_to(report.root))
         except ValueError:
             rel = str(result.path)
+        # 引擎名：优先取运行期记录的 result.engine（如 OCR 回退），空串回退静态映射
+        engine_name = result.engine or engine_for_extension(result.path.suffix.lstrip("."))
         for hit in result.hits:
             ws2.cell(row=row_idx, column=1, value=rel).alignment = wrap_align
             ws2.cell(row=row_idx, column=2, value=format_size(result.size))
@@ -218,10 +226,11 @@ def export_excel(report: ScanReport) -> bytes:
             ws2.cell(row=row_idx, column=4, value=hit.rule_name).alignment = wrap_align
             ws2.cell(row=row_idx, column=5, value=hit.match_description).alignment = wrap_align
             ws2.cell(row=row_idx, column=6, value=hit.match_count)
-            ws2.cell(row=row_idx, column=7, value=hit.detail).alignment = wrap_align
+            ws2.cell(row=row_idx, column=7, value=engine_name).alignment = wrap_align
+            ws2.cell(row=row_idx, column=8, value=hit.detail).alignment = wrap_align
             row_idx += 1
     # 列宽
-    col_widths = [50, 12, 12, 20, 20, 10, 40]
+    col_widths = [50, 12, 12, 20, 20, 10, 18, 40]
     for col_idx, width in enumerate(col_widths, start=1):
         ws2.column_dimensions[get_column_letter(col_idx)].width = width
     # 冻结表头

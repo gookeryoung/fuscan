@@ -67,6 +67,7 @@ from fuscan.rules import (
     save_ruleset,
 )
 from fuscan.rules.model import RuleSet, ScanParams
+from fuscan.rules.sandbox import match_rule_against_text
 from fuscan.rules.whitelist import WhitelistEntry
 from fuscan.utils.time import now_iso_local
 
@@ -1135,6 +1136,49 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         logger.info(msg)
         self.rulesIoCompleted.emit(True, msg)  # pyrefly: ignore [missing-attribute]
         return True
+
+    # ------------------- 规则测试沙盒 -------------------
+
+    @Slot(str, str, result=str)  # pyrefly: ignore [not-callable]
+    def testRuleText(self, rule_name: str, text: str) -> str:
+        """对输入文本执行指定规则的匹配测试，返回 JSON 结果。
+
+        供 QML「规则测试」面板调用：用户在规则列表选中一条规则、输入测试
+        文本后即时查看命中情况。在当前全局规则集 ``self._ruleset`` 中按
+        ``name`` 查找规则，调用 :func:`match_rule_against_text` 求值。
+
+        :param rule_name: 规则名称（与规则列表 ``model.name`` 一致）
+        :param text: 测试文本（CONTENT 规则的匹配内容）
+        :return: JSON 字符串（``ensure_ascii=False``），字段：
+
+            - ``matched``：是否命中
+            - ``matchCount``：命中次数
+            - ``target``：匹配目标（``filename``/``content``/``path``）
+            - ``detail``：命中详情或错误说明
+            - ``matches``：命中文本数组（``[{"text": "..."}]``，供 QML 高亮）
+            - ``error``：规则未找到或规则集未加载时 present
+        """
+        import json as _json
+
+        if self._ruleset is None:
+            return _json.dumps({"matched": False, "error": "规则集未加载"}, ensure_ascii=False)
+        rule = next((r for r in self._ruleset.rules if r.name == rule_name), None)
+        if rule is None:
+            return _json.dumps(
+                {"matched": False, "error": f"规则未找到: {rule_name}"},
+                ensure_ascii=False,
+            )
+        result = match_rule_against_text(rule, text)
+        return _json.dumps(
+            {
+                "matched": result.matched,
+                "matchCount": result.match_count,
+                "target": result.target,
+                "detail": result.detail,
+                "matches": [{"text": t} for t in result.match_texts],
+            },
+            ensure_ascii=False,
+        )
 
     # ------------------- 任务级规则预览 -------------------
 

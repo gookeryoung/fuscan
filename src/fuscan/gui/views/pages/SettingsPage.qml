@@ -15,6 +15,8 @@ Item {
     property WhitelistControllerType whitelistController: WhitelistController
     property RulesControllerType rulesController: RulesController
     property WorkspaceControllerType workspaceController: WorkspaceController
+    // 规则测试沙盒结果（testRuleText 返回的 JSON 解析对象，null=未测试）
+    property var testResult: null
 
     ColumnLayout {
         anchors.fill: parent
@@ -319,6 +321,129 @@ Item {
                         font.pixelSize: configController.fontSize
                         font.bold: configController.fontBold
                         color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                    }
+                }
+
+                // ---------- 规则测试沙盒 ----------
+                // 选择规则 + 输入文本 → 即时验证匹配（基于全局规则集 self._ruleset）
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                }
+
+                Label {
+                    text: "规则测试"
+                    font.pixelSize: theme.fontSizeHeading
+                    font.bold: true
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
+                Label {
+                    text: "选择规则并输入文本，即时验证匹配结果。CONTENT 规则匹配输入文本，FILENAME/PATH 规则匹配文件名 test.txt。"
+                    font.pixelSize: theme.fontSizeCaption
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                }
+
+                // 规则选择 + 测试按钮
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label {
+                        text: "规则"
+                        font.pixelSize: theme.fontSizeBody
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        Layout.preferredWidth: 80
+                    }
+                    ComboBox {
+                        id: testRuleCombo
+                        Layout.fillWidth: true
+                        // ruleModel 暴露 name 角色，currentText 即选中规则名
+                        model: rulesController.ruleModel
+                        textRole: "name"
+                    }
+                    IconButton {
+                        text: "测试匹配"
+                        tooltip: "对输入文本执行选中规则的匹配测试"
+                        accent: "primary"
+                        enabled: testRuleCombo.count > 0
+                        onClicked: {
+                            var raw = rulesController.testRuleText(
+                                testRuleCombo.currentText, testTextInput.text)
+                            try {
+                                settingsPage.testResult = JSON.parse(raw)
+                            } catch (e) {
+                                settingsPage.testResult = {"error": "结果解析失败"}
+                            }
+                        }
+                    }
+                }
+
+                // 测试文本输入
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 80
+                    clip: true
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                    TextArea {
+                        id: testTextInput
+                        placeholderText: "输入测试文本..."
+                        wrapMode: TextArea.Wrap
+                        font.pixelSize: theme.fontSizeBody
+                        background: Rectangle {
+                            color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                            border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                            border.width: 1
+                            radius: theme.radiusMd
+                        }
+                    }
+                }
+
+                // 结果摘要：命中次数 + 匹配目标
+                Label {
+                    Layout.fillWidth: true
+                    visible: settingsPage.testResult !== null && !settingsPage.testResult.error
+                    text: settingsPage.testResult && settingsPage.testResult.matched
+                        ? "命中 " + settingsPage.testResult.matchCount + " 次（目标: " + settingsPage.testResult.target + "）"
+                        : (settingsPage.testResult !== null ? "未命中" : "")
+                    font.pixelSize: theme.fontSizeBody
+                    color: settingsPage.testResult && settingsPage.testResult.matched
+                        ? theme.colorSuccess
+                        : (theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary)
+                }
+
+                // 错误提示（规则未找到 / 规则集未加载 / 结果解析失败）
+                Label {
+                    Layout.fillWidth: true
+                    visible: settingsPage.testResult !== null && !!settingsPage.testResult.error
+                    text: settingsPage.testResult ? settingsPage.testResult.error : ""
+                    font.pixelSize: theme.fontSizeCaption
+                    color: theme.colorDanger
+                    wrapMode: Text.WordWrap
+                }
+
+                // 命中文本列表（绿色淡底高亮每个匹配片段）
+                Repeater {
+                    model: settingsPage.testResult && settingsPage.testResult.matches
+                        ? settingsPage.testResult.matches : []
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: matchTextLbl.implicitHeight + 8
+                        color: Qt.rgba(theme.colorSuccess.r,
+                                       theme.colorSuccess.g,
+                                       theme.colorSuccess.b,
+                                       0.12)
+                        radius: theme.radiusSm
+                        Label {
+                            id: matchTextLbl
+                            anchors.fill: parent
+                            anchors.margins: 4
+                            text: modelData.text
+                            font.pixelSize: theme.fontSizeCaption
+                            color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                            wrapMode: Text.WrapAnywhere
+                        }
                     }
                 }
 

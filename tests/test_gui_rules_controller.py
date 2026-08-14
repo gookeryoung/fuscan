@@ -2168,3 +2168,43 @@ class TestPreviewRuleset:
         assert entry["ruleName"] == "r1"
         assert entry["note"] == "备注"
         assert entry["source"] == "runtime"
+
+
+class TestRuleTestSandbox:
+    """规则测试沙盒 Slot ``testRuleText`` 验证。"""
+
+    def test_matched_returns_hits(self, controller_with_file: RulesController) -> None:
+        """命中时返回 matched=True、matchCount、matches 命中文本数组。"""
+        data = json.loads(controller_with_file.testRuleText("敏感内容", "my password is 123"))
+        assert data["matched"] is True
+        assert data["matchCount"] >= 1
+        assert data["target"] == "content"
+        assert any("password" in m["text"] for m in data["matches"])
+
+    def test_not_matched_returns_false(self, controller_with_file: RulesController) -> None:
+        """规则存在但未命中时 matched=False。"""
+        data = json.loads(controller_with_file.testRuleText("敏感内容", "no secrets here"))
+        assert data["matched"] is False
+        assert data["matches"] == []
+
+    def test_unknown_rule_returns_error(self, controller_with_file: RulesController) -> None:
+        """规则名不存在时返回 error。"""
+        data = json.loads(controller_with_file.testRuleText("不存在的规则", "text"))
+        assert data["matched"] is False
+        assert "error" in data
+
+    def test_ruleset_none_returns_error(self, config_controller: ConfigController) -> None:
+        """规则集未加载（无规则文件且禁用内置）时返回 error。"""
+        config_controller.config.use_builtin = False
+        controller = RulesController(config_controller)
+        assert controller.ruleset is None
+        data = json.loads(controller.testRuleText("any", "text"))
+        assert data["matched"] is False
+        assert "error" in data
+
+    def test_result_is_valid_json_with_ensure_ascii_false(self, controller_with_file: RulesController) -> None:
+        """返回的 JSON 含中文规则命中文本时保持 UTF-8（ensure_ascii=False）。"""
+        # 内置规则含中文规则名，命中后 detail/matches 可能含中文，验证可被 json.loads 解析
+        data = json.loads(controller_with_file.testRuleText("敏感内容", "password"))
+        assert isinstance(data, dict)
+        assert "matched" in data

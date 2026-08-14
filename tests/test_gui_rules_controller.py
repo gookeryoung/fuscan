@@ -1717,6 +1717,291 @@ class TestAppendWhitelistEntry:
         assert entry.source == "runtime"
 
 
+# ============================= scan_params 写操作 =============================
+
+
+class TestApplyScanParamUpdate:
+    """``_apply_scan_param_update`` 纯函数测试。"""
+
+    def test_update_on_none_ruleset_creates_new(self) -> None:
+        """ruleset=None 时创建带 scan_params 的新 RuleSet。"""
+        from fuscan.gui.controllers.rules_controller import _apply_scan_param_update
+        from fuscan.rules.model import RuleSet
+
+        result = _apply_scan_param_update(None, {"max_workers": 8})
+        assert isinstance(result, RuleSet)
+        assert result.version == "1.0"
+        assert result.scan_params is not None
+        assert result.scan_params.max_workers == 8
+
+    def test_update_preserves_rules_and_whitelist(self) -> None:
+        """更新 scan_params 时保留原 rules/whitelist 不变。"""
+        from fuscan.gui.controllers.rules_controller import _apply_scan_param_update
+        from fuscan.rules.model import LeafMatch, MatchMode, MatchTarget, Rule, RuleSet, Severity
+        from fuscan.rules.whitelist import WhitelistEntry
+
+        rule = Rule(
+            name="test",
+            match=LeafMatch(target=MatchTarget.CONTENT, mode=MatchMode.CONTAINS, pattern="secret"),
+            severity=Severity.WARNING,
+        )
+        wl = WhitelistEntry(path_glob="/a", rule_name="*")
+        rs = RuleSet(version="1.0", rules=(rule,), whitelist=(wl,))
+        result = _apply_scan_param_update(rs, {"max_depth": 5})
+        assert len(result.rules) == 1
+        assert result.rules[0].name == "test"
+        assert len(result.whitelist) == 1
+        assert result.whitelist[0].path_glob == "/a"
+        assert result.scan_params is not None
+        assert result.scan_params.max_depth == 5
+
+    def test_update_merges_with_existing_scan_params(self) -> None:
+        """已有 scan_params 时字段级合并（仅更新指定字段）。"""
+        from fuscan.gui.controllers.rules_controller import _apply_scan_param_update
+        from fuscan.rules.model import RuleSet, ScanParams
+
+        sp = ScanParams(max_workers=4, max_depth=3, scan_archives=True)
+        rs = RuleSet(version="1.0", scan_params=sp)
+        result = _apply_scan_param_update(rs, {"max_workers": 8})
+        assert result.scan_params is not None
+        assert result.scan_params.max_workers == 8
+        # 未更新的字段保留原值
+        assert result.scan_params.max_depth == 3
+        assert result.scan_params.scan_archives is True
+
+    def test_all_none_clears_scan_params(self) -> None:
+        """所有字段设为 None 时 scan_params 置 None。"""
+        from fuscan.gui.controllers.rules_controller import _apply_scan_param_update
+        from fuscan.rules.model import RuleSet, ScanParams
+
+        sp = ScanParams(max_workers=4, max_depth=3)
+        rs = RuleSet(version="1.0", scan_params=sp)
+        updates = dict.fromkeys(
+            ("max_workers", "max_depth", "max_file_size", "scan_archives", "cache_enabled", "perf_log_enabled"),
+            None,
+        )
+        result = _apply_scan_param_update(rs, updates)
+        assert result.scan_params is None
+
+    def test_invalid_field_names_ignored(self) -> None:
+        """非法字段名被忽略，不抛异常。"""
+        from fuscan.gui.controllers.rules_controller import _apply_scan_param_update
+        from fuscan.rules.model import RuleSet
+
+        rs = RuleSet(version="1.0")
+        result = _apply_scan_param_update(rs, {"unknown_field": 42, "max_workers": 8})
+        assert result.scan_params is not None
+        assert result.scan_params.max_workers == 8
+
+    def test_empty_updates_returns_original(self) -> None:
+        """空 updates 字典返回原 ruleset（无变化）。"""
+        from fuscan.gui.controllers.rules_controller import _apply_scan_param_update
+        from fuscan.rules.model import RuleSet
+
+        rs = RuleSet(version="1.0")
+        result = _apply_scan_param_update(rs, {})
+        assert result is rs
+
+
+class TestSetScanParams:
+    """``setMaxWorkers``/``setMaxDepth`` 等 Slot 测试。"""
+
+    def test_set_max_workers_writes_and_reflects(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """setMaxWorkers 写入 user-scan.yaml 并在 effectiveConfigPreview 生效。"""
+        controller = RulesController(config_controller)
+        controller.setMaxWorkers(8)
+
+        user_scan = controller.userScanPath
+        assert user_scan.exists()
+        assert str(user_scan) in controller._config.rules_paths
+
+        preview = controller.effectiveConfigPreview
+        assert preview["maxWorkers"] == 8
+
+    def test_set_max_workers_clamps_to_range(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """setMaxWorkers 自动钳位到 1-32。"""
+        controller = RulesController(config_controller)
+        controller.setMaxWorkers(0)
+        assert controller.effectiveConfigPreview["maxWorkers"] == 1
+
+        controller.setMaxWorkers(100)
+        assert controller.effectiveConfigPreview["maxWorkers"] == 32
+
+    def test_set_max_depth_zero_means_unlimited(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """setMaxDepth(0) 存储为 0（无限递归）。"""
+        controller = RulesController(config_controller)
+        controller.setMaxDepth(0)
+        assert controller.effectiveConfigPreview["maxDepth"] == 0
+        assert controller.ruleset is not None
+        assert controller.ruleset.scan_params is not None
+        assert controller.ruleset.scan_params.max_depth == 0
+
+    def test_set_max_depth_negative_clamped(self, config_controller: ConfigController) -> None:
+        """setMaxDepth 负值钳位为 0。"""
+        controller = RulesController(config_controller)
+        controller.setMaxDepth(-5)
+        assert controller.effectiveConfigPreview["maxDepth"] == 0
+
+    def test_set_max_file_size_mb_converts_to_bytes(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """setMaxFileSizeMb(N) 存储为 N*1024*1024 字节。"""
+        controller = RulesController(config_controller)
+        controller.setMaxFileSizeMb(100)
+        assert controller.ruleset is not None
+        assert controller.ruleset.scan_params is not None
+        assert controller.ruleset.scan_params.max_file_size == 100 * 1024 * 1024
+        # effectiveConfigPreview 应转回 MB
+        assert controller.effectiveConfigPreview["maxFileSizeMB"] == 100
+
+    def test_set_max_file_size_mb_zero_means_no_limit(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """setMaxFileSizeMb(0) 存储为 0（不限）。"""
+        controller = RulesController(config_controller)
+        controller.setMaxFileSizeMb(0)
+        assert controller.ruleset is not None
+        assert controller.ruleset.scan_params is not None
+        assert controller.ruleset.scan_params.max_file_size == 0
+
+    def test_set_scan_archives_writes_bool(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """setScanArchives 写入布尔值。"""
+        controller = RulesController(config_controller)
+        controller.setScanArchives(False)
+        assert controller.effectiveConfigPreview["scanArchives"] is False
+
+        controller.setScanArchives(True)
+        assert controller.effectiveConfigPreview["scanArchives"] is True
+
+    def test_set_cache_enabled_writes_bool(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """setCacheEnabled 写入布尔值。"""
+        controller = RulesController(config_controller)
+        controller.setCacheEnabled(False)
+        assert controller.effectiveConfigPreview["cacheEnabled"] is False
+
+    def test_set_perf_log_enabled_writes_bool(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """setPerfLogEnabled 写入布尔值。"""
+        controller = RulesController(config_controller)
+        controller.setPerfLogEnabled(True)
+        assert controller.effectiveConfigPreview["perfLogEnabled"] is True
+
+    def test_set_param_emits_ruleset_changed(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """参数写入成功后发射 rulesetChanged 信号。"""
+        controller = RulesController(config_controller)
+        emitted: list[None] = []
+
+        def _on_changed() -> None:
+            emitted.append(None)
+
+        controller.rulesetChanged.connect(_on_changed)  # type: ignore[arg-type]
+        controller.setMaxWorkers(8)
+        assert len(emitted) == 1
+
+    def test_set_param_preserves_existing_whitelist(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """更新 scan_params 时不丢失已存在的白名单条目。"""
+        controller = RulesController(config_controller)
+        controller.appendWhitelistEntry("/a/b.txt", "r1", "")
+        assert controller.ruleset is not None
+        assert len(controller.ruleset.whitelist) == 1
+
+        controller.setMaxWorkers(8)
+        # 白名单条目仍在
+        assert controller.ruleset is not None
+        assert len(controller.ruleset.whitelist) == 1
+        assert controller.ruleset.whitelist[0].path_glob == "/a/b.txt"
+
+
+class TestResetScanParams:
+    """``resetScanParams`` Slot 测试。"""
+
+    def test_reset_clears_scan_params(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """resetScanParams 后 user-scan.yaml 不再含 scan_params 段。
+
+        注意：合并后的 ruleset.scan_params 仍非 None（来自内置规则集），
+        但 user-scan.yaml 自身不再覆盖任何字段。
+        """
+        from fuscan.rules import load_ruleset
+
+        controller = RulesController(config_controller)
+        controller.setMaxWorkers(16)
+        controller.setMaxDepth(5)
+
+        # user-scan.yaml 应含 scan_params
+        user_scan_rs = load_ruleset(controller.userScanPath)
+        assert user_scan_rs.scan_params is not None
+        assert user_scan_rs.scan_params.max_workers == 16
+
+        controller.resetScanParams()
+
+        # user-scan.yaml 应不再含 scan_params（合并结果来自内置规则集）
+        user_scan_rs = load_ruleset(controller.userScanPath)
+        assert user_scan_rs.scan_params is None
+
+    def test_reset_reflects_in_preview(
+        self,
+        config_controller: ConfigController,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """resetScanParams 后 effectiveConfigPreview 回到内置默认。"""
+        # 锁定 CPU 核数使默认 maxWorkers 稳定
+        monkeypatch.setattr("os.cpu_count", lambda: 8)
+        from fuscan.rules.builtin import load_builtin_ruleset, recommended_max_workers
+
+        load_builtin_ruleset.cache_clear()
+        try:
+            controller = RulesController(config_controller)
+            controller.setMaxWorkers(16)
+            assert controller.effectiveConfigPreview["maxWorkers"] == 16
+
+            controller.resetScanParams()
+            expected_workers = recommended_max_workers(8)
+            assert controller.effectiveConfigPreview["maxWorkers"] == expected_workers
+        finally:
+            load_builtin_ruleset.cache_clear()
+
+    def test_reset_preserves_whitelist(
+        self,
+        config_controller: ConfigController,
+    ) -> None:
+        """resetScanParams 不影响白名单条目。"""
+        controller = RulesController(config_controller)
+        controller.appendWhitelistEntry("/a", "r1", "")
+        controller.setMaxWorkers(8)
+
+        controller.resetScanParams()
+        assert controller.ruleset is not None
+        assert len(controller.ruleset.whitelist) == 1
+
+
 # ============================= previewRuleset =============================
 
 

@@ -5,9 +5,9 @@ import fuscan.theme 1.0
 import fuscan.controllers 1.0
 import "../components"
 
-// 设置页：仅字体设置。
+// 设置页：扫描参数配置 + 字体设置。
 // 规则配置（规则文件/白名单/生效预览）已迁移到文件扫描页任务卡片的「配置规则」
-// 与「预览规则」对话框，设置页不再承载规则管理 UI。
+// 与「预览规则」对话框，设置页仅承载扫描参数（写入 user-scan.yaml）与字体设置。
 Item {
     id: settingsPage
     property ThemeController theme: Theme
@@ -53,6 +53,127 @@ Item {
             ColumnLayout {
                 width: settingsPage.width
                 spacing: 16
+
+                Label {
+                    text: "扫描参数"
+                    font.pixelSize: theme.fontSizeHeading
+                    font.bold: true
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
+
+                // 并发线程数
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label {
+                        text: "并发线程"
+                        font.pixelSize: theme.fontSizeBody
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        Layout.preferredWidth: 100
+                    }
+                    SpinBox {
+                        from: 1
+                        to: 32
+                        value: rulesController.effectiveConfigPreview.maxWorkers
+                        onValueModified: rulesController.setMaxWorkers(value)
+                    }
+                    Label {
+                        text: "（1-32，越大扫描越快但占用资源越多）"
+                        font.pixelSize: theme.fontSizeCaption
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+
+                // 最大深度
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label {
+                        text: "最大深度"
+                        font.pixelSize: theme.fontSizeBody
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        Layout.preferredWidth: 100
+                    }
+                    SpinBox {
+                        from: 0
+                        to: 100
+                        value: rulesController.effectiveConfigPreview.maxDepth
+                        onValueModified: rulesController.setMaxDepth(value)
+                    }
+                    Label {
+                        text: "（0=无限递归）"
+                        font.pixelSize: theme.fontSizeCaption
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+
+                // 大文件阈值
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Label {
+                        text: "大文件阈值"
+                        font.pixelSize: theme.fontSizeBody
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                        Layout.preferredWidth: 100
+                    }
+                    SpinBox {
+                        from: 0
+                        to: 4096
+                        value: rulesController.effectiveConfigPreview.maxFileSizeMB
+                        onValueModified: rulesController.setMaxFileSizeMb(value)
+                    }
+                    Label {
+                        text: " MB（0=不限，超过此大小的文件跳过内容扫描）"
+                        font.pixelSize: theme.fontSizeCaption
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+
+                // 开关项：扫描压缩包 / 内容缓存 / 性能日志
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 16
+                    CheckBox {
+                        text: "扫描压缩包"
+                        checked: rulesController.effectiveConfigPreview.scanArchives
+                        onCheckedChanged: rulesController.setScanArchives(checked)
+                    }
+                    CheckBox {
+                        text: "内容缓存"
+                        checked: rulesController.effectiveConfigPreview.cacheEnabled
+                        onCheckedChanged: rulesController.setCacheEnabled(checked)
+                    }
+                    CheckBox {
+                        text: "性能日志"
+                        checked: rulesController.effectiveConfigPreview.perfLogEnabled
+                        onCheckedChanged: rulesController.setPerfLogEnabled(checked)
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+
+                // 恢复默认按钮
+                RowLayout {
+                    Layout.fillWidth: true
+                    Item { Layout.fillWidth: true }
+                    IconButton {
+                        iconSource: "qrc:/icons/rescan.svg"
+                        text: "恢复默认"
+                        tooltip: "恢复扫描参数为内置默认值"
+                        accent: "ghost"
+                        onClicked: rulesController.resetScanParams()
+                    }
+                }
+
+                // 分隔线
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                }
 
                 Label {
                     text: "字体设置"

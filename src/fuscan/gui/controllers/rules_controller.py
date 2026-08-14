@@ -37,6 +37,7 @@ import json
 import logging
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 try:
     from PySide2.QtCore import Property, QObject, Signal, Slot
@@ -65,7 +66,7 @@ from fuscan.rules import (
     merge_multiple_rulesets,
     save_ruleset,
 )
-from fuscan.rules.model import RuleSet
+from fuscan.rules.model import RuleSet, ScanParams
 from fuscan.rules.whitelist import WhitelistEntry
 from fuscan.utils.time import now_iso_local
 
@@ -124,6 +125,48 @@ def _scan_extensions_of(path: Path) -> tuple[list[str], str]:
         logger.debug("规则文件 %s scan_extensions 加载失败: %s", path, exc)
         return [], "unset"
     return _scan_extensions_state_of(rs)
+
+
+# ScanParams 全部字段名，用于 _apply_scan_param_update 的全 None 检测
+_SCAN_PARAM_FIELDS = (
+    "max_workers",
+    "max_depth",
+    "max_file_size",
+    "scan_archives",
+    "cache_enabled",
+    "perf_log_enabled",
+)
+
+
+def _apply_scan_param_update(
+    ruleset: RuleSet | None,
+    updates: dict[str, Any],
+) -> RuleSet:
+    """对 RuleSet 的 scan_params 应用字段级更新，返回新 RuleSet。
+
+    纯函数：不涉及文件 I/O，便于单元测试。保留原 rules/whitelist/ignore_dirs
+    等字段不变，仅用 :func:`dataclasses.replace` 替换 scan_params。
+
+    所有字段更新为 ``None`` 时将 ``scan_params`` 置为 ``None``（表示完全使用
+    内置默认），序列化时不会写入 YAML。
+
+    :param ruleset: 原规则集（None 时视为新建空规则集）
+    :param updates: scan_params 字段更新字典，键为 :class:`ScanParams` 字段名
+        （max_workers/max_depth/max_file_size/scan_archives/cache_enabled/
+        perf_log_enabled），值为新值；``None`` 表示恢复默认（未设置）
+    :return: 更新后的新 RuleSet
+    """
+    base = ruleset if ruleset is not None else RuleSet(version="1.0")
+    current_sp = base.scan_params or ScanParams()
+    # 仅保留 ScanParams 已定义的字段，忽略非法键
+    valid_updates = {f: updates[f] for f in updates if f in _SCAN_PARAM_FIELDS}
+    if not valid_updates:
+        return base
+    new_sp = replace(current_sp, **valid_updates)
+    # 所有字段为 None 时清除 scan_params（表示完全使用默认）
+    if all(getattr(new_sp, f) is None for f in _SCAN_PARAM_FIELDS):
+        return replace(base, scan_params=None)
+    return replace(base, scan_params=new_sp)
 
 
 class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
@@ -939,6 +982,77 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         msg = f"已添加: {path_glob} ({rule_name})"
         logger.info(msg)
         return msg
+
+    # ------------------- 扫描参数写操作 -------------------
+
+    def _set_scan_params(self, updates: dict[str, Any]) -> None:
+        """将 scan_params 字段更新写入 user-scan.yaml 并刷新规则集。
+
+        内部流程：load user-scan.yaml（不存在视为新建）→ _apply_scan_param_update
+        → save → 确保 user-scan.yaml 在 rules_paths → _reload_ruleset → emit
+        rulesetChanged。``rulesetChanged`` 自动触发
+        :meth:`WorkspaceController._invalidate_all_manifests` 使增量 manifest 失效。
+
+        :param updates: scan_params 字段更新字典（传给 _apply_scan_param_update）
+        """
+        user_scan_path = self.userScanPath
+        try:
+            if user_scan_path.exists():
+                existing = load_ruleset(user_scan_path)
+            else:
+                existing = None
+            updated = _apply_scan_param_update(existing, updates)
+            user_scan_path.parent.mkdir(parents=True, exist_ok=True)
+            save_ruleset(updated, user_scan_path)
+        except (RuleError, OSError) as exc:
+            logger.warning("更新扫描参数失败: %s", exc)
+            return
+
+        # 确保 user-scan.yaml 在 rules_paths 中（首次写入时加入）
+        user_scan_str = str(user_scan_path)
+        if user_scan_str not in self._config.rules_paths:
+            self._config.rules_paths.append(user_scan_str)
+            self._config_controller.save()  # pyrefly: ignore [missing-attribute]
+
+        self._reload_ruleset()
+        self._rule_model.set_ruleset(self._ruleset)
+        self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+
+    @Slot(int)  # pyrefly: ignore [not-callable]
+    def setMaxWorkers(self, value: int) -> None:
+        """设置最大并发线程数（1-32，自动钳位）。"""
+        self._set_scan_params({"max_workers": max(1, min(32, value))})
+
+    @Slot(int)  # pyrefly: ignore [not-callable]
+    def setMaxDepth(self, value: int) -> None:
+        """设置最大扫描深度（0=无限递归，负值钳位为 0）。"""
+        self._set_scan_params({"max_depth": max(0, value)})
+
+    @Slot(int)  # pyrefly: ignore [not-callable]
+    def setMaxFileSizeMb(self, value: int) -> None:
+        """设置大文件跳过阈值（MB，0=不限）。内部转换为字节存储。"""
+        bytes_value = value * 1024 * 1024 if value > 0 else 0
+        self._set_scan_params({"max_file_size": bytes_value})
+
+    @Slot(bool)  # pyrefly: ignore [not-callable]
+    def setScanArchives(self, value: bool) -> None:
+        """设置是否扫描压缩包内嵌文件。"""
+        self._set_scan_params({"scan_archives": value})
+
+    @Slot(bool)  # pyrefly: ignore [not-callable]
+    def setCacheEnabled(self, value: bool) -> None:
+        """设置是否启用内容哈希缓存（加速增量扫描）。"""
+        self._set_scan_params({"cache_enabled": value})
+
+    @Slot(bool)  # pyrefly: ignore [not-callable]
+    def setPerfLogEnabled(self, value: bool) -> None:
+        """设置是否启用性能剖析日志（记录各阶段耗时与慢文件）。"""
+        self._set_scan_params({"perf_log_enabled": value})
+
+    @Slot()  # pyrefly: ignore [not-callable]
+    def resetScanParams(self) -> None:
+        """恢复扫描参数为内置默认值（清除 user-scan.yaml 中的 scan_params 段）。"""
+        self._set_scan_params(dict.fromkeys(_SCAN_PARAM_FIELDS, None))
 
     # ------------------- 导入/导出 -------------------
 

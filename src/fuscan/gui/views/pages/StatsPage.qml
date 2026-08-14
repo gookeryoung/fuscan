@@ -518,6 +518,52 @@ Item {
                         }
                     }
                 }
+
+                // ---------- 性能剖析 ----------
+                // 仅在扫描完成且有 perf_summary 数据时展示
+                // perf_summary 不持久化，恢复的历史报告无数据（隐藏本区）
+                GroupBox {
+                    Layout.fillWidth: true
+                    title: "性能剖析"
+                    visible: workspaceController.currentScanController.scanDone
+                             && workspaceController.currentScanController.perfSummary.length > 0
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 8
+
+                        Label {
+                            text: "各阶段总耗时（毫秒）"
+                            font.pixelSize: theme.fontSizeCaption
+                            color: theme.colorTextSecondary
+                        }
+
+                        BarChart {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: Math.max(120, chartData.length * 34)
+                            chartData: workspaceController.currentScanController.perfSummary
+                            labelWidth: 120
+                            valueSuffix: "ms"
+                            valueDecimals: 1
+                        }
+
+                        // 摘要：最耗时阶段 + 总阶段数
+                        Label {
+                            Layout.fillWidth: true
+                            visible: workspaceController.currentScanController.perfSummary.length > 0
+                            text: {
+                                var data = workspaceController.currentScanController.perfSummary
+                                if (data.length === 0) return ""
+                                var top = data[0]
+                                return "最耗时阶段：" + top.label + " " + top.value + "ms（"
+                                    + top.percent + "%）· 共 " + data.length + " 个阶段"
+                            }
+                            font.pixelSize: theme.fontSizeCaption
+                            color: theme.colorTextSecondary
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                }
             }
         }
     }

@@ -3962,3 +3962,114 @@ class TestStatsChartData:
         data = controller.severityChartData
         assert len(data) == 1
         assert data[0]["label"] == "警告"
+
+
+class TestPerfSummary:
+    """性能剖析 Property 测试（perfSummary）。
+
+    覆盖：空态（无报告/无 perf_summary）、按 total_ms 降序、stage 中英文映射、
+    percent 占比计算、count 字段、未知 stage 保留英文、恢复报告无 perf 数据。
+    perf_summary 不持久化（from_json 置 None），故恢复的历史报告无性能数据。
+    """
+
+    def test_empty_when_no_report(self, controller: ScanController) -> None:
+        """未扫描时 perfSummary 为空列表。"""
+        assert controller.perfSummary == []
+
+    def test_empty_when_no_perf_data(self, controller: ScanController) -> None:
+        """ScanStats.perf_summary 为 None 时返回空列表。"""
+        controller.restoreFromReport(_make_scan_report(results=()))
+        assert controller.perfSummary == []
+
+    def test_sorted_by_total_ms_desc(self, controller: ScanController) -> None:
+        """perfSummary 按 total_ms 降序排列。"""
+        report = ScanReport(
+            root=Path("/tmp"),
+            results=(),
+            stats=ScanStats(
+                perf_summary={
+                    "walk": {"total_ms": 100.0, "count": 1, "max_ms": 100.0},
+                    "match": {"total_ms": 300.0, "count": 50, "max_ms": 10.0},
+                    "read_bytes": {"total_ms": 200.0, "count": 50, "max_ms": 5.0},
+                },
+            ),
+        )
+        controller.restoreFromReport(report)
+        data = controller.perfSummary
+        assert len(data) == 3
+        # 降序：match(300) > read_bytes(200) > walk(100)
+        assert data[0]["label"] == "规则匹配"
+        assert data[0]["value"] == 300.0
+        assert data[1]["label"] == "读取文件"
+        assert data[1]["value"] == 200.0
+        assert data[2]["label"] == "遍历文件"
+        assert data[2]["value"] == 100.0
+
+    def test_percent_calculation(self, controller: ScanController) -> None:
+        """percent 为该阶段占总耗时的百分比。"""
+        report = ScanReport(
+            root=Path("/tmp"),
+            results=(),
+            stats=ScanStats(
+                perf_summary={
+                    "match": {"total_ms": 300.0, "count": 50, "max_ms": 10.0},
+                    "walk": {"total_ms": 100.0, "count": 1, "max_ms": 100.0},
+                },
+            ),
+        )
+        controller.restoreFromReport(report)
+        data = controller.perfSummary
+        # 总耗时 400ms：match=75%, walk=25%
+        assert data[0]["percent"] == 75.0
+        assert data[1]["percent"] == 25.0
+
+    def test_count_field(self, controller: ScanController) -> None:
+        """count 字段反映该阶段调用次数。"""
+        report = ScanReport(
+            root=Path("/tmp"),
+            results=(),
+            stats=ScanStats(
+                perf_summary={
+                    "match": {"total_ms": 300.0, "count": 50, "max_ms": 10.0},
+                },
+            ),
+        )
+        controller.restoreFromReport(report)
+        data = controller.perfSummary
+        assert data[0]["count"] == 50
+
+    def test_unknown_stage_keeps_english(self, controller: ScanController) -> None:
+        """未知 stage 名保留英文原名（向前兼容未来新增 stage）。"""
+        report = ScanReport(
+            root=Path("/tmp"),
+            results=(),
+            stats=ScanStats(
+                perf_summary={
+                    "unknown_stage": {"total_ms": 50.0, "count": 1, "max_ms": 50.0},
+                },
+            ),
+        )
+        controller.restoreFromReport(report)
+        data = controller.perfSummary
+        assert data[0]["label"] == "unknown_stage"
+
+    def test_restore_from_persisted_report_has_no_perf(self, controller: ScanController) -> None:
+        """恢复的历史报告无 perf_summary（from_json 置 None），返回空列表。"""
+        # _make_scan_report 默认不传 perf_summary（None）
+        controller.restoreFromReport(_make_scan_report(results=()))
+        assert controller.perfSummary == []
+
+    def test_value_rounded_to_one_decimal(self, controller: ScanController) -> None:
+        """value 保留 1 位小数。"""
+        report = ScanReport(
+            root=Path("/tmp"),
+            results=(),
+            stats=ScanStats(
+                perf_summary={
+                    "match": {"total_ms": 123.456, "count": 1, "max_ms": 123.456},
+                },
+            ),
+        )
+        controller.restoreFromReport(report)
+        data = controller.perfSummary
+        assert data[0]["value"] == 123.5

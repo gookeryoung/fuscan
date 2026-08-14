@@ -27,9 +27,13 @@ Item {
     property var chartData: []
     // 标签列固定宽度
     property int labelWidth: 140
+    // 数值后缀（如 "ms"），默认空串
+    property string valueSuffix: ""
+    // 数值小数位数（0=整数，1=保留 1 位），默认 0
+    property int valueDecimals: 0
 
-    // 最大值（只读，供条形宽度计算）
-    readonly property int maxValue: {
+    // 最大值（只读，供条形宽度计算；支持浮点 value）
+    readonly property real maxValue: {
         var m = 0
         for (var i = 0; i < chartData.length; i++) {
             if (chartData[i].value > m) m = chartData[i].value
@@ -107,8 +111,8 @@ Item {
 
                 // 数值
                 Label {
-                    Layout.preferredWidth: 44
-                    text: modelData.value
+                    Layout.preferredWidth: 60
+                    text: Number(modelData.value).toFixed(root.valueDecimals) + root.valueSuffix
                     font.pixelSize: theme.fontSizeCaption
                     font.bold: true
                     color: theme.colorTextPrimary

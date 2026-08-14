@@ -170,6 +170,22 @@ _EXTENSION_PALETTE: tuple[str, ...] = (
     "#FF7B72",  # 浅红
 )
 
+# 性能剖析 stage 名中英文映射：PerfStats.measure() 用的英文 stage 名对用户不直观，
+# 展示层映射为中文标签。未知 stage 保留英文原名（向前兼容未来新增 stage）。
+_PERF_STAGE_LABELS: dict[str, str] = {
+    "walk": "遍历文件",
+    "match": "规则匹配",
+    "read_bytes": "读取文件",
+    "extract": "内容提取",
+    "hash": "哈希计算",
+    "cache_lookup": "缓存查找",
+    "cache_lookup_batch": "缓存批量查找",
+    "cache_lookup_hits": "缓存命中",
+    "cache_lookup_extract": "缓存提取查找",
+    "cache_write": "缓存写入",
+    "cache_put_extract": "缓存提取写入",
+}
+
 
 class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     """扫描工作流控制器。
@@ -1259,6 +1275,39 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     "label": "其他",
                     "value": other_count,
                     "color": _EXTENSION_PALETTE[8 % len(_EXTENSION_PALETTE)],
+                }
+            )
+        return result
+
+    @Property("QVariantList", notify=scanStateChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
+    def perfSummary(self) -> list[dict[str, object]]:
+        """性能剖析条形图数据：``[{label, value, color, count, percent}, ...]``。
+
+        由 :attr:`ScanStats.perf_summary` 派生，按 ``total_ms`` 降序。``label`` 为
+        stage 中文名（:data:`_PERF_STAGE_LABELS` 映射，未知保留英文），
+        ``value`` 为总耗时毫秒（``float``，1 位小数），``color`` 顺序循环色板，
+        ``count`` 为调用次数，``percent`` 为占总耗时百分比（1 位小数）。
+
+        ``perf_summary`` 不持久化（``from_json`` 置 ``None``），故仅当前会话扫描
+        完成后有数据；恢复的历史报告返回空列表（QML 据此隐藏性能区）。
+        """
+        if self._last_report is None:
+            return []
+        perf = self._last_report.stats.perf_summary
+        if not perf:
+            return []
+        grand_total = sum(s.get("total_ms", 0.0) for s in perf.values()) or 1.0
+        items = sorted(perf.items(), key=lambda x: -x[1].get("total_ms", 0.0))
+        result: list[dict[str, object]] = []
+        for i, (name, info) in enumerate(items):
+            total_ms = float(info.get("total_ms", 0.0))
+            result.append(
+                {
+                    "label": _PERF_STAGE_LABELS.get(name, name),
+                    "value": round(total_ms, 1),
+                    "color": _EXTENSION_PALETTE[i % len(_EXTENSION_PALETTE)],
+                    "count": int(info.get("count", 0)),
+                    "percent": round(total_ms / grand_total * 100, 1),
                 }
             )
         return result

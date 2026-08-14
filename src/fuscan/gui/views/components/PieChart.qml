@@ -36,6 +36,9 @@ Item {
         return sum
     }
 
+    // chartData 变化时触发饼图重绘（属性在 root 上，处理器须与属性同级）
+    onChartDataChanged: pieCanvas.requestPaint()
+
     implicitHeight: 220
 
     // ---------- 空态 ----------
@@ -61,8 +64,7 @@ Item {
             Canvas {
                 id: pieCanvas
                 anchors.fill: parent
-                // chartData/尺寸变化时重绘
-                onChartDataChanged: requestPaint()
+                // 尺寸变化时重绘（chartData 变化由 root.onChartDataChanged 触发）
                 onWidthChanged: requestPaint()
                 onHeightChanged: requestPaint()
                 Component.onCompleted: requestPaint()

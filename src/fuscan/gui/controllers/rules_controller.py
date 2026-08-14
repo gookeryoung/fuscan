@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,13 @@ from fuscan.rules import (
     save_ruleset,
 )
 from fuscan.rules.model import RuleSet, ScanParams
+from fuscan.rules.rule_edit import (
+    append_rule,
+    make_leaf_rule,
+    remove_rule,
+    replace_rule,
+    serialize_rule_for_editor,
+)
 from fuscan.rules.sandbox import match_rule_against_text
 from fuscan.rules.whitelist import WhitelistEntry
 from fuscan.utils.time import now_iso_local
@@ -1170,6 +1178,181 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
             )
         result = match_rule_against_text(rule, text)
         return _json.dumps(
+            {
+                "matched": result.matched,
+                "matchCount": result.match_count,
+                "target": result.target,
+                "detail": result.detail,
+                "matches": [{"text": t} for t in result.match_texts],
+            },
+            ensure_ascii=False,
+        )
+
+    # ------------------- 规则编辑（user-scan.yaml） -------------------
+
+    def _load_user_ruleset(self) -> RuleSet | None:
+        """加载 user-scan.yaml；文件不存在或解析失败返回 None。"""
+        path = self.userScanPath
+        if not path.exists():
+            return None
+        try:
+            return load_ruleset(path)
+        except RuleError as exc:
+            logger.warning("user-scan.yaml 加载失败: %s", exc)
+            return None
+
+    def _mutate_user_ruleset(
+        self,
+        mutator: Callable[[RuleSet], RuleSet],
+        error_label: str,
+    ) -> str:
+        """对 user-scan.yaml 应用变更并持久化，刷新规则集。
+
+        统一 createRule/updateRule/deleteRule 的「加载 → 变更 → 保存 → 注册到
+        rules_paths → 重载 → emit」流程。文件不存在时视为新建空规则集。
+
+        :param mutator: 接收当前 RuleSet，返回变更后的新 RuleSet
+        :param error_label: 错误日志与返回消息前缀（如「新建规则」）
+        :return: 成功返回空串，失败返回错误消息（供调用方回传 QML）
+        """
+        user_scan_path = self.userScanPath
+        try:
+            existing = load_ruleset(user_scan_path) if user_scan_path.exists() else RuleSet(version="1.0")
+            updated = mutator(existing)
+            user_scan_path.parent.mkdir(parents=True, exist_ok=True)
+            save_ruleset(updated, user_scan_path)
+        except (RuleError, OSError) as exc:
+            logger.warning("%s失败: %s", error_label, exc)
+            return f"{error_label}失败: {exc}"
+
+        # 首次写入 user-scan.yaml 时注册到 rules_paths，使新规则进入 effective ruleset
+        user_scan_str = str(user_scan_path)
+        if user_scan_str not in self._config.rules_paths:
+            self._config.rules_paths.append(user_scan_str)
+            self._config_controller.save()  # pyrefly: ignore [missing-attribute]
+
+        self._reload_ruleset()
+        self._rule_model.set_ruleset(self._ruleset)
+        self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
+        return ""
+
+    @Property("QVariantList", notify=rulesetChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
+    def userRulesModel(self) -> list[dict[str, object]]:
+        """user-scan.yaml 中的规则列表（编辑器数据源，仅用户规则文件）。
+
+        与 :attr:`ruleModel`（合并规则集）不同，本属性仅展示 user-scan.yaml
+        自身的规则，供「规则编辑」面板增删改。文件不存在时返回空列表。每项为
+        :func:`serialize_rule_for_editor` 输出的扁平字典（含 ``isLeaf`` 标记）。
+        """
+        rs = self._load_user_ruleset()
+        if rs is None:
+            return []
+        return [serialize_rule_for_editor(r) for r in rs.rules]
+
+    @Slot(result=str)  # pyrefly: ignore [not-callable]
+    def createRule(self) -> str:
+        """在 user-scan.yaml 追加默认叶子规则，返回 JSON ``{ok, name?, error?}``。
+
+        自动生成不重名的 ``新规则-N`` 名称，追加一条 CONTENT contains 占位规则，
+        保存后 QML 可打开编辑器细化字段。
+        """
+        existing = self._load_user_ruleset()
+        used = {r.name for r in existing.rules} if existing else set()
+        idx = 1
+        while f"新规则-{idx}" in used:
+            idx += 1
+        name = f"新规则-{idx}"
+        try:
+            rule = make_leaf_rule(
+                name=name,
+                severity="info",
+                target="content",
+                mode="contains",
+                pattern="占位",
+                case_sensitive=False,
+                description="",
+                replace=False,
+                replace_with="",
+            )
+        except RuleError as exc:
+            return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)
+        err = self._mutate_user_ruleset(lambda rs: append_rule(rs, rule), "新建规则")
+        if err:
+            return json.dumps({"ok": False, "error": err}, ensure_ascii=False)
+        return json.dumps({"ok": True, "name": name}, ensure_ascii=False)
+
+    @Slot(str, result=str)  # pyrefly: ignore [not-callable]
+    def updateRule(self, payload_json: str) -> str:
+        """按 ``originalName`` 更新 user-scan.yaml 中的规则，返回 JSON ``{ok, error?}``。
+
+        ``payload_json`` 字段：``originalName``/``name``/``severity``/``target``/
+        ``mode``/``pattern``/``caseSensitive``/``replace``/``replaceWith``/
+        ``description``。仅支持叶子规则编辑；字段非法（空名/空模式/枚举错/正则
+        编译失败）或重名时返回 ``ok=False`` 与错误消息。
+        """
+        try:
+            payload = json.loads(payload_json)
+        except json.JSONDecodeError as exc:
+            return json.dumps({"ok": False, "error": f"参数解析失败: {exc}"}, ensure_ascii=False)
+        original_name = str(payload.get("originalName", "")).strip()
+        if not original_name:
+            return json.dumps({"ok": False, "error": "缺少 originalName"}, ensure_ascii=False)
+        try:
+            rule = make_leaf_rule(
+                name=str(payload.get("name", "")),
+                severity=str(payload.get("severity", "info")),
+                target=str(payload.get("target", "content")),
+                mode=str(payload.get("mode", "contains")),
+                pattern=str(payload.get("pattern", "")),
+                case_sensitive=bool(payload.get("caseSensitive", False)),
+                description=str(payload.get("description", "")),
+                replace=bool(payload.get("replace", False)),
+                replace_with=str(payload.get("replaceWith", "")),
+            )
+        except RuleError as exc:
+            return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)
+        err = self._mutate_user_ruleset(
+            lambda rs: replace_rule(rs, original_name, rule),
+            "更新规则",
+        )
+        if err:
+            return json.dumps({"ok": False, "error": err}, ensure_ascii=False)
+        return json.dumps({"ok": True}, ensure_ascii=False)
+
+    @Slot(str, result=str)  # pyrefly: ignore [not-callable]
+    def deleteRule(self, name: str) -> str:
+        """从 user-scan.yaml 删除指定规则，返回 JSON ``{ok, error?}``。"""
+        err = self._mutate_user_ruleset(lambda rs: remove_rule(rs, name), "删除规则")
+        if err:
+            return json.dumps({"ok": False, "error": err}, ensure_ascii=False)
+        return json.dumps({"ok": True}, ensure_ascii=False)
+
+    @Slot(str, str, result=str)  # pyrefly: ignore [not-callable]
+    def testRuleFields(self, fields_json: str, text: str) -> str:
+        """对输入文本执行未保存规则字段的匹配测试。
+
+        供「规则编辑」表单的「测试匹配」按钮调用：编辑中的字段尚未保存到
+        user-scan.yaml，无法通过 :meth:`testRuleText`（按名查已存规则）测试，
+        故本 Slot 直接由字段构造临时 Rule 调 :func:`match_rule_against_text`。
+        返回 JSON 结构与 :meth:`testRuleText` 一致。
+        """
+        try:
+            payload = json.loads(fields_json)
+            rule = make_leaf_rule(
+                name="__editor_preview__",
+                severity=str(payload.get("severity", "info")),
+                target=str(payload.get("target", "content")),
+                mode=str(payload.get("mode", "contains")),
+                pattern=str(payload.get("pattern", "")),
+                case_sensitive=bool(payload.get("caseSensitive", False)),
+                description="",
+                replace=False,
+                replace_with="",
+            )
+        except (RuleError, json.JSONDecodeError) as exc:
+            return json.dumps({"matched": False, "error": f"规则字段无效: {exc}"}, ensure_ascii=False)
+        result = match_rule_against_text(rule, text)
+        return json.dumps(
             {
                 "matched": result.matched,
                 "matchCount": result.match_count,

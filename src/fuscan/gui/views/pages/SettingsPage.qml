@@ -17,6 +17,31 @@ Item {
     property WorkspaceControllerType workspaceController: WorkspaceController
     // 规则测试沙盒结果（testRuleText 返回的 JSON 解析对象，null=未测试）
     property var testResult: null
+    // 规则编辑：正在编辑的规则字典（null=未编辑），editMessage 为保存/删除反馈
+    property var editingRule: null
+    property string editMessage: ""
+
+    // 在 userRulesModel 中按名查找规则字典（新建后定位到刚追加的规则）
+    function lookupRuleByName(name) {
+        var m = rulesController.userRulesModel
+        for (var i = 0; i < m.length; i++) {
+            if (m[i].name === name) return m[i]
+        }
+        return null
+    }
+    // 枚举值 → 中文展示
+    function targetText(v) {
+        if (v === "filename") return "文件名"
+        if (v === "path") return "路径"
+        return "内容"
+    }
+    function modeText(v) {
+        if (v === "equals") return "相等"
+        if (v === "startswith") return "开头"
+        if (v === "endswith") return "结尾"
+        if (v === "regex") return "正则"
+        return "包含"
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -444,6 +469,179 @@ Item {
                             color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
                             wrapMode: Text.WrapAnywhere
                         }
+                    }
+                }
+
+                // ---------- 规则编辑 ----------
+                // 管理 user-scan.yaml 中的自定义规则：列表 + 新建/编辑/删除 + 内嵌表单
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                }
+
+                Label {
+                    text: "规则编辑"
+                    font.pixelSize: theme.fontSizeHeading
+                    font.bold: true
+                    color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                }
+                Label {
+                    text: "管理 user-scan.yaml 中的自定义规则。仅叶子规则支持图形编辑，组合规则（AND/OR/NOT）请外部编辑 YAML。"
+                    font.pixelSize: theme.fontSizeCaption
+                    color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                }
+
+                // 工具栏：新建规则 + 规则数
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    IconButton {
+                        iconSource: "qrc:/icons/add.svg"
+                        text: "新建规则"
+                        tooltip: "在 user-scan.yaml 追加默认规则并打开编辑器"
+                        accent: "primary"
+                        compact: true
+                        onClicked: {
+                            var raw = rulesController.createRule()
+                            try {
+                                var r = JSON.parse(raw)
+                                if (r.ok) {
+                                    settingsPage.editingRule = settingsPage.lookupRuleByName(r.name)
+                                    settingsPage.editMessage = ""
+                                } else {
+                                    settingsPage.editMessage = r.error || "新建失败"
+                                }
+                            } catch (e) {
+                                settingsPage.editMessage = "新建失败"
+                            }
+                        }
+                    }
+                    Item { Layout.fillWidth: true }
+                    Label {
+                        text: "共 " + rulesController.userRulesModel.length + " 条"
+                        font.pixelSize: theme.fontSizeCaption
+                        color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                    }
+                }
+
+                // 反馈消息（保存/删除/新建失败）
+                Label {
+                    Layout.fillWidth: true
+                    visible: settingsPage.editMessage.length > 0
+                    text: settingsPage.editMessage
+                    font.pixelSize: theme.fontSizeCaption
+                    color: theme.colorDanger
+                    wrapMode: Text.WordWrap
+                }
+
+                // 规则列表（user-scan.yaml 自身规则）
+                Repeater {
+                    model: rulesController.userRulesModel
+                    delegate: Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 40
+                        color: theme.isDark ? theme.colorBgApp : theme.colorBgApp
+                        border.color: theme.isDark ? theme.colorBorderDark : theme.colorBorder
+                        border.width: 1
+                        radius: theme.radiusSm
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 6
+                            spacing: 8
+
+                            // 严重度色点
+                            Rectangle {
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: modelData.severity === "critical" ? theme.colorDanger
+                                    : (modelData.severity === "warning" ? theme.colorWarning : theme.colorPrimary)
+                            }
+                            Label {
+                                text: modelData.name
+                                font.pixelSize: theme.fontSizeBody
+                                font.bold: true
+                                color: theme.isDark ? theme.colorTextPrimary : theme.colorTextPrimary
+                                Layout.preferredWidth: 160
+                                elide: Text.ElideRight
+                            }
+                            Label {
+                                text: modelData.isLeaf
+                                    ? (settingsPage.targetText(modelData.target) + " · " + settingsPage.modeText(modelData.mode))
+                                    : "组合规则（只读）"
+                                font.pixelSize: theme.fontSizeCaption
+                                color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+                            // 编辑（仅叶子规则可编辑）
+                            IconButton {
+                                iconSource: "qrc:/icons/edit.svg"
+                                tooltip: "编辑规则"
+                                accent: "ghost"
+                                compact: true
+                                enabled: modelData.isLeaf
+                                onClicked: {
+                                    settingsPage.editingRule = modelData
+                                    settingsPage.editMessage = ""
+                                }
+                            }
+                            // 删除
+                            IconButton {
+                                iconSource: "qrc:/icons/delete.svg"
+                                tooltip: "删除规则"
+                                accent: "danger"
+                                compact: true
+                                onClicked: {
+                                    var raw = rulesController.deleteRule(modelData.name)
+                                    try {
+                                        var r = JSON.parse(raw)
+                                        if (r.ok) {
+                                            if (settingsPage.editingRule
+                                                && settingsPage.editingRule.name === modelData.name) {
+                                                settingsPage.editingRule = null
+                                            }
+                                            settingsPage.editMessage = ""
+                                        } else {
+                                            settingsPage.editMessage = r.error || "删除失败"
+                                        }
+                                    } catch (e) {
+                                        settingsPage.editMessage = "删除失败"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 编辑表单（选中规则后展开；新建后自动展开）
+                RuleEditorForm {
+                    Layout.fillWidth: true
+                    visible: settingsPage.editingRule !== null
+                    rulesController: rulesController
+                    rule: settingsPage.editingRule
+                    onSaveRequested: {
+                        var raw = rulesController.updateRule(JSON.stringify(payload))
+                        try {
+                            var r = JSON.parse(raw)
+                            if (r.ok) {
+                                settingsPage.editingRule = null
+                                settingsPage.editMessage = ""
+                            } else {
+                                settingsPage.editMessage = r.error || "保存失败"
+                            }
+                        } catch (e) {
+                            settingsPage.editMessage = "保存失败"
+                        }
+                    }
+                    onCancelRequested: {
+                        settingsPage.editingRule = null
+                        settingsPage.editMessage = ""
                     }
                 }
 

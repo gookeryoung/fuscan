@@ -2208,3 +2208,217 @@ class TestRuleTestSandbox:
         data = json.loads(controller_with_file.testRuleText("敏感内容", "password"))
         assert isinstance(data, dict)
         assert "matched" in data
+
+
+class TestRuleEdit:
+    """规则编辑 Slot：createRule/updateRule/deleteRule/testRuleFields/userRulesModel。"""
+
+    @staticmethod
+    def _clean_controller(config_controller: ConfigController) -> RulesController:
+        """构造禁用内置规则的干净控制器，user-scan.yaml 初始不存在。"""
+        config_controller.config.use_builtin = False
+        return RulesController(config_controller)
+
+    def test_user_rules_model_empty_when_no_file(self, config_controller: ConfigController) -> None:
+        """user-scan.yaml 不存在时 userRulesModel 为空列表。"""
+        c = self._clean_controller(config_controller)
+        assert c.userRulesModel == []
+
+    def test_create_rule_appends(self, config_controller: ConfigController) -> None:
+        """createRule 追加默认叶子规则并落盘 user-scan.yaml。"""
+        c = self._clean_controller(config_controller)
+        r = json.loads(c.createRule())
+        assert r["ok"] is True
+        assert r["name"].startswith("新规则-")
+        assert c.userScanPath.exists()
+        m = c.userRulesModel
+        assert len(m) == 1
+        assert m[0]["name"] == r["name"]
+        assert m[0]["isLeaf"] is True
+        assert m[0]["target"] == "content"
+        assert m[0]["mode"] == "contains"
+
+    def test_create_rule_unique_name(self, config_controller: ConfigController) -> None:
+        """连续新建生成不重名规则。"""
+        c = self._clean_controller(config_controller)
+        n1 = json.loads(c.createRule())["name"]
+        n2 = json.loads(c.createRule())["name"]
+        assert n1 != n2
+        assert len(c.userRulesModel) == 2
+
+    def test_update_rule(self, config_controller: ConfigController) -> None:
+        """updateRule 按原名定位并替换全部字段。"""
+        c = self._clean_controller(config_controller)
+        name = json.loads(c.createRule())["name"]
+        payload = {
+            "originalName": name,
+            "name": "重命名",
+            "severity": "critical",
+            "target": "filename",
+            "mode": "regex",
+            "pattern": "^test",
+            "caseSensitive": True,
+            "replace": True,
+            "replaceWith": "X",
+            "description": "d",
+        }
+        r = json.loads(c.updateRule(json.dumps(payload, ensure_ascii=False)))
+        assert r["ok"] is True
+        m = c.userRulesModel
+        assert len(m) == 1
+        assert m[0]["name"] == "重命名"
+        assert m[0]["severity"] == "critical"
+        assert m[0]["target"] == "filename"
+        assert m[0]["mode"] == "regex"
+        assert m[0]["pattern"] == "^test"
+        assert m[0]["caseSensitive"] is True
+        assert m[0]["replace"] is True
+        assert m[0]["replaceWith"] == "X"
+
+    def test_update_rule_missing_original(self, config_controller: ConfigController) -> None:
+        """缺少 originalName 时返回 ok=False。"""
+        c = self._clean_controller(config_controller)
+        payload = {
+            "originalName": "",
+            "name": "x",
+            "severity": "info",
+            "target": "content",
+            "mode": "contains",
+            "pattern": "p",
+        }
+        r = json.loads(c.updateRule(json.dumps(payload, ensure_ascii=False)))
+        assert r["ok"] is False
+        assert "originalName" in r["error"]
+
+    def test_update_rule_bad_regex(self, config_controller: ConfigController) -> None:
+        """regex 模式编译失败时返回 ok=False。"""
+        c = self._clean_controller(config_controller)
+        name = json.loads(c.createRule())["name"]
+        payload = {
+            "originalName": name,
+            "name": "x",
+            "severity": "info",
+            "target": "content",
+            "mode": "regex",
+            "pattern": "(unclosed",
+        }
+        r = json.loads(c.updateRule(json.dumps(payload, ensure_ascii=False)))
+        assert r["ok"] is False
+        assert "正则" in r["error"]
+
+    def test_update_rule_rename_conflict(self, config_controller: ConfigController) -> None:
+        """重命名为已存在规则名时返回 ok=False。"""
+        c = self._clean_controller(config_controller)
+        n1 = json.loads(c.createRule())["name"]
+        n2 = json.loads(c.createRule())["name"]
+        payload = {
+            "originalName": n1,
+            "name": n2,
+            "severity": "info",
+            "target": "content",
+            "mode": "contains",
+            "pattern": "p",
+        }
+        r = json.loads(c.updateRule(json.dumps(payload, ensure_ascii=False)))
+        assert r["ok"] is False
+
+    def test_update_rule_not_found(self, config_controller: ConfigController) -> None:
+        """originalName 不存在时返回 ok=False。"""
+        c = self._clean_controller(config_controller)
+        payload = {
+            "originalName": "ghost",
+            "name": "x",
+            "severity": "info",
+            "target": "content",
+            "mode": "contains",
+            "pattern": "p",
+        }
+        r = json.loads(c.updateRule(json.dumps(payload, ensure_ascii=False)))
+        assert r["ok"] is False
+
+    def test_update_rule_invalid_json(self, config_controller: ConfigController) -> None:
+        """非法 JSON 入参时返回 ok=False。"""
+        c = self._clean_controller(config_controller)
+        r = json.loads(c.updateRule("not json"))
+        assert r["ok"] is False
+
+    def test_delete_rule(self, config_controller: ConfigController) -> None:
+        """deleteRule 移除规则，userRulesModel 同步清空。"""
+        c = self._clean_controller(config_controller)
+        name = json.loads(c.createRule())["name"]
+        r = json.loads(c.deleteRule(name))
+        assert r["ok"] is True
+        assert c.userRulesModel == []
+
+    def test_delete_rule_not_found(self, config_controller: ConfigController) -> None:
+        """删除不存在的规则返回 ok=False。"""
+        c = self._clean_controller(config_controller)
+        r = json.loads(c.deleteRule("ghost"))
+        assert r["ok"] is False
+
+    def test_test_rule_fields_match(self, config_controller: ConfigController) -> None:
+        """testRuleFields 对命中文本返回 matched=True。"""
+        c = self._clean_controller(config_controller)
+        fields = {
+            "severity": "info",
+            "target": "content",
+            "mode": "contains",
+            "pattern": "password",
+            "caseSensitive": False,
+        }
+        r = json.loads(c.testRuleFields(json.dumps(fields), "my password here"))
+        assert r["matched"] is True
+        assert r["matchCount"] >= 1
+
+    def test_test_rule_fields_no_match(self, config_controller: ConfigController) -> None:
+        """testRuleFields 对未命中文本返回 matched=False。"""
+        c = self._clean_controller(config_controller)
+        fields = {
+            "severity": "info",
+            "target": "content",
+            "mode": "contains",
+            "pattern": "zzz",
+            "caseSensitive": False,
+        }
+        r = json.loads(c.testRuleFields(json.dumps(fields), "hello"))
+        assert r["matched"] is False
+
+    def test_test_rule_fields_bad_pattern(self, config_controller: ConfigController) -> None:
+        """非法正则字段返回 matched=False 与 error。"""
+        c = self._clean_controller(config_controller)
+        fields = {
+            "severity": "info",
+            "target": "content",
+            "mode": "regex",
+            "pattern": "(unclosed",
+            "caseSensitive": False,
+        }
+        r = json.loads(c.testRuleFields(json.dumps(fields), "hello"))
+        assert r["matched"] is False
+        assert "error" in r
+
+    def test_user_rules_model_includes_composite(self, config_controller: ConfigController) -> None:
+        """组合规则在 userRulesModel 中标记 isLeaf=False。"""
+        c = self._clean_controller(config_controller)
+        c.userScanPath.parent.mkdir(parents=True, exist_ok=True)
+        c.userScanPath.write_text(
+            'version: "1.0"\nrules:\n'
+            '  - name: "复合"\n    severity: warning\n'
+            "    match:\n      type: and\n      children:\n"
+            '        - {type: content, mode: contains, pattern: "a"}\n'
+            '        - {type: content, mode: contains, pattern: "b"}\n',
+            encoding="utf-8",
+        )
+        m = c.userRulesModel
+        assert len(m) == 1
+        assert m[0]["isLeaf"] is False
+        assert m[0]["name"] == "复合"
+
+    def test_create_rule_registers_user_scan_in_rules_paths(self, config_controller: ConfigController) -> None:
+        """首次新建规则时 user-scan.yaml 注册到 rules_paths 并进入生效规则集。"""
+        c = self._clean_controller(config_controller)
+        assert c.ruleset is None
+        json.loads(c.createRule())
+        assert str(c.userScanPath) in c._config.rules_paths  # type: ignore[attr-defined]
+        assert c.ruleset is not None
+        assert c.ruleCount == 1

@@ -7,6 +7,7 @@ import importlib
 import logging
 import os
 import sys
+import threading
 import warnings
 from collections.abc import Sequence
 from typing import Any
@@ -131,19 +132,26 @@ _HIT_SOUND_PARAMS: dict[str, tuple[int, int]] = {
 def _play_hit_sound(severity: str) -> None:
     """播放监控命中提示音（仅 Windows；非 Windows 静默跳过）。
 
+    ``winsound.Beep`` 同步阻塞（critical 长达 500ms），在独立守护线程
+    播放避免阻塞 GUI 主线程。
+
     :param severity: 严重度值（``"info"``/``"warning"``/``"critical"``）
     """
     if sys.platform != "win32":
         return
-    try:
-        # 动态导入避免 pyrefly 在 Linux CI 上报 missing-import
-        # winsound 是 Windows 专有标准库模块
-        winsound = importlib.import_module("winsound")
-        freq, duration = _HIT_SOUND_PARAMS.get(severity, (800, 200))
-        winsound.Beep(freq, duration)
-    except (OSError, RuntimeError, ImportError) as exc:
-        # 蜂鸣器不可用（部分虚拟机/无音频设备）不阻塞流程
-        logger.debug("监控命中提示音播放失败: %s", exc)
+
+    def _beep() -> None:
+        try:
+            # 动态导入避免 pyrefly 在 Linux CI 上报 missing-import
+            # winsound 是 Windows 专有标准库模块
+            winsound = importlib.import_module("winsound")
+            freq, duration = _HIT_SOUND_PARAMS.get(severity, (800, 200))
+            winsound.Beep(freq, duration)
+        except (OSError, RuntimeError, ImportError) as exc:
+            # 蜂鸣器不可用（部分虚拟机/无音频设备）不阻塞流程
+            logger.debug("监控命中提示音播放失败: %s", exc)
+
+    threading.Thread(target=_beep, daemon=True, name="fuscan-monitor-beep").start()
 
 
 def _setup_file_monitor_tray(app: QGuiApplication, controller: object) -> QSystemTrayIcon | None:

@@ -46,10 +46,14 @@ class TestBuiltinRuleset:
 class TestBuiltinPatternsFields:
     """``builtin-patterns.yaml`` 字段覆盖测试。"""
 
-    def test_scan_extensions_only_txt(self) -> None:
-        """内置 scan_extensions 应仅含 txt（极简默认，用户可覆盖扩展）。"""
+    def test_scan_extensions_defaults_to_all(self) -> None:
+        """内置 scan_extensions 应为 None（全选默认，用户可用非空 list 覆盖）。
+
+        密钥/敏感信息典型载体（.env/.py/.yaml/.pem 等）远不止 txt，
+        收窄默认会让文件监控与工作区扫描静默漏报。
+        """
         rs = load_builtin_ruleset()
-        assert rs.scan_extensions == ("txt",)
+        assert rs.scan_extensions is None
 
     def test_rules_count(self) -> None:
         """内置规则集应包含 P0101/P0102/P0103 三条规则。"""
@@ -247,7 +251,7 @@ rules:
         assert ".git" in rs.ignore_dirs
 
     def test_load_with_builtin_user_scan_extensions_overrides(self, tmp_path: Path) -> None:
-        """用户规则中 scan_extensions 非 None 时覆盖内置的 ('txt',)。"""
+        """用户规则中 scan_extensions 非 None 时覆盖内置的全选默认。"""
         user_yaml = tmp_path / "user.yaml"
         user_yaml.write_text(
             'version: "1.0"\nscan_extensions:\n  - py\n  - js\n  - yaml\nrules: []\n',

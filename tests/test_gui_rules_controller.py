@@ -145,16 +145,17 @@ class TestRulesFileList:
         assert len(model) == 2  # 内置 + 缺失用户文件
         assert model[1]["exists"] is False
 
-    def test_rules_file_model_builtin_has_scan_extensions(self, config_controller: ConfigController) -> None:
-        """内置规则项应携带 scanExtensions（来自 builtin-patterns.yaml）与 state='list'。"""
+    def test_rules_file_model_builtin_scan_extensions_unset(self, config_controller: ConfigController) -> None:
+        """内置规则项 scanExtensionsState='unset'（默认全选，用户可非空 list 覆盖）。
+
+        builtin-patterns.yaml 不再收窄默认后缀（原 ['txt'] 会让文件监控与
+        工作区扫描对其余载体静默漏报），改由用户在 user-scan.yaml 覆盖。
+        """
         controller = RulesController(config_controller)
         model = controller.rulesFileModel
         assert model[0]["isBuiltin"] is True
-        assert model[0]["scanExtensionsState"] == "list"
-        exts = model[0]["scanExtensions"]
-        assert isinstance(exts, list)
-        # builtin-patterns.yaml 仅定义 txt 后缀作为极简默认，用户可覆盖扩展
-        assert exts == ["txt"]
+        assert model[0]["scanExtensionsState"] == "unset"
+        assert model[0]["scanExtensions"] == []
 
     def test_rules_file_model_user_file_without_scan_extensions(self, controller_with_file: RulesController) -> None:
         """用户规则文件未定义 scan_extensions 时 state='unset'，列表为空。"""
@@ -2085,7 +2086,7 @@ class TestPreviewRuleset:
     ) -> None:
         """预览的 ruleFiles 每项应携带 scanExtensions/scanExtensionsState 字段。
 
-        内置规则项 state='list' 且包含 builtin.yaml 中的后缀；
+        内置规则项 state='unset'（builtin-patterns.yaml 默认全选）；
         缺失文件项 state='unset'。
         """
         controller, _ = controller_with_workspace
@@ -2093,12 +2094,11 @@ class TestPreviewRuleset:
 
         rule_files = data["ruleFiles"]
         assert len(rule_files) >= 1
-        # 内置项：state='list'，scanExtensions 非空
+        # 内置项：state='unset'（默认全选），scanExtensions 为空列表
         builtin_item = rule_files[0]
         assert builtin_item["isBuiltin"] is True
-        assert builtin_item["scanExtensionsState"] == "list"
-        assert isinstance(builtin_item["scanExtensions"], list)
-        assert "txt" in builtin_item["scanExtensions"]
+        assert builtin_item["scanExtensionsState"] == "unset"
+        assert builtin_item["scanExtensions"] == []
 
     def test_preview_disabled_temp_rule_excluded_from_rules(
         self,

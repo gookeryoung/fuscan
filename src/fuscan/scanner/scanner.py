@@ -26,7 +26,7 @@ import logging
 import threading
 import time
 import weakref
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
@@ -204,6 +204,7 @@ class Scanner:
         prev_report: ScanReport | None = None,
         whitelist: Whitelist | None = None,
         file_perf: FilePerfRecorder | None = None,
+        dedup_memo_maxsize: int | None = None,
     ) -> None:
         self.ruleset = ruleset
         self._content_provider: ContentProvider = content_provider or default_extract_content
@@ -447,11 +448,15 @@ class Scanner:
         self._precomputed_file_hashes: dict[str, str | None] = {}
         # 单次扫描内文件内容去重 memo：(file_hash, extension) → (match_content, bucket_hits)
         # 同内容同扩展名的重复文件复用内容提取与 CONTENT 桶匹配结果，
-        # 仅重算路径相关规则（FILENAME/PATH）。扫描结束后随 Scanner 实例释放，
-        # 不跨扫描复用（跨扫描由 CacheStore 负责）。
-        # 线程安全：并发模式多 worker 共享，用 _dedup_memo_lock 保护 dict 读写。
-        self._content_dedup_memo: dict[tuple[str, str], tuple[str, list[RuleHit]]] = {}
+        # 仅重算路径相关规则（FILENAME/PATH）。工作区扫描随 Scanner 实例释放，
+        # 不跨扫描复用（跨扫描由 CacheStore 负责）；文件监控等长期存活的
+        # Scanner（scan_file 不清 memo，跨事件复用）由 dedup_memo_maxsize
+        # LRU 限容防止内存无限膨胀。
+        # 线程安全：并发模式多 worker 共享，用 _dedup_memo_lock 保护读写。
+        # OrderedDict 实现 LRU：命中 move_to_end，超限 popitem(last=False)。
+        self._content_dedup_memo: OrderedDict[tuple[str, str], tuple[str, list[RuleHit]]] = OrderedDict()
         self._dedup_memo_lock = threading.Lock()
+        self._dedup_memo_maxsize: int | None = dedup_memo_maxsize
         # 仅在默认内容提供器时启用去重：自定义提供器的非确定性内容
         # （如 source_files 映射）无法按 file_hash 安全复用。
         self._dedup_enabled: bool = content_provider is None or content_provider is default_extract_content
@@ -1222,11 +1227,13 @@ class Scanner:
         :param extension: 文件扩展名（去重键组成部分）
         :return: ``(bucket_hits, rule_errors)``
         """
-        # 先查去重 memo
+        # 先查去重 memo（LRU 命中移到队尾，最近使用）
         if file_hash is not None:
             dedup_key = (file_hash, extension)
             with self._dedup_memo_lock:
                 memo_entry = self._content_dedup_memo.get(dedup_key)
+                if memo_entry is not None:
+                    self._content_dedup_memo.move_to_end(dedup_key)
             if memo_entry is not None:
                 return memo_entry[1], 0
 
@@ -1238,11 +1245,15 @@ class Scanner:
             logger.warning("CONTENT 合并桶(缓存模式)匹配失败", exc_info=True)
             return [], 1
 
-        # 存入去重 memo（仅在桶匹配成功时，避免异常结果被复用）
+        # 存入去重 memo（仅在桶匹配成功时，避免异常结果被复用）；
+        # LRU 限容：超限淘汰最旧条目（dedup_memo_maxsize=None 表示不限）
         if file_hash is not None:
             dedup_key = (file_hash, extension)
             with self._dedup_memo_lock:
                 self._content_dedup_memo[dedup_key] = (content, matched)
+                maxsize = self._dedup_memo_maxsize
+                if maxsize is not None and len(self._content_dedup_memo) > maxsize:
+                    self._content_dedup_memo.popitem(last=False)
 
         return matched, 0
 
@@ -1455,6 +1466,9 @@ class Scanner:
                 dedup_key = (file_hash, entry.extension)
                 with self._dedup_memo_lock:
                     cached = self._content_dedup_memo.get(dedup_key)
+                    if cached is not None:
+                        # LRU 命中移到队尾（最近使用）
+                        self._content_dedup_memo.move_to_end(dedup_key)
                 if cached is not None:
                     # 命中去重：复用 (match_content, bucket_hits)，跳过提取 + 桶匹配
                     return cached[0], cached[1], 0
@@ -1484,10 +1498,14 @@ class Scanner:
                 logger.warning("CONTENT 合并桶匹配失败 %s", entry.path, exc_info=True)
                 rule_errors = 1
 
-        # 存入去重 memo（仅在桶匹配成功时，避免异常结果被复用）
+        # 存入去重 memo（仅在桶匹配成功时，避免异常结果被复用）；
+        # LRU 限容：超限淘汰最旧条目（dedup_memo_maxsize=None 表示不限）
         if dedup_key is not None and rule_errors == 0:
             with self._dedup_memo_lock:
                 self._content_dedup_memo[dedup_key] = (match_content, bucket_hits)
+                maxsize = self._dedup_memo_maxsize
+                if maxsize is not None and len(self._content_dedup_memo) > maxsize:
+                    self._content_dedup_memo.popitem(last=False)
 
         return match_content, bucket_hits, rule_errors
 

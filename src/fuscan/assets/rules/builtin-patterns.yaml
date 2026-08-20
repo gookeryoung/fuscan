@@ -12,8 +12,11 @@ version: "1.0"
 #   - null（未指定）= 全选默认（所有注册提取器支持的后缀）
 #   - 空 list = 都不扫描
 #   - 非空 list = 仅扫描指定后缀
+#
+# 内置默认为 null（全选）：密钥/敏感信息的典型载体（.env/.py/.yaml/.json/.pem
+# 等）远不止 txt，收窄默认会让文件监控与工作区扫描静默漏报；需要收窄的用户
+# 在 user-scan.yaml 中以非空 list 覆盖即可。
 scan_extensions:
-  - "txt"
 
 rules:
   # ---------- 敏感个人信息(PRIVATE INFO) ----------

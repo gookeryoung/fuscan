@@ -1993,3 +1993,368 @@ class TestTrayAvailable:
         assert result is not None
         assert result._shown is True
         assert result._tooltip == "fuscan 文件监控"
+
+
+# ============================ 异步扫描测试 ============================
+
+
+@pytest.fixture(scope="session")
+def qapp() -> Any:
+    """确保 QCoreApplication 存在（跨线程 queued 信号需要事件循环消费）。"""
+    try:
+        from PySide2.QtCore import QCoreApplication
+    except ImportError:  # pragma: no cover
+        from PySide6.QtCore import QCoreApplication  # pyrefly: ignore [missing-import]
+    app = QCoreApplication.instance()
+    if app is None:
+        app = QCoreApplication([])
+    return app
+
+
+def _wait_for_condition(cond: Any, qapp: Any, timeout_s: float = 5.0) -> None:
+    """轮询 processEvents 直到条件满足或超时（消费跨线程 queued 信号）。"""
+    import time as _time
+
+    deadline = _time.time() + timeout_s
+    while not cond() and _time.time() < deadline:
+        qapp.processEvents()
+        _time.sleep(0.005)
+    # 条件满足后多轮处理事件，确保 queued 信号回调全部消费
+    for _ in range(10):
+        qapp.processEvents()
+        _time.sleep(0.001)
+
+
+def _inject_hit_scanner(
+    controller: FileMonitorController,
+    fake_rules_controller: _FakeRulesController,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """注入必然命中的 fake ruleset + Scanner（绕过真实规则编译）。"""
+
+    class _FakeRuleset:
+        scan_extensions: tuple[str, ...] | None = None
+        ignore_dirs: tuple[str, ...] = ()
+
+    fake_rules_controller._ruleset = _FakeRuleset()
+    hit = _FakeRuleHit(rule_name="密码规则", severity=Severity.CRITICAL, match_text="password123")
+
+    class _FakeScanner:
+        def scan_file(self, path: Path) -> _FakeScanResult:
+            return _FakeScanResult(hits=(hit,))
+
+    monkeypatch.setattr(controller, "_get_scanner", _FakeScanner)
+
+
+class TestAsyncScan:
+    """``scan_async=True``：扫描提交后台线程池，结果经 ``_scan_done`` 回主线程。"""
+
+    @staticmethod
+    def _make_controller(
+        fake_rules_controller: _FakeRulesController,
+    ) -> FileMonitorController:
+        return FileMonitorController(
+            fake_rules_controller,
+            _observer_factory=_FakeObserver,
+            scan_async=True,
+        )
+
+    def test_async_constructs_executor(
+        self,
+        config_dir: Path,
+        fake_rules_controller: _FakeRulesController,
+    ) -> None:
+        """scan_async=True 时应创建单 worker 守护线程池。"""
+        controller = self._make_controller(fake_rules_controller)
+        assert controller._scan_executor is not None
+        controller.cleanup()
+
+    def test_async_default_sync_no_executor(
+        self,
+        controller: FileMonitorController,
+    ) -> None:
+        """默认 scan_async=False 时无线程池（同步模式）。"""
+        assert controller._scan_executor is None
+
+    def test_async_scan_runs_in_worker_thread(
+        self,
+        config_dir: Path,
+        fake_rules_controller: _FakeRulesController,
+        qapp: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """异步模式下扫描任务应在后台线程执行，不阻塞主线程。"""
+        import threading
+
+        controller = self._make_controller(fake_rules_controller)
+        try:
+            thread_ids: list[int] = []
+            orig_payload = controller._scan_file_payload
+
+            def spy_payload(path: Path) -> Any:
+                thread_ids.append(threading.get_ident())
+                return orig_payload(path)
+
+            monkeypatch.setattr(controller, "_scan_file_payload", spy_payload)
+            f = tmp_path / "a.txt"
+            f.write_text("content", encoding="utf-8")
+            controller._monitoring_enabled = True
+            controller._scan_path(str(f))
+            _wait_for_condition(lambda: len(thread_ids) == 1, qapp)
+            # 扫描在 worker 线程执行（非测试主线程）
+            assert thread_ids and thread_ids[0] != threading.get_ident()
+        finally:
+            controller.cleanup()
+
+    def test_async_hit_delivered_via_signal(
+        self,
+        config_dir: Path,
+        fake_rules_controller: _FakeRulesController,
+        qapp: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """异步命中应经 _scan_done 队列回主线程：追加 model 并 emit hitFound。"""
+        controller = self._make_controller(fake_rules_controller)
+        try:
+            _inject_hit_scanner(controller, fake_rules_controller, monkeypatch)
+            hits: list[dict[str, Any]] = []
+            controller.hitFound.connect(hits.append)  # pyrefly: ignore [missing-attribute]
+            f = tmp_path / "secret.txt"
+            f.write_text("password123", encoding="utf-8")
+            controller._monitoring_enabled = True
+            controller._scan_path(str(f))
+            _wait_for_condition(lambda: len(hits) > 0, qapp)
+            assert len(hits) == 1
+            assert hits[0]["rule_name"] == "密码规则"
+            assert hits[0]["path"] == str(f)
+            assert controller.model.count == 1
+        finally:
+            controller.cleanup()
+
+    def test_async_result_dropped_when_monitoring_disabled(
+        self,
+        config_dir: Path,
+        fake_rules_controller: _FakeRulesController,
+        qapp: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """异步扫描期间监控停用：到期的结果应丢弃（不追加 model）。"""
+        controller = self._make_controller(fake_rules_controller)
+        try:
+            _inject_hit_scanner(controller, fake_rules_controller, monkeypatch)
+            payload_done: list[Any] = []
+            orig_payload = controller._scan_file_payload
+
+            def spy_payload(path: Path) -> Any:
+                result = orig_payload(path)
+                payload_done.append(result)
+                return result
+
+            monkeypatch.setattr(controller, "_scan_file_payload", spy_payload)
+            f = tmp_path / "secret.txt"
+            f.write_text("password123", encoding="utf-8")
+            controller._monitoring_enabled = True
+            controller._scan_path(str(f))
+            # 后台扫描启动后立即停用监控（模拟用户在扫描期间关闭监控）
+            controller._monitoring_enabled = False
+            _wait_for_condition(lambda: len(payload_done) == 1, qapp)
+            # 停用后到期的命中结果被丢弃
+            assert controller.model.count == 0
+        finally:
+            controller.cleanup()
+
+    def test_async_cleanup_shuts_down_executor(
+        self,
+        config_dir: Path,
+        fake_rules_controller: _FakeRulesController,
+    ) -> None:
+        """cleanup 应关闭扫描线程池（幂等）。"""
+        controller = self._make_controller(fake_rules_controller)
+        executor = controller._scan_executor
+        assert executor is not None
+        controller.cleanup()
+        assert controller._scan_executor is None
+        # 重复 cleanup 不抛异常
+        controller.cleanup()
+
+
+# ============================ 命中提示去重测试 ============================
+
+
+class TestHitNotificationDedup:
+    """命中提示哈希去重：同 ``(file_hash, extension)`` 重复命中只提示一次。"""
+
+    def test_same_content_file_notified_once(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """同文件（内容未变）反复扫描只提示一次。"""
+        _inject_hit_scanner(controller, fake_rules_controller, monkeypatch)
+        hits: list[dict[str, Any]] = []
+        controller.hitFound.connect(hits.append)  # pyrefly: ignore [missing-attribute]
+        controller._monitoring_enabled = True
+
+        f = tmp_path / "secret.txt"
+        f.write_text("password123", encoding="utf-8")
+        controller._scan_path(str(f))
+        controller._scan_path(str(f))
+        assert len(hits) == 1
+        assert controller.model.count == 1
+
+    def test_same_content_new_file_notified_once(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """复制同内容到新文件（同哈希同扩展名）也只提示一次。"""
+        _inject_hit_scanner(controller, fake_rules_controller, monkeypatch)
+        hits: list[dict[str, Any]] = []
+        controller.hitFound.connect(hits.append)  # pyrefly: ignore [missing-attribute]
+        controller._monitoring_enabled = True
+
+        content = "password123"
+        a = tmp_path / "a.txt"
+        a.write_text(content, encoding="utf-8")
+        b = tmp_path / "b.txt"  # 同内容不同文件名
+        b.write_text(content, encoding="utf-8")
+        controller._scan_path(str(a))
+        controller._scan_path(str(b))
+        assert len(hits) == 1
+        assert controller.model.count == 1
+
+    def test_different_content_both_notified(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """不同内容（不同哈希）的文件都应提示。"""
+        _inject_hit_scanner(controller, fake_rules_controller, monkeypatch)
+        hits: list[dict[str, Any]] = []
+        controller.hitFound.connect(hits.append)  # pyrefly: ignore [missing-attribute]
+        controller._monitoring_enabled = True
+
+        a = tmp_path / "a.txt"
+        a.write_text("password=111", encoding="utf-8")
+        b = tmp_path / "b.txt"
+        b.write_text("password=222", encoding="utf-8")
+        controller._scan_path(str(a))
+        controller._scan_path(str(b))
+        assert len(hits) == 2
+        assert controller.model.count == 2
+
+    def test_hash_failure_not_deduplicated(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """哈希读取失败（file_hash 为空串）时不去重，保证不漏报。"""
+        _inject_hit_scanner(controller, fake_rules_controller, monkeypatch)
+
+        def _raise_oserror(data: bytes) -> str:
+            raise OSError("mock read failure")
+
+        monkeypatch.setattr(
+            "fuscan.gui.controllers.file_monitor_controller.hash_bytes",
+            _raise_oserror,
+        )
+        hits: list[dict[str, Any]] = []
+        controller.hitFound.connect(hits.append)  # pyrefly: ignore [missing-attribute]
+        controller._monitoring_enabled = True
+
+        f = tmp_path / "secret.txt"
+        f.write_text("password123", encoding="utf-8")
+        controller._scan_path(str(f))
+        controller._scan_path(str(f))
+        # 哈希失败 → 去重键哈希为空 → 两次都提示
+        assert len(hits) == 2
+        assert controller.model.count == 2
+
+    def test_ruleset_change_renotifies(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """规则集变更后清空去重键，同文件重新提示。"""
+        _inject_hit_scanner(controller, fake_rules_controller, monkeypatch)
+        hits: list[dict[str, Any]] = []
+        controller.hitFound.connect(hits.append)  # pyrefly: ignore [missing-attribute]
+        controller._monitoring_enabled = True
+
+        f = tmp_path / "secret.txt"
+        f.write_text("password123", encoding="utf-8")
+        controller._scan_path(str(f))
+        assert len(hits) == 1
+        # 规则集变更：清空 Scanner 缓存与命中去重键
+        fake_rules_controller.rulesetChanged.emit()
+        controller._scan_path(str(f))
+        assert len(hits) == 2
+
+    def test_monitor_restart_renotifies(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """监控停用→重启后清空去重键，同文件重新提示。"""
+        _inject_hit_scanner(controller, fake_rules_controller, monkeypatch)
+        hits: list[dict[str, Any]] = []
+        controller.hitFound.connect(hits.append)  # pyrefly: ignore [missing-attribute]
+        controller._monitoring_enabled = True
+
+        f = tmp_path / "secret.txt"
+        f.write_text("password123", encoding="utf-8")
+        controller._scan_path(str(f))
+        assert len(hits) == 1
+        # 停用 → 重启（重启时清空命中去重键）
+        controller.setMonitoringEnabled(False)
+        controller.setMonitoringEnabled(True)
+        controller._scan_path(str(f))
+        assert len(hits) == 2
+        controller.cleanup()
+
+    def test_notified_keys_lru_eviction(
+        self,
+        controller: FileMonitorController,
+        fake_rules_controller: _FakeRulesController,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """去重键 LRU 限容：超限淘汰最旧键后，旧内容重新命中会再次提示。"""
+        _inject_hit_scanner(controller, fake_rules_controller, monkeypatch)
+        monkeypatch.setattr(
+            "fuscan.gui.controllers.file_monitor_controller._NOTIFIED_KEYS_MAX",
+            2,
+        )
+        hits: list[dict[str, Any]] = []
+        controller.hitFound.connect(hits.append)  # pyrefly: ignore [missing-attribute]
+        controller._monitoring_enabled = True
+
+        a = tmp_path / "a.txt"
+        a.write_text("password=111", encoding="utf-8")
+        b = tmp_path / "b.txt"
+        b.write_text("password=222", encoding="utf-8")
+        c = tmp_path / "c.txt"
+        c.write_text("password=333", encoding="utf-8")
+        controller._scan_path(str(a))
+        controller._scan_path(str(b))
+        controller._scan_path(str(c))
+        assert len(hits) == 3
+        # a 的去重键已被 LRU 淘汰（maxsize=2）→ 再扫 a 重新提示
+        controller._scan_path(str(a))
+        assert len(hits) == 4
+        assert controller.model.count == 4

@@ -9,6 +9,17 @@
 - emit :signal:`hitFound` 信号（携带命中详情 dict），供 ``app.py`` 触发
   系统托盘通知与声音提示
 
+扫描执行模型（``scan_async=True`` 时）：防抖定时器回调仅提交任务到
+单 worker 守护线程池，文件读取/提取/规则匹配全部在后台线程执行，
+完成后经内部 :signal:`_scan_done` 信号（AutoConnection 自动排队）回
+主线程更新模型与提示——避免大文件（PDF/OCR 等）同步扫描阻塞 GUI
+事件循环导致界面卡死。``scan_async=False``（默认，测试用）在同一线程
+同步执行，行为与旧版等价。
+
+命中提示去重：同 ``(file_hash, extension)`` 的重复文件（如反复保存内容
+未变的文件、复制同内容的新文件）只提示一次，LRU 限容防膨胀；规则集
+变更或监控重启时清空（结果可能变化，需重新提示）。
+
 规则来源：全局规则集（内置 + 已加载的全局规则文件），与工作区无关。
 监听 :signal:`RulesController.rulesetChanged`，规则集变更时清空 Scanner
 缓存，下次事件用新规则集重建 Scanner。
@@ -33,10 +44,10 @@ import datetime
 import json
 import logging
 import threading
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from typing_extensions import override
 
@@ -55,8 +66,10 @@ if TYPE_CHECKING:
     # 此处仅声明类型供静态检查器识别，避免 F821。
     _WatchdogHandler: type
 
+from fuscan.cache.hashes import hash_bytes
 from fuscan.gui.models.file_monitor_model import FileMonitorModel
 from fuscan.gui.severity_utils import severity_text
+from fuscan.scanner.context import _extract_extension
 from fuscan.scanner.scanner import Scanner
 
 __all__ = ["FileMonitorController"]
@@ -68,6 +81,14 @@ _DEBOUNCE_MS = 300
 
 # 匹配文本摘要最大长度（避免 QML 列表过宽）
 _MATCH_TEXT_MAX = 120
+
+# 已提示命中去重键 LRU 上限：(file_hash, extension) 组合数。
+# 超限淘汰最旧条目，防止长生命周期监控会话内存无限膨胀
+_NOTIFIED_KEYS_MAX = 256
+
+# 监控 Scanner 内容去重 memo 上限（传入 Scanner.dedup_memo_maxsize）。
+# 监控 Scanner 跨事件长期存活（scan_file 不清 memo），需 LRU 限容防泄漏
+_MONITOR_DEDUP_MEMO_MAX = 512
 
 # 最近事件日志最大保留条数（FIFO，超过后丢弃最旧）
 _RECENT_EVENTS_MAX = 50
@@ -226,6 +247,9 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
     :param rules_controller: 规则控制器（共享全局规则集）
     :param parent: 父 QObject
     :param _observer_factory: 测试用 Observer 工厂（生产环境 None，使用默认 ``Observer``）
+    :param scan_async: ``True`` 时扫描任务提交到单 worker 守护线程池后台执行
+        （生产 GUI 路径，防止大文件同步扫描阻塞主线程）；``False``（默认）同步
+        执行（单测路径，行为与旧版等价）
     """
 
     # 命中信号：携带命中详情 dict，app.py 据此触发托盘通知 + 声音
@@ -242,6 +266,10 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
     # 实际不会 emit；声明仅为满足 QML「属性必须可 NOTIFY」要求，
     # 避免 QML 绑定警告「depends on non-NOTIFYable properties」。
     modelChanged = Signal()
+    # 内部扫描完成信号：后台线程扫描结束后 emit（携带命中 payload dict 或
+    # None），AutoConnection 跨线程自动排队到主线程处理。同步模式下同线程
+    # 直连，行为等价
+    _scan_done = Signal(str, object)
 
     def __init__(
         self,
@@ -249,6 +277,7 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         parent: QObject | None = None,
         *,
         _observer_factory: Callable[[], object] | None = None,
+        scan_async: bool = False,
     ) -> None:
         super().__init__(parent)
         self._rules_controller = rules_controller
@@ -293,6 +322,18 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._stats_timer.timeout.connect(self._poll_filter_stats)
         # 上次轮询的过滤统计快照（用于检测变化）
         self._last_filter_stats: tuple[int, int, int] = (0, 0, 0)
+        # 已提示命中的去重键 LRU：(file_hash, extension) → None。
+        # 同哈希同扩展名的重复命中只提示一次；仅主线程读写（_on_scan_done）
+        self._notified_keys: OrderedDict[tuple[str, str], None] = OrderedDict()
+        # 扫描执行器：scan_async=True 时懒创建单 worker 守护线程池
+        # （串行执行避免同一 Scanner 并发扫描），None 表示同步模式
+        self._scan_executor: Any | None = None
+        if scan_async:
+            from fuscan.scanner._executor import DaemonThreadPoolExecutor
+
+            self._scan_executor = DaemonThreadPoolExecutor(max_workers=1)
+        # 扫描完成信号 → 主线程统一处理命中（同步模式为直连，异步模式为队列）
+        self._scan_done.connect(self._on_scan_done)  # pyrefly: ignore [missing-attribute]
 
         # 监听规则集变化
         rules_controller.rulesetChanged.connect(self._on_ruleset_changed)  # pyrefly: ignore [missing-attribute]
@@ -444,9 +485,11 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         if enabled == self._monitoring_enabled:
             return
         if enabled:
-            # 重新启用时重置事件日志与过滤统计，从 0 开始计数本次会话
+            # 重新启用时重置事件日志与过滤统计，从 0 开始计数本次会话；
+            # 同时清空命中去重键（新会话重新提示）
             self._event_count = 0
             self._recent_events.clear()
+            self._notified_keys.clear()
             for key in self._filter_stats:
                 self._filter_stats[key] = 0
             self._start_observer()
@@ -473,13 +516,17 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self.eventLogChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def cleanup(self) -> None:
-        """窗口关闭时统一清理：停用 Observer，取消未触发的防抖定时器。"""
+        """窗口关闭时统一清理：停用 Observer，关闭扫描线程池，取消防抖定时器。"""
         if self._monitoring_enabled:
             self._stop_observer()
             self._monitoring_enabled = False
         for timer in list(self._debounce_timers.values()):
             timer.stop()
         self._debounce_timers.clear()
+        if self._scan_executor is not None:
+            # wait=False：退出阶段不等待在途扫描（daemon 线程随进程终止）
+            self._scan_executor.shutdown(wait=False)  # pyrefly: ignore [missing-attribute]
+            self._scan_executor = None
 
     # ----------------------------- 内部实现 -----------------------------
 
@@ -549,14 +596,22 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._handler = handler_cls(self._emitter, scan_extensions, self._filter_stats)
 
     def _on_ruleset_changed(self) -> None:
-        """规则集变更：清空 Scanner 缓存，重建 handler，下次事件用新规则集。"""
+        """规则集变更：清空 Scanner 缓存与命中去重键，重建 handler。
+
+        规则变化后同一文件的命中结果可能变化，已提示哈希需重新提示。
+        """
         self._scanner_cache.clear()
+        self._notified_keys.clear()
         self._rebuild_handler()
         # 若 observer 正在运行，已 schedule 的 handler 引用不变（watchdog 内部弱引用），
         # 新事件会用新 handler；这里直接替换 _handler 即可（下次 schedule 用新 handler）
 
     def _get_scanner(self) -> Scanner | None:
         """获取当前规则集对应的 Scanner（按 id(ruleset) 缓存）。
+
+        监控 Scanner 跨事件长期存活（``scan_file`` 不清内容去重 memo，
+        同哈希文件复用提取与匹配结果），故传 ``dedup_memo_maxsize``
+        LRU 限容防止长会话内存泄漏。
 
         :return: Scanner 实例；规则集为 ``None`` 时返回 ``None``
         """
@@ -571,6 +626,7 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 scan_extensions=ruleset.scan_extensions,
                 ignore_dirs=ruleset.ignore_dirs,
                 max_workers=1,
+                dedup_memo_maxsize=_MONITOR_DEDUP_MEMO_MAX,
             )
             self._scanner_cache[key] = scanner
         return scanner
@@ -606,9 +662,12 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         timer.start(_DEBOUNCE_MS)  # pyrefly: ignore [missing-argument]
 
     def _scan_path(self, path: str) -> None:
-        """扫描单个变动文件，命中规则则追加到模型并 emit hitFound。
+        """扫描单个变动文件（防抖定时器到期回调，主线程）。
 
-        扫描完成后从防抖定时器表中移除该路径的定时器（释放内存）。
+        仅做前置校验与任务提交：``scan_async=True`` 时把扫描任务提交到
+        单 worker 守护线程池后台执行（防止大文件同步扫描阻塞 GUI 事件
+        循环），完成后经 :signal:`_scan_done` 回主线程处理命中；同步模式
+        下在同一线程立即执行。命中处理与提示去重统一在 :meth:`_on_scan_done`。
         """
         # 清理防抖定时器引用
         timer = self._debounce_timers.pop(path, None)
@@ -621,42 +680,100 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         file_path = Path(path)
         if not file_path.is_file():
             return
+
+        def _task() -> None:
+            payload = self._scan_file_payload(file_path)
+            self._scan_done.emit(path, payload)  # pyrefly: ignore [missing-attribute]
+
+        if self._scan_executor is not None:
+            self._scan_executor.submit(_task)  # pyrefly: ignore [missing-attribute]
+        else:
+            _task()
+
+    def _scan_file_payload(self, file_path: Path) -> dict[str, Any] | None:
+        """执行单文件扫描并构造命中 payload（可能在后台线程运行）。
+
+        仅纯 Python 数据操作（无 Qt 对象访问），线程安全；异常被捕获
+        记日志后返回 ``None``（扫描器内部异常不应中断监控）。
+
+        :param file_path: 待扫描文件路径
+        :return: 命中 payload dict（含 ``file_hash``/``extension`` 去重键）；
+            无命中或扫描失败返回 ``None``
+        """
         scanner = self._get_scanner()
         if scanner is None:
-            return
+            return None
         try:
             result = scanner.scan_file(file_path)
         except OSError as exc:
-            logger.debug("监控扫描失败 %s: %s", path, exc)
-            return
+            logger.debug("监控扫描失败 %s: %s", file_path, exc)
+            return None
         except Exception as exc:  # 扫描器内部异常不应中断监控
-            logger.warning("监控扫描异常 %s: %s", path, exc)
-            return
+            logger.warning("监控扫描异常 %s: %s", file_path, exc)
+            return None
         if not result.has_hit:
-            return
+            return None
         # 命中：取首条命中作为列表展示的主要规则
         first_hit = result.hits[0]
-        time_str = datetime.datetime.now().strftime("%H:%M:%S")
         match_text = first_hit.match_text or first_hit.detail
         if len(match_text) > _MATCH_TEXT_MAX:
             match_text = match_text[: _MATCH_TEXT_MAX - 1] + "…"
+        # 计算内容哈希用于提示去重：仅对有命中的文件读一次字节
+        # （无命中不需要去重键）；读取失败时哈希为空串（跳过去重，照常提示）
+        file_hash = ""
+        try:
+            file_hash = hash_bytes(file_path.read_bytes())
+        except OSError:
+            logger.debug("监控命中文件读取哈希失败 %s", file_path)
+        return {
+            "path": str(file_path),
+            "rule_name": first_hit.rule_name,
+            "severity": first_hit.severity.value,
+            "severity_text": severity_text(first_hit.severity),
+            "match_text": match_text,
+            "file_hash": file_hash,
+            "extension": _extract_extension(file_path),
+        }
+
+    def _on_scan_done(self, path: str, payload: dict[str, Any] | None) -> None:
+        """主线程处理扫描结果：命中去重、追加模型、emit hitFound。
+
+        :param path: 扫描的文件路径
+        :param payload: :meth:`_scan_file_payload` 构造的命中 payload；
+            ``None`` 表示无命中/失败/无规则集
+        """
+        # 异步模式下监控停用后到期的结果直接丢弃
+        if payload is None or not self._monitoring_enabled:
+            return
+        # 提示去重：同 (file_hash, extension) 的重复命中只提示一次
+        # （反复保存内容未变的文件、复制同内容的新文件）。哈希为空
+        # （读取失败）时不去重，保证不漏报
+        dedup_key = (payload["file_hash"], payload["extension"])
+        if payload["file_hash"]:
+            if dedup_key in self._notified_keys:
+                self._notified_keys.move_to_end(dedup_key)
+                return
+            self._notified_keys[dedup_key] = None
+            if len(self._notified_keys) > _NOTIFIED_KEYS_MAX:
+                self._notified_keys.popitem(last=False)
+        time_str = datetime.datetime.now().strftime("%H:%M:%S")
         # 追加到 Model
         self._model.append_hit(
             time_str,
             path,
-            first_hit.rule_name,
-            first_hit.severity.value,
-            match_text,
+            payload["rule_name"],
+            payload["severity"],
+            payload["match_text"],
         )
         # emit 命中信号（供 app.py 触发托盘通知 + 声音）
         self.hitFound.emit(  # pyrefly: ignore [missing-attribute]
             {
                 "time": time_str,
                 "path": path,
-                "rule_name": first_hit.rule_name,
-                "severity": first_hit.severity.value,
-                "severity_text": severity_text(first_hit.severity),
-                "match_text": match_text,
+                "rule_name": payload["rule_name"],
+                "severity": payload["severity"],
+                "severity_text": payload["severity_text"],
+                "match_text": payload["match_text"],
             }
         )
 

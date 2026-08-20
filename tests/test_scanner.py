@@ -6484,3 +6484,90 @@ class TestContentDedup:
         scanner.scan(tmp_path)
         # a.txt 和 b.txt 同内容去重为 1 条，c.txt 1 条 → 共 2 条
         assert len(scanner._content_dedup_memo) == 2
+
+    def test_dedup_memo_lru_eviction(self, tmp_path: Path) -> None:
+        """dedup_memo_maxsize 限容：超限淘汰最旧条目（OrderedDict popitem）。"""
+        for name, content in (("a.txt", "password=aaa"), ("b.txt", "password=bbb"), ("c.txt", "password=ccc")):
+            (tmp_path / name).write_text(content, encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, dedup_memo_maxsize=2)
+        scanner.scan(tmp_path)
+        # 3 个不同内容文件，maxsize=2 → memo 长度 2，最旧的 a.txt 键被淘汰
+        assert len(scanner._content_dedup_memo) == 2
+        key_a = (hash_bytes(b"password=aaa"), "txt")
+        assert key_a not in scanner._content_dedup_memo
+
+    def test_dedup_memo_lru_hit_refreshes_recency(self, tmp_path: Path) -> None:
+        """LRU 命中刷新：scan_file 跨调用命中 memo 时移到队尾，淘汰最久未使用条目。
+
+        监控场景语义：同一文件反复变动（内容未变）命中去重 memo，
+        其条目移到队尾；随后新内容挤入时淘汰的是最久未使用的 b.txt。
+        """
+        a = tmp_path / "a.txt"
+        b = tmp_path / "b.txt"
+        c = tmp_path / "c.txt"
+        a.write_text("password=aaa", encoding="utf-8")
+        b.write_text("password=bbb", encoding="utf-8")
+        c.write_text("password=ccc", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs, dedup_memo_maxsize=2)
+        scanner.scan_file(a)
+        scanner.scan_file(b)
+        # 再扫 a：命中 memo 并刷新 recency（move_to_end）
+        scanner.scan_file(a)
+        # c 挤入 → 淘汰最久未使用的 b
+        scanner.scan_file(c)
+        assert len(scanner._content_dedup_memo) == 2
+        key_a = (hash_bytes(b"password=aaa"), "txt")
+        key_b = (hash_bytes(b"password=bbb"), "txt")
+        key_c = (hash_bytes(b"password=ccc"), "txt")
+        assert key_a in scanner._content_dedup_memo
+        assert key_b not in scanner._content_dedup_memo
+        assert key_c in scanner._content_dedup_memo
+
+    def test_dedup_memo_unlimited_by_default(self, tmp_path: Path) -> None:
+        """dedup_memo_maxsize 默认 None：memo 不限容（工作区扫描随实例释放）。"""
+        for i in range(5):
+            (tmp_path / f"f{i}.txt").write_text(f"password=v{i}", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs)
+        scanner.scan(tmp_path)
+        assert len(scanner._content_dedup_memo) == 5
+
+    def test_scan_file_keeps_memo_across_calls(self, tmp_path: Path) -> None:
+        """scan_file 不清 memo：监控场景同一文件反复变动复用提取与匹配结果。
+
+        与 scan（collect_entries 阶段清空 memo）不同，scan_file 跨调用
+        保留 memo，同内容文件第二次扫描命中去重（不新增条目）。
+        """
+        f = tmp_path / "a.txt"
+        f.write_text("password=abc", encoding="utf-8")
+        rs = _build_ruleset(_content_rule("pwd", "password"))
+        scanner = Scanner(rs)
+        scanner.scan_file(f)
+        assert len(scanner._content_dedup_memo) == 1
+        # 同文件再次扫描：命中 memo，不新增条目
+        scanner.scan_file(f)
+        assert len(scanner._content_dedup_memo) == 1
+
+    def test_cached_dedup_memo_lru_eviction(self, tmp_path: Path) -> None:
+        """缓存模式：dedup_memo_maxsize 限容对桶匹配结果 memo 同样生效。"""
+        from fuscan.cache import CacheStore
+
+        scan_dir = tmp_path / "scan"
+        scan_dir.mkdir()
+        for i in range(3):
+            (scan_dir / f"f{i}.txt").write_text(f"api_key=KEY{i}\ntoken=ghp_t{i}", encoding="utf-8")
+        rs = _build_ruleset(
+            _content_rule("aws_key", "api_key=KEY"),
+            _content_rule("github_token", "token=ghp_t"),
+        )
+        cache = CacheStore(tmp_path / "cache" / "test_cache.db")
+        try:
+            scanner = Scanner(rs, cache=cache, dedup_memo_maxsize=2)
+            report = scanner.scan(scan_dir)
+            assert report.stats.matched_files == 3
+            # 3 个不同内容文件，maxsize=2 → memo 长度 2
+            assert len(scanner._content_dedup_memo) == 2
+        finally:
+            cache.close()

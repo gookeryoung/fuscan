@@ -143,8 +143,10 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._rules.set_workspace_controller(self._workspace)
         self._about = AboutController(self)
         # FileMonitorController 依赖 RulesController（构造期读取当前 ruleset，
-        # 连接 rulesetChanged 信号），在 about 之后构造（不依赖 workspace）
-        self._file_monitor = FileMonitorController(self._rules, self)
+        # 连接 rulesetChanged 信号），在 about 之后构造（不依赖 workspace）。
+        # scan_async=True：监控扫描在单 worker 守护线程池后台执行，
+        # 防止大文件（PDF/OCR 等）同步扫描阻塞 GUI 主线程导致界面卡死
+        self._file_monitor = FileMonitorController(self._rules, self, scan_async=True)
         # 从用户配置注入字体设置到 ThemeController（QML 绑定 theme.fontSize* 自动刷新）
         self._apply_font_config_to_theme()
         # 监听 ConfigController 字体变更信号，实时同步到 ThemeController

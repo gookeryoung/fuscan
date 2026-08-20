@@ -89,14 +89,13 @@ Window {
         anchors.topMargin: 16
 
         Rectangle {
-            // 宽度绑定 progress（0.0-1.0），平滑过渡避免突变
-            width: progressTrack.width * splashController.progress
+            // 宽度绑定 progress（0.0-1.0）。进度值由 SplashController 保证单调
+            // 递增；宽度不施加 Behavior 动画——启动期窗口布局/DPI 抖动会使
+            // track 宽度瞬时变化，250ms 缓动会把这种抖动放大为可见的进度回退。
+            width: Math.max(0, progressTrack.width * splashController.progress)
             height: progressTrack.height
             color: "#0366D6"
             radius: 3
-            Behavior on width {
-                NumberAnimation { duration: 250; easing.type: Easing.OutCubic }
-            }
         }
     }
 

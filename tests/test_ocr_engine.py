@@ -139,8 +139,14 @@ def _force_windows_platform(monkeypatch: pytest.MonkeyPatch) -> None:
     RapidOCR-json 仅提供 Windows exe，:func:`is_ocr_available` /
     :class:`OcrEngine` 在非 Windows 直接返回不可用。测试用 FakeProc 模拟
     子进程通信，不依赖真实平台，故统一 patch 为 win32 绕过平台门禁。
+
+    同时用返回 None 的桩替换 :meth:`OcrEngine._startupinfo`：Linux CI 上
+    ``subprocess.STARTUPINFO`` 为 Windows 专属属性不存在，平台门禁被
+    patch 成 win32 后该方法走 Windows 分支会触发 AttributeError；FakeProc
+    忽略 startupinfo 参数，桩替换不影响被测的管道通信协议行为。
     """
     monkeypatch.setattr(ocr_mod.sys, "platform", "win32")
+    monkeypatch.setattr(ocr_mod.OcrEngine, "_startupinfo", staticmethod(lambda: None))
 
 
 def _make_responder(response: bytes) -> Callable[[bytes], bytes]:

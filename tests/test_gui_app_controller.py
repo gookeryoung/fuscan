@@ -14,36 +14,23 @@ from __future__ import annotations
 import os
 
 import pytest
+from PySide2.QtCore import QObject
+from PySide2.QtGui import QGuiApplication
+
+from fuscan.app import _apply_global_font
+from fuscan.config import Config
+from fuscan.gui import AppController
+from fuscan.gui.controllers.about_controller import AboutController
+from fuscan.gui.controllers.config_controller import ConfigController
+from fuscan.gui.controllers.file_monitor_controller import FileMonitorController
+from fuscan.gui.controllers.rules_controller import RulesController
+from fuscan.gui.controllers.workspace_controller import WorkspaceController
+from fuscan.gui.theme import ThemeController
 
 # 设置离屏平台，避免无显示器环境报错
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytestmark = pytest.mark.gui
-
-try:
-    from PySide2.QtCore import QObject
-    from PySide2.QtGui import QGuiApplication
-except ImportError:
-    from PySide6.QtCore import QObject  # type: ignore[no-redef]
-    from PySide6.QtGui import QGuiApplication  # type: ignore[no-redef]
-
-try:
-    from fuscan.app import _apply_global_font
-    from fuscan.config import Config
-    from fuscan.gui import AppController
-    from fuscan.gui.controllers.about_controller import AboutController
-    from fuscan.gui.controllers.config_controller import ConfigController
-    from fuscan.gui.controllers.file_monitor_controller import FileMonitorController
-    from fuscan.gui.controllers.rules_controller import RulesController
-    from fuscan.gui.controllers.workspace_controller import WorkspaceController
-    from fuscan.gui.theme import ThemeController
-
-    PYSIDE_AVAILABLE = True
-except ImportError:
-    PYSIDE_AVAILABLE = False
-
-if not PYSIDE_AVAILABLE:
-    pytest.skip("PySide 未安装，跳过 AppController 测试", allow_module_level=True)
 
 
 @pytest.fixture()

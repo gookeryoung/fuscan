@@ -17,10 +17,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-try:
-    from PySide2.QtCore import QThread, Signal
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import QThread, Signal  # pyrefly: ignore [missing-import]
+from PySide2.QtCore import QThread, Signal
 
 from fuscan.gui.models.result_model import build_indices, filter_and_sort
 from fuscan.rules.model import Severity

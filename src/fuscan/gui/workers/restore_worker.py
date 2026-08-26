@@ -14,10 +14,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-try:
-    from PySide2.QtCore import QThread, Signal
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import QThread, Signal  # pyrefly: ignore [missing-import]
+from PySide2.QtCore import QThread, Signal
 
 from fuscan.scanner import ScanReport
 

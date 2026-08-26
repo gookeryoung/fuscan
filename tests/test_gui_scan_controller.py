@@ -1686,11 +1686,7 @@ class TestOpenLocationWithResult:
                 return FakeClipboard()
 
         # copyPath 内部 from PySide2.QtGui import QGuiApplication，需 patch 源模块
-        # 双兼容：PySide2 优先，缺失时回退 PySide6
-        try:
-            import PySide2.QtGui as qt_gui_module
-        except ImportError:
-            import PySide6.QtGui as qt_gui_module  # type: ignore[no-redef]
+        import PySide2.QtGui as qt_gui_module
 
         monkeypatch.setattr(qt_gui_module, "QGuiApplication", FakeGuiApp)
         controller.copyPath()

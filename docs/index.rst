@@ -45,7 +45,7 @@ fuscan 是一款基于 YAML 规则的多格式文件内容扫描工具，支持 
 
 .. _uv: https://docs.astral.sh/uv/
 
-GUI 需要 PySide2（仅支持 Python 3.8~3.10）或 PySide6（Python 3.11+）。
+GUI 需要 PySide2，项目锁定 Python 3.10（PySide2 官方 wheel 支持上限）。
 
 快速上手
 ========

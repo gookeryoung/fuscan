@@ -30,16 +30,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-try:
-    from PySide2.QtCore import QAbstractListModel, QModelIndex, Qt, QTimer, Slot
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import (  # pyrefly: ignore [missing-import]
-        QAbstractListModel,
-        QModelIndex,
-        Qt,
-        QTimer,
-        Slot,
-    )
+from PySide2.QtCore import QAbstractListModel, QModelIndex, Qt, QTimer, Slot
 
 from fuscan.gui.severity_utils import severity_color_hex, severity_text
 from fuscan.rules.model import Severity
@@ -1165,7 +1156,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         if worker.isRunning():
             worker.quit()
             # wait(500) 阻塞最多 500ms，过滤任务通常 < 100ms
-            worker.wait(500)
+            worker.wait(500)  # pyrefly: ignore [missing-argument]
         self._filter_worker = None
 
     def _apply_filtered_result(

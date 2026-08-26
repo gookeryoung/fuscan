@@ -13,10 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-try:
-    from PySide2.QtCore import QAbstractListModel, QModelIndex, Qt
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt  # pyrefly: ignore [missing-import]
+from PySide2.QtCore import QAbstractListModel, QModelIndex, Qt
 
 from fuscan.gui.severity_utils import severity_color_hex, severity_text
 

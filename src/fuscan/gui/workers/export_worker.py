@@ -17,10 +17,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-try:
-    from PySide2.QtCore import QObject, QThread, Signal
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import QObject, QThread, Signal  # pyrefly: ignore [missing-import]
+from PySide2.QtCore import QObject, QThread, Signal
 
 from fuscan.export.report import export_report
 from fuscan.perf import PerfTimer

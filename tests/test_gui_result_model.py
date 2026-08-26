@@ -10,30 +10,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from PySide2.QtCore import QModelIndex, Qt
+from PySide2.QtWidgets import QApplication
+
+from fuscan.gui.models.result_model import SORT_DEFAULT, ResultListModel
+from fuscan.rules.model import Severity
+from fuscan.scanner.result import RuleHit, ScanResult
 
 # 设置离屏平台，避免无显示器环境报错
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytestmark = pytest.mark.gui
-
-try:
-    try:
-        from PySide2.QtCore import QModelIndex, Qt
-        from PySide2.QtWidgets import QApplication
-    except ImportError:  # pragma: no cover
-        from PySide6.QtCore import QModelIndex, Qt  # pyrefly: ignore [missing-import]
-        from PySide6.QtWidgets import QApplication  # pyrefly: ignore [missing-import]
-
-    from fuscan.gui.models.result_model import SORT_DEFAULT, ResultListModel
-    from fuscan.rules.model import Severity
-    from fuscan.scanner.result import RuleHit, ScanResult
-
-    PYSIDE_AVAILABLE = True
-except ImportError:
-    PYSIDE_AVAILABLE = False
-
-if not PYSIDE_AVAILABLE:
-    pytest.skip("PySide 未安装，跳过结果模型测试", allow_module_level=True)
 
 if TYPE_CHECKING:
     pass  # 仅用于类型检查占位
@@ -661,10 +648,7 @@ def _wait_for_worker(m: ResultListModel, timeout_ms: int = 5000) -> None:
     """
     import time
 
-    try:
-        from PySide2.QtCore import QCoreApplication
-    except ImportError:  # pragma: no cover
-        from PySide6.QtCore import QCoreApplication  # pyrefly: ignore [missing-import]
+    from PySide2.QtCore import QCoreApplication
 
     elapsed = 0
     while m._filter_worker is not None and elapsed < timeout_ms:  # type: ignore[attr-defined]
@@ -746,10 +730,7 @@ class TestIter129AsyncPath:
         """处理 Qt 事件循环直到 worker 完成。"""
         import time
 
-        try:
-            from PySide2.QtCore import QCoreApplication
-        except ImportError:  # pragma: no cover
-            from PySide6.QtCore import QCoreApplication  # pyrefly: ignore [missing-import]
+        from PySide2.QtCore import QCoreApplication
 
         elapsed = 0
         while m._filter_worker is not None and elapsed < timeout_ms:  # type: ignore[attr-defined]
@@ -1298,10 +1279,8 @@ class TestIter156LazyFill:
         # 手动等待 worker 完成，但不取消懒填充（保留懒加载状态用于断言）
         import time
 
-        try:
-            from PySide2.QtCore import QCoreApplication
-        except ImportError:  # pragma: no cover
-            from PySide6.QtCore import QCoreApplication  # pyrefly: ignore [missing-import]
+        from PySide2.QtCore import QCoreApplication
+
         elapsed = 0
         while m._filter_worker is not None and elapsed < 5000:  # type: ignore[attr-defined]
             QCoreApplication.processEvents()
@@ -1480,10 +1459,8 @@ class TestIter159FlatData:
         # patch 后 _lazystate 仍设置但 _fill_next_chunk 永不触发，_flat_data 保持全 None。
         import time
 
-        try:
-            from PySide2.QtCore import QCoreApplication
-        except ImportError:  # pragma: no cover
-            from PySide6.QtCore import QCoreApplication  # pyrefly: ignore [missing-import]
+        from PySide2.QtCore import QCoreApplication
+
         with patch("fuscan.gui.models.result_model.QTimer.singleShot"):
             elapsed = 0
             while m._filter_worker is not None and elapsed < 5000:  # type: ignore[attr-defined]
@@ -1616,7 +1593,7 @@ class TestIter165FilterWorkerWithIndex:
         worker.done.connect(_on_done)  # type: ignore[attr-defined]
         worker.start()
         # 等待线程完成，然后处理事件让信号送达 slot
-        worker.wait(2000)
+        worker.wait(2000)  # pyrefly: ignore [missing-argument]
         assert worker.isRunning() is False
         qapp.processEvents()
         assert "filtered" in captured, "FilterWorker.done 应触发"
@@ -1653,7 +1630,7 @@ class TestIter165FilterWorkerWithIndex:
 
         worker.done.connect(_on_done)  # type: ignore[attr-defined]
         worker.start()
-        worker.wait(2000)
+        worker.wait(2000)  # pyrefly: ignore [missing-argument]
         assert worker.isRunning() is False
         qapp.processEvents()
         # 100 条小于阈值，索引应为空
@@ -1676,9 +1653,9 @@ class TestIter165SetResultsAsyncIndex:
         # 等待 FilterWorker 完成
         worker = m._filter_worker  # type: ignore[attr-defined]
         if worker is not None:
-            worker.wait(3000)
+            worker.wait(3000)  # pyrefly: ignore [missing-argument]
             worker.quit()
-            worker.wait(500)
+            worker.wait(500)  # pyrefly: ignore [missing-argument]
             qapp.processEvents()
         # 索引已被 FilterWorker 回传并应用（通过信号）
         assert m._severity_index  # type: ignore[attr-defined]
@@ -1711,9 +1688,9 @@ class TestIter165SetResultsAsyncIndex:
         # 等待首次 set_results 的 worker 完成
         w1 = m._filter_worker  # type: ignore[attr-defined]
         if w1 is not None:
-            w1.wait(3000)
+            w1.wait(3000)  # pyrefly: ignore [missing-argument]
             w1.quit()
-            w1.wait(500)
+            w1.wait(500)  # pyrefly: ignore [missing-argument]
             qapp.processEvents()
         # 移除一条结果
         first_path = results[0].path
@@ -1722,9 +1699,9 @@ class TestIter165SetResultsAsyncIndex:
         # 等待 remove 后的 worker 完成
         w2 = m._filter_worker  # type: ignore[attr-defined]
         if w2 is not None:
-            w2.wait(3000)
+            w2.wait(3000)  # pyrefly: ignore [missing-argument]
             w2.quit()
-            w2.wait(500)
+            w2.wait(500)  # pyrefly: ignore [missing-argument]
             qapp.processEvents()
         # 索引仍可用于过滤
         assert m._severity_index  # type: ignore[attr-defined]

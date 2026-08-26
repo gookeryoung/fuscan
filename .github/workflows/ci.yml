@@ -46,13 +46,13 @@ jobs:
         run: uv run pyrefly check
 
   test:
-    name: Test (Python 3.10 & 3.14)
+    name: Test (Python 3.10)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.14"]
+        python-version: ["3.10"]
     steps:
       - uses: actions/checkout@v5
 
@@ -96,11 +96,11 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
-      - name: Set up Python 3.12
-        run: uv python install 3.12
+      - name: Set up Python 3.10
+        run: uv python install 3.10
 
       - name: Sync dependencies
-        run: uv sync --frozen --extra test --python 3.12
+        run: uv sync --frozen --extra test --python 3.10
 
       - name: Run benchmark tests
         # 运行 perf benchmark 测试，生成 JSON 报告供对比

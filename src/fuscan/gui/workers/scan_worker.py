@@ -13,10 +13,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-try:
-    from PySide2.QtCore import QObject, QThread, Signal
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import QObject, QThread, Signal  # pyrefly: ignore [missing-import]
+from PySide2.QtCore import QObject, QThread, Signal
 
 from fuscan.perf import PerfStats
 from fuscan.rules.model import RuleSet

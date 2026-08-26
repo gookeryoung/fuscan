@@ -25,10 +25,7 @@ import logging
 from functools import cache
 from typing import TYPE_CHECKING
 
-try:
-    from PySide2.QtCore import QObject
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import QObject  # pyrefly: ignore [missing-import]
+from PySide2.QtCore import QObject
 
 if TYPE_CHECKING:
     # 仅用于属性返回类型注解的 controller 类型（``from __future__ import annotations``
@@ -62,10 +59,7 @@ def register_qml_types() -> None:
 
     幂等：``lru_cache`` 保证多次调用只注册一次（多次注册会触发 Qt 警告）。
     """
-    try:
-        from PySide2.QtQml import qmlRegisterType
-    except ImportError:  # pragma: no cover
-        from PySide6.QtQml import qmlRegisterType  # pyrefly: ignore [missing-import]
+    from PySide2.QtQml import qmlRegisterType
 
     # 延迟导入所有 controller / model / theme 类型：register_qml_types 在 app.py 启动早期
     # 被显式调用（已过 Splash 显示），此时加载全部 controller（含 scanner 链）合理。
@@ -162,10 +156,8 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
             cfg.min_font_size,
         )
         # 同步全局 QGuiApplication 字体（影响 QML 控件默认继承）
-        try:
-            from PySide2.QtGui import QFont, QGuiApplication
-        except ImportError:  # pragma: no cover
-            from PySide6.QtGui import QFont, QGuiApplication  # pyrefly: ignore [missing-import]
+        from PySide2.QtGui import QFont, QGuiApplication
+
         app = QGuiApplication.instance()
         if app is not None:
             from fuscan.gui.theme import detect_font_families

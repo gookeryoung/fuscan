@@ -71,7 +71,7 @@ fuscan gui
 
 即可打开图形界面。
 
-> 注意：GUI 功能需要 PySide2（Python 3.10 及以下）或 PySide6（Python 3.11+）。
+> 注意：GUI 功能需要 PySide2，项目锁定 Python 3.10（PySide2 官方 wheel 支持上限）。
 
 ## 3. 主界面总览
 

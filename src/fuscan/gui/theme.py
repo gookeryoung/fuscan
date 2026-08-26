@@ -19,12 +19,8 @@ from __future__ import annotations
 
 import sys
 
-try:
-    from PySide2.QtCore import Property, QObject, Signal, Slot
-    from PySide2.QtGui import QColor
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
-    from PySide6.QtGui import QColor  # pyrefly: ignore [missing-import]
+from PySide2.QtCore import Property, QObject, Signal, Slot
+from PySide2.QtGui import QColor
 
 __all__ = ["ThemeController", "detect_font_families"]
 

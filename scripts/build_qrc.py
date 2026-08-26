@@ -117,17 +117,16 @@ def write_qrc(
 
 
 def detect_rcc_tool() -> str:
-    """检测 pyside2-rcc 或 pyside6-rcc 命令。
+    """检测 pyside2-rcc 命令。
 
-    优先使用 PATH 中的 ``pyside2-rcc``/``pyside6-rcc``；找不到则回退到
+    优先使用 PATH 中的 ``pyside2-rcc``；找不到则回退到
     ``python -m`` 调用方式。
 
     :return: 可用的 rcc 命令名
-    :raises RuntimeError: 两个工具都不可用
+    :raises RuntimeError: 工具不可用
     """
-    for tool in ("pyside2-rcc", "pyside6-rcc"):
-        if shutil.which(tool):
-            return tool
+    if shutil.which("pyside2-rcc"):
+        return "pyside2-rcc"
     # 兜底：尝试通过 python -m 调用
     try:
         import PySide2  # noqa: F401
@@ -135,13 +134,7 @@ def detect_rcc_tool() -> str:
         return "pyside2-rcc"
     except ImportError:
         pass
-    try:
-        import PySide6  # noqa: F401 # pyrefly: ignore [missing-import]
-
-        return "pyside6-rcc"
-    except ImportError:
-        pass
-    raise RuntimeError("未找到 pyside2-rcc 或 pyside6-rcc，请安装 PySide2 或 PySide6")
+    raise RuntimeError("未找到 pyside2-rcc，请安装 PySide2")
 
 
 def compile_qrc() -> None:

@@ -16,38 +16,26 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from PySide2.QtCore import Qt
+
+from fuscan.gui.controllers.file_monitor_controller import (
+    FileMonitorController,
+    _WatchdogHandler,
+)
+from fuscan.gui.models.file_monitor_model import FileMonitorModel
+from fuscan.rules.model import (
+    LeafMatch,
+    MatchMode,
+    MatchTarget,
+    Rule,
+    RuleSet,
+    Severity,
+)
 
 # 设置离屏平台，避免无显示器环境报错
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytestmark = pytest.mark.gui
-
-try:
-    from PySide2.QtCore import Qt
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import Qt  # type: ignore[no-redef]  # pyrefly: ignore [missing-import]
-
-try:
-    from fuscan.gui.controllers.file_monitor_controller import (
-        FileMonitorController,
-        _WatchdogHandler,
-    )
-    from fuscan.gui.models.file_monitor_model import FileMonitorModel
-    from fuscan.rules.model import (
-        LeafMatch,
-        MatchMode,
-        MatchTarget,
-        Rule,
-        RuleSet,
-        Severity,
-    )
-
-    PYSIDE_AVAILABLE = True
-except ImportError:
-    PYSIDE_AVAILABLE = False
-
-if not PYSIDE_AVAILABLE:
-    pytest.skip("PySide 未安装，跳过文件监控测试", allow_module_level=True)
 
 
 # ============================ 共享 fixture ============================
@@ -2001,10 +1989,8 @@ class TestTrayAvailable:
 @pytest.fixture(scope="session")
 def qapp() -> Any:
     """确保 QCoreApplication 存在（跨线程 queued 信号需要事件循环消费）。"""
-    try:
-        from PySide2.QtCore import QCoreApplication
-    except ImportError:  # pragma: no cover
-        from PySide6.QtCore import QCoreApplication  # pyrefly: ignore [missing-import]
+    from PySide2.QtCore import QCoreApplication
+
     app = QCoreApplication.instance()
     if app is None:
         app = QCoreApplication([])

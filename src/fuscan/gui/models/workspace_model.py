@@ -25,10 +25,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-try:
-    from PySide2.QtCore import QAbstractListModel, QModelIndex, Qt
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt  # pyrefly: ignore [missing-import]
+from PySide2.QtCore import QAbstractListModel, QModelIndex, Qt
 
 from fuscan.gui.scan_mode import scan_mode_text
 

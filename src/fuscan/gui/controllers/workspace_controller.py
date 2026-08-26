@@ -25,10 +25,7 @@ import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-try:
-    from PySide2.QtCore import Property, QObject, Signal, Slot
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
+from PySide2.QtCore import Property, QObject, Signal, Slot
 
 from fuscan import config as config_module
 from fuscan.gui.controllers._history_view import (
@@ -874,10 +871,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 取消未完成的 ResultRestoreWorker
         from typing import cast
 
-        try:
-            from PySide2.QtCore import QThread
-        except ImportError:  # pragma: no cover
-            from PySide6.QtCore import QThread  # pyrefly: ignore [missing-import]
+        from PySide2.QtCore import QThread
 
         for worker in list(self._restore_workers.values()):
             qt_worker = cast(QThread, worker)

@@ -40,10 +40,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-try:
-    from PySide2.QtCore import Property, QObject, Signal, Slot
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
+from PySide2.QtCore import Property, QObject, Signal, Slot
 
 from fuscan.config import DEFAULT_MAX_FILE_SIZE, Config
 from fuscan.gui.controllers._task_overrides import (

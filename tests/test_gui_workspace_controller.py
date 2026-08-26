@@ -19,34 +19,22 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from PySide2.QtCore import Qt
+
+from fuscan.config import Config  # noqa: F401
+from fuscan.gui.controllers.config_controller import ConfigController
+from fuscan.gui.controllers.rules_controller import RulesController
+from fuscan.gui.controllers.scan_controller import ScanController
+from fuscan.gui.controllers.workspace_controller import WorkspaceController
+from fuscan.gui.models.workspace_model import (
+    WorkspaceItem,
+    WorkspaceListModel,
+)
 
 # 设置离屏平台，避免无显示器环境报错
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytestmark = pytest.mark.gui
-
-try:
-    from PySide2.QtCore import Qt
-except ImportError:
-    from PySide6.QtCore import Qt  # type: ignore[no-redef]
-
-try:
-    from fuscan.config import Config  # noqa: F401
-    from fuscan.gui.controllers.config_controller import ConfigController
-    from fuscan.gui.controllers.rules_controller import RulesController
-    from fuscan.gui.controllers.scan_controller import ScanController
-    from fuscan.gui.controllers.workspace_controller import WorkspaceController
-    from fuscan.gui.models.workspace_model import (
-        WorkspaceItem,
-        WorkspaceListModel,
-    )
-
-    PYSIDE_AVAILABLE = True
-except ImportError:
-    PYSIDE_AVAILABLE = False
-
-if not PYSIDE_AVAILABLE:
-    pytest.skip("PySide 未安装，跳过工作区控制器测试", allow_module_level=True)
 
 
 # ============================= QApp fixture =============================
@@ -55,10 +43,7 @@ if not PYSIDE_AVAILABLE:
 @pytest.fixture(scope="session")
 def qapp() -> object:
     """创建 QApplication（若不存在），用于 QThread 信号传递。"""
-    try:
-        from PySide2.QtWidgets import QApplication
-    except ImportError:
-        from PySide6.QtWidgets import QApplication  # type: ignore[no-redef]
+    from PySide2.QtWidgets import QApplication
 
     app = QApplication.instance()
     if app is None:
@@ -77,10 +62,7 @@ def _wait_for_restore(controller: WorkspaceController, ws_id: str, timeout_ms: i
     （CI Linux exit 139 / Windows access violation）。故循环需持续到
     ``_restore_workers`` 也被清空（``finished`` → ``_cleanup_restore_worker``）。
     """
-    try:
-        from PySide2.QtCore import QCoreApplication
-    except ImportError:
-        from PySide6.QtCore import QCoreApplication  # type: ignore[no-redef]
+    from PySide2.QtCore import QCoreApplication
 
     elapsed = 0
     while (  # type: ignore[attr-defined]

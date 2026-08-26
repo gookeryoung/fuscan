@@ -23,15 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-try:
-    from PySide2.QtCore import QAbstractListModel, QModelIndex, Qt, Slot
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import (  # pyrefly: ignore [missing-import]
-        QAbstractListModel,
-        QModelIndex,
-        Qt,
-        Slot,
-    )
+from PySide2.QtCore import QAbstractListModel, QModelIndex, Qt, Slot
 
 from fuscan.gui.severity_utils import severity_color_hex, severity_text
 from fuscan.rules.model import Severity

@@ -32,7 +32,7 @@ pip install fuscan
 uv add fuscan
 ```
 
-GUI 需要 PySide2（仅支持 Python 3.8~3.10）。
+GUI 需要 PySide2，项目锁定 Python 3.10（PySide2 官方 wheel 支持上限）。
 
 ## 快速上手
 

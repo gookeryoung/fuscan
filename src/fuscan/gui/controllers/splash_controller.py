@@ -19,10 +19,7 @@ QML ``Splash.qml`` 通过 ``SplashController.stage``/``SplashController.progress
 
 from __future__ import annotations
 
-try:
-    from PySide2.QtCore import Property, QObject, Signal, Slot
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
+from PySide2.QtCore import Property, QObject, Signal, Slot
 
 __all__ = ["SplashController"]
 

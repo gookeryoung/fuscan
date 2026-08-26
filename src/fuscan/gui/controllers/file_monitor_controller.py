@@ -49,12 +49,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from PySide2.QtCore import Property, QObject, QTimer, Signal, Slot
 from typing_extensions import override
-
-try:
-    from PySide2.QtCore import Property, QObject, QTimer, Signal, Slot
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot  # pyrefly: ignore [missing-import]
 
 if TYPE_CHECKING:
     # watchdog 仅用于类型注解（注解因 from __future__ import annotations 为字符串，

@@ -20,14 +20,7 @@ from __future__ import annotations
 
 import re
 
-try:
-    from PySide2.QtCore import QAbstractListModel, QModelIndex, Qt
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import (  # pyrefly: ignore [missing-import]
-        QAbstractListModel,
-        QModelIndex,
-        Qt,
-    )
+from PySide2.QtCore import QAbstractListModel, QModelIndex, Qt
 
 from fuscan.extractors.base import SpeedTier, default_registry
 

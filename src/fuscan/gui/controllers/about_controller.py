@@ -13,12 +13,8 @@ import os
 import sys
 from importlib.metadata import PackageNotFoundError, version
 
-try:
-    from PySide2.QtCore import Property, QObject, QUrl, Signal, Slot
-    from PySide2.QtGui import QDesktopServices
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot  # pyrefly: ignore [missing-import]
-    from PySide6.QtGui import QDesktopServices  # pyrefly: ignore [missing-import]
+from PySide2.QtCore import Property, QObject, QUrl, Signal, Slot
+from PySide2.QtGui import QDesktopServices
 
 from fuscan import __author__, __description__, __license__, __version__
 from fuscan.config import CONFIG_DIR
@@ -56,7 +52,7 @@ def _open_path_robustly(path: object) -> bool:
 
 # 第三方依赖（与 pyproject.toml dependencies 同步，简化展示）
 _DEPENDENCIES: tuple[str, ...] = (
-    "PySide2/PySide6 - Qt GUI 框架",
+    "PySide2 - Qt GUI 框架",
     "PyYAML - 配置与规则文件解析",
     "lxml - DOCX/PPTX/ODF 文档提取",
     "pypdfium2 - PDF 文本提取",

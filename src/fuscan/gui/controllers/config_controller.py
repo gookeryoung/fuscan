@@ -21,10 +21,7 @@ from __future__ import annotations
 
 import logging
 
-try:
-    from PySide2.QtCore import Property, QObject, QTimer, Signal, Slot
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot  # pyrefly: ignore [missing-import]
+from PySide2.QtCore import Property, QObject, QTimer, Signal, Slot
 
 from fuscan.config import Config, load_config, save_config
 

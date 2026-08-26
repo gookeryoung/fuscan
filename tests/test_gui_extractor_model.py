@@ -9,27 +9,15 @@ from __future__ import annotations
 import os
 
 import pytest
+from PySide2.QtCore import QModelIndex, Qt
+
+from fuscan.extractors.base import SpeedTier, default_registry  # noqa: F401
+from fuscan.gui.models.extractor_model import ExtractorListModel
 
 # 设置离屏平台，避免无显示器环境报错
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytestmark = pytest.mark.gui
-
-try:
-    try:
-        from PySide2.QtCore import QModelIndex, Qt
-    except ImportError:  # pragma: no cover
-        from PySide6.QtCore import QModelIndex, Qt  # pyrefly: ignore [missing-import]
-
-    from fuscan.extractors.base import SpeedTier, default_registry  # noqa: F401
-    from fuscan.gui.models.extractor_model import ExtractorListModel
-
-    PYSIDE_AVAILABLE = True
-except ImportError:
-    PYSIDE_AVAILABLE = False
-
-if not PYSIDE_AVAILABLE:
-    pytest.skip("PySide 未安装，跳过提取器模型测试", allow_module_level=True)
 
 
 @pytest.fixture()

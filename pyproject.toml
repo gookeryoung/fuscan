@@ -31,7 +31,7 @@ description     = "极速通用文件扫描器."
 license         = "MIT"
 name            = "fuscan"
 readme          = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.11"
 version         = "0.3.7"
 
 [project.optional-dependencies]

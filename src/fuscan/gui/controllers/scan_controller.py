@@ -25,10 +25,7 @@ from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-try:
-    from PySide2.QtCore import Property, QObject, Signal, Slot
-except ImportError:  # pragma: no cover
-    from PySide6.QtCore import Property, QObject, Signal, Slot  # pyrefly: ignore [missing-import]
+from PySide2.QtCore import Property, QObject, Signal, Slot
 
 from fuscan.config import CONFIG_DIR, Config
 from fuscan.export.report import export_report
@@ -1809,10 +1806,8 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         result = self._get_selected_result()
         if result is None:
             return
-        try:
-            from PySide2.QtGui import QGuiApplication
-        except ImportError:  # pragma: no cover
-            from PySide6.QtGui import QGuiApplication  # pyrefly: ignore [missing-import]
+        from PySide2.QtGui import QGuiApplication
+
         clipboard = QGuiApplication.clipboard()
         clipboard.setText(str(result.path))
         self._set_status("已复制", "已复制路径到剪贴板")
@@ -2504,7 +2499,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._detail_worker.done.disconnect(self._on_detail_done)  # pyrefly: ignore [missing-attribute]
         if self._detail_worker.isRunning():
             self._detail_worker.quit()
-            self._detail_worker.wait(500)
+            self._detail_worker.wait(500)  # pyrefly: ignore [missing-argument]
         self._detail_worker.deleteLater()
         self._detail_worker = None
 
@@ -2578,10 +2573,10 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
-            self._worker.wait(500)
+            self._worker.wait(500)  # pyrefly: ignore [missing-argument]
         if self._stats_worker is not None and self._stats_worker.isRunning():
             self._stats_worker.cancel()
-            self._stats_worker.wait(500)
+            self._stats_worker.wait(500)  # pyrefly: ignore [missing-argument]
         # detail worker 任务短，quit + wait(500) 内退出（无内部循环）
         self._cancel_detail_worker()
         self._cleanup_workers()
@@ -2610,27 +2605,27 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
-            self._worker.wait(200)
+            self._worker.wait(200)  # pyrefly: ignore [missing-argument]
             if self._worker.isRunning():
                 self._worker.terminate()
-                self._worker.wait(100)
+                self._worker.wait(100)  # pyrefly: ignore [missing-argument]
             self._worker.deleteLater()
             self._worker = None
         if self._stats_worker is not None and self._stats_worker.isRunning():
             self._stats_worker.cancel()
-            self._stats_worker.wait(200)
+            self._stats_worker.wait(200)  # pyrefly: ignore [missing-argument]
             if self._stats_worker.isRunning():
                 self._stats_worker.terminate()
-                self._stats_worker.wait(100)
+                self._stats_worker.wait(100)  # pyrefly: ignore [missing-argument]
             self._stats_worker.deleteLater()
             self._stats_worker = None
         # detail worker：quit + wait(200) + terminate 后备
         if self._detail_worker is not None and self._detail_worker.isRunning():
             self._detail_worker.quit()
-            self._detail_worker.wait(200)
+            self._detail_worker.wait(200)  # pyrefly: ignore [missing-argument]
             if self._detail_worker.isRunning():
                 self._detail_worker.terminate()
-                self._detail_worker.wait(100)
+                self._detail_worker.wait(100)  # pyrefly: ignore [missing-argument]
             self._detail_worker.deleteLater()
             self._detail_worker = None
         # 取消未完成的 FilterWorker

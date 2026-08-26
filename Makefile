@@ -37,7 +37,7 @@ test-qml: ## 补跑 gui_qml 测试（本地有 Qt 环境时用）
 	uv run pytest -m "gui_qml"
 
 cov: ## 运行测试并检查覆盖率
-	uv run pytest -m $(TEST_MARKERS) --cov=$(PACKAGE) --cov-fail-under=$(COV_THRESHOLD)
+	uv run pytest -m $(TEST_MARKERS) --cov=$(PACKAGE) --cov-fail-under=$(COV_THRESHOLD) -n 8
 
 lint: ## 代码风格检查 (ruff)
 	uv run ruff check .

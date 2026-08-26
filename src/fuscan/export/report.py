@@ -200,7 +200,6 @@ def export_excel(report: ScanReport) -> bytes:
     headers = ["路径", "大小", "严重等级", "规则", "描述", "匹配数", "解析引擎", "详情"]
     for col_idx, header in enumerate(headers, start=1):
         cell = ws2.cell(row=1, column=col_idx, value=header)
-        cell.font = bold_font
         cell.fill = PatternFill(start_color="0887A0", end_color="0887A0", fill_type="solid")
         cell.font = Font(bold=True, color="FFFFFF")
     row_idx = 2

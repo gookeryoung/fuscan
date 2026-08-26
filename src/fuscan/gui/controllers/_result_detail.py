@@ -79,8 +79,8 @@ def _extract_contexts_batch(path: Path, match_texts: list[str]) -> dict[str, str
 
     对 ``match_texts`` 去空去重后，一遍 ``enumerate`` 扫描文件行，为每个
     匹配文本定位其**首个**命中行，随后按 ``_CONTEXT_LINES`` 窗口切片生成
-    带 ``>>> `` 前缀标记的上下文文本。相比逐条 :func:`_extract_context`
-    重复读盘/分行/搜索，复杂度从 O(命中数 × 行数) 降至 O(行数)。
+    带 ``>>> `` 前缀标记的上下文文本。相比逐条重复读盘/分行/搜索，
+    复杂度从 O(命中数 × 行数) 降至 O(行数)。
 
     内容读取使用 :func:`extract_content_with_fallback`（与扫描器同一提取链），
     确保 PDF/DOCX/XLSX 等提取器文件的上下文从**提取后的文本**中定位——

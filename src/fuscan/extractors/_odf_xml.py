@@ -16,7 +16,7 @@ lxml 为必需依赖（python-docx/pptx 传递依赖），始终可用；但为�
 - :func:`local_name`：剥离 XML 命名前缀返回本地名。
 - :func:`element_text`：递归提取元素及子元素所有文本节点。
 
-ODF 1.2 命名空间常量见模块底部 ``NAMESPACES``。
+ODF 1.2 命名空间常量：``OFFICE_NS`` / ``TABLE_NS`` / ``TEXT_NS``。
 """
 
 from __future__ import annotations
@@ -28,10 +28,6 @@ from collections.abc import Iterable, Iterator
 from typing import Any
 
 __all__ = [
-    "NAMESPACES",
-    "OfficeNS",
-    "TableNS",
-    "TextNS",
     "element_text",
     "iter_elements",
     "iter_text_paragraphs",
@@ -53,25 +49,6 @@ def _make_parser():
     from lxml import etree
 
     return etree.XMLParser(resolve_entities=False, no_network=True, recover=True)
-
-
-class Namespaces:
-    """ODF 命名空间常量集合。
-
-    用 ``OfficeNS`` / ``TableNS`` / ``TextNS`` 作为 ``Element.find`` 的
-    namespace 参数，避免在调用点拼接 ``{urn:...}local-name`` 的冗长写法。
-    """
-
-    OFFICE = OFFICE_NS
-    TABLE = TABLE_NS
-    TEXT = TEXT_NS
-
-
-# 模块级便捷别名（与 odfpy 习惯对齐：office/text/table）
-NAMESPACES = Namespaces()
-OfficeNS = OFFICE_NS
-TableNS = TABLE_NS
-TextNS = TEXT_NS
 
 
 def iter_elements(

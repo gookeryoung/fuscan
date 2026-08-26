@@ -60,9 +60,6 @@ logger = logging.getLogger(__name__)
 # BLAKE2b 摘要字节数（输出 64 字符 hex，与 SHA-256 长度一致）
 _DIGEST_SIZE: int = 32
 
-# SHA-256 十六进制摘要长度（用于审计/断言；BLAKE2b digest_size=32 输出长度相同）
-HASH_HEX_LEN: int = 64
-
 # 大小文件分流阈值（字节）：小于此值用 SHA-256（CPython 内建无初始化开销），
 # 大于等于此值用 BLAKE2b（OpenSSL 加速且释放 GIL）。
 # 实测 4-6KB 样本 SHA-256 比 BLAKE2b 快约 20%，8KB+ BLAKE2b 反超

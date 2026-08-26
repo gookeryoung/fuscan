@@ -160,7 +160,6 @@ Rectangle {
                 color: theme.isDark ? theme.colorTextSecondary : theme.colorTextSecondary
             }
             // 规则 TAG 标签列表：内置=灰色，全局用户=主色蓝，临时=绿色，从左到右排列
-            // 配色与 RulesPanel.qml 作用域标签一致（全局域=蓝 / 临时=绿）
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 4

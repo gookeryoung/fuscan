@@ -8,7 +8,6 @@
     <file alias="qml/components/PieChart.qml">views/components/PieChart.qml</file>
     <file alias="qml/components/ResultDetailPanel.qml">views/components/ResultDetailPanel.qml</file>
     <file alias="qml/components/RuleEditorForm.qml">views/components/RuleEditorForm.qml</file>
-    <file alias="qml/components/RulesPanel.qml">views/components/RulesPanel.qml</file>
     <file alias="qml/components/ScanProgressCard.qml">views/components/ScanProgressCard.qml</file>
     <file alias="qml/components/TrendChart.qml">views/components/TrendChart.qml</file>
     <file alias="qml/components/WorkspaceCard.qml">views/components/WorkspaceCard.qml</file>

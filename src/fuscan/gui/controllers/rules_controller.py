@@ -697,7 +697,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """按路径直接移除全局规则文件（无需先选中）。
 
         供任务级「配置规则」对话框的全局规则区调用——该区 ListView
-        不与 RulesPanel 共享 selectedFileIndex，需要按路径直接操作。
+        无共享选中索引，需要按路径直接操作。
 
         :param path: 规则文件路径（内置规则标识 ``__builtin__`` 忽略）
         """

@@ -1236,13 +1236,3 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         if cache_key == self._sort_cache_key():
             self._sort_cache[cache_key] = filtered
         self._apply_filtered_result(filtered, generation=generation)
-
-    @staticmethod
-    def _severity_to_text(severity: Severity) -> str:
-        """严重度枚举转中文文本（向后兼容）。"""
-        return severity_text(severity)
-
-    @staticmethod
-    def _severity_to_color(severity: Severity) -> str:
-        """严重度枚举转色值（向后兼容）。"""
-        return severity_color_hex(severity)

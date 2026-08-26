@@ -166,9 +166,6 @@ class ReplaceStatus:
     UNSUPPORTED_FILE_TYPE = "unsupported_file_type"
     BACKUP_FAILED = "backup_failed"
     REPLACE_FAILED = "replace_failed"
-    # 备份文件 .bak 完整性校验失败（size/sha256 与 manifest 不一致），
-    # 撤销操作前由 :func:`restore_from_backup` 返回此状态，避免恢复出损坏文件
-    BACKUP_CORRUPTED = "backup_corrupted"
     # 重复扫描检测命中：当前源文件 sha256 与 manifest 中 post_sha256 一致，
     # 表示文件已被替换且未修改 → 跳过替换，保留原始 .bak 避免覆盖
     ALREADY_REPLACED = "already_replaced"

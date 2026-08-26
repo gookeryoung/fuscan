@@ -151,13 +151,17 @@ class OcrEngine:
             raise ExtractorError("OCR 引擎初始化失败或超时")
 
     @staticmethod
-    def _startupinfo() -> subprocess.STARTUPINFO | None:
-        """Windows 下隐藏 exe 控制台窗口（避免扫描时弹黑窗）。"""
+    def _startupinfo() -> subprocess.STARTUPINFO | None:  # pyrefly: ignore [missing-attribute]
+        """Windows 下隐藏 exe 控制台窗口（避免扫描时弹黑窗）。
+
+        STARTUPINFO/STARTF_USESHOWWINDOW/SW_HIDE 为 Windows 专属属性，
+        运行时由 sys.platform 守卫，Linux CI 静态检查需定点压制。
+        """
         if sys.platform != "win32":
             return None
-        si = subprocess.STARTUPINFO()
-        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        si.wShowWindow = subprocess.SW_HIDE
+        si = subprocess.STARTUPINFO()  # pyrefly: ignore [missing-attribute]
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW  # pyrefly: ignore [missing-attribute]
+        si.wShowWindow = subprocess.SW_HIDE  # pyrefly: ignore [missing-attribute]
         return si
 
     def _wait_init(self) -> bool:

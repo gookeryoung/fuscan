@@ -8,14 +8,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
-from PySide2.QtCore import Qt
+from PySide2.QtCore import Qt, QUrl
 from PySide2.QtTest import QTest
 from PySide2.QtWidgets import QApplication
 
 import fuscan.gui.widgets as gui_widgets
-from fuscan.gui.controllers import AboutController, SplashController
+from fuscan.gui.controllers import AboutController, FileMonitorController, SplashController
 from fuscan.gui.widgets.about_page import AboutPage
+from fuscan.gui.widgets.file_monitor_page import FileMonitorPage
 from fuscan.gui.widgets.icons import clear_icon_cache, tinted_svg_icon
 from fuscan.gui.widgets.main_window import PAGE_IDS, MainWindow
 from fuscan.gui.widgets.qss import build_app_qss, palette_tokens
@@ -179,14 +182,51 @@ class TestSidebarWidget:
         assert sidebar.isVisible()
 
 
+class _NullSignal:
+    """无行为的信号替身：仅支持 connect。"""
+
+    def connect(self, cb: object) -> None:
+        """接收订阅但不做任何事。"""
+
+
+class _FakeObserver:
+    """伪 watchdog Observer：不启动真实线程。"""
+
+    def schedule(self, handler: object, path: str, recursive: bool = False) -> object:
+        return {"path": path}
+
+    def unschedule(self, watch: object) -> None:
+        pass
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+    def join(self, timeout: float = 0.0) -> None:
+        pass
+
+
+class _FakeRulesStub:
+    """FileMonitorController 所需的最小规则控制器替身。"""
+
+    ruleset = None
+    rulesetChanged = _NullSignal()
+
+
 class _StubController:
-    """仅提供 cleanup 与 about 子控制器的最小桩（about 页用真实实现）。"""
+    """提供 cleanup / about / file_monitor 的最小桩（页面用真实控制器）。"""
 
     cleanup_calls: list[int] = []
 
-    def __init__(self, qapp: QApplication) -> None:
-        """构造 about 子控制器（依赖已就绪的 QApplication）。"""
+    def __init__(self, qapp: QApplication, cfg_dir: Path) -> None:
+        """构造子控制器（依赖已就绪的 QApplication 与隔离配置目录）。"""
         self.about = AboutController()
+        self.file_monitor = FileMonitorController(
+            _FakeRulesStub(),
+            _observer_factory=_FakeObserver,
+        )
 
     def cleanup(self) -> None:
         """清理钩子：closeEvent 流程会异步调用一次。"""
@@ -197,9 +237,17 @@ class TestMainWindow:
     """MainWindow 骨架测试（controller 用最小桩对象）。"""
 
     @pytest.fixture()
-    def window(self, qapp: QApplication) -> MainWindow:
-        """构造带桩控制器的主窗口。"""
-        return MainWindow(_StubController(qapp))
+    def window(
+        self,
+        qapp: QApplication,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> MainWindow:
+        """构造带桩控制器的主窗口（配置目录重定向到临时目录）。"""
+        cfg_dir = tmp_path / ".fuscan"
+        cfg_dir.mkdir()
+        monkeypatch.setattr("fuscan.config.CONFIG_DIR", cfg_dir)
+        return MainWindow(_StubController(qapp, cfg_dir))
 
     def test_six_pages_created(self, window: MainWindow) -> None:
         """内容栈应有 6 页且默认首页。"""
@@ -325,14 +373,144 @@ class TestAboutPage:
         page._toast_timer.stop()
 
 
+class TestFileMonitorPage:
+    """FileMonitorPage 文件监控页测试。"""
+
+    @pytest.fixture()
+    def page(
+        self,
+        qapp: QApplication,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> FileMonitorPage:
+        """构造挂在真实 FileMonitorController 上的监控页。"""
+
+        class _Owner:
+            file_monitor = FileMonitorController(
+                _FakeRulesStub(),
+                _observer_factory=_FakeObserver,
+            )
+
+        cfg_dir = tmp_path / ".fuscan"
+        cfg_dir.mkdir()
+        monkeypatch.setattr("fuscan.config.CONFIG_DIR", cfg_dir)
+        return FileMonitorPage(_Owner())
+
+    def test_initial_empty_state(self, qapp: QApplication, page: FileMonitorPage) -> None:
+        """无监控目录：拖拽区可见、目录/事件/命中区隐藏、状态为已停止。"""
+        assert page._drop_hint.isVisibleTo(page)
+        assert not page._watched_box.isVisibleTo(page)
+        assert not page._hit_list.isVisibleTo(page)
+        assert page._status_label.text() == "已停止"
+        assert not page._toggle.isEnabled()
+
+    def test_add_and_remove_directory(self, qapp: QApplication, page: FileMonitorPage, tmp_path: Path) -> None:
+        """添加目录后刷新行与显隐；移除后回到空态且自动停用监控。"""
+        target = tmp_path / "watch_me"
+        target.mkdir()
+        page.show()
+        assert page._controller.addWatch(str(target)) is True
+        # addWatch 内部 emit watchedDirectoriesChanged → 页面已重建
+        assert page._controller.watchedCount == 1
+        assert f"监控目录（{page._controller.watchedCount}）" in page._watched_title.text()
+        assert page._watched_rows_layout.itemAt(0).widget() is not None
+        path = page._controller.watchedDirectories[0]
+        assert page._controller.removeWatch(path) is True
+        assert not page._watched_box.isVisibleTo(page)
+        assert page._status_label.text() == "已停止"
+
+    def test_toggle_switches_monitoring(self, qapp: QApplication, page: FileMonitorPage, tmp_path: Path) -> None:
+        """开关切换驱动 controller 并同步状态文字；无目录时禁用。"""
+        target = tmp_path / "dir_toggle"
+        target.mkdir()
+        page._controller.addWatch(str(target))
+        QTest.mouseClick(page._toggle, Qt.LeftButton)  # 开
+        assert page._controller.monitoringEnabled is True
+        assert page._status_label.text() == "监控中"
+        QTest.mouseClick(page._toggle, Qt.LeftButton)  # 关
+        assert page._controller.monitoringEnabled is False
+
+    def test_events_refresh_and_clear(self, qapp: QApplication, page: FileMonitorPage) -> None:
+        """事件徽标计数与最近 3 条事件行渲染；清空后复位。"""
+        c = page._controller
+        c._event_count = 5
+        for i in range(5):
+            c._recent_events.append({"time": f"10:00:0{i}", "path": f"f{i}.txt", "event_type": "modified"})
+        c.eventLogChanged.emit()  # pyrefly: ignore [missing-attribute]
+        assert "5 个事件" in page._event_badge.text()
+        rows = [page._events_rows_layout.itemAt(i).widget() for i in range(3)]
+        assert all(w is not None for w in rows)
+
+        c.clearEvents()
+        assert page._clear_events_btn.isEnabled() is False
+
+    def test_hit_rows_and_empty_state(self, qapp: QApplication, page: FileMonitorPage, tmp_path: Path) -> None:
+        """命中记录进模型后列表非空；清空后空态提示恢复可见。"""
+        target = tmp_path / "dir_hits"
+        target.mkdir()
+        page.show()
+        page._controller.addWatch(str(target))
+        model = page._controller.model
+        model.append_hit("10:01:00", str(target / "a.py"), "rule_x", "warning", "secret")
+        page._refresh_empty_state()
+        assert model.rowCount() == 1
+        assert not page._empty_label.isVisibleTo(page)
+        model.clear()
+        page._refresh_empty_state()
+        assert page._empty_label.text() == "点击开关开始监控" or page._empty_label.text().startswith("等待")
+
+    def test_set_dark_refreshes_without_error(self, qapp: QApplication, page: FileMonitorPage, tmp_path: Path) -> None:
+        """主题切换幂等且自绘元素刷新不崩溃（grab 渲染 delegate）。"""
+        target = tmp_path / "dir_dark"
+        target.mkdir()
+        page.resize(900, 600)
+        page._controller.addWatch(str(target))
+        page._controller.model.append_hit("10:02:00", str(target / "b.py"), "r", "critical", "k=AKIA...")
+        page.set_dark(True)
+        assert page._dark is True
+        pixmap = page.grab()
+        assert not pixmap.isNull()
+
+    def test_drop_hint_accepts_directory_drag(self, qapp: QApplication, page: FileMonitorPage, tmp_path: Path) -> None:
+        """拖拽区 dragEnter 接受本地目录并高亮，drop 发出路径信号。"""
+        from PySide2.QtCore import QMimeData, QPoint
+        from PySide2.QtGui import QDragEnterEvent, QDropEvent
+
+        mime = QMimeData()
+        url = QUrl.fromLocalFile(str(tmp_path))
+        mime.setUrls([url])
+        enter_ev = QDragEnterEvent(
+            QPoint(10, 10),
+            Qt.CopyAction,
+            mime,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        )
+        page._drop_hint.dragEnterEvent(enter_ev)
+        assert enter_ev.isAccepted()
+        assert page._drop_hint._hovered is True
+        received: list[list[str]] = []
+        page._drop_hint.pathsDropped.connect(received.append)
+        drop_ev = QDropEvent(
+            QPoint(10, 10),
+            Qt.CopyAction,
+            mime,
+            Qt.LeftButton,
+            Qt.NoModifier,
+        )
+        page._drop_hint.dropEvent(drop_ev)
+        assert received and received[0][0] == str(tmp_path)
+
+
 class TestLazyFacade:
     """widgets 包惰性导出门面测试。"""
 
     def test_lazy_exports_resolve(self) -> None:
-        """MainWindow/SplashWindow/AboutPage 经 __getattr__ 惰性解析为类。"""
+        """MainWindow/SplashWindow/AboutPage/FileMonitorPage 惰性解析为类。"""
         assert gui_widgets.MainWindow.__name__ == "MainWindow"
         assert gui_widgets.SplashWindow.__name__ == "SplashWindow"
         assert gui_widgets.AboutPage.__name__ == "AboutPage"
+        assert gui_widgets.FileMonitorPage.__name__ == "FileMonitorPage"
 
     def test_unknown_attribute_raises(self) -> None:
         """未知属性抛 AttributeError。"""

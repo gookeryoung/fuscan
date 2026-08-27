@@ -13,6 +13,7 @@
 - :class:`MainWindow`：主窗口
 - :class:`SplashWindow`：启动画面
 - :class:`AboutPage`：关于页
+- :class:`FileMonitorPage`：文件监控页
 """
 
 from __future__ import annotations
@@ -32,4 +33,8 @@ def __getattr__(name: str):  # type: ignore[no-untyped-def]
         from fuscan.gui.widgets.about_page import AboutPage
 
         return AboutPage
+    if name == "FileMonitorPage":
+        from fuscan.gui.widgets.file_monitor_page import FileMonitorPage
+
+        return FileMonitorPage
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

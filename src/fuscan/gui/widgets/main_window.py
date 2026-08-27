@@ -33,6 +33,7 @@ from PySide2.QtWidgets import (
 )
 
 from fuscan.gui.widgets.about_page import AboutPage
+from fuscan.gui.widgets.file_monitor_page import FileMonitorPage
 from fuscan.gui.widgets.qss import build_app_qss
 from fuscan.gui.widgets.sidebar import SidebarWidget
 
@@ -95,6 +96,8 @@ class MainWindow(QMainWindow):
         """构建页面：已迁移页返回正式实现，未迁移页返回占位视图。"""
         if page_id == "about":
             return AboutPage(self._controller)
+        if page_id == "monitor":
+            return FileMonitorPage(self._controller)
         return self._make_placeholder(page_id)
 
     def _make_placeholder(self, page_id: str) -> QWidget:

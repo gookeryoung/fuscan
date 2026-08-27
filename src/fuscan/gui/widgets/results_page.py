@@ -534,8 +534,11 @@ class _DetailPanel(QFrame):
         self._hit_cards.clear()
         for i, hit in enumerate(hits):
             card = _HitCard(self._dark, hit)
-            card.setVisible(self._details_expanded or i == 0)
+            # 先 insertWidget reparent 再 setVisible——构造时无父的 widget 是
+            # 顶级窗口，先 setVisible(True) 等同 show()，会创建原生窗口句柄
+            # 闪现独立窗口（点击结果列表选中行时逐卡闪现）
             self._hits_layout.insertWidget(i, card)
+            card.setVisible(self._details_expanded or i == 0)
             self._hit_cards.append(card)
 
     def _toggle_expand(self) -> None:

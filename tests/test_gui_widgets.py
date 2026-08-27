@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 
 import pytest
-from PySide2.QtCore import QAbstractListModel, QModelIndex, QObject, Qt, QUrl, Signal
+from PySide2.QtCore import QAbstractListModel, QEvent, QModelIndex, QObject, Qt, QUrl, Signal
 from PySide2.QtGui import QCloseEvent, QShowEvent
 from PySide2.QtTest import QTest
 from PySide2.QtWidgets import (
@@ -1610,6 +1610,43 @@ class TestResultsPage:
             panel._undo_current_btn,
         ):
             assert btn.isEnabled()
+
+    def test_rebuild_hits_no_toplevel_window_flash(
+        self, qapp: QApplication, ws: _FakeResultsWorkspace, page: ResultsPage
+    ) -> None:
+        """选中结果重建命中卡片时不得以顶级窗口身份闪现。
+
+        回归防护：_HitCard 无父构造，若在 reparent（insertWidget）前调用
+        setVisible(True)，等同对顶级窗口 show()，会在屏幕上闪现独立
+        窗口（用户表现为点击结果列表时「闪出对话框」）。
+        """
+
+        class _WindowShowSpy(QObject):
+            """记录所有顶级窗口 Show 事件的事件过滤器。"""
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.flash_events: list[str] = []
+
+            def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+                if event.type() == QEvent.Show and hasattr(obj, "isWindow") and obj.isWindow():
+                    self.flash_events.append(obj.metaObject().className())
+                return False
+
+        spy = _WindowShowSpy()
+        qapp.installEventFilter(spy)
+        try:
+            fake = _FakeResultsScanController()
+            ws.bind(fake)
+            fake.selectedResultIndex = 0
+            fake.selectedResultChanged.emit()  # 触发 _rebuild_hits
+        finally:
+            qapp.removeEventFilter(spy)
+        # 命中卡片已重建且全程无顶级窗口闪现
+        assert len(page._detail_panel._hit_cards) == 2
+        assert spy.flash_events == []
+        for card in page._detail_panel._hit_cards:
+            assert not card.isWindow()
 
     def test_row_click_delegates_to_controller(
         self, qapp: QApplication, ws: _FakeResultsWorkspace, page: ResultsPage

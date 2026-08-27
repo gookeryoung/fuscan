@@ -124,7 +124,7 @@ PHASE_DONE: str = "done"
 _MANIFESTS_DIR: Path = CONFIG_DIR / "manifests"
 
 # 解析节点展开明细保留的最近文件条数上限：GitHub Actions 风格明细区
-# 仅展示最近解析的若干文件，避免海量文件时列表无限增长拖慢 QML 渲染。
+# 仅展示最近解析的若干文件，避免海量文件时列表无限增长拖慢 界面渲染。
 _RECENT_FILES_MAX: int = 50
 
 # recentParsedFiles 刷新节流阈值：明细列表刷新与高频进度回调解耦，
@@ -179,7 +179,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     """扫描工作流控制器。
 
     持有 :class:`FileStatsWorker` / :class:`ScanWorker` 引用、扫描状态、
-    进度信息与结果模型，通过 ``@Property`` 暴露给 QML 绑定。
+    进度信息与结果模型，通过 ``@Property`` 暴露为视图绑定。
 
     :param config_controller: 配置控制器（提供 Config 与 extractor 勾选）
     :param rules_controller: 规则控制器（提供 RuleSet）
@@ -190,7 +190,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     scanStateChanged = Signal()
     # progressChanged 保留为「全量」进度信号（扫描完成/取消/重置时 emit），
-    # 确保向后兼容；高频进度回调拆分到以下细粒度信号，减少 QML 绑定重算量。
+    # 确保向后兼容；高频进度回调拆分到以下细粒度信号，减少视图绑定重算量。
     progressChanged = Signal()
     # walk 阶段独立进度信号：仅 walk 阶段属性（walkDiscovered/walkSkipped 等）
     # 绑定此信号，scan 阶段进度回调不触发 walk 属性重算。
@@ -200,7 +200,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     scanProgressChanged = Signal()
     # 明细列表独立刷新信号：仅 recentParsedFiles 绑定此信号，与高频进度回调
     # （scanProgressChanged ~10Hz）解耦。recentParsedFiles 每次返回全新 QVariantList，
-    # QML ListView.model 绑定它会全量重建 delegate；若跟随 scanProgressChanged，
+    # 视图清单模型 绑定它会全量重建 delegate；若跟随 scanProgressChanged，
     # 展开明细时每次进度回调都触发整表重建，饿死低优先级扫描线程。故独立低频节流
     # （见 _maybe_emit_recent，~2Hz 或每 25 文件），进度条/计数照常高频刷新。
     recentParsedFilesChanged = Signal()
@@ -210,7 +210,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     statusChanged = Signal()
     selectedResultChanged = Signal()
     # detailHitsModel 独立刷新信号：命中详情由后台 DetailWorker 补齐上下文后
-    # 替换缓存并 emit 此信号触发 QML Repeater.model 重求值。与 selectedResultChanged
+    # 替换缓存并 emit 此信号触发 视图动态区 重求值。与 selectedResultChanged
     # 分离——「详情就绪」与「选中变化」是两件事，独立信号避免 worker 完成时连带
     # 触发 detailFilePath/detailHitsCount 等其余绑 selectedResultChanged 的属性重算，
     # 且无信号环。
@@ -221,12 +221,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     rulesCountChanged = Signal()
     selectedDriveChanged = Signal()
     # canStartScan 的独立 NOTIFY 信号：仅触发 canStartScan 重算，
-    # 不触发 QML 侧 Connections.onScanStateChanged（避免 StackView 误重建）
+    # 不触发 视图侧 Connections.onScanStateChanged（避免 StackView 误重建）
     canStartScanChanged = Signal()
     # 后台恢复扫描结果时的加载态信号
     restoringChanged = Signal()
     # 任务级 effective 配置变更信号——max_workers/max_file_size/max_depth
-    # 等任务级覆盖或全局 Config 变更时 emit，供 QML 重算 effective* 属性绑定。
+    # 等任务级覆盖或全局 Config 变更时 emit，供视图 重算 effective* 属性绑定。
     # 同时连接到 configController.configChanged 以反映全局配置变更。
     effectiveConfigChanged = Signal()
 
@@ -350,7 +350,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # filter 阶段统计——四类剔除计数（空/超限/不可读/符号链接）。
         # filter 是 walk 与 scan 之间的快速筛选阶段，对 walk 产物二次过滤，
         # 剔除本不应进入扫描队列的条目。``_filter_active`` 标记当前是否处于
-        # filter 阶段，供 QML 切换"解析文件内容"行的展示形态（转圈+剔除详情）。
+        # filter 阶段，供视图 切换"解析文件内容"行的展示形态（转圈+剔除详情）。
         self._filter_active: bool = False
         self._filter_removed_empty: int = 0
         self._filter_removed_oversize: int = 0
@@ -372,7 +372,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 启动时计算一次占位，startScan 时再次计算最新（保证规则变更立即生效）。
         self._ruleset = self._compute_effective_ruleset()
         # 全局 Config 变更时同步 emit effectiveConfigChanged，
-        # 让 QML effective* 绑定（如 effectiveMaxWorkers）跟随全局配置更新。
+        # 让视图 effective* 绑定（如 effectiveMaxWorkers）跟随全局配置更新。
         # 任务级 override 变更由 setTaskOverride 内部 emit，不在此处处理。
         self._config_controller.configChanged.connect(  # pyrefly: ignore [missing-attribute]
             self._emit_effective_config_changed
@@ -394,7 +394,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def restoring(self) -> bool:
         """是否正在后台恢复扫描结果。
 
-        QML 据此显示「正在恢复扫描结果...」占位态，加载完成后无缝切换到结果列表。
+        视图据此显示「正在恢复扫描结果...」占位态，加载完成后无缝切换到结果列表。
         """
         return self._restoring
 
@@ -408,7 +408,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """是否正在取消扫描中。
 
         cancelScan 设置为 True，_reset_scan_ui 重置为 False（取消完成回调）。
-        QML 据此显示模态遮罩防止用户重复操作（与退出保存 Popup 同模式）。
+        视图据此显示模态遮罩防止用户重复操作（与退出保存 Popup 同模式）。
         notify 用 phaseChanged：取消与重置均伴随 phaseChanged emit。
         """
         return self._cancelling
@@ -531,7 +531,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         每项为 ``{"name", "path", "size", "ext", "elapsedMs", "engine",
         "sizeText", "elapsedText"}``——``name`` 为路径末段文件名，``sizeText``/
         ``elapsedText`` 为后端预格式化的大小/耗时文案（格式化逻辑下沉后端，避免
-        QML 层重复实现），``engine`` 为该文件解析引擎名（供明细行标注）。供 QML
+        视图层重复实现），``engine`` 为该文件解析引擎名（供明细行标注）。供视图
         以 GitHub Actions 风格逐行展示（文件名 · 大小 · 耗时 · 引擎）。
         返回副本并倒序（最新解析的文件排在列表首位）。
         """
@@ -626,13 +626,13 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """
         return self._scan_phase
 
-    # ---- filter 阶段统计（QML 据此切换"解析文件内容"行为转圈+剔除详情） ----
+    # ---- filter 阶段统计（视图据此切换"解析文件内容"行为转圈+剔除详情） ----
 
     @Property(bool, notify=scanProgressChanged)  # pyrefly: ignore [not-callable]
     def filterActive(self) -> bool:
         """当前是否处于 filter 阶段。
 
-        QML 据此将"解析文件内容"行切换为转圈+剔除详情展示，
+        视图据此将"解析文件内容"行切换为转圈+剔除详情展示，
         避免将 filter 的已处理/总数误展示为扫描进度。
         """
         return self._filter_active
@@ -777,7 +777,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         任务级扫描设置功能已移除，扫描参数统一由全局规则集决定，此处仅承载
         任务级临时规则。``rules_paths``/``use_builtin``/``temp_rules_paths``/
         ``disabled_temp_rules_paths`` 变更时重算 effective ruleset 缓存并
-        emit ``canStartScanChanged``/``rulesCountChanged``，让 QML 侧
+        emit ``canStartScanChanged``/``rulesCountChanged``，让视图侧
         ``canStartScan``/``rulesCount`` 绑定反映任务级规则集。
         """
         self._task_overrides[key] = value
@@ -805,19 +805,19 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def _emit_effective_config_changed(self) -> None:
         """configController.configChanged → effectiveConfigChanged 桥接。
 
-        全局 Config 变更时 QML 侧 ``configController.maxWorkers`` 等绑定自行重算，
+        全局 Config 变更时视图侧 ``configController.maxWorkers`` 等绑定自行重算，
         但 ``ScanController.effectiveMaxWorkers`` 等需通过本信号触发重算。
         """
         self.effectiveConfigChanged.emit()  # pyrefly: ignore [missing-attribute]
 
     def _on_ruleset_changed(self) -> None:
-        """rulesController.rulesetChanged → 同步 effective ruleset 缓存与 QML 绑定信号。
+        """rulesController.rulesetChanged → 同步 effective ruleset 缓存与 视图绑定信号。
 
         全局规则集变更时重算 ``self._ruleset``（effective ruleset：任务级覆盖
         优先，回退全局）。无任务级覆盖时直接取全局；有任务级覆盖时按覆盖
         配置重新加载（覆盖优先级高于全局变更）。
 
-        emit ``canStartScanChanged`` 与 ``rulesCountChanged`` 让 QML 侧绑定重算。
+        emit ``canStartScanChanged`` 与 ``rulesCountChanged`` 让视图侧绑定重算。
         """
         self._ruleset = self._compute_effective_ruleset()
         self.canStartScanChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -930,7 +930,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def effectiveMaxWorkers(self) -> int:
         """任务级覆盖优先的最大工作线程数。
 
-        供 QML ScanProgressCard 显示实际生效的线程数（任务级 override 优先，
+        供 扫描进度面板 显示实际生效的线程数（任务级 override 优先，
         回退到全局 Config）。变更通知走 :attr:`effectiveConfigChanged`：
         ``setTaskOverride("max_workers", ...)`` 与全局 Config 变更均会触发。
         """
@@ -1001,7 +1001,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property("QVariantList", notify=detailHitsModelChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
     def detailHitsModel(self) -> list[dict[str, object]]:
-        """选中结果的命中详情列表（QML 直接 ListView 绑定）。
+        """选中结果的命中详情列表（视图 直接 ListView 绑定）。
 
         直接返回 :attr:`_detail_hits_model` 缓存——选中变化时由
         :meth:`_refresh_detail_hits` 先填轻量占位（主线程即时可读），
@@ -1138,7 +1138,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(int)  # pyrefly: ignore [not-callable]
     def setResultFilterReplaced(self, value: int) -> None:
-        """设置结果列表「已替换」维度过滤（供 QML TabBar 切换）。
+        """设置结果列表「已替换」维度过滤（供视图 TabBar 切换）。
 
         :param value: 0=不过滤（全部），1=仅未替换（待处理 Tab），2=仅已替换
         """
@@ -1160,7 +1160,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property("QVariantList", notify=scanStateChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
     def resultRuleNames(self) -> list[str]:
-        """当前结果中出现的所有规则名（供 QML 规则过滤 ComboBox 选择）。"""
+        """当前结果中出现的所有规则名（供视图 规则过滤 ComboBox 选择）。"""
         seen: list[str] = []
         for result in self._result_model.results:
             for name in result.rule_names:
@@ -1176,7 +1176,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         ``label`` 为中文（信息/警告/严重），``value`` 为该档位命中文件数，
         ``color`` 为与 :mod:`fuscan.gui.severity_utils` 一致的十六进制色值。
 
-        无命中或未扫描时返回空列表（QML 据此隐藏饼图）。
+        无命中或未扫描时返回空列表（视图据此隐藏饼图）。
         """
         if self._last_report is None:
             return []
@@ -1277,7 +1277,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         ``count`` 为调用次数，``percent`` 为占总耗时百分比（1 位小数）。
 
         ``perf_summary`` 不持久化（``from_json`` 置 ``None``），故仅当前会话扫描
-        完成后有数据；恢复的历史报告返回空列表（QML 据此隐藏性能区）。
+        完成后有数据；恢复的历史报告返回空列表（视图据此隐藏性能区）。
         """
         if self._last_report is None:
             return []
@@ -1304,12 +1304,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def replaceSelectedResult(self, replace_with: str = "") -> str:
         """替换当前选中结果的命中内容。
 
-        接受用户自定义替换文本 ``replace_with``（QML 输入框提供，
+        接受用户自定义替换文本 ``replace_with``（视图 输入框提供，
         默认 ``...``）。非空时覆盖所有规则的 ``replace_with``，且不要求规则
         ``replace=True``，实现「默认用 ... 替换被命中内容，支持设置自定义」。
 
         调用 :func:`fuscan.replacer.replace_in_file` 执行备份 + 原子替换。
-        返回操作消息供 QML 显示（成功/失败原因）。
+        返回操作消息供视图 显示（成功/失败原因）。
 
         :param replace_with: 用户自定义替换文本（空字符串走规则驱动模式）
         :return: 操作消息字符串
@@ -1345,12 +1345,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def replaceAllFilteredResults(self, replace_with: str = "") -> str:
         """对当前过滤后的所有结果执行批量替换。
 
-        接受用户自定义替换文本 ``replace_with``（QML 输入框提供，
+        接受用户自定义替换文本 ``replace_with``（视图 输入框提供，
         默认 ``...``）。非空时覆盖所有规则的 ``replace_with``，且不要求规则
         ``replace=True``。
 
         委托 :func:`fuscan.gui.controllers._batch_actions.replace_all_filtered_results`
-        执行批量替换，返回 :class:`BatchReplaceResult.message` 供 QML 显示，并
+        执行批量替换，返回 :class:`BatchReplaceResult.message` 供视图 显示，并
         记录成功项的 ``(源, 备份)`` 配对供 :meth:`undoLastBatchReplace` 撤销。
 
         :param replace_with: 用户自定义替换文本（空字符串走规则驱动模式）
@@ -1430,12 +1430,12 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
            ``<默认暂存区>/quarantine/``
         3. 保留源文件相对扫描根目录的目录结构，复制到隔离目录
         4. 调用 :class:`SkipStore.add` 标记为跳过，后续扫描自动跳过
-        5. 返回操作消息供 QML 显示
+        5. 返回操作消息供视图 显示
 
         移至暂存成功后从 :class:`ResultListModel` 与
         ``_last_report.hits`` 中移除该条目，避免用户仍能在结果列表中
         看到已隔离的文件。选中索引重置为 -1，emit ``selectedResultChanged``
-        让 QML 详情面板清空。
+        让 结果详情面板清空。
 
         - 未选中结果 → ``未选中结果``
         - 压缩包内部条目 → ``压缩包内部条目不支持移至暂存``
@@ -1463,7 +1463,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     stats=self._last_report.stats,
                     cancelled=self._last_report.cancelled,
                 )
-            # 重置选中索引，触发 QML 详情面板清空
+            # 重置选中索引，触发 结果详情面板清空
             self._selected_result_index = -1
             self.selectedResultChanged.emit()  # pyrefly: ignore [missing-attribute]
             self._refresh_detail_hits()
@@ -1481,7 +1481,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         :param rule_filter: 指定规则名（精确匹配）；空字符串表示该文件全部命中
             规则均标记为误报（``*`` 通配）。默认空字符串。
-        :return: 操作消息供 QML 显示
+        :return: 操作消息供视图 显示
 
         返回值语义：
 
@@ -1501,7 +1501,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self.invalidate_manifest(self._pending_ws_id)
         return msg
 
-    # ----------------------------- QML 调用槽 -----------------------------
+    # ----------------------------- 视图调用槽 -----------------------------
 
     @Slot()  # pyrefly: ignore [not-callable]
     def startScan(self) -> None:
@@ -1576,7 +1576,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 平均速度与解析明细重置（避免上次扫描残留）
         self._scan_elapsed = 0.0
         self._recent_files.clear()
-        # 节流状态归零并立即 emit，让 QML 明细列表清空为本次扫描的初始空态
+        # 节流状态归零并立即 emit，让视图 明细列表清空为本次扫描的初始空态
         self._recent_pending = 0
         self._recent_emit_last = float("-inf")
         self._maybe_emit_recent(force=True)
@@ -1690,7 +1690,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 平均速度与解析明细重置（避免上次扫描残留）
         self._scan_elapsed = 0.0
         self._recent_files.clear()
-        # 节流状态归零并立即 emit，让 QML 明细列表清空为本次扫描的初始空态
+        # 节流状态归零并立即 emit，让视图 明细列表清空为本次扫描的初始空态
         self._recent_pending = 0
         self._recent_emit_last = float("-inf")
         self._maybe_emit_recent(force=True)
@@ -1757,7 +1757,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str, str)  # pyrefly: ignore [not-callable]
     def exportResults(self, fmt: str, path_str: str) -> None:
-        """导出结果到文件（路径由 QML FileDialog 选定后传入）。
+        """导出结果到文件（路径由 系统文件对话框 选定后传入）。
 
         :param fmt: 格式 ``"pdf"``/``"csv"``/``"json"``/``"sarif"``/``"text"``
         :param path_str: 导出文件绝对路径
@@ -1809,7 +1809,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """更新 scan/archive 阶段进度字段（由 :meth:`_on_scan_progress` 调用）。
 
         拆分为独立方法以控制 :meth:`_on_scan_progress` 的分支复杂度。
-        filter→scan 切换时 ``_filter_active`` 由 True 降为 False，QML 据此从
+        filter→scan 切换时 ``_filter_active`` 由 True 降为 False，视图据此从
         转圈+剔除详情切回常规扫描进度展示。同步累计耗时（供平均速度计算）
         与最近解析文件明细（供解析节点展开区展示具体文件信息）。
         """
@@ -1865,7 +1865,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def _maybe_emit_recent(self, *, force: bool = False) -> None:
         """按低频节流择机 emit ``recentParsedFilesChanged`` 刷新明细列表。
 
-        recentParsedFiles 每次返回全新 QVariantList，QML ListView.model 绑定它
+        recentParsedFiles 每次返回全新 QVariantList，视图清单模型 绑定它
         会全量重建 delegate；若跟随高频进度回调（~10Hz）刷新，展开明细时主线程
         持续重建整表，饿死低优先级扫描线程（曾致单文件墙钟耗时 700ms）。故此处
         以「距上次刷新 >= :data:`_RECENT_EMIT_INTERVAL` 秒」或「累计新增
@@ -1893,11 +1893,11 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """扫描实时进度回调（节流由 worker 内部完成）。
 
         根据 ``info.phase`` 分别更新 walk / filter / scan / archive 阶段的独立字段，
-        使 QML 双进度条能分别反映收集与解析进度。
+        使视图双进度条能分别反映收集与解析进度。
 
         信号拆分：walk 阶段 emit ``walkProgressChanged``，filter/scan/archive 阶段
         emit ``scanProgressChanged``，阶段切换 emit ``phaseChanged``，
-        避免单一 ``progressChanged`` 触发 22+ 个 QML 绑定全量重算。
+        避免单一 ``progressChanged`` 触发 22+ 个视图绑定全量重算。
 
         filter 阶段属于「非 walk」分支——``scanned`` 复用为「已处理文件数」，
         ``total`` 为待筛选 entries 长度。filter→scan 切换时若 walk 未标记完成
@@ -1928,7 +1928,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
             # filter 阶段：转圈+剔除详情，不更新扫描进度字段。
             # filter 是快速阶段（仅 size 比较 + os.access），用确定进度条会
             # 让用户误以为正在解析文件内容；改用 indeterminate 转圈，
-            # 并填入四类剔除计数供 QML 展示详情。
+            # 并填入四类剔除计数供视图 展示详情。
             self._filter_active = True
             self._progress_indeterminate = True
             self._filter_removed_empty = info.filter_removed_empty
@@ -1988,7 +1988,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._scan_phase = PHASE_SCAN
         self.phaseChanged.emit()  # pyrefly: ignore [missing-attribute]
         # walk 完成后 walkElapsedText 定格为 _walk_elapsed，需 emit
-        # walkProgressChanged 触发其 QML 绑定重算（_on_stats_finished 不经过
+        # walkProgressChanged 触发其视图绑定重算（_on_stats_finished 不经过
         # _on_scan_progress 的 walk 分支，否则收集节点用时停在最后一次回调值）。
         self.walkProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
         self.scanProgressChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -2044,7 +2044,7 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         先切换扫描状态到 results/setup 与「已完成」状态文本，让 UI
         状态机立即跳出"扫描中"；再执行 ``set_results``/``_sync_stats_from_report``
-        /``_save_manifest`` 等耗时操作。状态切换在前确保 Qt 信号 emit 后 QML
+        /``_save_manifest`` 等耗时操作。状态切换在前确保 Qt 信号 emit 后 视图
         绑定可立即重算（虽然实际重绘需等事件循环），避免 set_results 大结果集
         阻塞时 UI 状态机仍停在 STATE_SCANNING。
         """
@@ -2064,9 +2064,9 @@ class ScanController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._scan_phase = PHASE_DONE
         # 先清理 worker 引用并复位 cancelling/paused 标志
         self._reset_scan_ui()
-        # 立即 emit 状态文本与扫描状态：让 QML 状态机先切到"已完成/已取消"
+        # 立即 emit 状态文本与扫描状态：让视图 状态机先切到"已完成/已取消"
         # 后续 set_results 等耗时操作即使阻塞主线程，Qt 信号已 emit，
-        # QML 绑定在事件循环恢复后立即重算到正确状态
+        # 视图绑定在事件循环恢复后立即重算到正确状态
         summary = report.summary()
         speed = report.stats.speed
         if speed > 0:

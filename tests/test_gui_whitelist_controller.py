@@ -1,6 +1,6 @@
 """``WhitelistController`` 单元测试（iter-133）。
 
-覆盖 QML 控制器的：
+覆盖白名单控制器的：
 
 - ``whitelistEntries``/``whitelistCount`` 属性
 - ``addEntry``/``removeEntry``/``clearAll``/``removeByGlobAndRule`` 槽

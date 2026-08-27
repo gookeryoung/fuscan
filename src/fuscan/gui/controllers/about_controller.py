@@ -1,4 +1,4 @@
-"""关于页控制器：暴露版本/作者/License/依赖列表给 QML。
+"""关于页控制器：暴露版本/作者/License/依赖列表。
 
 公共 API：
 
@@ -95,10 +95,10 @@ def _detect_ocr_status() -> str:
 class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
     """关于页控制器。"""
 
-    # 关于页内容为常量，运行时不变；QML 绑定要求 @Property 声明 NOTIFY，
+    # 关于页内容为常量，运行时不变；@Property 语义要求声明 NOTIFY，
     # 否则报 "depends on non-NOTIFYable properties" 警告。共用一个信号即可。
     infoChanged = Signal()
-    # 打开手册/配置目录失败时通知 QML 显示 toast（参数为提示消息）
+    # 打开手册/配置目录失败时通知视图显示 toast（参数为提示消息）
     openFailed = Signal(str)
 
     def __init__(self, parent: QObject | None = None) -> None:
@@ -147,7 +147,7 @@ class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """OCR 各依赖项状态（供关于页逐项展示绿勾/红叉）。
 
         返回 RapidOCR-json 引擎与 PP-OCRv3 模型文件两项的就位状态与版本，
-        QML 用 Repeater 渲染：已就位绿色勾 + 版本号，未就位红色叉。
+        关于页逐项渲染：已就位绿色勾 + 版本号，未就位红色叉。
         """
         status = get_ocr_status()
         return [{"name": d.name, "installed": d.installed, "version": d.version} for d in status.dependencies]
@@ -161,7 +161,7 @@ class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def openManual(self) -> None:
         """打开用户手册 PDF（系统默认阅读器）。
 
-        失败时通过 :attr:`openFailed` 信号通知 QML 显示 toast，
+        失败时通过 :attr:`openFailed` 信号通知视图显示 toast，
         避免用户点击后无任何反馈。Windows 上 ``QDesktopServices.openUrl``
         对含中文路径的本地 PDF 偶发失败，回退到 ``os.startfile``。
         """
@@ -178,7 +178,7 @@ class AboutController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """打开配置目录（系统文件管理器）。
 
         方便用户查看 ``config.yaml`` / 规则文件 / 缓存等。
-        失败时通过 :attr:`openFailed` 信号通知 QML 显示 toast。
+        失败时通过 :attr:`openFailed` 信号通知视图 显示 toast。
         """
         if not CONFIG_DIR.exists():
             logger.warning("配置目录不存在: %s", CONFIG_DIR)

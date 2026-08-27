@@ -364,7 +364,7 @@ class TestDetailPropertiesExtended:
         """build_detail_hits_light 剥离 matchText/context 中的 null 字节。
 
         防御性兜底：本修复部署前已完成扫描的结果，RuleHit.match_text/detail
-        可能含 null 字节（PDF/OCR 提取噪声），传入 QML 前须清洗。
+        可能含 null 字节（PDF/OCR 提取噪声），传入视图前须清洗。
         """
         from fuscan.gui.controllers._result_detail import build_detail_hits_light
 

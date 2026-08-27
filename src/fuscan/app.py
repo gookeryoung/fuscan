@@ -1,4 +1,4 @@
-"""GUI 应用入口：构造 QApplication 与 QtWidgets 主窗口（QML → Widgets 迁移）。"""
+"""GUI 应用入口：构造 QApplication 与 QtWidgets 主窗口（视图 → Widgets 迁移）。"""
 
 from __future__ import annotations
 
@@ -88,9 +88,9 @@ def _apply_global_font(app: QApplication) -> None:
 
 
 def _load_splash(app: QApplication, splash_controller: SplashController):
-    """构造 Widgets 版启动画面，让用户尽早看到启动反馈。
+    """构造启动画面，让用户尽早看到启动反馈。
 
-    与旧版 QML Splash 等价：仅依赖 :class:`SplashController` 的阶段/进度信号，
+    仅依赖 :class:`SplashController` 的阶段/进度信号，
     不依赖尚未构造的 :class:`AppController`。显示后调用 :meth:`processEvents`
     强制渲染一帧确保立即可见。
 

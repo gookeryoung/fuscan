@@ -27,7 +27,7 @@ __all__ = ["SplashController"]
 class SplashController(QObject):  # pyrefly: ignore [invalid-inheritance]
     """Splash 启动画面阶段状态控制器。
 
-    QML 通过 ``SplashController.stage`` 绑定显示当前启动阶段文本，
+    视图通过 ``SplashController.stage`` 绑定显示当前启动阶段文本，
     通过 ``SplashController.progress`` 绑定驱动确定性进度条宽度。
     Python 端在每个启动阶段调用 :meth:`setStage` 更新文本与进度并触发重绘。
 
@@ -62,7 +62,7 @@ class SplashController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         进度采用单调递增策略：仅当 ``progress >= 0`` 且**大于**当前进度时
         才更新进度值，保证进度条永不回退。文本变化与进度变化分别 emit
-        对应信号，QML 绑定各自刷新。
+        对应信号，视图绑定各自刷新。
 
         :param text: 新的阶段文本（如「迁移配置...」）
         :param progress: 新的进度值（0.0-1.0）；传 -1.0（默认）表示不更新进度，

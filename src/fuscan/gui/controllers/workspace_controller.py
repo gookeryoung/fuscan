@@ -2,8 +2,8 @@
 
 工作区是 fuscan GUI 的核心组织单元：每个工作区代表一个独立的扫描任务，
 包含名称、扫描模式、目标、规则配置与最近一次扫描结果摘要。所有工作区
-通过 :class:`WorkspaceListModel` 暴露给 QML ``ListView`` 绑定，
-QML 通过本控制器的 ``@Slot`` 修改状态。
+通过 :class:`WorkspaceListModel` 暴露给视图 ``ListView`` 绑定，
+视图通过本控制器的 ``@Slot`` 修改状态。
 
 公共 API：
 
@@ -143,7 +143,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 避免启动时读 ~/.fuscan/history.json 阻塞主线程。
         self._history_store_instance: HistoryStore | None = None
         # cleanup 标志——cleanup() 后置 True，hasCurrentWorkspace
-        # 据此返回 False（进程退出阶段 QML 不应再访问 currentScanController）
+        # 据此返回 False（进程退出阶段视图不应再访问 currentScanController）
         self._cleaned_up: bool = False
         # 恢复持久化的工作区
         self._load_persisted()
@@ -165,7 +165,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._history_store_instance = HistoryStore()
         return self._history_store_instance
 
-    # ----------------------------- QML 属性 -----------------------------
+    # ----------------------------- 视图属性 -----------------------------
 
     @Property(QObject, notify=workspaceListChanged)  # pyrefly: ignore [not-callable]
     def workspaceModel(self) -> WorkspaceListModel:
@@ -173,7 +173,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         用 ``QObject`` 作为 Property 类型，避免 PySide2 元类型系统对
         ``QAbstractListModel*`` 未注册导致的 ``QMetaObjectBuilder`` 警告。
-        QML ``ListView.model`` 接受任何 ``QAbstractItemModel*``，绑定不受影响。
+        视图 ``ListView.model`` 接受任何 ``QAbstractItemModel*``，绑定不受影响。
         """
         return self._model
 
@@ -204,7 +204,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def currentScanController(self) -> ScanController:
         """当前工作区对应的 :class:`ScanController` 实例。
 
-        未选中工作区时返回一个默认实例（避免 QML 绑定 null 报错）。
+        未选中工作区时返回一个默认实例（避免视图绑定 null 报错）。
 
         ScanController 延迟创建——首次访问时通过
         :meth:`_ensure_scan_controller` 构造，避免启动时为所有工作区预创建。
@@ -215,7 +215,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 return controller
         # 兜底：返回一个临时实例（仅当未选中工作区或工作区不存在时）
         # fallback 实例直接复用全局 RulesController.ruleset（启动时占位），
-        # 该实例不会启动扫描（hasCurrentWorkspace=False 时 QML 不显示扫描入口）
+        # 该实例不会启动扫描（hasCurrentWorkspace=False 时视图不显示扫描入口）
         if not hasattr(self, "_fallback_controller"):
             self._fallback_controller = ScanController(
                 self._config_controller,
@@ -232,8 +232,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         基于 :class:`WorkspaceListModel` 判断工作区是否存在，
         不依赖 ScanController 是否已创建（延迟创建场景下未访问过的工作区
-        也应视为「存在」，QML 据此显示工作区详情）。
-        cleanup 后返回 False（进程退出阶段 QML 不应再访问工作区）。
+        也应视为「存在」，视图据此显示工作区详情）。
+        cleanup 后返回 False（进程退出阶段视图不应再访问工作区）。
         """
         if self._cleaned_up or not self._current_workspace_id:
             return False
@@ -258,7 +258,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """当前扫描中工作区的 :class:`ScanController` 实例。
 
         无扫描任务时返回 :attr:`currentScanController` 的兜底实例，
-        避免 QML 绑定 null 报错（与 :attr:`currentScanController` 同策略）。
+        避免视图绑定 null 报错（与 :attr:`currentScanController` 同策略）。
         """
         if self._active_scan_workspace_id and self._active_scan_workspace_id in self._scan_controllers:
             return self._scan_controllers[self._active_scan_workspace_id]
@@ -283,7 +283,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         item = self._model.get_workspace(self._active_scan_workspace_id)
         return item.target if item is not None else ""
 
-    # ----------------------------- QML 调用槽 -----------------------------
+    # ----------------------------- 视图调用槽 -----------------------------
 
     @Slot(str, str, str, str, bool, result=str)  # pyrefly: ignore [not-callable]
     def addWorkspace(
@@ -291,8 +291,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         name: str,
         mode_str: str,
         target: str,
-        rules_paths_json: str,  # noqa: ARG002 废弃参数，保留以兼容 QML 调用签名
-        use_builtin: bool,  # noqa: ARG002 废弃参数，保留以兼容 QML 调用签名
+        rules_paths_json: str,  # noqa: ARG002 废弃参数，保留以兼容 视图 调用签名
+        use_builtin: bool,  # noqa: ARG002 废弃参数，保留以兼容 视图 调用签名
     ) -> str:
         """新建工作区。
 
@@ -332,7 +332,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         路径为文件夹时创建 ``folder`` 模式工作区，路径为文件时创建 ``file``
         模式工作区，任务名默认取末段文件名。非文件/文件夹或空路径返回空串。
 
-        :param path_str: 文件或文件夹路径（QML DropArea 已剥离 ``file:///`` 前缀）
+        :param path_str: 文件或文件夹路径（视图 DropArea 已剥离 ``file:///`` 前缀）
         :return: 新工作区 ID；非文件/文件夹或空路径返回空串
         """
         if not path_str:
@@ -353,7 +353,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def addWorkspacesFromPaths(self, paths: list[object]) -> int:
         """批量从文件或文件夹路径创建工作区（拖拽多选）。
 
-        :param paths: 文件/文件夹路径列表（QML 端已剥离 ``file:///`` 前缀）
+        :param paths: 文件/文件夹路径列表（视图 端已剥离 ``file:///`` 前缀）
         :return: 成功创建的工作区数
         """
         count = 0
@@ -460,7 +460,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 lambda wid=ws_id: self._sync_workspace_state(wid)
             )
             # 细粒度进度信号：phaseChanged + scanProgressChanged + walkProgressChanged
-            # 替代原单一 progressChanged，避免 22+ 个 QML 绑定全量重算
+            # 替代原单一 progressChanged，避免 22+ 个视图绑定全量重算
             scan_controller.phaseChanged.connect(  # pyrefly: ignore [missing-attribute]
                 lambda wid=ws_id: self._sync_workspace_state(wid)
             )
@@ -560,7 +560,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         :param ws_id: 工作区 ID
         :param fmt: ``"pdf"``/``"csv"``/``"json"``/``"sarif"``/``"text"``
-        :param path_str: 导出文件绝对路径（由 QML FileDialog 选定）
+        :param path_str: 导出文件绝对路径（由 系统文件对话框 选定）
         """
         controller = self._ensure_scan_controller(ws_id)
         if controller is None:
@@ -638,7 +638,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         try:
             return json.dumps(item.task_overrides, ensure_ascii=False)
         except (TypeError, ValueError):
-            # 容错防御，避免非 JSON 可序列化对象冒泡到 QML
+            # 容错防御，避免非 JSON 可序列化对象冒泡到 视图
             logger.warning("工作区 %s 的 task_overrides 序列化失败", ws_id, exc_info=True)
             return "{}"
 
@@ -853,7 +853,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         每 controller 最多 5s 累计等待 + SQLite 刷盘）。
 
         关闭时不再 emit ``currentWorkspaceChanged``/``activeScanChanged``
-        信号，避免 QML 在组件销毁过程中重新求值 ``currentScanController`` binding
+        信号，避免 视图 在组件销毁过程中重新求值 ``currentScanController`` binding
         访问到已被 ``deleteLater`` 的对象（Terminal#4-17 null 错误根因）。
 
         ``quick_cancel`` 内部已改为 cancel + wait(500) + terminate，
@@ -883,8 +883,8 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                     qt_worker.wait(100)  # pyrefly: ignore [missing-argument]
         self._restore_workers.clear()
         # 不清空 _current_workspace_id / _active_scan_workspace_id，不 emit 信号：
-        # 应用退出阶段 QML 组件正在销毁，重新求值 binding 会触发 null TypeError。
-        # 状态清空无意义（进程即将退出），保留原值让 QML binding 求值稳定。
+        # 应用退出阶段 视图 组件正在销毁，重新求值 binding 会触发 null TypeError。
+        # 状态清空无意义（进程即将退出），保留原值让视图 binding 求值稳定。
 
     # ----------------------------- 持久化 -----------------------------
 
@@ -950,7 +950,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
                 logger.warning("工作区 %s 恢复失败: %s", ws_id, exc)
         if self._model.rowCount() > 0:
             self.workspaceListChanged.emit()  # pyrefly: ignore [missing-attribute]
-            # 启动时仅后台加载第一个工作区的结果（QML 默认选中第一个）
+            # 启动时仅后台加载第一个工作区的结果（视图 默认选中第一个）
             first_ws_id = self._model.all_workspaces()[0].workspace_id
             self._try_load_cached_results(first_ws_id)
         # 将旧版本工作区级 rules_paths 迁移到全局规则配置
@@ -1024,7 +1024,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         effective 值 = 任务级覆盖优先，回退全局 :class:`RulesController`。
         :attr:`WorkspaceItem.rules_paths`/``use_builtin`` 字段同时被
         :attr:`WorkspaceItem.rules_tags`/``rules_text` 派生属性使用，
-        同步后 QML ``WorkspaceCard`` 的规则标签反映 effective 规则集。
+        同步后 视图 ``WorkspaceCard`` 的规则标签反映 effective 规则集。
 
         触发场景：
         - 全局规则变更（``rulesetChanged``/``rulesFileListChanged``/``useBuiltinChanged``）
@@ -1167,7 +1167,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(str, result=str)  # pyrefly: ignore [not-callable]
     def workspaceHistoryJson(self, ws_id: str) -> str:
-        """返回指定工作区的历史记录 JSON 字符串（供 QML 解析展示）。
+        """返回指定工作区的历史记录 JSON 字符串（供视图 解析展示）。
 
         委托 :func:`._history_view.build_workspace_history_json`。
 
@@ -1195,7 +1195,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """返回指定工作区扫描趋势 JSON 字符串（供趋势图绘制）。
 
         委托 :func:`._history_view.build_scan_trend_json`，取最近 20 条历史
-        并按时间正序排列（最旧在前），供 QML 趋势图从左到右绘制。
+        并按时间正序排列（最旧在前），供视图 趋势图从左到右绘制。
 
         :param ws_id: 工作区 ID
         :return: JSON 数组字符串，每个元素含 ``finished_at``/``matched_files``/
@@ -1210,7 +1210,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         委托 :func:`._history_view.build_arbitrary_comparison_json`，按
         ``scan_id`` 在历史中定位两条，``finished_at`` 较新者为 ``current``。
-        输出结构与 :meth:`compareWithPreviousScan` 一致，QML 可复用同一对比
+        输出结构与 :meth:`compareWithPreviousScan` 一致，视图 可复用同一对比
         摘要展示组件。
 
         :param ws_id: 工作区 ID

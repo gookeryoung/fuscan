@@ -1,11 +1,9 @@
-"""统计页（Widgets 版）：状态摘要 + 双阶段进度 + 分类计数 + 图表区。
-
-对照 QML 版 :file:`StatsPage.qml` 等价迁移：
+"""统计页：状态摘要 + 双阶段进度 + 分类计数 + 图表区。
 
 - 状态摘要：状态文字按语义着色（扫描中=警告色，已完成=有命中危险色）
 - 收集（walk）/解析（scan）双进度条与统计网格
 - 安全/命中/错误三卡片
-- 命中分布：严重度/扩展名环形图 + Top 规则条形图（Widgets 自绘，对应原 QML 组件）
+- 命中分布：严重度/扩展名环形图 + Top 规则条形图（Widgets 自绘）
 - 性能剖析条形图（仅当前会话且有 perf_summary 时显示）
 
 刷新模型：ScanController 的状态/进度/结果信号统一汇聚到 :meth:`refresh_all`
@@ -51,8 +49,7 @@ def _fmt_int(value: object) -> str:
 class PieChart(QWidget):
     """自绘环形饼图：右侧图例逐项列出 标签·数量·占比。
 
-    对应 QML 版 :file:`components/PieChart.qml`；``chartData`` 为
-    ``[{label, value, color}, ...]``。
+    ``chartData`` 为 ``[{label, value, color}, ...]``。
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -172,7 +169,6 @@ def _pt(x: int, y: int) -> object:
 class BarChart(QWidget):
     """自绘水平条形图：标签 | 比例条 | 数值文本。
 
-    对应 QML 版 :file:`components/BarChart.qml`；
     ``chartData`` 为 ``[{label, value, color}, ...]``，
     ``percent>0`` 或 ``suffix`` 支持数值文案定制。
     """

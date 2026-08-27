@@ -1381,7 +1381,7 @@ class TestNullByteSanitization:
     """提取器注册表剥离 null 字节，防止 Qt 信号传递崩溃。
 
     PDF 文本层提取（pypdfium2）与 OCR 回退（RapidOCR）可能产生 null 字节，
-    null 字节无法经 Qt 信号传递到 QML（C 字符串以 null 结尾），触发
+    null 字节无法经 Qt 信号传递（C 字符串以 null 结尾），触发
     ``ValueError: embedded null character`` 并连锁导致 shiboken 溢出。
     """
 

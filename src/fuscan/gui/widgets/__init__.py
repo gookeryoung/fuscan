@@ -1,4 +1,4 @@
-"""QtWidgets GUI 子包（QML 已全面迁移至本层）。
+"""QtWidgets GUI 子包。
 
 按职责拆分：
 

@@ -32,7 +32,7 @@ __all__ = [
 
 
 def build_workspace_history_json(entries: tuple[ScanHistoryEntry, ...]) -> str:
-    """构造扫描历史列表 JSON 数组字符串（供 QML 解析展示）。
+    """构造扫描历史列表 JSON 数组字符串（供视图 解析展示）。
 
     :param entries: 按 ``finished_at`` 倒序的历史条目元组
         （``HistoryStore.workspace_history`` 返回值）
@@ -128,7 +128,7 @@ def build_arbitrary_comparison_json(
 
     在 ``entries`` 中按 ``scan_id`` 定位两条，``finished_at`` 较新者为
     ``current``、较旧者为 ``previous``，复用 :func:`compare_scans` 计算差异。
-    与 :func:`build_scan_comparison_json` 输出结构完全一致，便于 QML 复用
+    与 :func:`build_scan_comparison_json` 输出结构完全一致，便于复用
     同一对比摘要展示组件。
 
     :param entries: 历史条目元组（顺序不限，内部按 scan_id 查找）

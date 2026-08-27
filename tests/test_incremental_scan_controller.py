@@ -1127,7 +1127,7 @@ class TestResolveScanRootFallback:
 class TestScanControllerPropertiesCoverage:
     """补充 Property getter 覆盖测试。
 
-    这些 Property 在增量扫描上下文中也可能被 QML 读取（如扫描中读取 cancelling、
+    这些 Property 在增量扫描上下文中也可能被视图读取（如扫描中读取 cancelling、
     canStartScan 等），确保各 getter 分支被覆盖。
     """
 

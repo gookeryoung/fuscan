@@ -1,7 +1,4 @@
-"""文件扫描页（Widgets 版）：工作区列表 + 扫描进度面板。
-
-对照 QML 版 :file:`HomePage.qml` + :file:`WorkspaceCard.qml` +
-:file:`ScanProgressCard.qml` + :file:`PhaseNode.qml` 等价迁移：
+"""文件扫描页：工作区列表 + 扫描进度面板。
 
 - 工作区卡片：任务名/状态徽标/元数据/规则标签/摘要/分类计数 +
   启动暂停/重新扫描/配置规则/预览规则/查看结果/统计/展开更多操作
@@ -61,7 +58,7 @@ def _tokens(dark: bool) -> dict[str, str]:
 
 
 def _status_color(status_text: str, matched_count: int, t: dict[str, str]) -> str:
-    """状态徽标语义色（与 WorkspaceCard.qml / StatsPage 判断逻辑一致）。"""
+    """状态徽标语义色（与 StatsPage 判断逻辑一致）。"""
     s = str(status_text or "")
     if s == "扫描中":
         return t["warning"]

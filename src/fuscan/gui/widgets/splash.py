@@ -1,6 +1,6 @@
-"""Widgets 版启动画面：无边框圆角卡片 + Logo + 阶段文本 + 确定性进度条。
+"""启动画面：无边框圆角卡片 + Logo + 阶段文本 + 确定性进度条。
 
-对照 QML 版 :file:`Splash.qml` 等价迁移。阶段与进度数据仍由
+阶段与进度数据由
 :class:`~fuscan.gui.controllers.splash_controller.SplashController` 提供，
 本视图连接其 ``stageChanged``/``progressChanged`` 信号刷新显示。
 """

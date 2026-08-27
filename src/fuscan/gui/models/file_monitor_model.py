@@ -1,6 +1,6 @@
 """文件监控命中列表模型（QAbstractListModel）。
 
-供 QML ``ListView`` 直接绑定，按 role 返回每条监控命中记录的展示字段
+供 Widgets 文件监控页表格消费，按 role 返回每条监控命中记录的展示字段
 （时间、文件路径、规则名、严重度文本/色值、匹配文本摘要）。
 
 与 :class:`ResultListModel` 不同，本模型面向**实时增量追加**场景：
@@ -124,7 +124,7 @@ class FileMonitorModel(QAbstractListModel):  # pyrefly: ignore [invalid-inherita
         """追加一条命中记录。
 
         超过 ``max_rows`` 时从头部丢弃最旧记录（用 ``beginRemoveRows``/
-        ``endRemoveRows`` 通知 QML）。
+        ``endRemoveRows`` 通知视图）。
 
         :param time: 时间字符串
         :param file_path: 文件路径

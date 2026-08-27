@@ -6,7 +6,7 @@
 供主线程即时展示），``build_detail_hits_full`` 读文件补齐上下文（供后台
 worker 调用）。``can_replace_result`` 判断当前结果是否可执行替换，
 ``replace_selected`` 与 ``move_to_staging`` 执行实际文件操作并返回操作消息
-供 QML 显示。
+供视图显示。
 
 公共 API：
 
@@ -48,13 +48,13 @@ logger = logging.getLogger(__name__)
 
 
 def _strip_null(text: str) -> str:
-    """剥离 null 字节，防御性清洗经 Qt 信号传递到 QML 的文本。
+    """剥离 null 字节，防御性清洗经 Qt 信号传递的文本。
 
     根因修复在提取器注册表（:func:`fuscan.extractors.base._sanitize_extracted_content`）
     已剥离提取内容的 null 字节，但本修复部署前已完成扫描的结果中，``RuleHit.match_text``
     与 ``hit.detail`` 可能仍含 null 字节（PDF/OCR 提取噪声）。null 字节无法经 Qt
     信号传递（C 字符串以 null 结尾），会触发 ``ValueError: embedded null character``
-    并连锁导致 shiboken 溢出。此处对传入 QML 的文本字段二次清洗作为兜底。
+    并连锁导致 shiboken 溢出。此处对传入视图的文本字段二次清洗作为兜底。
     """
     if "\x00" not in text:
         return text
@@ -150,7 +150,7 @@ def _extract_context(path: Path, match_text: str) -> str:
     """从文件中提取匹配文本的上下文（前后各 ``_CONTEXT_LINES`` 行）。
 
     薄封装 :func:`_extract_contexts_batch`——匹配行用 ``>>> `` 前缀标记，
-    便于 QML 高亮显示。文件过大或非文本文件时返回空字符串。
+    便于视图高亮显示。文件过大或非文本文件时返回空字符串。
 
     :param path: 文件路径
     :param match_text: 匹配文本（在文件中搜索该文本所在行）
@@ -232,7 +232,7 @@ def build_detail_hits_full(result: ScanResult | None) -> list[dict[str, object]]
 
 
 # build_detail_hits_model 保留为 build_detail_hits_full 的向后兼容别名，
-# QML 绑定与既有测试无需改动即可复用完整构建逻辑。
+# 既有调用方与测试无需改动即可复用完整构建逻辑。
 build_detail_hits_model = build_detail_hits_full
 
 
@@ -266,7 +266,7 @@ def replace_selected(
     """替换当前选中结果的命中内容。
 
     调用 :func:`fuscan.replacer.replace_in_file` 执行备份 + 原子替换。
-    返回操作消息供 QML 显示（成功/失败原因）。
+    返回操作消息供视图显示（成功/失败原因）。
 
     :param result: 选中结果；``None`` 返回 ``未选中结果``
     :param ruleset: 当前规则集；``override_replace_with`` 非空时可为 ``None``
@@ -334,7 +334,7 @@ def move_to_staging(
        ``<默认暂存区>/quarantine/``
     3. 保留源文件相对扫描根目录的目录结构，复制到隔离目录
     4. 调用 :meth:`SkipStore.add` 标记为跳过，后续扫描自动跳过
-    5. 返回操作消息供 QML 显示
+    5. 返回操作消息供视图显示
 
     压缩包内部条目（``archive_path`` 非 None）时，移至暂存的是
     压缩包文件本身（``archive_path``），并标记 ``archive_path`` 为跳过——

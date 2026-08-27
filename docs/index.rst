@@ -13,7 +13,7 @@ fuscan
 简介
 ====
 
-fuscan 是一款基于 YAML 规则的多格式文件内容扫描工具，支持 CLI 与 GUI（PySide2 + QML）两种使用形态。
+fuscan 是一款基于 YAML 规则的多格式文件内容扫描工具，支持 CLI 与 GUI（PySide2 + QtWidgets）两种使用形态。
 可扫描 PDF、Office 文档、压缩包等多种格式，按文件名/内容/路径匹配，并支持 AND/OR/NOT 逻辑组合。
 
 特性：
@@ -25,7 +25,7 @@ fuscan 是一款基于 YAML 规则的多格式文件内容扫描工具，支持 
 - **两种使用形态**：
 
   - CLI：``scan``/``rules``/``gui``/``cache``/``version`` 子命令，支持 text/json/csv/pdf/excel 输出
-  - GUI：PySide2 + QML 极简界面（Sidebar + ContentArea），实时进度、结果分类、详情预览、关键词高亮
+  - GUI：PySide2 极简界面（Sidebar + ContentArea），实时进度、结果分类、详情预览、关键词高亮
 
 - **内置通用规则**：随包分发 8 条安全规则，用户规则可覆盖
 - **多规则合并**：支持加载多个规则文件，按顺序链式合并，后者覆盖前者同名规则

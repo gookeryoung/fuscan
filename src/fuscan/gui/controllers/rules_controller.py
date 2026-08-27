@@ -1,4 +1,4 @@
-"""规则控制器：QML ↔ RuleSet/规则文件管理桥接。
+"""规则控制器：视图 ↔ RuleSet/规则文件管理桥接。
 
 管理全局规则与任务级临时规则两类规则文件：
 
@@ -10,7 +10,7 @@
   临时规则文件可勾选启用/禁用（禁用列表持久化到
   ``task_overrides["disabled_temp_rules_paths"]``），可移除。
 
-规则列表通过 :class:`RuleListModel` 暴露给 QML ``ListView`` 绑定，
+规则列表通过 :class:`RuleListModel` 暴露给视图 ``ListView`` 绑定，
 规则文件列表（全局 + 临时合并）通过 ``@Property`` 暴露 ``QVariantList``。
 
 公共 API：
@@ -27,7 +27,7 @@
 - :meth:`RulesController.exportRuleset`：导出当前规则集到 YAML/JSON
 - :meth:`RulesController.importRuleset`：从 YAML/JSON 文件导入规则
 - :meth:`RulesController.set_workspace_controller`：延迟注入工作区控制器
-- :meth:`RulesController.effectiveConfigPreview`：生效配置预览（QML 只读展示）
+- :meth:`RulesController.effectiveConfigPreview`：生效配置预览（视图 只读展示）
 - :meth:`RulesController.appendWhitelistEntry`：追加白名单条目到 user-scan.yaml
 """
 
@@ -186,10 +186,10 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
     rulesFileListChanged = Signal()
     selectionChanged = Signal()
     useBuiltinChanged = Signal()
-    # 规则导入/导出操作结果通知（QML 据此显示 toast/对话框）
+    # 规则导入/导出操作结果通知（视图据此显示 toast/对话框）
     # 参数：成功 True/False，消息文本
     rulesIoCompleted = Signal(bool, str)
-    # 当前工作区变更（切换或其临时规则变更）时触发，QML 据此刷新临时规则区
+    # 当前工作区变更（切换或其临时规则变更）时触发，视图据此刷新临时规则区
     currentWorkspaceChanged = Signal()
 
     def __init__(self, config_controller: object, parent: QObject | None = None) -> None:
@@ -282,7 +282,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return value
         return ()
 
-    # ----------------------------- QML 属性 -----------------------------
+    # ----------------------------- 视图属性 -----------------------------
 
     @Property(QObject, notify=rulesetChanged)  # pyrefly: ignore [not-callable]
     def ruleModel(self) -> RuleListModel:
@@ -322,7 +322,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(str, notify=currentWorkspaceChanged)  # pyrefly: ignore [not-callable]
     def currentWorkspaceName(self) -> str:
-        """当前工作区名称（供 QML 临时规则区标题显示）。"""
+        """当前工作区名称（供视图 临时规则区标题显示）。"""
         ws_id = self._current_ws_id()
         if not ws_id or self._workspace_controller is None:
             return ""
@@ -330,7 +330,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property("QVariantList", notify=rulesFileListChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
     def rulesFileModel(self) -> list[dict[str, object]]:
-        """规则文件列表（全局 + 临时合并，QML 直接 ListView 绑定）。
+        """规则文件列表（全局 + 临时合并，视图 直接 ListView 绑定）。
 
         列表顺序：内置规则（固定第一项） → 全局规则文件 → 临时规则文件。
 
@@ -404,7 +404,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def lastRulesDir(self) -> str:
         """上次使用的规则文件目录（供 FileDialog folder 绑定）。
 
-        返回 ``Config.last_rules_dir``；为 None 时返回空串（QML FileDialog
+        返回 ``Config.last_rules_dir``；为 None 时返回空串（系统文件对话框
         会回退到平台默认目录）。``loadFileFromPath``/``loadFileToTemp``/
         ``importRuleset``/``exportRuleset`` 成功后回写父目录。
         """
@@ -471,7 +471,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return False
         return bool(item["canRemove"])
 
-    # ----------------------------- QML 调用槽 -----------------------------
+    # ----------------------------- 视图调用槽 -----------------------------
 
     @Slot(str, result=bool)  # pyrefly: ignore [not-callable]
     def loadFileFromPath(self, path_str: str) -> bool:
@@ -731,7 +731,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         :param path_str: 规则文件路径（必须是当前工作区已加载的临时规则）
         :return: 是否迁移成功。无当前工作区、路径不在临时规则中或加载失败返回 False，
-            并通过 ``rulesIoCompleted`` 信号通知 QML。
+            并通过 ``rulesIoCompleted`` 信号通知视图。
         """
         ws_id = self._current_ws_id()
         if not ws_id or self._workspace_controller is None:
@@ -804,7 +804,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         :param path_str: 规则文件路径（必须是已加载的全局规则文件）
         :return: 是否迁移成功。无当前工作区、路径不在全局规则中或加载失败返回 False，
-            并通过 ``rulesIoCompleted`` 信号通知 QML。
+            并通过 ``rulesIoCompleted`` 信号通知视图。
         """
         ws_id = self._current_ws_id()
         if not ws_id or self._workspace_controller is None:
@@ -876,7 +876,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property("QVariantMap", notify=rulesetChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
     def effectiveConfigPreview(self) -> dict[str, object]:
-        """当前规则集的生效配置预览（供 QML 设置页只读展示）。
+        """当前规则集的生效配置预览（供 设置页只读展示）。
 
         从 :attr:`_ruleset` 读取 ``scan_params``/``ignore_dirs``/``scan_extensions``
         等字段，``None`` 字段回退到内置默认值。ruleset 为 None 时全部返回默认值
@@ -928,12 +928,12 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         将 (path_glob, rule_name, note) 作为 ``WhitelistEntry``（source="runtime"）
         追加到 user-scan.yaml 的 ``whitelist`` 段。文件不存在时创建；存在时加载
         现有 RuleSet 并 append。保存后重新加载规则集并 emit ``rulesetChanged``，
-        使 QML 设置页与扫描控制器立即生效。
+        使 设置页与扫描控制器立即生效。
 
         :param path_glob: 路径 glob 模式（空字符串返回错误消息）
         :param rule_name: 规则名；空字符串归一化为 ``*``（匹配任意规则）
         :param note: 用户备注（可空）
-        :return: 操作消息（成功/失败原因），供 QML 显示
+        :return: 操作消息（成功/失败原因），供视图 显示
         """
         path_glob = path_glob.strip()
         if not path_glob:
@@ -980,7 +980,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
             self._config.rules_paths.append(user_scan_str)
             self._config_controller.save()  # pyrefly: ignore [missing-attribute]
 
-        # 重新加载规则集，emit 信号让 QML 与 ScanController 同步
+        # 重新加载规则集，emit 信号让视图 与 ScanController 同步
         self._reload_ruleset()
         self._rule_model.set_ruleset(self._ruleset)
         self.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -1069,8 +1069,8 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         将当前合并后的 :class:`RuleSet`（内置 + 用户规则）序列化到目标路径。
         格式根据扩展名推断（.yaml/.yml → YAML，.json → JSON）。
 
-        :param path_str: 目标文件路径（QML FileDialog 选定后传入）
-        :return: 是否导出成功；失败时通过 ``rulesIoCompleted`` 信号通知 QML
+        :param path_str: 目标文件路径（系统文件对话框 选定后传入）
+        :return: 是否导出成功；失败时通过 ``rulesIoCompleted`` 信号通知视图
         """
         if not path_str:
             logger.warning("导出规则集失败：路径为空")
@@ -1102,10 +1102,10 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         导入即将该文件加入规则文件列表（等价于 :meth:`loadFileFromPath`），
         但带有版本兼容性校验（不兼容版本会在加载阶段抛 ``RuleParseError``）。
-        导入后规则立即生效，QML 列表自动刷新。
+        导入后规则立即生效，视图 列表自动刷新。
 
-        :param path_str: 规则文件路径（QML FileDialog 选定后传入）
-        :return: 是否导入成功；失败时通过 ``rulesIoCompleted`` 信号通知 QML
+        :param path_str: 规则文件路径（系统文件对话框 选定后传入）
+        :return: 是否导入成功；失败时通过 ``rulesIoCompleted`` 信号通知视图
         """
         if not path_str:
             logger.warning("导入规则集失败：路径为空")
@@ -1148,7 +1148,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def testRuleText(self, rule_name: str, text: str) -> str:
         """对输入文本执行指定规则的匹配测试，返回 JSON 结果。
 
-        供 QML「规则测试」面板调用：用户在规则列表选中一条规则、输入测试
+        供视图「规则测试」面板调用：用户在规则列表选中一条规则、输入测试
         文本后即时查看命中情况。在当前全局规则集 ``self._ruleset`` 中按
         ``name`` 查找规则，调用 :func:`match_rule_against_text` 求值。
 
@@ -1160,7 +1160,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
             - ``matchCount``：命中次数
             - ``target``：匹配目标（``filename``/``content``/``path``）
             - ``detail``：命中详情或错误说明
-            - ``matches``：命中文本数组（``[{"text": "..."}]``，供 QML 高亮）
+            - ``matches``：命中文本数组（``[{"text": "..."}]``，供视图 高亮）
             - ``error``：规则未找到或规则集未加载时 present
         """
         import json as _json
@@ -1210,7 +1210,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         :param mutator: 接收当前 RuleSet，返回变更后的新 RuleSet
         :param error_label: 错误日志与返回消息前缀（如「新建规则」）
-        :return: 成功返回空串，失败返回错误消息（供调用方回传 QML）
+        :return: 成功返回空串，失败返回错误消息（供调用方回传视图）
         """
         user_scan_path = self.userScanPath
         try:
@@ -1251,7 +1251,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """在 user-scan.yaml 追加默认叶子规则，返回 JSON ``{ok, name?, error?}``。
 
         自动生成不重名的 ``新规则-N`` 名称，追加一条 CONTENT contains 占位规则，
-        保存后 QML 可打开编辑器细化字段。
+        保存后视图可打开编辑器细化字段。
         """
         existing = self._load_user_ruleset()
         used = {r.name for r in existing.rules} if existing else set()
@@ -1369,7 +1369,7 @@ class RulesController(QObject):  # pyrefly: ignore [invalid-inheritance]
         合并任务级覆盖（``rules_paths``/``use_builtin``）与临时规则
         （``temp_rules_paths``，跳过 ``disabled_temp_rules_paths``），
         与 :meth:`ScanController._compute_effective_ruleset` 算法一致。
-        供 QML「预览规则」对话框只读展示。
+        供视图「预览规则」对话框只读展示。
 
         :param ws_id: 工作区 ID（不存在或为空返回空对象 ``{}``）
         :return: JSON 字符串，字段：

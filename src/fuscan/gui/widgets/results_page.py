@@ -1,6 +1,4 @@
-"""结果页（Widgets 版）：扫描结果清单 + 命中详情面板。
-
-对照 QML 版 :file:`ResultsPage.qml` + :file:`ResultDetailPanel.qml` 等价迁移：
+"""结果页：扫描结果清单 + 命中详情面板。
 
 - 工具栏：路径搜索框（300ms 防抖）/ 严重度过滤 / 排序字段与方向 /
   重置排序 / 过滤计数；「待处理/已替换/全部」维度 Tab
@@ -98,7 +96,7 @@ class _ResultDelegate(QStyledItemDelegate):
         self._dark = dark
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
-        """固定行高 56px（与 QML delegate 一致）。"""
+        """固定行高 56px。"""
         del option, index
         return QSize(0, 56)
 
@@ -616,7 +614,7 @@ class ResultsPage(QWidget):
 
         self._sort_field_combo = QComboBox()
         self._sort_field_combo.addItems(["默认顺序", "文件路径", "命中数", "严重度"])
-        # 默认按严重度排序（与 QML 版一致）
+        # 默认按严重度排序
         self._sort_field_combo.setCurrentIndex(3)
         toolbar.addWidget(self._sort_field_combo)
 
@@ -642,7 +640,7 @@ class ResultsPage(QWidget):
         self._tabs = QTabBar()
         for label in ("待处理", "已替换", "全部"):
             self._tabs.addTab(label)
-        # 默认「待处理」：避免自动替换项与未替换项混在一起（与 QML 版一致）
+        # 默认「待处理」：避免自动替换项与未替换项混在一起
         self._tabs.setCurrentIndex(0)
         self._tabs.currentChanged.connect(self._on_replaced_tab_changed)
         tabs_row = QHBoxLayout()

@@ -1,12 +1,9 @@
-"""文件扫描页共享对话框组（Widgets 版）。
+"""文件扫描页共享对话框组：按需构建的模态 :class:`QDialog`。
 
-对照 QML 版 :file:`HomePageDialogs.qml` 等价迁移，从 QML 的共享单例 Dialog
-改为按需构建的模态 :class:`QDialog`：
-
-- 切换扫描目标：盘符/文件夹双模式（对应 ``editTargetDialog``）
-- 配置规则：规则文件列表 + 勾选启用/加载/排序（对应 ``configureRulesDialog``）
-- 预览规则：只读双 Tab 展示 effective 规则集（对应 ``previewRulesDialog``）
-- 扫描历史：趋势图 + 对比摘要 + 历史列表（对应 ``historyDialog``）
+- 切换扫描目标：盘符/文件夹双模式
+- 配置规则：规则文件列表 + 勾选启用/加载/排序
+- 预览规则：只读双 Tab 展示 effective 规则集
+- 扫描历史：趋势图 + 对比摘要 + 历史列表
 
 导出/清空等简单交互由 HomePage 直接用原生 QFileDialog / QMessageBox 完成。
 """

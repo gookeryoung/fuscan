@@ -1,11 +1,9 @@
-"""文件监控页（Widgets 版）：目录管理 + 事件日志 + 命中列表。
-
-对照 QML 版 :file:`FileMonitorPage.qml` 等价迁移：
+"""文件监控页：目录管理 + 事件日志 + 命中列表。
 
 - 拖拽/对话框添加监控目录，首次添加自动启用监控
 - 最近变更紧凑日志（最近 3 条）与过滤统计提示（悬浮显示明细）
-- 命中列表复用 :class:`~fuscan.gui.models.file_monitor_model.FileMonitorModel`
-  （QAbstractListModel 与 QML 版共享），经自绘 delegate 呈现五列信息
+- 命中列表复用 :class:`~fuscan.gui.models.file_monitor_model.FileMonitorModel`，
+  经自绘 delegate 呈现五列信息
 """
 
 # pyrefly: ignore-errors

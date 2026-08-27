@@ -1,10 +1,10 @@
 """``ThemeController`` 单元测试。
 
 验证主题令牌（色彩/排版/间距/圆角/按钮层级/速度档次色）的默认值与
-暗色模式切换行为。QML 通过 ``@Property`` 直接绑定，本测试确保令牌值
+暗色模式切换行为。视图通过 ``@Property`` 直接读取，本测试确保令牌值
 与 rule-12-pyside-dev.md 中 GitHub Desktop + Tokyo Night 风格定义一致。
 
-测试不依赖 QML 引擎，仅构造 ``QObject`` 子类验证 ``@Property`` 返回值。
+测试不依赖 Qt Quick 引擎，仅构造 ``QObject`` 子类验证 ``@Property`` 返回值。
 """
 
 from __future__ import annotations
@@ -125,7 +125,7 @@ class TestDarkColorTokens:
 class TestDynamicDarkSwitch:
     """通用色值属性在 isDark 切换时应动态返回对应深浅色值。
 
-    QML 中存在大量 ``theme.isDark ? theme.colorX : theme.colorX`` 三元（两侧
+    历史实现中存在大量 ``theme.isDark ? theme.colorX : theme.colorX`` 三元（两侧
     同名属性），只有当 ``colorX`` 本身根据 ``isDark`` 动态切换时三元才生效。
     """
 

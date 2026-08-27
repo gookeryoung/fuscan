@@ -1,7 +1,7 @@
 """规则列表模型（QAbstractListModel）。
 
 展示 :class:`RuleSet` 中所有 :class:`Rule` 的名称、严重度、描述。
-供 QML ``ListView`` 直接绑定。
+供 Widgets 规则配置对话框列表消费。
 
 公共 API：
 

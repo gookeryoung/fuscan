@@ -1,7 +1,5 @@
 """侧边栏导航：Logo 区 + 顶部主导航 + 底部辅助导航 + 暗色开关。
 
-对照 QML 版 :file:`Sidebar.qml` 等价迁移：
-
 - 顶部：文件扫描（home）/ 文件监控（monitor）
 - 弹性撑开后底部：设置（settings）/ 关于（about）
 - 每个 NavItem 左侧 3px 选中指示条 + 图标/文字染色随主题与选中态切换
@@ -276,7 +274,7 @@ class SidebarWidget(QWidget):
 
 
 class _ToggleSwitch(QWidget):
-    """最小化滑块开关（对应 QML 版自定义 Rectangle 开关）。
+    """最小化滑块开关。
 
     点击切换状态并发 :attr:`toggled_to(bool)`。
     """

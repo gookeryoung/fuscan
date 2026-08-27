@@ -525,7 +525,7 @@ class TestWorkspaceListModel:
 
         task_overrides 含 temp_rules_paths/disabled_temp_rules_paths，二者变化会
         影响 rules_tags 派生属性（临时规则 TAG 列表），故 task_overrides 变化时
-        需 emit rulesTags role 刷新 QML。其他非规则相关 task_overrides key 变化
+        需 emit rulesTags role 刷新视图。其他非规则相关 task_overrides key 变化
         也会触发 emit（因 _FIELD_TO_ROLES 按 field 整体对比，无法区分 key 级别），
         开销可接受（task_overrides 变化频率低，仅用户操作触发）。
         """
@@ -660,7 +660,7 @@ class TestAddWorkspace:
         rules_controller._reload_ruleset()
         rules_controller.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
 
-        # QML 传入 "[]" + True，但工作区应反映全局规则
+        # 传入 "[]" + True，但工作区应反映全局规则
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
         item = controller.workspaceModel.get_workspace(ws_id)
         assert item is not None
@@ -685,7 +685,7 @@ class TestAddWorkspace:
         ws_id = controller.addWorkspace("t", "folder", "/tmp", rules_json, True)
         item = controller.workspaceModel.get_workspace(ws_id)
         assert item is not None
-        # 全局为空，工作区也为空（忽略 QML 传入的 ["a.yaml", "b.yaml"]）
+        # 全局为空，工作区也为空（忽略传入的 ["a.yaml", "b.yaml"]）
         assert item.rules_paths == ()
         assert item.use_builtin is True
 
@@ -1232,11 +1232,11 @@ class TestCleanup:
     """``cleanup`` 资源释放。"""
 
     def test_cleanup_clears_scan_controllers(self, controller: WorkspaceController) -> None:
-        """iter-124：cleanup 清理 ScanController 资源，但不清空 model（避免 QML binding null）。"""
+        """iter-124：cleanup 清理 ScanController 资源，但不清空 model。"""
         controller.addWorkspace("t1", "folder", "/tmp", "[]", True)
         controller.addWorkspace("t2", "folder", "/tmp", "[]", True)
         controller.cleanup()
-        # model 保留（进程即将退出，清空会触发 QML binding null 错误）
+        # model 保留（进程即将退出，无需清空）
         assert controller.workspaceCount == 2
         # ScanController 字典已清空
         assert len(controller._scan_controllers) == 0
@@ -1261,11 +1261,11 @@ class TestCleanup:
         assert called is True
 
     def test_cleanup_preserves_current_workspace(self, controller: WorkspaceController) -> None:
-        """iter-124：cleanup 不清空 currentWorkspaceId（避免 QML binding 求值 null）。"""
+        """iter-124：cleanup 不清空 currentWorkspaceId。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
         controller.setCurrentWorkspaceId(ws_id)
         controller.cleanup()
-        # ID 保留（进程即将退出，清空会触发 QML binding null 错误）
+        # ID 保留（进程即将退出，无需清空）
         assert controller.currentWorkspaceId == ws_id
         # hasCurrentWorkspace 依赖 _scan_controllers 字典，已清空 → False
         assert controller.hasCurrentWorkspace is False
@@ -1475,7 +1475,7 @@ class TestActiveScan:
         assert controller.activeScanWorkspaceId == ""
 
     def test_cleanup_preserves_active(self, controller: WorkspaceController) -> None:
-        """iter-124：cleanup 不清空 active 状态（避免 QML binding 求值 null）。"""
+        """iter-124：cleanup 不清空 active 状态。"""
         ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
@@ -1485,7 +1485,7 @@ class TestActiveScan:
         assert controller.hasActiveScan is True
 
         controller.cleanup()
-        # ID 保留（进程即将退出，清空会触发 QML binding null 错误）
+        # ID 保留（进程即将退出，无需清空）
         assert controller.activeScanWorkspaceId == ws_id
         # hasActiveScan 依赖 _scan_controllers 字典，已清空 → False
         assert controller.hasActiveScan is False
@@ -2220,7 +2220,7 @@ class TestScanControllerOverrideSyncContract:
         """T5：直接调 ScanController.setTaskOverride 不应回写 WorkspaceItem.task_overrides。
 
         契约：WorkspaceController → ScanController 是单向同步。
-        ScanController.setTaskOverride 是 @Slot 暴露给 QML 的，但 QML 应通过
+        ScanController.setTaskOverride 是 @Slot 暴露的，但调用方应通过
         WorkspaceController.setTaskOverride 调用以同时更新 WorkspaceItem。
         直接调 ScanController.setTaskOverride 仅影响运行时扫描行为，
         不会持久化也不会更新 WorkspaceItem。
@@ -2244,7 +2244,7 @@ class TestScanControllerOverrideSyncContract:
 
 
 class TestWorkspaceHistorySlots:
-    """iter-115：``WorkspaceController`` 扫描历史 QML 槽测试。"""
+    """iter-115：``WorkspaceController`` 扫描历史槽测试。"""
 
     def test_workspace_history_json_empty(self, controller: WorkspaceController) -> None:
         """无历史时返回 ``"[]"``。"""

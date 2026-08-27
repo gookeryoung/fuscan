@@ -75,7 +75,7 @@ def format_elapsed(seconds: float) -> str:
     - ``>= 60s``：分秒（如 ``"1分05秒"``），避免大数字秒不直观
 
     负数或非有限值归零处理，返回 ``"0ms"``。供 GUI 在收集/解析节点
-    统一展示阶段用时，格式化逻辑下沉后端避免 QML 层重复实现。
+    统一展示阶段用时，格式化逻辑下沉后端避免视图层重复实现。
     """
     if math.isnan(seconds) or seconds < 0:  # NaN 或负数
         return "0ms"

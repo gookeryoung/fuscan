@@ -1,7 +1,7 @@
 """SVG 图标染色工具：将 qrc 内单色 SVG 渲染为指定颜色的 QIcon。
 
-QML 版用 ``ColorOverlay`` 染色；Widgets 版等价实现：QSvgRenderer 渲染
-SVG 到透明 QPixmap，再以 ``CompositionMode_SourceIn`` 整体着色。
+实现：QSvgRenderer 渲染 SVG 到透明 QPixmap，再以
+``CompositionMode_SourceIn`` 整体着色。
 渲染结果按 ``(qrc 路径, 颜色, 尺寸)`` 缓存，导航切换/主题切换时避免重复渲染。
 """
 

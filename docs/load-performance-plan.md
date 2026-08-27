@@ -1,5 +1,7 @@
 # fuscan 加载性能优化开发计划
 
+> 状态：历史规划存档。文中 `register_qml_types`/`Main.qml` 等 QML 相关描述对应 Widgets 迁移前的实现，现 GUI 已改为 PySide2 + QtWidgets，相关条目仅作历史参考。
+
 > 目标：缩短 CLI / GUI 的**进程启动到可用**时间（import 与初始化阶段），与既有"扫描热路径"优化（benchmarks/baseline.md）区分——本计划聚焦**加载期**，不涉及扫描吞吐。
 > 当前基线参考：GUI 设计目标"启动到主窗口可见 < 500ms"（benchmarks/gui-baseline.md）；CLI 冷启动 `fuscan --help` / `fuscan version` 应在数百毫秒内完成。
 

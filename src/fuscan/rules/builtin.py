@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 # 推荐工作线程数计算的硬上下界：
 # - 下限 4：小机型仍保证 I/O 并行度，避免过少线程导致 PDF/Excel 解析串行
 # - 上限 16：CPU 核数多时不再增加线程，避免缓存争用与内存压力
-# - 保留 2 个核心给系统与 GUI（OS 调度、QML 渲染、用户后台任务）
+# - 保留 2 个核心给系统与 GUI（OS 调度、界面渲染、用户后台任务）
 _RECOMMENDED_MIN_WORKERS: int = 4
 _RECOMMENDED_MAX_WORKERS: int = 16
 _RECOMMENDED_RESERVED_CORES: int = 2
@@ -57,7 +57,7 @@ _RECOMMENDED_RESERVED_CORES: int = 2
 def recommended_max_workers(cpu_count: int | None = None) -> int:
     """按 CPU 核数计算推荐工作线程数。
 
-    推荐最佳实践：留 2 个核心给系统与 GUI（OS 调度、QML 渲染、用户后台任务），
+    推荐最佳实践：留 2 个核心给系统与 GUI（OS 调度、界面渲染、用户后台任务），
     下限 4、上限 16，避免影响机器正常使用。
 
     - ``cpu_count`` 为 None 时调用 :func:`os.cpu_count`，仍为 None 时回退到 4

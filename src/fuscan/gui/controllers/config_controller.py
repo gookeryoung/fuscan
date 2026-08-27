@@ -1,11 +1,11 @@
-"""配置控制器：QML ↔ Config 持久化桥接。
+"""配置控制器：视图 ↔ Config 持久化桥接。
 
-暴露 :class:`Config` 字段为 ``@Property``，QML 控件 ``onCheckedChanged``/
+暴露 :class:`Config` 字段为 ``@Property``，视图控件 ``onCheckedChanged``/
 ``onValueChanged`` 直接调用 setter 保存配置。同时管理盘符列表与扫描路径历史。
 
 扫描参数（scan_archives/max_workers/max_depth/max_file_size/cache_enabled/
 perf_log_enabled/ignore_dirs/disabled_extractors）已迁移到 RuleSet 顶层，
-由 :class:`RulesController.effectiveConfigPreview` 暴露给 QML 只读展示，
+由 :class:`RulesController.effectiveConfigPreview` 暴露给视图 只读展示，
 设置页「生效配置预览」区呈现。本控制器仅保留扫描模式、路径历史、字体等
 "应用级"配置。
 
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 # 配置 debounce 保存延迟（毫秒）：300ms 内多次 save 合并为一次磁盘写入，
 # 避免设置页拖动滑块/输入框时每帧触发一次 YAML 序列化导致主线程卡顿。
-# configChanged 信号仍每次 emit（QML 绑定立即更新），仅磁盘写入被合并
+# configChanged 信号仍每次 emit（视图绑定立即更新），仅磁盘写入被合并
 _SAVE_DEBOUNCE_MS: int = 300
 
 
@@ -55,7 +55,7 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         self._save_timer: QTimer | None = None
         # 盘符列表缓存：None 表示未缓存，首次访问 drives 时填充。
         # refresh_drives 清空缓存并 emit drivesChanged，下次访问重新枚举。
-        # 避免每次 QML 访问 drives 属性都调用 list_drives（Windows 上较慢）
+        # 避免每次视图访问 drives 属性都调用 list_drives（Windows 上较慢）
         self._drives_cache: list[str] | None = None
 
     @property
@@ -111,7 +111,7 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(int, notify=configChanged)  # pyrefly: ignore [not-callable]
     def cpuCount(self) -> int:
-        """当前机器 CPU 逻辑核心数（供 QML 显示「当前机器最大线程=…」备注）。"""
+        """当前机器 CPU 逻辑核心数（供视图 显示「当前机器最大线程=…」备注）。"""
         import os
 
         return os.cpu_count() or 1
@@ -192,7 +192,7 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         输入框逐字符输入时每帧触发 YAML 序列化导致主线程卡顿。
 
         ``configChanged`` 信号每次都立即 emit（反映内存中 Config 已变更），
-        QML 绑定即时更新；仅磁盘写入被 debounce 到最后一次调用后 300ms 执行。
+        视图绑定即时更新；仅磁盘写入被 debounce 到最后一次调用后 300ms 执行。
         """
         self.configChanged.emit()  # pyrefly: ignore [missing-attribute]
         if self._save_timer is None:
@@ -233,7 +233,7 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot()  # pyrefly: ignore [not-callable]
     def refresh_drives(self) -> None:
-        """刷新盘符列表（清空缓存并通知 QML 重新读取 ``drives`` 属性）。"""
+        """刷新盘符列表（清空缓存并通知视图 重新读取 ``drives`` 属性）。"""
         self._drives_cache = None
         self.drivesChanged.emit()  # pyrefly: ignore [missing-attribute]
 
@@ -242,7 +242,7 @@ class ConfigController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """系统可用盘符列表（如 ``["C:\\", "D:\\"]``）。
 
         首次访问调用 :func:`list_drives` 并缓存结果，后续访问直接返回缓存，
-        避免 QML 每次 binding 求值都触发 Windows 盘符枚举开销。
+        避免视图每次 binding 求值都触发 Windows 盘符枚举开销。
         :meth:`refresh_drives` 清空缓存触发重新枚举。
         """
         if self._drives_cache is None:

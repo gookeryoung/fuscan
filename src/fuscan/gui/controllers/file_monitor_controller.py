@@ -5,7 +5,7 @@
 按文件路径防抖（300ms 单发 QTimer 合并同文件多次事件），触发
 :meth:`Scanner.scan_file` 对变动文件单独扫描。命中规则时：
 
-- 追加到 :class:`FileMonitorModel`（QML ListView 实时展示）
+- 追加到 :class:`FileMonitorModel`（文件监控页实时展示）
 - emit :signal:`hitFound` 信号（携带命中详情 dict），供 ``app.py`` 触发
   系统托盘通知与声音提示
 
@@ -75,7 +75,7 @@ logger = logging.getLogger(__name__)
 # 防抖窗口（毫秒）：同文件多次事件合并为一次扫描
 _DEBOUNCE_MS = 300
 
-# 匹配文本摘要最大长度（避免 QML 列表过宽）
+# 匹配文本摘要最大长度（避免命中列表过宽）
 _MATCH_TEXT_MAX = 120
 
 # 已提示命中去重键 LRU 上限：(file_hash, extension) 组合数。
@@ -90,7 +90,7 @@ _MONITOR_DEDUP_MEMO_MAX = 512
 _RECENT_EVENTS_MAX = 50
 
 # 过滤统计轮询间隔（毫秒）：handler 线程仅递增计数器，controller 每 N ms
-# 轮询一次并 emit 信号刷新 QML，避免逐事件信号开销
+# 轮询一次并 emit 信号刷新视图，避免逐事件信号开销
 _STATS_POLL_MS = 500
 
 # 噪声目录名（路径中包含这些片段的直接跳过，避免 IDE/构建产物刷屏）
@@ -256,11 +256,11 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
     monitorStateChanged = Signal(bool)
     watchedDirectoriesChanged = Signal()
     # 事件日志变更信号——收到任意文件变更事件时 emit，
-    # 驱动 QML 刷新 eventCount / recentEvents 属性，让用户知道监控在工作
+    # 驱动视图刷新 eventCount / recentEvents 属性，让用户知道监控在工作
     eventLogChanged = Signal()
     # model 属性变更信号——model 实例在 __init__ 后稳定不变，
-    # 实际不会 emit；声明仅为满足 QML「属性必须可 NOTIFY」要求，
-    # 避免 QML 绑定警告「depends on non-NOTIFYable properties」。
+    # 实际不会 emit；声明仅为满足 Qt「属性必须可 NOTIFY」要求，
+    # 避免绑定警告「depends on non-NOTIFYable properties」。
     modelChanged = Signal()
     # 内部扫描完成信号：后台线程扫描结束后 emit（携带命中 payload dict 或
     # None），AutoConnection 跨线程自动排队到主线程处理。同步模式下同线程
@@ -343,15 +343,13 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(QObject, notify=modelChanged)  # pyrefly: ignore [not-callable]
     def model(self) -> FileMonitorModel:
-        """命中记录列表模型（QML ListView 绑定）。
+        """命中记录列表模型（文件监控页绑定）。
 
-        用 ``QObject`` 作为 Property 类型，避免 PySide2/6 元类型系统对
+        用 ``QObject`` 作为 Property 类型，避免 PySide2 元类型系统对
         ``QAbstractListModel*`` 未注册导致的 ``QMetaProperty::read`` 警告
         （``FileMonitorModel`` 继承 ``QAbstractListModel``，``@Property`` 会
         生成 ``Q_PROPERTY(QAbstractListModel* model ...)``，该指针类型未
-        ``qRegisterMetaType``）。QML 侧仍可通过 ``model.count``/``model.time``
-        等 role 正常访问，因 ``FileMonitorModel`` 已通过 ``qmlRegisterType``
-        注册到 ``fuscan.models`` URI。
+        ``qRegisterMetaType``）。视图侧仍可通过该属性正常访问模型。
         """
         return self._model
 
@@ -398,7 +396,7 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """目录事件数（文件夹创建/修改/移动，不触发文件扫描）。"""
         return self._filter_stats.get("dir_events", 0)
 
-    # ----------------------------- QML Slots -----------------------------
+    # ----------------------------- 槽函数 -----------------------------
 
     @Slot(str)  # pyrefly: ignore [not-callable]
     def addWatch(self, path: str) -> bool:
@@ -561,14 +559,14 @@ class FileMonitorController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # 但清空 watch handle（下次启用时重新 schedule）
         for path_str in list(self._watched.keys()):
             self._watched[path_str] = None
-        # 停止时最后轮询一次，确保 QML 显示最终统计值
+        # 停止时最后轮询一次，确保视图显示最终统计值
         self._poll_filter_stats()
 
     def _poll_filter_stats(self) -> None:
         """轮询 handler 的过滤统计，有变化时 emit eventLogChanged。
 
         handler 线程仅递增 dict 值（无信号开销），controller 每 500ms 轮询一次，
-        检测到变化才 emit，驱动 QML 刷新 ignoredDirCount 等属性。
+        检测到变化才 emit，驱动视图 刷新 ignoredDirCount 等属性。
         """
         current = (
             self._filter_stats.get("ignored_dir", 0),

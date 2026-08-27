@@ -908,7 +908,7 @@ class TestScanWorkerCallbacks:
         assert controller.scanState == "results"
         assert controller.matchedCount == 1
         assert controller.resultModel.rowCount() == 1
-        # 复用/变更文件数 Property（gui_qml 排除时需显式访问覆盖 getter）
+        # 复用/变更文件数 Property
         assert controller.reusedFiles == 0
         assert controller.changedFiles == 10  # scanned=10, archive_entries=0
 
@@ -1175,7 +1175,7 @@ class TestScanPhaseProgress:
         fake_workers: tuple[list[FakeStatsWorker], list[FakeScanWorker]],
         tmp_path: Path,
     ) -> None:
-        """filter 阶段：转圈 indeterminate=True，四类剔除计数透传 QML 属性。"""
+        """filter 阶段：转圈 indeterminate=True，四类剔除计数透传属性。"""
         stats_instances, _ = fake_workers
         controller.setScanModeIndex(1)
         controller.setFolderRoot(str(tmp_path))
@@ -1581,7 +1581,7 @@ class TestExportResults:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """空路径时不导出（对应 QML FileDialog 取消）。"""
+        """空路径时不导出（对应文件对话框取消）。"""
         result = _make_scan_result(tmp_path / "test.txt")
         controller._last_report = _make_scan_report(results=(result,))
 
@@ -2965,7 +2965,7 @@ class TestIter143CoverageGaps:
         assert recent[0]["elapsedMs"] == 600.0
 
     def test_recent_status_scanning_for_current_file(self, controller: ScanController) -> None:
-        """当前正在解析的文件 status 为 "scanning"（QML 据此显示转圈）。"""
+        """当前正在解析的文件 status 为 "scanning"（视图据此显示转圈）。"""
         controller._on_scan_progress(
             ProgressInfo(
                 phase="scan",
@@ -2978,7 +2978,7 @@ class TestIter143CoverageGaps:
         assert controller.recentParsedFiles[0]["status"] == "scanning"
 
     def test_recent_status_done_when_new_file_arrives(self, controller: ScanController) -> None:
-        """新文件到来时前一条从 "scanning" 切换为 "done"（QML 据此显示勾选）。"""
+        """新文件到来时前一条从 "scanning" 切换为 "done"（视图据此显示勾选）。"""
         controller._on_scan_progress(
             ProgressInfo(phase="scan", scanned=1, total=2, current_file="/a.txt", current_file_size=100)
         )

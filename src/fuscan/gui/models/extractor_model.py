@@ -2,8 +2,7 @@
 
 扁平化展示所有提取器（按 ``(category_order, display_name)`` 排序，同类相邻），
 每行包含类名、显示名、扩展名、速度档次（文本/色值）、格式标签、类别与勾选状态，
-供 QML ``ListView`` 直接绑定；QML 侧通过 ``section.property: "category"``
-实现按类别分组渲染，类别头部仅展示类别名（勾选状态由各行 CheckBox 体现）。
+供 Widgets 设置页提取器列表消费（行内勾选框切换状态）。
 
 公共 API：
 
@@ -12,7 +11,7 @@
 - :meth:`ExtractorListModel.set_disabled_extractors`：按 Config.disabled_extractors 配置勾选
 - :meth:`ExtractorListModel.disabled_extractors`：返回当前未勾选的提取器类名列表
 - :meth:`ExtractorListModel.enabled_extensions`：返回勾选提取器的扩展名集合
-- :meth:`ExtractorListModel.set_extractor_enabled`：QML 勾选回调
+- :meth:`ExtractorListModel.set_extractor_enabled`：勾选回调
 - :meth:`ExtractorListModel.select_all` / :meth:`unselect_all`：全选/全不选
 """
 
@@ -26,7 +25,7 @@ from fuscan.extractors.base import SpeedTier, default_registry
 
 __all__ = ["ExtractorListModel"]
 
-# QML role 名称
+# role 名称
 _ROLE_CLASS_NAME = b"className"
 _ROLE_DISPLAY_NAME = b"displayName"
 _ROLE_EXTENSIONS = b"extensions"
@@ -176,9 +175,8 @@ class _ExtractorRow:
 class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritance]
     """提取器勾选列表模型（扁平化，按 category 分组排序）。
 
-    行按 ``(category_order, display_name)`` 排序，QML ``ListView`` 可通过
-    ``section.property: "category"`` 实现分组渲染。类别头部仅展示类别名，
-    勾选状态由各行提取器 CheckBox 体现（移除三态 CheckBox）。
+    行按 ``(category_order, display_name)`` 排序，Widgets 列表按类别分组展示。
+    类别头部仅展示类别名，勾选状态由各行提取器勾选框体现。
     """
 
     def __init__(self, parent: object | None = None) -> None:
@@ -214,7 +212,7 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
         if role == Qt.UserRole + 8:
             return row.category
         if role == Qt.UserRole + 9:
-            # 返回 list（QML 端 Repeater 可直接用 modelData 访问）
+            # 返回 list（视图端按行渲染格式标签）
             return list(row.format_tags)
         if role == Qt.UserRole + 10:
             # 返回引擎信息字符串（如 "pypdfium2" / "python-calamine"）
@@ -227,7 +225,7 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
         """从默认注册表加载所有提取器，按 disabled_extractors 配置勾选。
 
         行按 ``(category_order, display_name)`` 排序，使同类提取器相邻，
-        便于 QML ``ListView.section`` 按 ``category`` 角色分组渲染。
+        便于视图端按 ``category`` 角色分组渲染。
 
         压缩包类别（ZIP/RAR/7z）为虚拟行，不对应实际提取器类（压缩包扫描
         由 :class:`fuscan.archive.ArchiveScanner` 处理），仅用于文件类型树勾选
@@ -313,7 +311,7 @@ class ExtractorListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
         return tuple(sorted(set(exts)))
 
     def set_extractor_enabled(self, class_name: str, enabled: bool) -> None:
-        """QML 勾选回调：按类名更新勾选状态。"""
+        """勾选回调：按类名更新勾选状态。"""
         for i, row in enumerate(self._rows):
             if row.class_name == class_name:
                 if row.enabled != enabled:

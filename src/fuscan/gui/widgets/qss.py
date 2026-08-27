@@ -15,7 +15,7 @@ from typing import Any
 __all__ = ["build_app_qss"]
 
 # ----------------------------- 色彩令牌 -----------------------------
-# 浅色：GitHub Desktop 风格；深色：Tokyo Night 风格（与原 QML 主题一致）
+# 浅色：GitHub Desktop 风格；深色：Tokyo Night 风格
 
 _LIGHT: dict[str, str] = {
     "primary": "#0366D6",

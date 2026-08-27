@@ -1,8 +1,8 @@
 """扫描结果列表模型（QAbstractListModel）。
 
-供 QML ``ListView`` 直接绑定，按 role 返回每个 :class:`ScanResult` 的
-展示字段（文件路径、命中规则名、严重度文本/色值、命中数等）。大数据量
-（数千条命中）必须用 Model，禁止 QML 侧 ``ListModel`` 动态 append。
+供 Widgets 结果页清单（delegate 自绘）消费，按 role 返回每个
+:class:`ScanResult` 的展示字段（文件路径、命中规则名、严重度文本/色值、
+命中数等）。大数据量（数千条命中）必须用 Model，禁止视图侧动态 append。
 
 在 Model 内部维护过滤+排序视图：
 
@@ -69,7 +69,7 @@ _SEVERITY_WEIGHT: dict[Severity, int] = {
     Severity.INFO: 1,
 }
 
-# 排序字段枚举（与 QML ComboBox currentIndex 对应）
+# 排序字段枚举（与结果页排序下拉框索引对应）
 SORT_DEFAULT = "default"
 SORT_FILE_PATH = "filePath"
 SORT_HITS_COUNT = "hitsCount"
@@ -90,13 +90,13 @@ _INDEX_CHUNK_SIZE = 20000
 _INDEX_MAX_WORKERS = 4
 
 # ListView 虚拟化——视口外额外缓冲的行数（快速滚动时减少占位闪烁）
-# 100 → 60，配合 ListView cacheBuffer（像素，最大 560 行像素~约 10 行）
+# 100 → 60，配合视图 cacheBuffer（像素，最大 560 行像素~约 10 行）
 # 60 行足够 3 帧快速滚动的覆盖区，减少 dataChanged 触发的整段刷新规模
 _VISIBLE_BUFFER_ROWS = 60
 # 启用虚拟化的最小过滤后结果数（小结果集全量渲染更快，无需虚拟化开销）
 _VIRTUALIZE_THRESHOLD = 2000
 # Filter 完成后分帧懒加载的单帧填充行数（每批 emit 一次 dataChanged）
-# 2000 行/dataChanged 约 <5ms，既减少 QML 侧信号风暴又不卡顿用户交互
+# 2000 行/dataChanged 约 <5ms，既减少视图侧信号风暴又不卡顿用户交互
 _LAZY_BATCH_SIZE = 2000
 
 
@@ -106,7 +106,7 @@ def _is_range_covered(s: int, e: int, ranges: list[tuple[int, int]]) -> bool:
     懒加载场景下，setVisibleRange / restore_visible_range 可能已手动
     发射若干 dataChanged 段，而后续 ``_fill_range_from_real`` / ``_cancel_lazy_fill``
     又会根据需要发射整段刷新。若本次填充范围已被完全覆盖，则跳过重发，
-    保证测试的段数断言不被重复发射干扰（QML 侧视觉完全无差异）。
+    保证测试的段数断言不被重复发射干扰（视图侧视觉完全无差异）。
 
     对最多 4 段（2 正向 + 2 反向）ranges，O(len(ranges)) 贪心扫描，
     配合 ranges 长度小（<8），完全可接受。
@@ -143,11 +143,11 @@ class _LazyFillState:
     """追踪当前进行中的「幽灵行 → 真实值」分帧填充任务。
 
     FilterWorker 返回超大结果集（>_VIRTUALIZE_THRESHOLD）时，为避免一次性
-    ``beginResetModel`` 引发 ListView 立即为 50k 行构造 delegate 造成的
+    ``beginResetModel`` 引发视图立即为 50k 行构造 delegate 造成的
     100~300ms 主线程卡顿，采用「幽灵行 + 分帧填充」策略：
 
     1. 先把 ``_filtered`` 置为 ``(None,) * len(result_tuple)``（幽灵行，长度
-       正确，ListView 能正确计算滚动条范围）。
+       正确，视图能正确计算滚动条范围）。
     2. 立即填充 visible_range + buffer 范围内的真实值（用户可见部分）。
     3. 用 ``QTimer.singleShot(0, …)`` 递归填充剩余范围，每帧填充
        ``_LAZY_BATCH_SIZE`` 行，填满即释放。
@@ -365,7 +365,7 @@ _FLAT_REPLACED = 6
 
 
 def _build_flat_row(result: ScanResult, index: int) -> tuple[str, str, str, str, int, int, bool]:
-    """从 ScanResult 预构造扁平数据行（避免 QML data() 中重复属性访问）。
+    """从 ScanResult 预构造扁平数据行（避免 data() 中重复属性访问）。
 
     只包含 _ResultDelegate 绘制所需的字段：
     file_path_str, rule_name, severity_text, severity_color_hex, hits_count,
@@ -391,7 +391,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
 
     新增扁平数据层 ``_flat_data``，预先为每一行构造 7 列扁平元组，
     使 ``data()`` 直接从扁平列表按索引读取而非每次重新计算，
-    5k 行场景下 QML delegate 每帧可见 10-20 行时的 Python 调用开销降低约 70%。
+    5k 行场景下 delegate 每帧可见 10-20 行时的 Python 调用开销降低约 70%。
     """
 
     def __init__(self, parent: object | None = None) -> None:
@@ -439,7 +439,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         self._filter_generation: int = 0
         self._filter_worker: FilterWorker | None = None
 
-        # ListView 虚拟化——当前 QML 视口范围（行号，闭区间）
+        # ListView 虚拟化——当前视图视口范围（行号，闭区间）
         # _visible_end < 0 表示未设置视口（全量渲染，<= _VIRTUALIZE_THRESHOLD 时使用）
         self._visible_start: int = 0
         self._visible_end: int = -1
@@ -466,7 +466,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
 
         启用虚拟化时（过滤后结果 > ``_VIRTUALIZE_THRESHOLD`` 且
         ``_visible_end >= 0``），视口范围外（含缓冲）的行返回占位空值，
-        避免 QML 为离屏 delegate 构造完整 ScanResult 展示字段造成的大量
+        避免视图为离屏 delegate 构造完整 ScanResult 展示字段造成的大量
         内存分配与 GC 压力。
 
         过滤完成后分帧懒加载的前几帧内，``_filtered[row]`` 可能
@@ -524,7 +524,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         if role == Qt.UserRole + 1:
             return str(result.path)
         if role == Qt.UserRole + 2:
-            # 多规则命中时取第一个规则名，QML 显示主要规则
+            # 多规则命中时取第一个规则名，视图显示主要规则
             return result.rule_names[0] if result.rule_names else ""
         if role == Qt.UserRole + 3:
             return severity_text(result.max_severity)
@@ -564,7 +564,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
 
     @Slot(int, int)  # pyrefly: ignore [not-callable]
     def setVisibleRange(self, start: int, end: int) -> None:
-        """设置 QML ListView 当前可见行号范围（闭区间）。"""
+        """设置视图当前可见行号范围（闭区间）。"""
         total = len(self._filtered)
         if total <= 0:
             return
@@ -577,7 +577,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         # 永远允许两段差异 dataChanged 被正确 emit。
         # 收集已 emit 的范围，传给 _apply_visible_priority_fill，避免
         # _fill_range_from_real 对同一范围重复发射（会让测试
-        # 断言段数失败，虽然 QML 侧视觉无害）。
+        # 断言段数失败，虽然视图侧视觉无害）。
         emit_signals = True
         emitted_ranges: list[tuple[int, int]] = []
         # 先计算旧缓冲区范围（用于判断哪些行需要刷新：旧占位→新真实 或 旧真实→新占位）
@@ -641,7 +641,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         继续走 QTimer 递归），避免看到空白幽灵行。
         """
         if self._visible_end < 0:
-            return  # 从未设置过可见范围（首次加载前），QML onCountChanged 会首次设置
+            return  # 从未设置过可见范围（首次加载前），视图加载完成后会首次设置
         total = len(self._filtered)
         if total <= 0:
             return
@@ -725,7 +725,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
         实际被 None→真实值 替换过的最小/最大行号），仅当这段「实际变动区间」
         未被已发射段完全覆盖时，才发射这段变动区间的 dataChanged（而不是
         原请求的 [start,end] 全区间）。这避免了把已经填充过的中间段也打包
-        进 emit，导致段数断言被重复段干扰（QML 侧视觉无差异）。
+        进 emit，导致段数断言被重复段干扰（视图侧视觉无差异）。
 
         :param already_emitted_ranges: 调用方已发射的 (s,e) 段列表。仅当
             本次「实际变动区间」未被列表完全覆盖时，才补充发射 dataChanged。
@@ -968,7 +968,7 @@ class ResultListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheritan
 
     @Slot(int)  # pyrefly: ignore [not-callable]
     def set_filter_replaced(self, value: int) -> None:
-        """设置已替换维度过滤条件（供 QML 「待处理 / 已替换」Tab 切换）。
+        """设置已替换维度过滤条件（供结果页「待处理 / 已替换」Tab 切换）。
 
         :param value: 0=不过滤（全部），1=仅未替换（待处理），2=仅已替换
             传入其它值视为不过滤

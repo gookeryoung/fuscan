@@ -109,7 +109,7 @@ def _sanitize_extracted_content(content: str) -> str:
     """剥离提取文本中的 null 字节（``\\x00``）。
 
     PDF 文本层提取（pypdfium2）与 OCR 回退（RapidOCR）可能产生 null 字节，
-    null 字节无法经 Qt 信号传递到 QML（C 字符串以 null 结尾），会触发
+    null 字节无法经 Qt 信号传递（C 字符串以 null 结尾），会触发
     ``ValueError: embedded null character`` 并连锁导致 shiboken 溢出。
     null 字节在文本内容中永远是提取噪声，剥离不影响语义。
 

@@ -1,6 +1,4 @@
-"""关于页（Widgets 版）：应用信息 + 快捷入口 + 引擎状态 + 第三方依赖 + 快捷键说明。
-
-对照 QML 版 :file:`AboutPage.qml` 等价迁移：
+"""关于页：应用信息 + 快捷入口 + 引擎状态 + 第三方依赖 + 快捷键说明。
 
 - 打开手册/配置目录失败时经 :attr:`AboutController.openFailed` 显示 Toast
 - 引擎状态组展示 fuscan-core 与 OCR 各依赖项绿勾/红叉

@@ -1,6 +1,6 @@
 """Widgets GUI 骨架测试：QSS 构建 / 图标染色 / 侧边栏 / 主窗口 / 关于页。
 
-对应 QML → Widgets 迁移 P1 骨架与 P2 页面迁移（iter-qml-widgets）。
+对应 Widgets GUI 的 P1 骨架与 P2 页面实现。
 """
 
 # pyrefly: ignore-errors

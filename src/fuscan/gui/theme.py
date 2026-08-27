@@ -48,10 +48,10 @@ def detect_font_families() -> tuple[str, ...]:
 
 
 class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
-    """主题令牌控制器：暴露色值/字号/圆角/按钮层级给 QML。
+    """主题令牌控制器：暴露色值/字号/圆角/按钮层级给视图。
 
     所有 ``@Property`` 只读，仅 :attr:`isDark` 可通过 :meth:`setDark` 双向切换。
-    QML 通过 ``Theme.isDark ? colorA : colorB`` 三元表达式切换深浅色。
+    视图通过 ``Theme.isDark ? colorA : colorB`` 三元表达式切换深浅色。
     """
 
     themeChanged = Signal()
@@ -79,7 +79,7 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Slot(bool)  # pyrefly: ignore [not-callable]
     def setDark(self, value: bool) -> None:
-        """切换暗色模式（QML 通过 ``Theme.setDark(...)`` 调用）。"""
+        """切换暗色模式（视图通过 ``Theme.setDark(...)`` 调用）。"""
         if self._dark != value:
             self._dark = value
             self.themeChanged.emit()  # pyrefly: ignore [missing-attribute]
@@ -271,7 +271,7 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
         """主字体族（用户配置优先，否则返回平台默认字体族首个可用字体名）。
 
         全局字体回退由 ``app.py`` 的 ``QGuiApplication.setFont()`` +
-        ``QFont.setFamilies()`` 处理，QML 控件默认继承，无需每个控件单独设置。
+        ``QFont.setFamilies()`` 处理，视图控件默认继承，无需每个控件单独设置。
         仅在需要显式覆盖时绑定此令牌。
         """
         if self._font_family:
@@ -280,7 +280,7 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(bool, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def fontBold(self) -> bool:
-        """是否全局加粗（QML 通过 ``font.bold: theme.fontBold`` 绑定）。"""
+        """是否全局加粗（视图通过 ``font.bold: theme.fontBold`` 绑定）。"""
         return self._font_bold
 
     @Property(int, notify=themeChanged)  # pyrefly: ignore [not-callable]
@@ -339,7 +339,7 @@ class ThemeController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property(str, notify=themeChanged)  # pyrefly: ignore [not-callable]
     def iconsPrefix(self) -> str:
-        """图标 qrc 前缀（供 QML ``Image { source: theme.iconsPrefix + "xxx.svg" }``）。
+        """图标 qrc 前缀（供视图 ``Image { source: theme.iconsPrefix + "xxx.svg" }``）。
 
         返回 ``qrc:/icons/``，对应 ``resources.qrc`` 中 ``alias="icons/xxx.svg"`` 的资源。
         所有 SVG 图标已编译进 ``resources_rc.py``，无需磁盘 I/O。

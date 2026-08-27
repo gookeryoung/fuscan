@@ -1,4 +1,4 @@
-"""白名单控制器：QML ↔ WhitelistStore/RuleSet 白名单桥接。
+"""白名单控制器：视图 ↔ WhitelistStore/RuleSet 白名单桥接。
 
 历史职责：管理 :class:`WhitelistStore`（``~/.fuscan/whitelist.json``）的增删查改
 与导入导出，扫描时通过 :meth:`snapshot` 返回不可变 :class:`Whitelist` 供
@@ -50,7 +50,7 @@ class WhitelistController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     持有 :class:`WhitelistStore` 实例（兼容历史 JSON 数据），并通过延迟注入的
     :class:`RulesController` 把新增条目写入 ``user-scan.yaml`` 的 ``whitelist``
-    段。QML 通过 ``@Property`` 读取合并后的条目列表，``@Slot`` 接收增删/导入导出
+    段。视图通过 ``@Property`` 读取合并后的条目列表，``@Slot`` 接收增删/导入导出
     操作。
 
     :param parent: 父 QObject
@@ -75,7 +75,7 @@ class WhitelistController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
         注入后 :meth:`addEntry` 委托 :meth:`RulesController.appendWhitelistEntry`
         写入 ``user-scan.yaml``，并监听 ``rulesetChanged`` 触发
-        ``whitelistChanged`` 让 QML 列表刷新。
+        ``whitelistChanged`` 让视图 列表刷新。
 
         :param rc: 规则控制器实例
         """
@@ -115,7 +115,7 @@ class WhitelistController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     @Property("QVariantList", notify=whitelistChanged)  # pyrefly: ignore [not-callable, bad-argument-type]
     def whitelistEntries(self) -> list[dict[str, str]]:
-        """白名单条目列表（QML ListView 绑定）。
+        """白名单条目列表（视图清单 绑定）。
 
         合并 JSON store 与 effective ruleset 的白名单条目。每项格式：
         ``{"pathGlob": str, "ruleName": str, "createdAt": str, "note": str,
@@ -151,7 +151,7 @@ class WhitelistController(QObject):  # pyrefly: ignore [invalid-inheritance]
         :param note: 用户备注（可空）
         :return: 操作消息（成功/失败原因）
 
-        添加后发射 :pyattr:`whitelistChanged` 信号，QML ListView 自动刷新。
+        添加后发射 :pyattr:`whitelistChanged` 信号，视图清单 自动刷新。
         """
         if self._rules_controller is not None:
             msg = self._rules_controller.appendWhitelistEntry(path_glob, rule_name, note)
@@ -235,7 +235,7 @@ class WhitelistController(QObject):  # pyrefly: ignore [invalid-inheritance]
         与 :meth:`addEntry` 委托 rules_controller 的路径不同——导入保留 JSON store
         作为批量交换格式，便于与外部系统互通。
 
-        :param path_str: JSON 文件路径（由 QML FileDialog 传入）
+        :param path_str: JSON 文件路径（由 系统文件对话框 传入）
         :return: 操作消息（含实际新增条目数）
         """
         if not path_str:
@@ -253,7 +253,7 @@ class WhitelistController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def exportJson(self, path_str: str) -> str:
         """导出当前合并白名单（JSON store + ruleset）到 JSON 文件。
 
-        :param path_str: 目标 JSON 文件路径（由 QML FileDialog 传入）
+        :param path_str: 目标 JSON 文件路径（由 系统文件对话框 传入）
         :return: 操作消息
         """
         if not path_str:

@@ -1,6 +1,4 @@
-"""设置页（Widgets 版）：扫描参数 + 字体设置 + 规则测试沙盒 + 规则编辑。
-
-对照 QML 版 :file:`SettingsPage.qml` 等价迁移：
+"""设置页：扫描参数 + 字体设置 + 规则测试沙盒 + 规则编辑。
 
 - 扫描参数：并发线程/最大深度/大文件阈值 SpinBox 与三个开关，写入规则集
   ``scan_params``（经 RulesController 持久化到 user-scan.yaml）
@@ -10,8 +8,8 @@
 - 规则编辑：user-scan.yaml 自定义规则的列表 + 新建/编辑/删除与内嵌表单
   （组合规则只读提示，叶子规则全字段编辑）
 
-与 QML 版差异：Widgets 写回用「先赋初值、后连接信号」顺序天然避免
-binding loop；控制器属性变更不推送信号，页面在用户操作后重读生效预览。
+实现约定：写回用「先赋初值、后连接信号」顺序避免回环触发；
+控制器属性变更不推送信号，页面在用户操作后重读生效预览。
 """
 
 # pyrefly: ignore-errors
@@ -576,8 +574,8 @@ class SettingsPage(QWidget):
 class _RuleEditorForm(QWidget):
     """规则编辑表单：叶子规则字段编辑 + 即时测试匹配 + 保存/取消。
 
-    对应 QML 版 :file:`components/RuleEditorForm.qml`；组合规则由外层在
-    打开前拦截（``isLeaf=False`` 时仅提供删除入口，不进入本表单）。
+    组合规则由外层在打开前拦截（``isLeaf=False`` 时仅提供删除入口，
+    不进入本表单）。
     """
 
     saveRequested = Signal(dict)

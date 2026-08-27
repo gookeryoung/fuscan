@@ -1,11 +1,11 @@
 """工作区列表模型（QAbstractListModel）。
 
-按 rule-12-pyside-dev.md，工作区列表用 Model 暴露给 QML ``ListView`` 绑定，
-禁止 QML 侧 ``ListModel`` 动态 append。
+按 rule-12-pyside-dev.md，工作区列表用 Model 暴露给视图绑定，
+禁止视图侧动态构造大量列表元素。
 
 每个 :class:`WorkspaceItem` 描述一个独立的扫描任务，包含名称、扫描模式、
 目标路径、规则文件列表与最近一次扫描结果摘要。所有字段在 Python 端维护，
-QML 通过 role 读取展示字段，通过 :class:`WorkspaceController` 槽修改状态。
+Widgets 页通过 role 读取展示字段，通过 :class:`WorkspaceController` 槽修改状态。
 
 公共 API：
 
@@ -43,8 +43,8 @@ __all__ = [
     "WorkspaceListModel",
 ]
 
-# 工作区状态展示文本（跨 controller/QML 共享，QML 侧用字符串字面量与此处对齐）。
-# 历史上这些字符串散落在 workspace_controller/scan_controller/WorkspaceCard.qml 等
+# 工作区状态展示文本（跨 controller/视图共享的唯一来源）。
+# 历史上这些字符串散落在 workspace_controller/scan_controller/视图卡片等
 # 多处硬编码，本处集中为唯一来源，便于检索与重命名。
 STR_STATUS_READY: str = "就绪"
 STR_STATUS_SCANNING: str = "扫描中"
@@ -91,7 +91,7 @@ _ROLES: dict[int, bytes] = {
 
 # 字段名 → 关联 role 列表（含派生属性依赖）
 # update_workspace 按字段对比仅 emit 实际变化的 role，
-# 避免扫描进度回调（0.3s 节流）时全量 14 个 role 刷新导致 QML 重新评估所有绑定
+# 避免扫描进度回调（0.3s 节流）时全量 14 个 role 刷新导致视图重绘所有行
 _FIELD_TO_ROLES: dict[str, list[int]] = {
     "workspace_id": [Qt.UserRole + 1],
     "name": [Qt.UserRole + 2],
@@ -107,7 +107,7 @@ _FIELD_TO_ROLES: dict[str, list[int]] = {
     "last_summary": [Qt.UserRole + 11],
     "collected_count": [Qt.UserRole + 14],
     # task_overrides 含 temp_rules_paths/disabled_temp_rules_paths，
-    # rules_tags 派生属性依赖这两个键，变化时需 emit rules_tags role 刷新 QML
+    # rules_tags 派生属性依赖这两个键，变化时需 emit rules_tags role 刷新视图
     "task_overrides": [Qt.UserRole + 13],
 }
 
@@ -185,7 +185,7 @@ class WorkspaceItem:
 
     @property
     def rules_tags(self) -> list[dict[str, object]]:
-        """规则标签列表（供 QML TAG 标签展示）。
+        """规则标签列表（供工作区卡片 TAG 标签展示）。
 
         每项：``{"name": 规则名, "is_builtin": bool, "is_temp": bool}``
 
@@ -216,7 +216,7 @@ class WorkspaceListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
 
     存储 :class:`WorkspaceItem` 列表，按 role 返回展示字段。
     所有修改操作（add/remove/update）均 emit 对应 ``QAbstractItemModel`` 信号，
-    QML ``ListView`` 自动刷新。
+    视图自动刷新。
     """
 
     def __init__(self, parent: object | None = None) -> None:
@@ -329,8 +329,8 @@ class WorkspaceListModel(QAbstractListModel):  # pyrefly: ignore [invalid-inheri
         :return: 是否成功更新
 
         按字段对比新旧 item，仅 emit 实际变化字段对应的 role，
-        避免扫描进度回调（0.3s 节流）时全量 14 个 role 刷新导致 QML 重新评估
-        所有绑定（statusText/matchedCount/collectedCount 等）。
+        避免扫描进度回调（0.3s 节流）时全量 14 个 role 刷新导致视图重绘
+        所有行（statusText/matchedCount/collectedCount 等）。
         ``task_overrides`` 不通过 role 暴露，变化时不 emit 信号。
         """
         for idx, item in enumerate(self._items):

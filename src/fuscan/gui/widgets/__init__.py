@@ -12,6 +12,7 @@
 
 - :class:`MainWindow`：主窗口
 - :class:`SplashWindow`：启动画面
+- :class:`AboutPage`：关于页
 """
 
 from __future__ import annotations
@@ -27,4 +28,8 @@ def __getattr__(name: str):  # type: ignore[no-untyped-def]
         from fuscan.gui.widgets.splash import SplashWindow
 
         return SplashWindow
+    if name == "AboutPage":
+        from fuscan.gui.widgets.about_page import AboutPage
+
+        return AboutPage
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

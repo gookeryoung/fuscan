@@ -32,6 +32,7 @@ from PySide2.QtWidgets import (
     QWidget,
 )
 
+from fuscan.gui.widgets.about_page import AboutPage
 from fuscan.gui.widgets.qss import build_app_qss
 from fuscan.gui.widgets.sidebar import SidebarWidget
 
@@ -84,11 +85,17 @@ class MainWindow(QMainWindow):
 
         self.stack = QStackedWidget()
         for page_id in PAGE_IDS:
-            self.stack.addWidget(self._make_placeholder(page_id))
+            self.stack.addWidget(self._make_page(page_id))
         layout.addWidget(self.stack, stretch=1)
         self.setCentralWidget(central)
         # 默认首页
         self.sidebar.set_current_page("home")
+
+    def _make_page(self, page_id: str) -> QWidget:
+        """构建页面：已迁移页返回正式实现，未迁移页返回占位视图。"""
+        if page_id == "about":
+            return AboutPage(self._controller)
+        return self._make_placeholder(page_id)
 
     def _make_placeholder(self, page_id: str) -> QWidget:
         """构建迁移过渡期的页面占位视图。"""
@@ -142,6 +149,11 @@ class MainWindow(QMainWindow):
         self.sidebar.blockSignals(True)
         self.sidebar.set_dark(dark)
         self.sidebar.blockSignals(False)
+        # 主题切换时刷新已迁移的子页面语义色（占位页无 set_dark，跳过）
+        for i in range(self.stack.count()):
+            page = self.stack.widget(i)
+            if hasattr(page, "set_dark"):
+                page.set_dark(dark)
 
     @property
     def dark_mode(self) -> bool:

@@ -1,6 +1,6 @@
-"""Widgets GUI 骨架测试：QSS 构建 / 图标染色 / 侧边栏 / 主窗口。
+"""Widgets GUI 骨架测试：QSS 构建 / 图标染色 / 侧边栏 / 主窗口 / 关于页。
 
-对应 QML → Widgets 迁移 P1 骨架（iter-qml-widgets）。
+对应 QML → Widgets 迁移 P1 骨架与 P2 页面迁移（iter-qml-widgets）。
 """
 
 # pyrefly: ignore-errors
@@ -14,7 +14,8 @@ from PySide2.QtTest import QTest
 from PySide2.QtWidgets import QApplication
 
 import fuscan.gui.widgets as gui_widgets
-from fuscan.gui.controllers import SplashController
+from fuscan.gui.controllers import AboutController, SplashController
+from fuscan.gui.widgets.about_page import AboutPage
 from fuscan.gui.widgets.icons import clear_icon_cache, tinted_svg_icon
 from fuscan.gui.widgets.main_window import PAGE_IDS, MainWindow
 from fuscan.gui.widgets.qss import build_app_qss, palette_tokens
@@ -179,9 +180,13 @@ class TestSidebarWidget:
 
 
 class _StubController:
-    """仅提供 cleanup 的最小桩（P1 骨架不依赖业务接口）。"""
+    """仅提供 cleanup 与 about 子控制器的最小桩（about 页用真实实现）。"""
 
     cleanup_calls: list[int] = []
+
+    def __init__(self, qapp: QApplication) -> None:
+        """构造 about 子控制器（依赖已就绪的 QApplication）。"""
+        self.about = AboutController()
 
     def cleanup(self) -> None:
         """清理钩子：closeEvent 流程会异步调用一次。"""
@@ -194,7 +199,7 @@ class TestMainWindow:
     @pytest.fixture()
     def window(self, qapp: QApplication) -> MainWindow:
         """构造带桩控制器的主窗口。"""
-        return MainWindow(_StubController())
+        return MainWindow(_StubController(qapp))
 
     def test_six_pages_created(self, window: MainWindow) -> None:
         """内容栈应有 6 页且默认首页。"""
@@ -269,13 +274,65 @@ class TestSplashWindow:
         assert not pixmap.isNull()
 
 
+class TestAboutPage:
+    """AboutPage 关于页测试（about 子控制器用真实实现）。"""
+
+    @pytest.fixture()
+    def page(self, qapp: QApplication) -> AboutPage:
+        """构造挂在真实 AboutController 上的关于页。"""
+
+        class _Owner:
+            about = AboutController()
+
+        return AboutPage(_Owner())
+
+    def test_initial_build(self, qapp: QApplication, page: AboutPage) -> None:
+        """构造应完成布局：OCR 勾叉行数与依赖一致、快捷入口与初始配色就绪。"""
+        assert len(page._ocr_rows) == len(page._controller.ocrDependencies)
+        assert page._manual_btn.text().strip() == "用户手册"
+        # 初始语义色已应用：Logo 有主色底
+        assert "background-color" in page._logo_box.styleSheet()
+
+    def test_show_toast_and_auto_hide(self, qapp: QApplication, page: AboutPage) -> None:
+        """show_toast 显示提示条；定时器超时信号触发后隐藏。"""
+        page.resize(800, 600)
+        page.show()  # 子控件 isVisible 依赖父级显示链
+        page.show_toast("打开失败")
+        assert page._toast.isVisible()
+        assert page._toast.text() == "打开失败"
+        assert page._toast_timer.isActive()
+        page._toast_timer.timeout.emit()  # 直接派发超时信号，免真实等待
+        assert not page._toast.isVisible()
+        # 复位计时器，避免泄漏到后续用例
+        page._toast_timer.stop()
+
+    def test_set_dark_refreshes_semantic_colors(self, qapp: QApplication, page: AboutPage) -> None:
+        """set_dark 刷新 Logo/图标/勾叉配色，重复设置幂等。"""
+        before = page._logo_box.styleSheet()
+        page.set_dark(True)
+        assert page._dark is True
+        after = page._logo_box.styleSheet()
+        assert after != before  # 深浅主色不同，样式串必然变化
+        page.set_dark(True)  # 幂等：不抛异常不重绘
+        assert page._dark is True
+
+    def test_open_failed_signal_drives_toast(self, qapp: QApplication, page: AboutPage) -> None:
+        """控制器 openFailed 信号联动 Toast 显示。"""
+        page.show()  # 子控件 isVisible 依赖父级显示链
+        page._controller.openFailed.emit("手册缺失")
+        assert page._toast.text() == "手册缺失"
+        assert page._toast.isVisible()
+        page._toast_timer.stop()
+
+
 class TestLazyFacade:
     """widgets 包惰性导出门面测试。"""
 
     def test_lazy_exports_resolve(self) -> None:
-        """MainWindow/SplashWindow 经 __getattr__ 惰性解析为类。"""
+        """MainWindow/SplashWindow/AboutPage 经 __getattr__ 惰性解析为类。"""
         assert gui_widgets.MainWindow.__name__ == "MainWindow"
         assert gui_widgets.SplashWindow.__name__ == "SplashWindow"
+        assert gui_widgets.AboutPage.__name__ == "AboutPage"
 
     def test_unknown_attribute_raises(self) -> None:
         """未知属性抛 AttributeError。"""

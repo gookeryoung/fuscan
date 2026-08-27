@@ -1,4 +1,4 @@
-"""GUI 应用入口：构造 QGuiApplication 与 QQmlApplicationEngine。"""
+"""GUI 应用入口：构造 QApplication 与 QtWidgets 主窗口（QML → Widgets 迁移）。"""
 
 from __future__ import annotations
 
@@ -12,14 +12,18 @@ import warnings
 from collections.abc import Sequence
 from typing import Any
 
-from PySide2.QtCore import QUrl
-from PySide2.QtGui import QFont, QGuiApplication, QIcon
-from PySide2.QtQml import QQmlApplicationEngine
-from PySide2.QtQuickControls2 import QQuickStyle
-from PySide2.QtWidgets import QSystemTrayIcon
+from PySide2.QtGui import QFont, QIcon
+from PySide2.QtWidgets import QApplication, QSystemTrayIcon
 
-from fuscan.paths import ICON_QRC_URL, MAIN_QML_URL, QML_IMPORT_PATH, SPLASH_QML_URL
+from fuscan.config import migrate_config_to_rules
+from fuscan.gui import resources_rc  # noqa: F401  注册 qrc 资源
+from fuscan.gui.controllers import AppController, SplashController
+from fuscan.gui.theme import detect_font_families
+from fuscan.gui.widgets.main_window import MainWindow
+from fuscan.paths import ICON_QRC_URL
 from fuscan.perf import PerfReport, render_startup_summary, timed
+
+__all__ = ["main"]
 
 # 显式 import QtSvg：触发 fspack 打包 Qt5Svg.dll（qsvg imageformat plugin 依赖）。
 # fspack 的 imageformats plugin 始终保留 qsvg.dll，但未标明其对 Svg 子模块的依赖，
@@ -27,13 +31,6 @@ from fuscan.perf import PerfReport, render_startup_summary, timed
 # import 失败但不阻塞启动——仅 SVG 图标解码回退为空，应用仍可用，便于用户升级过渡。
 with contextlib.suppress(ImportError):
     from PySide2 import QtSvg  # noqa: F401
-
-from fuscan.config import migrate_config_to_rules
-from fuscan.gui import resources_rc  # noqa: F401  注册 qrc 资源
-from fuscan.gui.controllers import AppController, SplashController, register_qml_types
-from fuscan.gui.theme import detect_font_families
-
-__all__ = ["main"]
 
 
 logging.basicConfig(level=logging.INFO)
@@ -60,7 +57,7 @@ def _tune_gil_switch_interval(interval: float = 0.001) -> None:
     sys.setswitchinterval(interval)
 
 
-def _apply_global_font(app: QGuiApplication) -> None:
+def _apply_global_font(app: QApplication) -> None:
     """设置全局默认字体（跨平台最佳实践 + 用户配置覆盖）。
 
     用 ``QFont.setFamilies()`` 设置优先级列表，Qt 自动选择首个可用字体：
@@ -68,10 +65,10 @@ def _apply_global_font(app: QGuiApplication) -> None:
     - 否则按平台默认：Windows → Microsoft YaHei UI；macOS → PingFang SC；Linux → Noto Sans CJK SC
 
     字号与加粗从用户配置读取（默认 14px、不加粗），
-    QML 控件默认继承此全局字体，无需每个控件单独设置 ``font.family``。
+    QtWidgets 控件默认继承此全局字体，无需每个控件单独设置 ``font.family``。
 
     .. note::
-        ``launch()`` 不再调用本函数；由 :meth:`AppController._apply_font_config_to_theme`
+        ``main()`` 不再调用本函数；由 :meth:`AppController._apply_font_config_to_theme`
         在构造 ``ConfigController`` 后复用其已加载的 :class:`Config` 实例统一设置字体，
         避免 ``load_config()`` 重复读取 ``~/.fuscan/config.yaml``。本函数保留供
         需要独立设置字体的入口（如脚本测试）使用。
@@ -90,25 +87,24 @@ def _apply_global_font(app: QGuiApplication) -> None:
     app.setFont(font)
 
 
-def _load_splash(app: QGuiApplication, splash_controller: SplashController) -> QQmlApplicationEngine:
-    """构造独立 QML 引擎加载 Splash.qml，让用户尽早看到启动反馈。
+def _load_splash(app: QApplication, splash_controller: SplashController):
+    """构造 Widgets 版启动画面，让用户尽早看到启动反馈。
 
-    Splash 用独立 :class:`QQmlApplicationEngine` 加载，仅注册 ``SplashController``
-    一个 context property，避免依赖 :class:`AppController`（尚未构造）。加载后
-    调用 :meth:`processEvents` 强制渲染一帧，确保 Splash 立即可见。
+    与旧版 QML Splash 等价：仅依赖 :class:`SplashController` 的阶段/进度信号，
+    不依赖尚未构造的 :class:`AppController`。显示后调用 :meth:`processEvents`
+    强制渲染一帧确保立即可见。
 
-    :param app: 已构造的 QGuiApplication（用于 processEvents）
+    :param app: 已构造的 QApplication（用于 processEvents）
     :param splash_controller: Splash 阶段文本控制器
-    :return: 加载完毕的 Splash QML 引擎（由调用者在主窗口显示后释放）
+    :return: 加载完毕的 :class:`~fuscan.gui.widgets.splash.SplashWindow`
+        （由调用者在主窗口显示后释放）
     """
-    engine = QQmlApplicationEngine()
-    engine.rootContext().setContextProperty("SplashController", splash_controller)  # pyrefly: ignore [missing-argument]
-    engine.load(QUrl(SPLASH_QML_URL))  # pyrefly: ignore [missing-argument]
-    if not engine.rootObjects():
-        logger.warning("Splash 加载失败：%s（继续无 Splash 启动）", SPLASH_QML_URL)
-    # 强制处理一次事件循环，让 Splash 立即渲染
+    from fuscan.gui.widgets.splash import SplashWindow
+
+    splash = SplashWindow(splash_controller)
+    splash.show()
     app.processEvents()
-    return engine
+    return splash
 
 
 # 文件监控命中时的声音参数（仅 Windows winsound.Beep 可用）
@@ -145,13 +141,13 @@ def _play_hit_sound(severity: str) -> None:
     threading.Thread(target=_beep, daemon=True, name="fuscan-monitor-beep").start()
 
 
-def _setup_file_monitor_tray(app: QGuiApplication, controller: object) -> QSystemTrayIcon | None:
+def _setup_file_monitor_tray(app: QApplication, controller: object) -> QSystemTrayIcon | None:
     """构造系统托盘图标，连接文件监控命中信号触发托盘通知 + 声音。
 
     托盘在系统通知区显示 fuscan 图标，命中规则时弹出消息框并播放提示音。
     无系统托盘环境（如部分 Linux 无 tray）时静默跳过，不影响主功能。
 
-    :param app: QGuiApplication 实例（提供图标）
+    :param app: QApplication 实例（提供图标）
     :param controller: AppController 实例（读取 ``file_monitor`` 属性）
     :return: 构造的 :class:`QSystemTrayIcon`；不可用时返回 ``None``
     """
@@ -187,68 +183,52 @@ def _setup_file_monitor_tray(app: QGuiApplication, controller: object) -> QSyste
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """启动 QML GUI 应用。
+    """启动 Widgets GUI 应用。
 
-    启动流程采用**渐进式 Splash 反馈**：在 QGuiApplication 构造后立即加载独立
-    的 :file:`Splash.qml`（无边框圆角窗口 + logo + 阶段文本 + 确定性进度条），让用户
-    在数百毫秒内看到反馈；后续各阶段（迁移配置 / 构造主控制器 / 加载主 QML）
-    通过 :meth:`SplashController.setStage` 更新文本与单调递增的进度值，并调用
-    :meth:`QGuiApplication.processEvents` 让 Splash 重绘，缓解"应用启动卡顿"的观感。
-    进度条按阶段比例填充且只增不减，避免 indeterminate 往返动画造成的"反复前进后退"。
-    主窗口 QML 加载完成后关闭 Splash 并进入事件循环。
+    启动流程采用**渐进式 Splash 反馈**：在 QApplication 构造后立即显示
+    :class:`~fuscan.gui.widgets.splash.SplashWindow`（无边框圆角卡片 + logo +
+    阶段文本 + 确定性进度条），让用户在数百毫秒内看到反馈；后续各阶段
+    （迁移配置 / 构造主控制器 / 构造主窗口）通过 :meth:`SplashController.setStage`
+    更新文本与单调递增的进度值，并调用 :meth:`QApplication.processEvents`
+    让 Splash 重绘。主窗口构造完成后关闭 Splash 并进入事件循环。
 
     各启动阶段通过 :class:`~fuscan.perf.timed` 分段计时并登记到 :class:`~fuscan.perf.PerfReport`；
-    外层 ``timed("启动流程")`` 汇总总用时。启用性能测量时（``FUSCAN_PERF=1`` 环境变量或
-    CLI ``--perf``），外层块退出后由 :func:`~fuscan.perf.render_startup_summary` 打印**单张**
-    rich 汇总表（列：阶段 / 耗时 / 占比），一眼识别瓶颈；逐阶段细节降为 DEBUG（``-vv`` 才可见），
-    避免刷屏。发布版默认关闭、零开销。
+    启用性能测量时（``FUSCAN_PERF=1`` 或 CLI ``--perf``）退出后由
+    :func:`~fuscan.perf.render_startup_summary` 打印 rich 汇总表；默认零开销。
     """
-    logger.info("启动 QML GUI 应用")
+    logger.info("启动 Widgets GUI 应用")
 
     # 进程级下调 GIL 切换间隔，缓解扫描期多 worker 线程持 GIL 导致的 GUI 冻结。
-    # 越早设置越好：影响后续所有线程（扫描/导出/统计/筛选/恢复 worker）。
     _tune_gil_switch_interval()
 
     # 抑制 cryptography 对 Python 3.8 的弃用警告
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="cryptography")
 
-    # 抑制 Qt 在 Windows 上访问剪贴板时的 "Retrying to obtain clipboard"
-    # 警告。该警告由其他应用锁住剪贴板时 Qt 内部重试产生，非代码 bug，仅日志噪音。
+    # 抑制 Qt 在 Windows 上访问剪贴板时的 "Retrying to obtain clipboard" 警告噪音
     os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.mime=false")
 
-    # 收集各阶段耗时；外层块退出后渲染单张 rich 汇总表。逐阶段细节降为 DEBUG 避免刷屏。
     report = PerfReport()
     with timed("启动流程", level=logging.DEBUG, report=report):
-        with timed("构造 QGuiApplication", level=logging.DEBUG, report=report):
+        with timed("构造 QApplication", level=logging.DEBUG, report=report):
             args = list(argv) if argv is not None else sys.argv
-            app = QGuiApplication.instance() or QGuiApplication(args)
+            app = QApplication.instance() or QApplication(args)
             app.setApplicationName("fuscan")
             app.setOrganizationName("fuscan")
+            app.setStyle("Fusion")
 
-            # 设置应用图标：影响 Windows 任务栏与窗口标题栏图标。
-            # favicon.ico 已编译进 qrc（resources_rc.py），通过 qrc 路径加载。
-            # 必须在 QGuiApplication 构造后、首次显示窗口前设置。
+            # 应用图标：影响 Windows 任务栏与窗口标题栏图标。
+            # favicon.ico 已编译进 qrc（resources_rc.py），必须先 import resources_rc。
             app.setWindowIcon(QIcon(ICON_QRC_URL))
 
-            # 设置 QtQuick Controls 2 风格为 Fusion（跨平台一致）
-            QQuickStyle.setStyle("Fusion")
-
-        with timed("注册 QML 类型", level=logging.DEBUG, report=report):
-            register_qml_types()
-
-        # 构造 Splash：在 QGuiApplication 与 QML 类型注册后立即加载，让用户尽早看到反馈。
-        # Splash 用独立 engine + 仅 SplashController context property，不依赖 AppController。
+        # Widgets 版启动画面：仅依赖 SplashController，不依赖 AppController。
         with timed("构造 Splash 启动画面", level=logging.DEBUG, report=report):
             splash_controller = SplashController()
-            splash_engine = _load_splash(app, splash_controller)
+            splash = _load_splash(app, splash_controller)
+            splash.set_dark(False)
 
         with timed("迁移旧配置字段到规则集", level=logging.DEBUG, report=report):
-            # 在 ConfigController 构造前执行迁移：将旧版 config.yaml 中的
-            # scan_archives/max_workers/ignore_dirs/disabled_extractors 等字段
-            # 搬到 ~/.fuscan/rules/user-scan.yaml，并从 config.yaml 中清除。
-            # 幂等：无迁移字段时 no-op。
             splash_controller.setStage("迁移配置...", 0.15)
-            app.processEvents()  # 让 Splash 立即刷新阶段文本与进度
+            app.processEvents()
             migrate_config_to_rules()
 
         with timed("构造主控制器", level=logging.DEBUG, report=report):
@@ -256,38 +236,41 @@ def main(argv: Sequence[str] | None = None) -> int:
             app.processEvents()
             controller = AppController()
 
-        with timed("构造 QML 引擎并注册上下文", level=logging.DEBUG, report=report):
-            engine = QQmlApplicationEngine()
-            controller.register_to(engine.rootContext())
-            logger.info("导入 QML 路径：%s", QML_IMPORT_PATH)
-            engine.addImportPath(QML_IMPORT_PATH)
+        with timed("应用全局字体与主题色板", level=logging.DEBUG, report=report):
+            # 复用 ConfigController 已加载的 Config：字体注入 ThemeController 后
+            # 读取计算值设置全局 QFont 与 QSS 字号，避免重复读配置文件。
+            # 注意 fontFamily/fontSizeBase/fontBold 为 QProperty，须按属性访问
+            theme = controller.theme  # pyrefly: ignore [missing-attribute]
+            font = QFont()
+            font.setFamily(theme.fontFamily)
+            font.setPixelSize(theme.fontSizeBase)
+            if theme.fontBold:
+                font.setBold(True)
+            app.setFont(font)
+            from fuscan.gui.widgets.qss import build_app_qss
 
-        with timed("加载主 QML", level=logging.DEBUG, report=report):
+            app.setStyleSheet(
+                build_app_qss(dark=False, font_family=theme.fontFamily, body_font_size=theme.fontSizeBase)
+            )
             splash_controller.setStage("加载主界面...", 0.65)
-            app.processEvents()
-            logger.info("加载主 QML：%s", MAIN_QML_URL)
-            engine.load(QUrl(MAIN_QML_URL))  # pyrefly: ignore [missing-argument]
 
-        if not engine.rootObjects():
-            logger.error("QML 加载失败：%s", MAIN_QML_URL)
-            return -1
+        with timed("构造主窗口", level=logging.DEBUG, report=report):
+            window = MainWindow(controller)
 
-        # 窗口关闭时清理 controller 资源
+        # 窗口关闭时清理 controller 资源（closeEvent 内驱动）
         app.aboutToQuit.connect(controller.cleanup)
 
-        # 构造系统托盘并连接文件监控命中信号（无系统托盘环境静默跳过）
         with timed("构造文件监控托盘", level=logging.DEBUG, report=report):
             _setup_file_monitor_tray(app, controller)
 
-        # 主窗口已加载显示，关闭并释放 Splash 资源
+        # 主窗口已就绪，关闭并释放 Splash
         splash_controller.setStage("就绪", 1.0)
+        window.show()
         app.processEvents()
-        splash_engine.deleteLater()
+        splash.deleteLater()
 
-    # 启动成功后渲染单张 rich 汇总表（perf 未启用时内部即刻 return，零开销）
     render_startup_summary(report)
 
-    # PySide2 事件循环入口为 exec_()
     logger.info("启动应用")
     return app.exec_()  # pragma: no cover
 

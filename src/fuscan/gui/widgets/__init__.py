@@ -1,0 +1,30 @@
+"""QtWidgets GUI 子包（QML → Widgets 迁移目标层）。
+
+对照原 :mod:`fuscan.gui.views` QML 层，按职责拆分：
+
+- :mod:`fuscan.gui.widgets.qss`：全局样式表构建（色板唯一来源）
+- :mod:`fuscan.gui.widgets.icons`：SVG 染色图标
+- :mod:`fuscan.gui.widgets.sidebar`：侧边栏导航
+- :mod:`fuscan.gui.widgets.splash`：启动画面
+- :mod:`fuscan.gui.widgets.main_window`：主窗口骨架
+
+公共 API（惰性导出，避免无 GUI 环境下 import 失败）：
+
+- :class:`MainWindow`：主窗口
+- :class:`SplashWindow`：启动画面
+"""
+
+from __future__ import annotations
+
+
+def __getattr__(name: str):  # type: ignore[no-untyped-def]
+    """惰性导入 Widgets 顶层组件。"""
+    if name == "MainWindow":
+        from fuscan.gui.widgets.main_window import MainWindow
+
+        return MainWindow
+    if name == "SplashWindow":
+        from fuscan.gui.widgets.splash import SplashWindow
+
+        return SplashWindow
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

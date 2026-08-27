@@ -1,10 +1,10 @@
-"""QML 控制层：``QObject`` 子类，通过 ``Property``/``Signal``/``Slot`` 暴露状态与操作给 QML。
+"""GUI 控制层：``QObject`` 子类，通过 ``Signal``/``Slot`` 暴露状态与操作给 Widgets 页面。
 
-按 rule-12-pyside-dev.md 三层 MVC 分层，控制器不持有 QML 控件引用，仅通过
-信号槽与 QML 通信。子模块：
+按 rule-12-pyside-dev.md 三层 MVC 分层，控制器不持有页面控件引用，仅通过
+信号槽与 Widgets 页面通信。子模块：
 
-- :class:`AppController`：主控制器工厂，聚合所有 controller 并注册到 QML context
-- :class:`SplashController`：启动画面阶段文本状态机（Splash.qml 绑定）
+- :class:`AppController`：主控制器工厂，聚合所有 controller 供 ``app.py`` 构造 MainWindow
+- :class:`SplashController`：启动画面阶段文本状态机（SplashWindow 绑定）
 - :class:`ScanController`：扫描工作流（状态机 + 进度 + 结果模型）
 - :class:`ConfigController`：配置持久化 + 盘符/路径历史/提取器勾选
 - :class:`RulesController`：规则文件管理 + 规则列表模型
@@ -32,7 +32,6 @@ __all__ = [
     "SplashController",
     "WhitelistController",
     "WorkspaceController",
-    "register_qml_types",
 ]
 
 # 符号名 → 所在子模块路径。按名访问时惰性加载对应子模块并缓存到模块全局。
@@ -46,7 +45,6 @@ _LAZY_MODULES: dict[str, str] = {
     "SplashController": "fuscan.gui.controllers.splash_controller",
     "WhitelistController": "fuscan.gui.controllers.whitelist_controller",
     "WorkspaceController": "fuscan.gui.controllers.workspace_controller",
-    "register_qml_types": "fuscan.gui.controllers.app_controller",
 }
 
 

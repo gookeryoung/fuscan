@@ -56,7 +56,7 @@ STR_STATUS_FAILED: str = "失败"
 # 扫描中或已暂停的状态集合（用于"拒绝修改目标/清空工作区"等守卫判断）
 ACTIVE_STATUS_TEXTS: frozenset[str] = frozenset({STR_STATUS_SCANNING, STR_STATUS_PAUSED})
 
-# QML role 名称（与 HomePage.qml delegate 中 model.* 一致）
+# 角色名编号（与 HomePage 工作区卡片各展示字段一致）
 _ROLE_WORKSPACE_ID = b"workspaceId"
 _ROLE_NAME = b"name"
 _ROLE_MODE_TEXT = b"modeText"

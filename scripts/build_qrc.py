@@ -1,7 +1,7 @@
-"""扫描 QML 与 SVG 资源，生成 ``resources.qrc`` 并编译为 ``resources_rc.py``。
+"""扫描图标与动画资源，生成 ``resources.qrc`` 并编译为 ``resources_rc.py``。
 
-将 QML 文件与 SVG 图标打包进 Qt 资源系统（qrc），运行时通过 ``qrc:///`` 路径
-访问，减少 Win7 等老系统的磁盘 I/O，加快启动速度。
+将 SVG 图标、favicon.ico 与动画 sprite sheet 打包进 Qt 资源系统（qrc），
+运行时通过 ``qrc:///`` 路径访问，减少磁盘 I/O，加快启动速度。
 
 使用方式::
 
@@ -11,13 +11,6 @@
 
 - ``src/fuscan/gui/resources.qrc``：资源清单（XML）
 - ``src/fuscan/gui/resources_rc.py``：编译后的 Python 模块，供 ``app.py`` import
-
-QML 内引用规则：
-
-- 主 QML 加载：``engine.load(QUrl("qrc:/qml/Main.qml"))``
-- QML import 路径：``engine.addImportPath("qrc:/qml")``
-- 图标引用：``source: theme.iconsPrefix + "rules.svg"``（iconsPrefix 返回 ``qrc:/icons/``）
-- QML 间相对 import（如 ``import "pages"``）在 qrc 内保持不变
 """
 
 from __future__ import annotations
@@ -32,31 +25,15 @@ from xml.dom import minidom
 
 # 仓库根目录（scripts/build_qrc.py 的上两级）
 ROOT = Path(__file__).resolve().parent.parent
-# QML 视图目录
-VIEWS_DIR = ROOT / "src" / "fuscan" / "gui" / "views"
 # 图标目录
 ICONS_DIR = ROOT / "src" / "fuscan" / "assets" / "icons"
-# 动画资源目录（PNG sprite sheet 等，供 AnimatedSprite 使用）
+# 动画资源目录（PNG sprite sheet 等）
 ANIMATIONS_DIR = ROOT / "src" / "fuscan" / "assets" / "animations"
 # 输出文件
 QRC_FILE = ROOT / "src" / "fuscan" / "gui" / "resources.qrc"
 RC_FILE = ROOT / "src" / "fuscan" / "gui" / "resources_rc.py"
 
 __all__ = ["main"]
-
-
-def collect_qml_files() -> list[tuple[str, Path]]:
-    """收集所有 .qml 文件，返回 (qrc_alias, abs_path) 列表。
-
-    :return: alias 形如 ``qml/Main.qml``、``qml/pages/HomePage.qml``，
-             对应 qrc 内路径 ``qrc:/qml/Main.qml``
-    """
-    files: list[tuple[str, Path]] = []
-    for qml in sorted(VIEWS_DIR.rglob("*.qml")):
-        rel = qml.relative_to(VIEWS_DIR)
-        alias = f"qml/{rel.as_posix()}"
-        files.append((alias, qml))
-    return files
 
 
 def collect_icon_files() -> list[tuple[str, Path]]:
@@ -86,13 +63,11 @@ def collect_animation_files() -> list[tuple[str, Path]]:
 
 
 def write_qrc(
-    qml_files: list[tuple[str, Path]],
     icon_files: list[tuple[str, Path]],
     animation_files: list[tuple[str, Path]] | None = None,
 ) -> None:
     """生成 .qrc 文件。
 
-    :param qml_files: QML 文件 (alias, abs_path) 列表
     :param icon_files: 图标文件 (alias, abs_path) 列表
     :param animation_files: 动画 PNG 文件 (alias, abs_path) 列表
     """
@@ -100,16 +75,14 @@ def write_qrc(
     # schema 版本声明，便于后续升级
     rcc.set("version", "1.0")
     qresource = ET.SubElement(rcc, "qresource", {"prefix": "/"})
-    all_files = qml_files + icon_files + (animation_files or [])
+    all_files = icon_files + (animation_files or [])
     for alias, path in all_files:
         # qrc 内 <file> 路径相对于 .qrc 文件所在目录解析
         # 用 os.path.relpath 处理跨目录的 ..（pathlib.relative_to 不支持）
         rel = os.path.relpath(path, QRC_FILE.parent).replace("\\", "/")
         ET.SubElement(qresource, "file", {"alias": alias}).text = rel
-    # 用 minidom 美化输出（ET.indent 仅 Python 3.9+ 可用，项目要求 3.8+）
     raw = ET.tostring(rcc, encoding="unicode")
     pretty = minidom.parseString(raw).toprettyxml(indent="  ", encoding="utf-8")
-    # minidom 输出 bytes 带 XML 声明，转回 str 并去掉多余空行
     pretty_str = pretty.decode("utf-8")
     # 去掉 minidom 默认的空行，保持紧凑
     lines = [line for line in pretty_str.splitlines() if line.strip()]
@@ -157,12 +130,11 @@ def main() -> int:
 
     :return: 退出码（0 成功）
     """
-    qml_files = collect_qml_files()
     icon_files = collect_icon_files()
     animation_files = collect_animation_files()
-    print(f"收集 QML 文件 {len(qml_files)} 个，图标 {len(icon_files)} 个，动画 {len(animation_files)} 个")
+    print(f"收集图标 {len(icon_files)} 个，动画 {len(animation_files)} 个")
 
-    write_qrc(qml_files, icon_files, animation_files)
+    write_qrc(icon_files, animation_files)
     print(f"生成清单: {QRC_FILE.relative_to(ROOT)}")
 
     compile_qrc()

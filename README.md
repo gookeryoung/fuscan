@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Coverage](https://img.shields.io/badge/coverage-%E2%89%A596%25-brightgreen.svg)
 
-基于 YAML 规则的多格式文件内容扫描工具，支持 CLI 与 GUI（PySide2 + QML）。可扫描 PDF、Office 文档、压缩包等多种格式，按文件名/内容/路径匹配并支持 AND/OR/NOT 逻辑组合。
+基于 YAML 规则的多格式文件内容扫描工具，支持 CLI 与 GUI（PySide2 QtWidgets）。可扫描 PDF、Office 文档、压缩包等多种格式，按文件名/内容/路径匹配并支持 AND/OR/NOT 逻辑组合。
 
 ## 特性
 
@@ -16,7 +16,7 @@
 - **多格式支持**：PDF、DOCX、PPTX、XLSX、ODT/ODS、WPS、纯文本，及 ZIP/RAR 压缩包内扫描
 - **两种使用形态**：
   - CLI：`scan`/`rules`/`gui`/`cache`/`version` 子命令，支持 text/json/csv 输出
-  - GUI：PySide2 + QML 极简界面（Sidebar + ContentArea），实时进度、结果分类、详情预览、关键词高亮
+  - GUI：PySide2 QtWidgets 极简界面（Sidebar + ContentArea），实时进度、结果分类、详情预览、关键词高亮
 - **内置通用规则**：随包分发 8 条安全规则，用户规则可覆盖
 - **多规则合并**：支持加载多个规则文件，按顺序链式合并，后者覆盖前者同名规则
 

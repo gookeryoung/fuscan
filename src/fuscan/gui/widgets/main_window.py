@@ -1,9 +1,6 @@
 """主窗口：原生标题栏 + 侧边栏导航 + 六页 QStackedWidget。
 
-对照 QML 版 :file:`Main.qml` + :file:`ContentArea.qml` 等价迁移：
-
-- 布局：HBox（侧边栏 | 内容栈），内容栈 6 页常驻（P1 为占位页，
-  后续迭代逐页替换为 Widgets 实现并删除对应 QML）
+- 布局：HBox（侧边栏 | 内容栈），内容栈 6 页常驻
 - 快捷键：Ctrl+1..6 切页 / Ctrl+B 折叠侧边栏 / Esc 返回首页
   （Ctrl+R 重扫待 HomePage 迁移后接入 WorkspaceController 时恢复）
 - 暗色切换：侧边栏开关驱动 :meth:`set_dark`，整表替换全局 QSS 并刷新全部子页面
@@ -190,7 +187,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         """拦截关闭：先渲染保存进度对话框，再异步清理资源退出。
 
-        复刻原 Main.qml onClosing → exitPopup → 50ms 后 Qt.quit() 的时序。
+        退出确认弹窗确认后延时 50ms 再执行清理退出。
         """
         event.ignore()
         dialog = QProgressDialog("正在清理扫描线程与缓存资源", "", 0, 0, self)

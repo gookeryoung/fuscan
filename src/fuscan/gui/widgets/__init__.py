@@ -1,6 +1,6 @@
-"""QtWidgets GUI 子包（QML → Widgets 迁移目标层）。
+"""QtWidgets GUI 子包（QML 已全面迁移至本层）。
 
-对照原 :mod:`fuscan.gui.views` QML 层，按职责拆分：
+按职责拆分：
 
 - :mod:`fuscan.gui.widgets.qss`：全局样式表构建（色板唯一来源）
 - :mod:`fuscan.gui.widgets.icons`：SVG 染色图标

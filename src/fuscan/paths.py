@@ -24,7 +24,6 @@ __all__ = [
     "BUILTIN_RULES_PATH",
     "ICON_QRC_URL",
     "MANUAL_PDF_PATH",
-    "SPLASH_QML_URL",
 ]
 
 # 包内静态资源根目录：``src/fuscan/assets/``
@@ -41,12 +40,6 @@ BUILTIN_PATTERNS_PATH: Path = ASSETS_DIR / "rules" / "builtin-patterns.yaml"
 # 目录名用 manual 而非 docs，避免 fspack 打包时被内置 ``docs`` 排除规则剥离
 MANUAL_PDF_PATH: Path = ASSETS_DIR / "manual" / "fuscan-用户手册.pdf"
 
-# 应用图标：``assets/icons/favicon.ico`` 编译进 qrc，供 QGuiApplication.setWindowIcon 使用。
+# 应用图标：``assets/icons/favicon.ico`` 编译进 qrc，供 QApplication.setWindowIcon 使用。
 # Windows 任务栏与窗口标题栏图标均依赖 setWindowIcon，缺失时显示为空白 exe 默认图标。
 ICON_QRC_URL: str = "qrc:/icons/favicon.ico"
-
-# QML
-QML_IMPORT_PATH = "qrc:/qml"
-MAIN_QML_URL = "qrc:/qml/Main.qml"
-# 启动画面 QML：在 QGuiApplication 构造后立即加载，主窗口 QML 加载完成后关闭
-SPLASH_QML_URL = "qrc:/qml/Splash.qml"

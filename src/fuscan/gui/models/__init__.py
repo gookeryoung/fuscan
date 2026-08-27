@@ -1,7 +1,7 @@
-"""QML 模型层：``QAbstractListModel`` 子类，大数据量列表绑定。
+"""GUI 模型层：``QAbstractListModel`` 子类，大数据量列表绑定。
 
 按 rule-12-pyside-dev.md，结果/规则/文件类型列表必须用 Model，
-禁止 QML 侧 ``ListModel`` 动态 append 大量元素。子模块：
+禁止视图侧动态 append 大量元素。子模块：
 
 - :class:`ExtractorListModel`：提取器勾选列表（扁平化，按 display_name 排序）
 - :class:`RuleListModel`：规则列表（按规则文件分组）

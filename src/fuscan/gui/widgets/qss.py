@@ -1,8 +1,8 @@
 """QtWidgets 全局 QSS 构建：由主题色板生成深/浅两套应用样式表。
 
 设计令牌（色板/字号）集中定义于本模块，是 Widgets GUI 的唯一色值来源；
-原 :mod:`fuscan.gui.theme` 的 ``ThemeController`` 为 QML 专用包装，
-待 QML 视图全部移除后其色板将并入此处（见迭代记录 iter-qml-widgets）。
+:mod:`fuscan.gui.theme` 的 ``ThemeController`` 承接字号配置与 ``@Property``
+通知语义，页面同时从两者取值。
 
 用法：``app.setStyleSheet(build_app_qss(dark=True))``；主题切换时重新调用
 并整表替换，QApplication 会自动 repolish 全部控件。

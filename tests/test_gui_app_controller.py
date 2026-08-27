@@ -2,8 +2,7 @@
 
 覆盖：
 
-- ``AppController`` 构造时聚合 5 个 controller（theme/config/rules/workspace/about）
-- ``register_to`` 将 controller 注册到 QQmlContext
+- ``AppController`` 构造时聚合 7 个 controller（theme/config/rules/whitelist/workspace/about/file_monitor）
 - ``cleanup`` 调用 WorkspaceController.cleanup（资源释放）
 - ``fuscan.gui.__init__`` 的 ``__getattr__`` 惰性导入 AppController 等类
 - 错误属性名抛 ``AttributeError``
@@ -14,7 +13,6 @@ from __future__ import annotations
 import os
 
 import pytest
-from PySide2.QtCore import QObject
 from PySide2.QtGui import QGuiApplication
 
 from fuscan.app import _apply_global_font
@@ -68,48 +66,6 @@ class TestConstruction:
         assert controller.workspace.parent() is controller
         assert controller.about.parent() is controller
         assert controller.file_monitor.parent() is controller
-
-
-class TestRegisterTo:
-    """``register_to`` 将 controller 注册到 QQmlContext。"""
-
-    def test_register_to_sets_all_context_properties(
-        self,
-        controller: AppController,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """register_to 应将 7 个 controller 全部注册到 QML context。"""
-        registered: dict[str, QObject] = {}
-
-        def fake_set_context_property(name: str, obj: QObject) -> None:
-            registered[name] = obj
-
-        # QQmlApplicationEngine.rootContext() 返回的 QQmlContext 在测试环境
-        # 难以构造，用 duck typing 传入带 setContextProperty 的 stub。
-        # 不创建真实 QQmlApplicationEngine —— Windows 上 PySide2 + QML 会触发
-        # STATUS_STACK_BUFFER_OVERRUN 崩溃（参考 iter-95 文档已知问题）。
-        class FakeContext:
-            def setContextProperty(self, name: str, obj: QObject) -> None:
-                fake_set_context_property(name, obj)
-
-        controller.register_to(FakeContext())
-
-        assert set(registered.keys()) == {
-            "Theme",
-            "ConfigController",
-            "RulesController",
-            "WorkspaceController",
-            "WhitelistController",
-            "AboutController",
-            "FileMonitorController",
-        }
-        assert registered["Theme"] is controller.theme
-        assert registered["ConfigController"] is controller.config
-        assert registered["RulesController"] is controller.rules
-        assert registered["WorkspaceController"] is controller.workspace
-        assert registered["WhitelistController"] is controller.whitelist
-        assert registered["AboutController"] is controller.about
-        assert registered["FileMonitorController"] is controller.file_monitor
 
 
 class TestCleanup:
@@ -253,18 +209,6 @@ class TestApplyGlobalFont:
         assert font.pixelSize() == 14
         # family 应被设置（具体名取决于 QFont.setFamilies 选中的首个可用字体）
         assert font.family()
-
-
-class TestRegisterQmlTypes:
-    """``register_qml_types`` 注册 QML 类型测试。"""
-
-    def test_register_qml_types_is_callable(self) -> None:
-        """register_qml_types 应可重复调用且不抛异常（幂等）。"""
-        from fuscan.gui.controllers import register_qml_types
-
-        # 幂等：lru_cache 保证多次调用只注册一次
-        register_qml_types()
-        register_qml_types()
 
 
 class TestApplyFontConfigToTheme:

@@ -116,12 +116,12 @@ def _new_whitelist_controller() -> WhitelistController:
     return WhitelistController()
 
 
-# 扫描状态机字符串（与 QML 侧 ContentArea.qml 的 case 分支对齐）
+# 扫描状态机字符串（视图层据此切换文案与图标）
 STATE_SETUP: str = "setup"
 STATE_SCANNING: str = "scanning"
 STATE_RESULTS: str = "results"
 
-# 扫描阶段字符串（QML 侧 StatsPage.qml 按 phase 切换展示）
+# 扫描阶段字符串（StatsPage 按 phase 切换展示）
 PHASE_SETUP: str = "setup"
 PHASE_WALK: str = "walk"
 PHASE_FILTER: str = "filter"

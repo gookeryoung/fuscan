@@ -1,9 +1,9 @@
-"""Splash 启动画面状态控制器：暴露当前阶段文本与确定性进度给 QML 绑定。
+"""Splash 启动画面状态控制器：暴露当前阶段文本与确定性进度。
 
 启动流程中由 :mod:`fuscan.app` 调用 :meth:`setStage` 更新阶段文本与进度，
-QML ``Splash.qml`` 通过 ``SplashController.stage``/``SplashController.progress``
-绑定显示当前阶段文本与进度条宽度，让用户在 QGuiApplication 构造后立即看到
-反馈，缓解"应用启动卡顿"的观感。
+:class:`~fuscan.gui.widgets.splash.SplashWindow` 读取
+``SplashController.stage``/``SplashController.progress`` 显示当前阶段文本，
+让用户在应用构造后立即看到反馈，缓解"应用启动卡顿"的观感。
 
 进度采用**确定性单调递增**设计：各启动阶段传入递增的进度值（0.0→1.0），
 进度条宽度按比例填充且只增不减，避免 indeterminate 左右往返动画造成的
@@ -12,8 +12,8 @@ QML ``Splash.qml`` 通过 ``SplashController.stage``/``SplashController.progress
 公共 API：
 
 - :class:`SplashController`：阶段文本 + 进度状态机
-- :attr:`SplashController.stage`：当前阶段文本（QML 绑定）
-- :attr:`SplashController.progress`：当前进度（0.0-1.0，QML 绑定）
+- :attr:`SplashController.stage`：当前阶段文本
+- :attr:`SplashController.progress`：当前进度（0.0-1.0）
 - :meth:`SplashController.setStage`：更新阶段文本与进度（Python 端调用）
 """
 

@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 
 __all__ = ["ResultListModel"]
 
-# QML role 名称（与 ResultsPage.qml delegate 中 model.* 一致）
+# 角色名编号（供 _ResultDelegate 绘制与详情面板读取展示字段）
 _ROLE_FILE_PATH = b"filePath"
 _ROLE_RULE_NAME = b"ruleName"
 _ROLE_SEVERITY_TEXT = b"severityText"
@@ -367,7 +367,7 @@ _FLAT_REPLACED = 6
 def _build_flat_row(result: ScanResult, index: int) -> tuple[str, str, str, str, int, int, bool]:
     """从 ScanResult 预构造扁平数据行（避免 QML data() 中重复属性访问）。
 
-    只包含 ResultsPage.qml delegate 使用的字段：
+    只包含 _ResultDelegate 绘制所需的字段：
     file_path_str, rule_name, severity_text, severity_color_hex, hits_count,
     row_index, replaced。
     """

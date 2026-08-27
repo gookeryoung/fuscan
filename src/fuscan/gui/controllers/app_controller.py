@@ -1,40 +1,29 @@
-"""主控制器工厂：构造并注册所有 controller 到 QML context。
+"""主控制器工厂：构造并聚合所有 controller。
 
 单入口构造 :class:`ThemeController`/`ConfigController`/`RulesController`/
-:class:`WorkspaceController`/`AboutController`，供 ``app.py`` 调用
-``engine.rootContext().setContextProperty`` 注册到 QML。
+:class:`WorkspaceController`/`AboutController`/`WhitelistController`/
+`FileMonitorController`，供 ``app.py`` 构造 ``MainWindow`` 使用。
 
 公共 API：
 
 - :class:`AppController`：聚合所有 controller
-- :func:`register_qml_types`：将 controller 类型注册到 QML 引擎（必须在 ``engine.load`` 前调用）
-- :meth:`AppController.register_to`：注册到 QQmlContext
 - :meth:`AppController.cleanup`：窗口关闭时统一清理
-
-注册类型的必要性：``setContextProperty`` 注册的 QObject 实例，QML 编译器无法在
-编译时推断其类型，导致绑定 ``Theme.isDark`` 在初始求值时把 ``Theme`` 当成 ``null``，
-输出大量 ``Cannot read property 'xxx' of null`` TypeError。用 ``qmlRegisterType``
-注册类型后，QML 文件可 ``import fuscan.controllers 1.0`` 并声明
-``property ThemeController theme: Theme``，编译器据此生成正确的类型化访问代码，
-消除 TypeError。
 """
 
 from __future__ import annotations
 
 import logging
-from functools import cache
 from typing import TYPE_CHECKING
 
 from PySide2.QtCore import QObject
 
 if TYPE_CHECKING:
     # 仅用于属性返回类型注解的 controller 类型（``from __future__ import annotations``
-    # 使注解为字符串，运行时不求值）。运行时在 register_qml_types / __init__ 内延迟导入，
+    # 使注解为字符串，运行时不求值）。运行时在 __init__ 内延迟导入，
     # 使 ``from fuscan.gui.controllers import AppController`` 不触发任何 controller 模块加载：
     # ScanController 顶层拉起 scanner 链（``from fuscan.scanner import ScanReport``），
     # WorkspaceController 间接拉起（导入 scan_controller），FileMonitorController 拉起
-    # ``fuscan.scanner.scanner``。ScanController/SplashController/models 仅在
-    # register_qml_types 内运行时使用，不出现在类型注解中，故不在 TYPE_CHECKING 导入。
+    # ``fuscan.scanner.scanner``。
     from fuscan.gui.controllers.about_controller import AboutController
     from fuscan.gui.controllers.config_controller import ConfigController
     from fuscan.gui.controllers.file_monitor_controller import FileMonitorController
@@ -43,67 +32,13 @@ if TYPE_CHECKING:
     from fuscan.gui.controllers.workspace_controller import WorkspaceController
     from fuscan.gui.theme import ThemeController
 
-__all__ = ["AppController", "register_qml_types"]
+__all__ = ["AppController"]
 
 logger = logging.getLogger(__name__)
 
 
-@cache
-def register_qml_types() -> None:
-    """将所有 controller 与 model 类型注册到 QML 引擎。
-
-    在 ``QQmlApplicationEngine`` 构造前调用一次，使 QML 文件能通过
-    ``import fuscan.controllers 1.0`` / ``import fuscan.models 1.0`` /
-    ``import fuscan.theme 1.0`` 导入类型，声明类型化 property 访问
-    context property，消除 ``setContextProperty`` 导致的 TypeError。
-
-    幂等：``lru_cache`` 保证多次调用只注册一次（多次注册会触发 Qt 警告）。
-    """
-    from PySide2.QtQml import qmlRegisterType
-
-    # 延迟导入所有 controller / model / theme 类型：register_qml_types 在 app.py 启动早期
-    # 被显式调用（已过 Splash 显示），此时加载全部 controller（含 scanner 链）合理。
-    from fuscan.gui.controllers.about_controller import AboutController
-    from fuscan.gui.controllers.config_controller import ConfigController
-    from fuscan.gui.controllers.file_monitor_controller import FileMonitorController
-    from fuscan.gui.controllers.rules_controller import RulesController
-    from fuscan.gui.controllers.scan_controller import ScanController
-    from fuscan.gui.controllers.splash_controller import SplashController
-    from fuscan.gui.controllers.whitelist_controller import WhitelistController
-    from fuscan.gui.controllers.workspace_controller import WorkspaceController
-    from fuscan.gui.models import (
-        ExtractorListModel,
-        FileMonitorModel,
-        ResultListModel,
-        RuleListModel,
-        WorkspaceListModel,
-    )
-    from fuscan.gui.theme import ThemeController
-
-    # URI=fuscan.theme，QML 用 `import fuscan.theme 1.0` 后用 ThemeController 类型
-    # ThemeController 类型名与 context property 名 "Theme" 不同，无冲突
-    # pyrefly stub 将 URI/typeName 参数标注为 bytes，实际运行时接受 str，故忽略类型检查
-    qmlRegisterType(ThemeController, "fuscan.theme", 1, 0, "ThemeController")  # pyrefly: ignore [bad-argument-type]
-    # URI=fuscan.controllers，类型名加 Type 后缀避免与同名 context property 冲突
-    # （QML 编译器会把 property XxxController x: XxxController 右侧的 XxxController 解析为类型名而非 context property）
-    qmlRegisterType(ConfigController, "fuscan.controllers", 1, 0, "ConfigControllerType")  # pyrefly: ignore [bad-argument-type]
-    qmlRegisterType(RulesController, "fuscan.controllers", 1, 0, "RulesControllerType")  # pyrefly: ignore [bad-argument-type]
-    qmlRegisterType(ScanController, "fuscan.controllers", 1, 0, "ScanControllerType")  # pyrefly: ignore [bad-argument-type]
-    qmlRegisterType(SplashController, "fuscan.controllers", 1, 0, "SplashControllerType")  # pyrefly: ignore [bad-argument-type]
-    qmlRegisterType(WorkspaceController, "fuscan.controllers", 1, 0, "WorkspaceControllerType")  # pyrefly: ignore [bad-argument-type]
-    qmlRegisterType(WhitelistController, "fuscan.controllers", 1, 0, "WhitelistControllerType")  # pyrefly: ignore [bad-argument-type]
-    qmlRegisterType(AboutController, "fuscan.controllers", 1, 0, "AboutControllerType")  # pyrefly: ignore [bad-argument-type]
-    qmlRegisterType(FileMonitorController, "fuscan.controllers", 1, 0, "FileMonitorControllerType")  # pyrefly: ignore [bad-argument-type]
-    # URI=fuscan.models，QML 用 `import fuscan.models 1.0` 后用各 model 类型
-    qmlRegisterType(ExtractorListModel, "fuscan.models", 1, 0, "ExtractorListModel")  # pyrefly: ignore [bad-argument-type]
-    qmlRegisterType(FileMonitorModel, "fuscan.models", 1, 0, "FileMonitorModel")  # pyrefly: ignore [bad-argument-type]
-    qmlRegisterType(RuleListModel, "fuscan.models", 1, 0, "RuleListModel")  # pyrefly: ignore [bad-argument-type]
-    qmlRegisterType(ResultListModel, "fuscan.models", 1, 0, "ResultListModel")  # pyrefly: ignore [bad-argument-type]
-    qmlRegisterType(WorkspaceListModel, "fuscan.models", 1, 0, "WorkspaceListModel")  # pyrefly: ignore [bad-argument-type]
-
-
 class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
-    """主控制器聚合：构造所有 controller 并注册到 QML context。
+    """主控制器聚合：构造所有 controller 并接管生命周期。
 
     :param parent: 父 QObject
     """
@@ -141,7 +76,7 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
         # scan_async=True：监控扫描在单 worker 守护线程池后台执行，
         # 防止大文件（PDF/OCR 等）同步扫描阻塞 GUI 主线程导致界面卡死
         self._file_monitor = FileMonitorController(self._rules, self, scan_async=True)
-        # 从用户配置注入字体设置到 ThemeController（QML 绑定 theme.fontSize* 自动刷新）
+        # 从用户配置注入字体设置到 ThemeController（Widgets 各页读 theme.fontSize* 刷新）
         self._apply_font_config_to_theme()
         # 监听 ConfigController 字体变更信号，实时同步到 ThemeController
         self._config.fontConfigChanged.connect(self._apply_font_config_to_theme)  # pyrefly: ignore [missing-attribute]
@@ -155,7 +90,7 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
             cfg.font_bold,
             cfg.min_font_size,
         )
-        # 同步全局 QGuiApplication 字体（影响 QML 控件默认继承）
+        # 同步全局 QApplication 字体（Widgets 控件默认继承）
         from PySide2.QtGui import QFont, QGuiApplication
 
         app = QGuiApplication.instance()
@@ -206,23 +141,6 @@ class AppController(QObject):  # pyrefly: ignore [invalid-inheritance]
     def file_monitor(self) -> FileMonitorController:
         """文件监控控制器。"""
         return self._file_monitor
-
-    def register_to(self, context: object) -> None:
-        """注册所有 controller 到 QQmlContext（以 QML 可见的名字）。
-
-        QML 中通过 ``Theme`` / ``ConfigController`` / ``RulesController`` /
-        ``WorkspaceController`` / ``AboutController`` / ``FileMonitorController``
-        直接访问。
-
-        :param context: ``QQmlContext`` 实例
-        """
-        context.setContextProperty("Theme", self._theme)  # pyrefly: ignore [missing-attribute]
-        context.setContextProperty("ConfigController", self._config)  # pyrefly: ignore [missing-attribute]
-        context.setContextProperty("RulesController", self._rules)  # pyrefly: ignore [missing-attribute]
-        context.setContextProperty("WorkspaceController", self._workspace)  # pyrefly: ignore [missing-attribute]
-        context.setContextProperty("WhitelistController", self._whitelist)  # pyrefly: ignore [missing-attribute]
-        context.setContextProperty("AboutController", self._about)  # pyrefly: ignore [missing-attribute]
-        context.setContextProperty("FileMonitorController", self._file_monitor)  # pyrefly: ignore [missing-attribute]
 
     def cleanup(self) -> None:
         """窗口关闭时清理资源（工作区 ScanController + 缓存 + 文件监控 Observer）。"""

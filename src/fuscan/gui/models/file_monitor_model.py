@@ -30,7 +30,7 @@ from fuscan.rules.model import Severity
 
 __all__ = ["FileMonitorModel"]
 
-# QML role 名称（与 FileMonitorPanel.qml delegate 中 model.* 一致）
+# 角色名编号（与 FileMonitorPage 表格各列展示字段一致）
 _ROLE_TIME = b"time"
 _ROLE_FILE_PATH = b"filePath"
 _ROLE_RULE_NAME = b"ruleName"

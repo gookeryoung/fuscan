@@ -1,15 +1,16 @@
-"""PySide2 + QML GUI 子包。
+"""PySide2 QtWidgets GUI 子包。
 
 按 rule-12-pyside-dev.md 三层 MVC 分层：
 
 - :mod:`fuscan.gui.controllers`：控制层（``QObject`` 子类）
 - :mod:`fuscan.gui.models`：模型层（``QAbstractListModel`` 子类）
 - :mod:`fuscan.gui.theme`：主题令牌（``ThemeController``，rule-12 指定位置）
+- :mod:`fuscan.gui.widgets`：视图层（页面与组件）
 - :mod:`fuscan.gui.severity_utils`：严重度文本/色值工具（跨层共享）
 
 公共 API（惰性导出，避免无 GUI 环境下 import 整个包失败）：
 
-- :class:`AppController`：主控制器工厂，构造并注册所有 controller 到 QML context
+- :class:`AppController`：主控制器工厂，聚合所有 controller 供 MainWindow 使用
 - :class:`ScanController`：扫描工作流控制器（状态机 + 进度 + 结果模型）
 - :class:`ConfigController`：配置持久化 + 盘符/路径历史/提取器勾选
 - :class:`RulesController`：规则文件管理 + 规则列表模型

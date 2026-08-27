@@ -3,13 +3,13 @@
 
 PACKAGE := fuscan
 COV_THRESHOLD := 95
-# 与 CI 一致：排除 slow 与需 QML 引擎的 gui_qml 测试（headless 环境跑不了）
+# 与 CI 一致：排除 slow（benchmark 用）测试
 TEST_MARKERS := "not slow and not gui_qml"
 # 性能回归门禁：iter-1 ContentRegexPool 优化成果保护
 PERF_TEST := tests/test_perf_regression.py
 PERF_THRESHOLD := 10
 
-.PHONY: help sync build b clean c test test-qml cov lint typecheck check doc tox bump patch minor major push perf perf-compare perf-list bump-core
+.PHONY: help sync build b clean c test cov lint typecheck check doc tox bump patch minor major push perf perf-compare perf-list bump-core
 
 help: ## 显示帮助信息
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z].*:.*##/ {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -30,11 +30,8 @@ clean c: ## 清理构建产物与缓存
 download: ## 下载 OCR 模型
 	python scripts/download_ocr_models.py
 
-test: ## 运行测试（不含覆盖率，与 CI 一致排除 gui_qml）
+test: ## 运行测试（不含覆盖率，与 CI 一致）
 	uv run pytest -m $(TEST_MARKERS)
-
-test-qml: ## 补跑 gui_qml 测试（本地有 Qt 环境时用）
-	uv run pytest -m "gui_qml"
 
 cov: ## 运行测试并检查覆盖率
 	uv run pytest -m $(TEST_MARKERS) --cov=$(PACKAGE) --cov-fail-under=$(COV_THRESHOLD) -n 8

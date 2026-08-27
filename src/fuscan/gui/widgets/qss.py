@@ -267,7 +267,6 @@ QProgressBar[indeterminateHeight="true"] {{ min-height: 6px; }}
 
 /* ---------- 对话框按钮与弹窗 ---------- */
 QPushButton#dialogBtnPrimary {{ background-color: {t["primary"]}; color: {t["text_on_primary"]}; border: none; }}
-QProgressDialog {{ background-color: {t["bg_card"]}; }}
 QMenu {{
     background-color: {t["bg_card"]};
     color: {t["text_primary"]};

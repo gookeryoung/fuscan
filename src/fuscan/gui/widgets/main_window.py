@@ -4,8 +4,9 @@
 - 快捷键：Ctrl+1..6 切页 / Ctrl+B 折叠侧边栏 / Ctrl+R 重扫当前工作区 /
   Esc 返回首页
 - 暗色切换：侧边栏开关驱动 :meth:`set_dark`，整表替换全局 QSS 并刷新全部子页面
-- 关闭窗口：显示保存进度对话框后异步调用 ``controller.cleanup()``，复刻
-  原 exitPopup 渐进退出模式
+- 关闭窗口：显示窗口内退出覆盖层（复刻 QML 原版 exitPopup，不产生独立
+  对话框窗口），延时 50ms 退出；资源清理由 ``app.py`` 的
+  ``aboutToQuit → controller.cleanup()`` 统一驱动
 """
 
 # pyrefly: ignore-errors
@@ -15,15 +16,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide2.QtCore import QTimer
+from PySide2.QtCore import Qt, QTimer
 from PySide2.QtGui import QCloseEvent, QKeySequence
 from PySide2.QtWidgets import (
     QApplication,
     QHBoxLayout,
+    QLabel,
     QMainWindow,
-    QProgressDialog,
     QShortcut,
     QStackedWidget,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -55,6 +57,8 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self._controller = controller
         self._dark = False
+        self._quitting = False
+        self._exit_overlay: QWidget | None = None
         self.setWindowTitle("fuscan")
         self.resize(1080, 680)
         self.setMinimumSize(880, 560)
@@ -165,21 +169,38 @@ class MainWindow(QMainWindow):
     # ----------------------------- 关闭流程 -----------------------------
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """拦截关闭：先渲染保存进度对话框，再异步清理资源退出。
+        """拦截关闭：显示窗口内退出覆盖层，延时 50ms 退出应用。
 
-        退出确认弹窗确认后延时 50ms 再执行清理退出。
+        复刻 QML 原版 exitPopup 行为（窗口内嵌遮罩，不产生独立对话框
+        窗口）；资源清理由 ``app.py`` 的 ``aboutToQuit → cleanup()``
+        统一驱动，此处不直接调用 cleanup，避免双重清理。
         """
         event.ignore()
-        dialog = QProgressDialog("正在清理扫描线程与缓存资源", "", 0, 0, self)
-        dialog.setWindowTitle("fuscan")
-        dialog.setCancelButton(None)
-        dialog.setMinimumDuration(0)
-        dialog.show()
+        if self._quitting:
+            return
+        self._quitting = True
+        self._show_exit_overlay()
+        QTimer.singleShot(50, self._quit_app)
 
-        def _quit() -> None:
-            self._controller.cleanup()
-            app = QApplication.instance()
-            if app is not None:
-                app.quit()
+    def _show_exit_overlay(self) -> None:
+        """显示半透明退出覆盖层（居中文案，随主窗口尺寸铺满）。"""
+        overlay = QWidget(self)
+        overlay.setObjectName("exitOverlay")
+        overlay.setStyleSheet(
+            "QWidget#exitOverlay { background-color: rgba(20, 22, 30, 220); }"
+            "QLabel { color: #e8eaf0; background: transparent; font-size: 14px; }"
+        )
+        layout = QVBoxLayout(overlay)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.addWidget(QLabel("正在保存退出状态，请稍候..."))
+        overlay.setGeometry(self.rect())
+        overlay.show()
+        overlay.raise_()
+        self._exit_overlay = overlay
 
-        QTimer.singleShot(50, _quit)
+    @staticmethod
+    def _quit_app() -> None:
+        """退出应用（资源清理由 aboutToQuit 钩子完成）。"""
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()

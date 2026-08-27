@@ -278,7 +278,7 @@ class _StubController:
         self.workspace = _StubWorkspace()
 
     def cleanup(self) -> None:
-        """清理钩子：closeEvent 流程会异步调用一次。"""
+        """清理钩子：由 app.py 的 aboutToQuit 信号驱动调用。"""
         type(self).cleanup_calls.append(1)
 
 
@@ -371,20 +371,33 @@ class TestMainWindow:
         assert window.dark_mode is True
         assert received == []
 
-    def test_close_event_defers_cleanup(self, window: MainWindow, monkeypatch: pytest.MonkeyPatch) -> None:
-        """closeEvent 拦截关闭并经 50ms 单次定时器延迟清理。"""
+    def test_close_event_defers_quit(self, window: MainWindow, monkeypatch: pytest.MonkeyPatch) -> None:
+        """closeEvent 拦截关闭：显示退出覆盖层并经 50ms 定时器延迟退出。
+
+        延迟回调仅退出应用（aboutToQuit 驱动 cleanup），不直接调用
+        cleanup，避免双重清理。
+        """
         scheduled: list[tuple[int, object]] = []
         monkeypatch.setattr(
             "fuscan.gui.widgets.main_window.QTimer.singleShot",
             lambda msec, callback: scheduled.append((msec, callback)),
         )
+        quit_calls: list[int] = []
+        app = QApplication.instance()
+        assert app is not None
+        monkeypatch.setattr(app, "quit", lambda: quit_calls.append(1))
         assert window.close() is False  # 事件被 ignore，窗口未真正关闭
+        assert window._exit_overlay is not None  # 窗口内覆盖层已显示
         assert len(scheduled) == 1
         msec, callback = scheduled[0]
         assert msec == 50
         _StubController.cleanup_calls.clear()
-        callback()  # 手动触发延迟回调 → stub.cleanup()
-        assert _StubController.cleanup_calls == [1]
+        callback()  # 手动触发延迟回调 → 仅退出，不触发 cleanup
+        assert _StubController.cleanup_calls == []
+        assert quit_calls == [1]
+        # 二次关闭请求被幂等拦截，不再重复调度
+        assert window.close() is False
+        assert len(scheduled) == 1
 
 
 class TestSplashWindow:

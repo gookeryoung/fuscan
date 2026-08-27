@@ -14,6 +14,8 @@
 - :class:`SplashWindow`：启动画面
 - :class:`AboutPage`：关于页
 - :class:`FileMonitorPage`：文件监控页
+- :class:`StatsPage`：统计页
+- :class:`SettingsPage`：设置页
 """
 
 from __future__ import annotations
@@ -37,4 +39,12 @@ def __getattr__(name: str):  # type: ignore[no-untyped-def]
         from fuscan.gui.widgets.file_monitor_page import FileMonitorPage
 
         return FileMonitorPage
+    if name == "StatsPage":
+        from fuscan.gui.widgets.stats_page import StatsPage
+
+        return StatsPage
+    if name == "SettingsPage":
+        from fuscan.gui.widgets.settings_page import SettingsPage
+
+        return SettingsPage
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

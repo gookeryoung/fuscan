@@ -34,8 +34,12 @@ from PySide2.QtWidgets import (
 
 from fuscan.gui.widgets.about_page import AboutPage
 from fuscan.gui.widgets.file_monitor_page import FileMonitorPage
+from fuscan.gui.widgets.home_page import HomePage
 from fuscan.gui.widgets.qss import build_app_qss
+from fuscan.gui.widgets.results_page import ResultsPage
+from fuscan.gui.widgets.settings_page import SettingsPage
 from fuscan.gui.widgets.sidebar import SidebarWidget
+from fuscan.gui.widgets.stats_page import StatsPage
 
 __all__ = ["PAGE_IDS", "MainWindow"]
 
@@ -89,15 +93,33 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(self._make_page(page_id))
         layout.addWidget(self.stack, stretch=1)
         self.setCentralWidget(central)
+        # 工作区卡片「查看结果/统计」→ 切当前工作区 + 跳页
+        home = self.stack.widget(PAGE_IDS.index("home"))
+        if isinstance(home, HomePage):
+            wc = self._controller.workspace
+            home.viewResultsRequested.connect(
+                lambda ws_id: (wc.setCurrentWorkspaceId(ws_id), self.switch_page("results"))
+            )
+            home.viewStatsRequested.connect(lambda ws_id: (wc.setCurrentWorkspaceId(ws_id), self.switch_page("stats")))
+        # 结果页「返回」→ 回文件扫描页
+        results = self.stack.widget(PAGE_IDS.index("results"))
+        if isinstance(results, ResultsPage):
+            results.backRequested.connect(lambda: self.switch_page("home"))
         # 默认首页
         self.sidebar.set_current_page("home")
 
     def _make_page(self, page_id: str) -> QWidget:
         """构建页面：已迁移页返回正式实现，未迁移页返回占位视图。"""
+        if page_id == "home":
+            return HomePage(self._controller)
         if page_id == "about":
             return AboutPage(self._controller)
         if page_id == "monitor":
             return FileMonitorPage(self._controller)
+        if page_id == "stats":
+            return StatsPage(self._controller)
+        if page_id == "settings":
+            return SettingsPage(self._controller)
         return self._make_placeholder(page_id)
 
     def _make_placeholder(self, page_id: str) -> QWidget:

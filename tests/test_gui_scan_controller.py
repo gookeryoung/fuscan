@@ -1006,7 +1006,7 @@ class TestProgressCallback:
         assert controller.passedCount == 3  # 5 - 2 - 0
         assert controller.progressIndeterminate is False
         assert "test.txt" in controller.currentFile
-        # 单文件进度字段（iter-148 新增，gui_qml 排除时需显式访问覆盖 getter）
+        # 单文件进度字段（iter-148 新增；显式访问覆盖 getter）
         assert controller.currentFileSize == 12345
         assert controller.currentFileExt == "txt"
         assert controller.currentFileElapsedMs == 500.0

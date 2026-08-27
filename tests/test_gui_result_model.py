@@ -113,7 +113,7 @@ class TestData:
         覆盖 result_model.data() 行 504-511 幽灵行回退路径：扁平数据未就绪 +
         filtered 对应行为幽灵行（None）时，按 role 返回占位值
         （hitsCount=0 / index=row / 其余空串）。
-        该路径在 gui_qml 排除时无 QML delegate 自然访问，需故障注入显式触发。
+        该路径无视图 delegate 自然访问，需故障注入显式触发。
         """
         # 故障注入：模拟懒加载中间状态（扁平数据未填充 + filtered 幽灵行）
         model._flat_data[0] = None  # type: ignore[attr-defined]

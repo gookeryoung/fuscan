@@ -1,18 +1,16 @@
-"""主题控制器：将设计令牌暴露给 QML 双向绑定。
+"""主题控制器：集中暴露设计令牌（色值/字号/圆角）。
 
 按 rule-12-pyside-dev.md 要求，所有色值/字号/圆角通过 :class:`ThemeController`
-暴露为 ``@Property``，QML 直接绑定（如 ``color: Theme.colorPrimary``），
-禁止 QML 侧硬编码色值。暗色模式由 ``isDark`` 双向驱动，切换时仅 emit
-``themeChanged``，QML 绑定自动刷新。
+暴露为 ``@Property``，Widgets 页面经 ``palette_tokens``/属性访问统一取值，
+禁止视图侧硬编码色值。暗色模式由 ``isDark`` 驱动，切换时 emit
+``themeChanged``，各页面 ``set_dark`` 重刷 QSS 与语义色。
 
 色值定义沿用 GitHub Desktop 风格（浅色）+ Tokyo Night 风格（深色），
 按钮三级层级差异化设计（L1 主操作/L2 次要/L3 辅助）。
 
 所有 ``@Property`` 共用 :attr:`themeChanged` 作为 NOTIFY 信号：色值/字号/圆角
-本身为常量不变，但 QML 绑定要求属性必须声明 NOTIFY 才能在绑定表达式中使用
-（否则报 ``depends on non-NOTIFYable properties`` 警告，且暗色模式切换时
-``Theme.isDark ? colorA : colorB`` 三元不会重新求值）。``setDark`` 切换时
-emit ``themeChanged``，所有绑定表达式重新求值，实现暗色模式无缝切换。
+本身为常量不变，但 Qt 属性语义要求声明 NOTIFY 才能安全地在绑定表达式中使用；
+``setDark`` 切换时 emit ``themeChanged``，监听方统一重新求值实现暗色无缝切换。
 """
 
 from __future__ import annotations

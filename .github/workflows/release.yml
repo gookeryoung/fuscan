@@ -12,7 +12,7 @@ name: Release
 # 任一前置 job 失败时 release 仍尝试发布已成功产物，但最终标记 workflow 失败。
 #
 # iter-139：参考 fspack 项目工作流，将 fspack 原生打包融入 Release 流程。
-# fuscan 是 PySide2+QML GUI 应用，打包用 Python 3.10（PySide2 兼容上限）。
+# fuscan 是 PySide2 QtWidgets GUI 应用，打包用 Python 3.10（PySide2 兼容上限）。
 
 on:
   push:

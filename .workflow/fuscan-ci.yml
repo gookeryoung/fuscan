@@ -79,7 +79,7 @@ stages:
 
           # --------------------------------------------------------------------
           # 测试：Python 3.10 + pytest，覆盖率门禁 95%
-          # 标记排除 slow（benchmark 用）与 gui_qml（headless 无 Qt 环境跑不了）
+          # 标记排除 slow（benchmark 用）
           # --------------------------------------------------------------------
           run_tests:
             step: Command
@@ -91,7 +91,7 @@ stages:
                 # 安装并锁定 Python 3.10（与 release.yml 打包版本一致）
                 uv python install 3.10
                 uv sync --frozen --extra test --python 3.10
-                uv run pytest -m "not slow and not gui_qml" \
+                uv run pytest -m "not slow" \
                   --cov=fuscan \
                   --cov-fail-under=95 \
                   --cov-report=term-missing \

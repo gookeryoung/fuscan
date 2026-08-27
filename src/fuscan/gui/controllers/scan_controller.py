@@ -1,16 +1,7 @@
-"""扫描工作流控制器：QML ↔ ScanWorker/FileStatsWorker 桥接。
+"""扫描工作流控制器：视图层 ↔ ScanWorker/FileStatsWorker 桥接。
 
 状态机三态：``setup`` → ``scanning`` → ``results``（取消/失败回 ``setup``）。
-所有耗时操作走 ``QThread`` Worker，QML 主线程仅渲染。
-
-公共 API：
-
-- :class:`ScanController`：``QObject`` 子类，``@Property``/``@Slot`` 暴露给 QML
-- :meth:`ScanController.start_scan`：开始扫描（启动 stats worker → scan worker 串行）
-- :meth:`ScanController.toggle_pause`：暂停/继续扫描
-- :meth:`ScanController.cancel_scan`：取消扫描
-- :meth:`ScanController.export_results`：导出 CSV/JSON（路径由 QML FileDialog 传入）
-- :meth:`ScanController.open_location` / :meth:`copy_path`：选中结果文件操作
+所有耗时操作走 ``QThread`` Worker，主线程仅渲染。
 """
 
 from __future__ import annotations

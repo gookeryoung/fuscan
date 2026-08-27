@@ -376,10 +376,10 @@ def test_perf_report_add_collects_stages() -> None:
     report = perf_mod.PerfReport()
     report.add("启动流程", 100.0, 0)
     report.add("构造主控制器", 40.0, 1)
-    report.add("加载主 QML", 55.0, 1)
+    report.add("加载主界面", 55.0, 1)
     assert len(report.stages) == 3
     assert [s.order for s in report.stages] == [0, 1, 2]
-    assert [s.name for s in report.stages] == ["启动流程", "构造主控制器", "加载主 QML"]
+    assert [s.name for s in report.stages] == ["启动流程", "构造主控制器", "加载主界面"]
     # total_ms 取最外层 depth==0 的耗时
     assert report.total_ms() == 100.0
 
@@ -454,12 +454,12 @@ def test_render_startup_summary_with_rich(capsys) -> None:  # type: ignore[no-un
     report = perf_mod.PerfReport()
     report.add("启动流程", 200.0, 0)
     report.add("构造主控制器", 40.0, 1)
-    report.add("加载主 QML", 120.0, 1)
+    report.add("加载主界面", 120.0, 1)
     perf_mod.render_startup_summary(report)
     out = capsys.readouterr().out
     assert "启动性能汇总" in out
     assert "构造主控制器" in out
-    assert "加载主 QML" in out
+    assert "加载主界面" in out
     assert "总计" in out
     assert "%" in out
     # 最外层"启动流程"不作为普通行，仅作总计基准（占比 120/200=60%）
@@ -487,12 +487,12 @@ def test_render_startup_summary_fallback_no_rich(
     report = perf_mod.PerfReport()
     report.add("启动流程", 200.0, 0)
     report.add("构造主控制器", 40.0, 1)
-    report.add("加载主 QML", 120.0, 1)
+    report.add("加载主界面", 120.0, 1)
     perf_mod.render_startup_summary(report)
 
     records = _collect_info_records(caplog)
     messages = "\n".join(r.getMessage() for r in records)
     assert "启动性能汇总" in messages
     assert "构造主控制器" in messages
-    assert "加载主 QML" in messages
+    assert "加载主界面" in messages
     assert "总计" in messages

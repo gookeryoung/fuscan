@@ -343,10 +343,10 @@ class TestSpeedTierColors:
 
 
 class TestRawDarkGetters:
-    """暗色模式原始色值属性（QML 三元中直接引用的 ``colorXxxDark`` getter）。
+    """暗色模式原始色值属性（``colorXxxDark`` getter）。
 
-    这些 getter 在浅色模式下也可被 QML 显式绑定，需独立于 ``isDark`` 切换直接验证
-    返回值，避免仅由需真实 QML 引擎的 gui_qml 测试覆盖（headless CI 会跳过 gui_qml）。
+    这些 getter 需独立于 ``isDark`` 切换直接验证返回值，确保浅色模式下
+    显式读取暗色令牌也得到正确结果。
     """
 
     def test_bg_hover_dark_raw(self, theme: ThemeController) -> None:

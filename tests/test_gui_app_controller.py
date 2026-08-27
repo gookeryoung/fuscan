@@ -178,7 +178,6 @@ class TestApplyGlobalFont:
 
     覆盖 :func:`fuscan.app._apply_global_font` 的两个分支：
     ``font_family`` 非空时用指定字体，为空时回退到平台默认字体族列表。
-    本测试不标记 ``gui_qml``，CI 上仍会运行（不同于 ``main`` smoke 测试）。
     """
 
     def test_user_font_family_applied(self) -> None:

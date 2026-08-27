@@ -69,7 +69,7 @@ jobs:
         run: uv sync --frozen --extra test --python ${{ matrix.python-version }}
 
       - name: Run tests
-        run: uv run pytest -m "not slow and not gui_qml" --cov=fuscan --cov-fail-under=95 --cov-report=term-missing --cov-report=xml:coverage-${{ matrix.python-version }}.xml
+        run: uv run pytest -m "not slow" --cov=fuscan --cov-fail-under=95 --cov-report=term-missing --cov-report=xml:coverage-${{ matrix.python-version }}.xml
 
       - name: Upload coverage report
         if: always()

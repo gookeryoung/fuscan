@@ -4,7 +4,7 @@
 PACKAGE := fuscan
 COV_THRESHOLD := 95
 # 与 CI 一致：排除 slow（benchmark 用）测试
-TEST_MARKERS := "not slow and not gui_qml"
+TEST_MARKERS := "not slow"
 # 性能回归门禁：iter-1 ContentRegexPool 优化成果保护
 PERF_TEST := tests/test_perf_regression.py
 PERF_THRESHOLD := 10

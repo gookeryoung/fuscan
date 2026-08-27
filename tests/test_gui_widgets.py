@@ -238,9 +238,10 @@ class _FakeRulesStub:
 
 
 class _StubWorkspace:
-    """StatsPage/HomePage 所需的最小工作区控制器替身（无当前任务）。"""
+    """StatsPage/HomePage/ResultsPage 所需的最小工作区控制器替身（无当前任务）。"""
 
     hasCurrentWorkspace = False
+    currentWorkspaceId = ""
     currentScanController: object | None = None
     hasActiveScan = False
     currentWorkspaceChanged = _NullSignal()
@@ -249,6 +250,11 @@ class _StubWorkspace:
     def __init__(self) -> None:
         """每个实例持有独立模型，避免跨测试共享状态。"""
         self.workspaceModel = WorkspaceListModel()
+        self.scan_calls: list[str] = []
+
+    def startScan(self, ws_id: str) -> None:
+        """记录重扫调用（Ctrl+R 快捷键测试用）。"""
+        self.scan_calls.append(ws_id)
 
 
 class _StubController:
@@ -309,6 +315,53 @@ class TestMainWindow:
         """侧边栏导航信号应驱动堆栈切换。"""
         window.sidebar.set_current_page("settings")
         assert window.stack.currentIndex() == PAGE_IDS.index("settings")
+
+    def test_all_pages_are_real_implementations(self, window: MainWindow) -> None:
+        """六页应全部为正式页面实现，无迁移占位视图。"""
+        real_types = {
+            "home": HomePage,
+            "monitor": FileMonitorPage,
+            "results": ResultsPage,
+            "stats": StatsPage,
+            "settings": SettingsPage,
+            "about": AboutPage,
+        }
+        for page_id, cls in real_types.items():
+            assert isinstance(window.stack.widget(PAGE_IDS.index(page_id)), cls)
+
+    def test_view_results_request_switches_to_results(self, window: MainWindow) -> None:
+        """首页「查看结果」信号应切换到结果页。"""
+        home = window.stack.widget(PAGE_IDS.index("home"))
+        assert isinstance(home, HomePage)
+        home.viewResultsRequested.emit("ws-a")
+        assert window.stack.currentIndex() == PAGE_IDS.index("results")
+
+    def test_view_stats_request_switches_to_stats(self, window: MainWindow) -> None:
+        """首页「统计」信号应切换到统计页。"""
+        home = window.stack.widget(PAGE_IDS.index("home"))
+        assert isinstance(home, HomePage)
+        home.viewStatsRequested.emit("ws-a")
+        assert window.stack.currentIndex() == PAGE_IDS.index("stats")
+
+    def test_results_back_request_returns_home(self, window: MainWindow) -> None:
+        """结果页「返回」信号应切回文件扫描页。"""
+        window.switch_page("results")
+        results = window.stack.widget(PAGE_IDS.index("results"))
+        assert isinstance(results, ResultsPage)
+        results.backRequested.emit()
+        assert window.stack.currentIndex() == PAGE_IDS.index("home")
+
+    def test_rescan_current_starts_scan(self, window: MainWindow) -> None:
+        """Ctrl+R 回调应对当前工作区发起重扫。"""
+        ws = window._controller.workspace
+        ws.currentWorkspaceId = "ws-1"
+        window._rescan_current()
+        assert ws.scan_calls == ["ws-1"]
+
+    def test_rescan_current_ignored_without_workspace(self, window: MainWindow) -> None:
+        """无当前工作区时 Ctrl+R 回调应静默忽略。"""
+        window._rescan_current()
+        assert window._controller.workspace.scan_calls == []
 
     def test_set_dark_refreshes_sidebar_without_loop(self, window: MainWindow) -> None:
         """set_dark 刷新主题且不产生信号回环。"""

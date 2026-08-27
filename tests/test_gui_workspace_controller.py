@@ -617,25 +617,25 @@ class TestAddWorkspace:
     """``addWorkspace`` 槽。"""
 
     def test_returns_ws_id_with_prefix(self, controller: WorkspaceController) -> None:
-        ws_id = controller.addWorkspace("任务 1", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("任务 1", "folder", "/tmp")
         assert ws_id.startswith("ws-")
         assert len(ws_id) == len("ws-") + 8  # token_hex(4) → 8 字符
 
     def test_increments_count(self, controller: WorkspaceController) -> None:
-        controller.addWorkspace("任务 1", "folder", "/tmp", "[]", True)
-        controller.addWorkspace("任务 2", "folder", "/tmp", "[]", True)
+        controller.addWorkspace("任务 1", "folder", "/tmp")
+        controller.addWorkspace("任务 2", "folder", "/tmp")
         assert controller.workspaceCount == 2
 
     def test_empty_name_auto_generated(self, controller: WorkspaceController) -> None:
         """空名称应自动生成「任务 N」。"""
-        ws_id = controller.addWorkspace("", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("", "folder", "/tmp")
         item = controller.workspaceModel.get_workspace(ws_id)
         assert item is not None
         assert item.name == "任务 1"
 
     def test_empty_name_auto_increment(self, controller: WorkspaceController) -> None:
-        controller.addWorkspace("", "folder", "/tmp", "[]", True)
-        ws_id2 = controller.addWorkspace("", "folder", "/tmp", "[]", True)
+        controller.addWorkspace("", "folder", "/tmp")
+        ws_id2 = controller.addWorkspace("", "folder", "/tmp")
         item = controller.workspaceModel.get_workspace(ws_id2)
         assert item is not None
         assert item.name == "任务 2"
@@ -661,7 +661,7 @@ class TestAddWorkspace:
         rules_controller.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
 
         # 传入 "[]" + True，但工作区应反映全局规则
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         item = controller.workspaceModel.get_workspace(ws_id)
         assert item is not None
         assert item.rules_paths == (str(rules_file),)
@@ -671,43 +671,6 @@ class TestAddWorkspace:
         assert len(tags) == 2
         assert tags[0] == {"name": "内置", "is_builtin": True, "is_temp": False}
         assert tags[1] == {"name": "custom.yaml", "is_builtin": False, "is_temp": False}
-
-    def test_add_workspace_ignores_rules_paths_json(
-        self,
-        controller: WorkspaceController,
-    ) -> None:
-        """iter-139：rules_paths_json 参数已废弃，不影响工作区规则。
-
-         无论传入什么 JSON，工作区 rules_paths 始终从全局同步
-        （fixture 中全局 Config.rules_paths=[]，故为空 tuple）。
-        """
-        rules_json = json.dumps(["a.yaml", "b.yaml"])
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", rules_json, True)
-        item = controller.workspaceModel.get_workspace(ws_id)
-        assert item is not None
-        # 全局为空，工作区也为空（忽略传入的 ["a.yaml", "b.yaml"]）
-        assert item.rules_paths == ()
-        assert item.use_builtin is True
-
-    def test_add_workspace_ignores_invalid_rules_paths_json(
-        self,
-        controller: WorkspaceController,
-    ) -> None:
-        """iter-139：无效 JSON 不影响工作区规则（从全局同步）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "not-json", True)
-        item = controller.workspaceModel.get_workspace(ws_id)
-        assert item is not None
-        assert item.rules_paths == ()
-
-    def test_add_workspace_ignores_empty_rules_paths_json(
-        self,
-        controller: WorkspaceController,
-    ) -> None:
-        """iter-139：空字符串不影响工作区规则（从全局同步）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "", True)
-        item = controller.workspaceModel.get_workspace(ws_id)
-        assert item is not None
-        assert item.rules_paths == ()
 
     def test_add_workspace_from_path_creates_with_folder_name(
         self,
@@ -795,7 +758,7 @@ class TestAddWorkspace:
     ) -> None:
         """iter-139：全局规则变化时已存在的工作区应同步刷新 rules_paths/use_builtin。"""
         # 先新建一个工作区（全局规则为空，工作区 rules_paths=()）
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         item = controller.workspaceModel.get_workspace(ws_id)
         assert item is not None
         assert item.rules_paths == ()
@@ -824,7 +787,7 @@ class TestAddWorkspace:
         rules_controller: RulesController,
     ) -> None:
         """iter-139：全局规则未变化时不触发 persist（避免无谓 I/O）。"""
-        controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.addWorkspace("t", "folder", "/tmp")
         # 全局规则未变化，再次 emit 信号不应触发 persist
         from unittest.mock import patch
 
@@ -855,8 +818,8 @@ class TestAddWorkspace:
         rules_controller.rulesetChanged.emit()  # pyrefly: ignore [missing-attribute]
 
         # 新建两个工作区（无任务级覆盖，跟随全局）
-        ws_id_1 = controller.addWorkspace("t1", "folder", "/tmp1", "[]", True)
-        ws_id_2 = controller.addWorkspace("t2", "folder", "/tmp2", "[]", True)
+        ws_id_1 = controller.addWorkspace("t1", "folder", "/tmp1")
+        ws_id_2 = controller.addWorkspace("t2", "folder", "/tmp2")
 
         # 初始标签应包含内置 + a + b
         for ws_id in (ws_id_1, ws_id_2):
@@ -885,8 +848,8 @@ class TestAddWorkspace:
 
     def test_creates_independent_scan_controller(self, controller: WorkspaceController) -> None:
         """每个工作区应有独立的 ScanController。"""
-        ws_id1 = controller.addWorkspace("t1", "folder", "/tmp", "[]", True)
-        ws_id2 = controller.addWorkspace("t2", "folder", "/tmp", "[]", True)
+        ws_id1 = controller.addWorkspace("t1", "folder", "/tmp")
+        ws_id2 = controller.addWorkspace("t2", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id1)
         sc1 = controller.currentScanController
         controller.setCurrentWorkspaceId(ws_id2)
@@ -895,7 +858,7 @@ class TestAddWorkspace:
 
     def test_drive_mode_sets_selected_drive(self, controller: WorkspaceController) -> None:
         """drive 模式应同步设置 selectedDrive。"""
-        ws_id = controller.addWorkspace("t", "drive", "C:\\", "[]", True)
+        ws_id = controller.addWorkspace("t", "drive", "C:\\")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         assert sc.scanModeIndex == 0
@@ -903,7 +866,7 @@ class TestAddWorkspace:
 
     def test_folder_mode_sets_folder_root(self, controller: WorkspaceController) -> None:
         """folder 模式应同步设置 folderRoot。"""
-        ws_id = controller.addWorkspace("t", "folder", "/custom/path", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/custom/path")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         assert sc.scanModeIndex == 1
@@ -914,7 +877,7 @@ class TestAddWorkspace:
         controller: WorkspaceController,
     ) -> None:
         """未知模式字符串应回退为 folder（索引 1）。"""
-        ws_id = controller.addWorkspace("t", "custom", "/x", "[]", True)
+        ws_id = controller.addWorkspace("t", "custom", "/x")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         assert sc.scanModeIndex == 1
@@ -926,7 +889,7 @@ class TestAddWorkspace:
         """addWorkspace 应 emit workspaceListChanged。"""
         emitted: list[None] = []
         controller.workspaceListChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
-        controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.addWorkspace("t", "folder", "/tmp")
         assert len(emitted) == 1
 
 
@@ -934,7 +897,7 @@ class TestRemoveWorkspace:
     """``removeWorkspace`` 槽。"""
 
     def test_removes_from_model(self, controller: WorkspaceController) -> None:
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.removeWorkspace(ws_id)
         assert controller.workspaceCount == 0
         assert controller.workspaceModel.get_workspace(ws_id) is None
@@ -943,7 +906,7 @@ class TestRemoveWorkspace:
         self,
         controller: WorkspaceController,
     ) -> None:
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         emitted: list[None] = []
         controller.workspaceListChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
         controller.removeWorkspace(ws_id)
@@ -953,7 +916,7 @@ class TestRemoveWorkspace:
         self,
         controller: WorkspaceController,
     ) -> None:
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         assert controller.hasCurrentWorkspace is True
         controller.removeWorkspace(ws_id)
@@ -964,8 +927,8 @@ class TestRemoveWorkspace:
         self,
         controller: WorkspaceController,
     ) -> None:
-        ws_id1 = controller.addWorkspace("t1", "folder", "/tmp", "[]", True)
-        ws_id2 = controller.addWorkspace("t2", "folder", "/tmp", "[]", True)
+        ws_id1 = controller.addWorkspace("t1", "folder", "/tmp")
+        ws_id2 = controller.addWorkspace("t2", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id1)
         controller.removeWorkspace(ws_id2)
         assert controller.currentWorkspaceId == ws_id1
@@ -984,7 +947,7 @@ class TestRemoveWorkspace:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """removeWorkspace 应调用对应 ScanController.cleanup。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         called = False
@@ -1005,7 +968,7 @@ class TestCurrentWorkspace:
         self,
         controller: WorkspaceController,
     ) -> None:
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         emitted: list[None] = []
         controller.currentWorkspaceChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
         controller.setCurrentWorkspaceId(ws_id)
@@ -1017,7 +980,7 @@ class TestCurrentWorkspace:
         self,
         controller: WorkspaceController,
     ) -> None:
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         emitted: list[None] = []
         controller.currentWorkspaceChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
@@ -1028,7 +991,7 @@ class TestCurrentWorkspace:
         self,
         controller: WorkspaceController,
     ) -> None:
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         assert isinstance(sc, ScanController)
@@ -1051,7 +1014,7 @@ class TestScanControlDelegation:
         controller: WorkspaceController,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         called = False
@@ -1076,7 +1039,7 @@ class TestScanControlDelegation:
         controller: WorkspaceController,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         called = False
@@ -1097,7 +1060,7 @@ class TestScanControlDelegation:
         controller: WorkspaceController,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         called = False
@@ -1123,7 +1086,7 @@ class TestExportResults:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         captured: dict[str, object] = {}
@@ -1149,7 +1112,7 @@ class TestWorkspaceExists:
     """``workspaceExists`` 槽。"""
 
     def test_exists_true(self, controller: WorkspaceController) -> None:
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         assert controller.workspaceExists(ws_id) is True
 
     def test_exists_false(self, controller: WorkspaceController) -> None:
@@ -1165,7 +1128,7 @@ class TestSyncWorkspaceState:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """ScanController 状态变化应回写到 WorkspaceItem。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
 
         # 取出关联的 ScanController
         controller.setCurrentWorkspaceId(ws_id)
@@ -1201,7 +1164,7 @@ class TestSyncWorkspaceState:
 
     def test_sync_scanning_state(self, controller: WorkspaceController) -> None:
         """scanning 状态应回写为「扫描中」。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         sc._scan_state = "scanning"  # type: ignore[attr-defined]
@@ -1213,7 +1176,7 @@ class TestSyncWorkspaceState:
 
     def test_sync_paused_state(self, controller: WorkspaceController) -> None:
         """scanning + isPaused=True 应回写为「已暂停」。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         sc._scan_state = "scanning"  # type: ignore[attr-defined]
@@ -1233,8 +1196,8 @@ class TestCleanup:
 
     def test_cleanup_clears_scan_controllers(self, controller: WorkspaceController) -> None:
         """iter-124：cleanup 清理 ScanController 资源，但不清空 model。"""
-        controller.addWorkspace("t1", "folder", "/tmp", "[]", True)
-        controller.addWorkspace("t2", "folder", "/tmp", "[]", True)
+        controller.addWorkspace("t1", "folder", "/tmp")
+        controller.addWorkspace("t2", "folder", "/tmp")
         controller.cleanup()
         # model 保留（进程即将退出，无需清空）
         assert controller.workspaceCount == 2
@@ -1247,7 +1210,7 @@ class TestCleanup:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """iter-127：cleanup 改用 quick_cancel（非阻塞），不再调 cleanup/wait/close。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         called = False
@@ -1262,7 +1225,7 @@ class TestCleanup:
 
     def test_cleanup_preserves_current_workspace(self, controller: WorkspaceController) -> None:
         """iter-124：cleanup 不清空 currentWorkspaceId。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         controller.cleanup()
         # ID 保留（进程即将退出，无需清空）
@@ -1292,7 +1255,7 @@ class TestActiveScan:
         controller: WorkspaceController,
     ) -> None:
         """工作区进入 scanning 态应被标记为 active。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         sc._scan_state = "scanning"  # type: ignore[attr-defined]
@@ -1305,7 +1268,7 @@ class TestActiveScan:
 
     def test_paused_keeps_active(self, controller: WorkspaceController) -> None:
         """暂停态（scanning + isPaused=True）应保留 active。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         sc._scan_state = "scanning"  # type: ignore[attr-defined]
@@ -1321,7 +1284,7 @@ class TestActiveScan:
 
     def test_results_clears_active(self, controller: WorkspaceController) -> None:
         """扫描完成（results 态）应清空 active。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         # 进入扫描
@@ -1338,7 +1301,7 @@ class TestActiveScan:
 
     def test_setup_clears_active(self, controller: WorkspaceController) -> None:
         """扫描取消/失败回 setup 态应清空 active。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         sc._scan_state = "scanning"  # type: ignore[attr-defined]
@@ -1355,7 +1318,7 @@ class TestActiveScan:
         controller: WorkspaceController,
     ) -> None:
         """activeScanController 应返回扫描中工作区的 ScanController。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         sc._scan_state = "scanning"  # type: ignore[attr-defined]
@@ -1378,7 +1341,7 @@ class TestActiveScan:
         controller: WorkspaceController,
     ) -> None:
         """activeScanWorkspaceName/ModeText/Target 应返回工作区元数据。"""
-        ws_id = controller.addWorkspace("我的任务", "drive", "C:\\", "[]", True)
+        ws_id = controller.addWorkspace("我的任务", "drive", "C:\\")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         sc._scan_state = "scanning"  # type: ignore[attr-defined]
@@ -1403,7 +1366,7 @@ class TestActiveScan:
         controller: WorkspaceController,
     ) -> None:
         """进入扫描态应 emit activeScanChanged。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         emitted: list[None] = []
@@ -1419,7 +1382,7 @@ class TestActiveScan:
         controller: WorkspaceController,
     ) -> None:
         """离开扫描态应 emit activeScanChanged。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         # 先进入扫描
@@ -1440,7 +1403,7 @@ class TestActiveScan:
         controller: WorkspaceController,
     ) -> None:
         """状态不变时不应 emit activeScanChanged。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         sc._scan_state = "scanning"  # type: ignore[attr-defined]
@@ -1460,7 +1423,7 @@ class TestActiveScan:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """删除扫描中的工作区应清空 active 状态。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         sc._scan_state = "scanning"  # type: ignore[attr-defined]
@@ -1476,7 +1439,7 @@ class TestActiveScan:
 
     def test_cleanup_preserves_active(self, controller: WorkspaceController) -> None:
         """iter-124：cleanup 不清空 active 状态。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         sc._scan_state = "scanning"  # type: ignore[attr-defined]
@@ -1496,7 +1459,7 @@ class TestUpdateWorkspaceTarget:
 
     def test_update_target_folder_mode(self, controller: WorkspaceController) -> None:
         """更新 folder 模式目标应同步到 WorkspaceItem 与 ScanController。"""
-        ws_id = controller.addWorkspace("t", "folder", "/old", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/old")
         controller.updateWorkspaceTarget(ws_id, "folder", "/new/path")
 
         item = controller.workspaceModel.get_workspace(ws_id)
@@ -1511,7 +1474,7 @@ class TestUpdateWorkspaceTarget:
 
     def test_update_target_to_drive_mode(self, controller: WorkspaceController) -> None:
         """从 folder 切换到 drive 模式应正确同步。"""
-        ws_id = controller.addWorkspace("t", "folder", "/old", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/old")
         controller.updateWorkspaceTarget(ws_id, "drive", "C:\\")
 
         item = controller.workspaceModel.get_workspace(ws_id)
@@ -1521,7 +1484,7 @@ class TestUpdateWorkspaceTarget:
 
     def test_update_target_to_file_mode(self, controller: WorkspaceController) -> None:
         """从 folder 切换到 file 模式应同步 folderRoot（file 复用 folder_root 字段）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/old", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/old")
         controller.updateWorkspaceTarget(ws_id, "file", "/tmp/scan/report.pdf")
 
         item = controller.workspaceModel.get_workspace(ws_id)
@@ -1539,7 +1502,7 @@ class TestUpdateWorkspaceTarget:
         controller: WorkspaceController,
     ) -> None:
         """扫描中/暂停中应拒绝修改目标。"""
-        ws_id = controller.addWorkspace("t", "folder", "/old", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/old")
         # 强制设为扫描中状态
         item = controller.workspaceModel.get_workspace(ws_id)
         assert item is not None
@@ -1554,7 +1517,7 @@ class TestUpdateWorkspaceTarget:
 
     def test_update_target_invalid_mode_noop(self, controller: WorkspaceController) -> None:
         """无效的扫描模式应被拒绝。"""
-        ws_id = controller.addWorkspace("t", "folder", "/old", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/old")
         controller.updateWorkspaceTarget(ws_id, "invalid_mode", "/new")
 
         item = controller.workspaceModel.get_workspace(ws_id)
@@ -1569,7 +1532,7 @@ class TestUpdateWorkspaceTarget:
 
     def test_update_target_persists(self, controller: WorkspaceController, config_dir: Path) -> None:
         """更新目标应持久化到 workspaces.json。"""
-        ws_id = controller.addWorkspace("t", "folder", "/old", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/old")
         controller.updateWorkspaceTarget(ws_id, "folder", "/new/persisted")
 
         persist_file = config_dir / "workspaces.json"
@@ -1589,7 +1552,7 @@ class TestUpdateWorkspaceTarget:
         cfg1 = ConfigController()
         rules1 = RulesController(cfg1)
         ctrl1 = WorkspaceController(cfg1, rules1)
-        ws_id = ctrl1.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = ctrl1.addWorkspace("t", "folder", "/tmp")
         ctrl1.setCurrentWorkspaceId(ws_id)
         sc1 = ctrl1.currentScanController
         # 模拟 walk 阶段结果：发现 100，跳过 30，用户跳过 5 → 符合 65
@@ -1633,9 +1596,9 @@ class TestClearAllWorkspaces:
         controller: WorkspaceController,
     ) -> None:
         """清空应移除所有工作区。"""
-        controller.addWorkspace("t1", "folder", "/tmp", "[]", True)
-        controller.addWorkspace("t2", "folder", "/tmp", "[]", True)
-        controller.addWorkspace("t3", "folder", "/tmp", "[]", True)
+        controller.addWorkspace("t1", "folder", "/tmp")
+        controller.addWorkspace("t2", "folder", "/tmp")
+        controller.addWorkspace("t3", "folder", "/tmp")
         assert controller.workspaceCount == 3
 
         assert controller.clearAllWorkspaces() is True
@@ -1647,7 +1610,7 @@ class TestClearAllWorkspaces:
         controller: WorkspaceController,
     ) -> None:
         """扫描中状态拒绝清空。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         # 模拟扫描中状态
@@ -1666,7 +1629,7 @@ class TestClearAllWorkspaces:
         controller: WorkspaceController,
     ) -> None:
         """暂停中状态同样拒绝清空。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         sc._scan_state = "scanning"  # type: ignore[attr-defined]
@@ -1682,7 +1645,7 @@ class TestClearAllWorkspaces:
         controller: WorkspaceController,
     ) -> None:
         """清空后 currentWorkspaceId 应被重置为空串。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         assert controller.currentWorkspaceId == ws_id
 
@@ -1696,8 +1659,8 @@ class TestClearAllWorkspaces:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """清空应调用每个 ScanController 的 cleanup。"""
-        ws_id1 = controller.addWorkspace("t1", "folder", "/tmp", "[]", True)
-        ws_id2 = controller.addWorkspace("t2", "folder", "/tmp", "[]", True)
+        ws_id1 = controller.addWorkspace("t1", "folder", "/tmp")
+        ws_id2 = controller.addWorkspace("t2", "folder", "/tmp")
         sc1 = controller._ensure_scan_controller(ws_id1)  # type: ignore[attr-defined]
         sc2 = controller._ensure_scan_controller(ws_id2)  # type: ignore[attr-defined]
 
@@ -1718,8 +1681,8 @@ class TestClearAllWorkspaces:
         config_dir: Path,
     ) -> None:
         """清空后 workspaces.json 应包含空 workspaces 列表。"""
-        controller.addWorkspace("t1", "folder", "/tmp", "[]", True)
-        controller.addWorkspace("t2", "folder", "/tmp", "[]", True)
+        controller.addWorkspace("t1", "folder", "/tmp")
+        controller.addWorkspace("t2", "folder", "/tmp")
         persist_file = config_dir / "workspaces.json"
         assert persist_file.exists()
         # 清空前有 2 个工作区
@@ -1738,7 +1701,7 @@ class TestClearAllWorkspaces:
         controller: WorkspaceController,
     ) -> None:
         """清空应 emit workspaceListChanged 信号。"""
-        controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        controller.addWorkspace("t", "folder", "/tmp")
         emitted: list[None] = []
         controller.workspaceListChanged.connect(lambda: emitted.append(None))  # pyrefly: ignore [missing-attribute]
 
@@ -1761,7 +1724,7 @@ class TestClearAllWorkspaces:
         controller: WorkspaceController,
     ) -> None:
         """已完成状态应允许清空（仅扫描中/暂停中拒绝）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         # 模拟扫描完成进入 results 状态
@@ -1780,12 +1743,12 @@ class TestTaskOverrides:
 
     def test_task_overrides_json_default_empty(self, controller: WorkspaceController) -> None:
         """新建工作区默认无覆盖，taskOverridesJson 返回 '{}'。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         assert controller.taskOverridesJson(ws_id) == "{}"
 
     def test_set_task_override_use_builtin_updates_field(self, controller: WorkspaceController) -> None:
         """setTaskOverride 应更新 task_overrides 字段。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setTaskOverride(ws_id, "use_builtin", "false")
 
         overrides = json.loads(controller.taskOverridesJson(ws_id))
@@ -1793,7 +1756,7 @@ class TestTaskOverrides:
 
     def test_set_task_override_temp_rules_paths_list_to_tuple(self, controller: WorkspaceController) -> None:
         """temp_rules_paths 列表应在内部转为 tuple。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setTaskOverride(ws_id, "temp_rules_paths", '["/tmp/a.yaml", "/tmp/b.yaml"]')
 
         overrides = json.loads(controller.taskOverridesJson(ws_id))
@@ -1805,7 +1768,7 @@ class TestTaskOverrides:
 
     def test_set_task_override_rules_paths_list_to_tuple(self, controller: WorkspaceController) -> None:
         """rules_paths 列表应在内部转为 tuple，并同步 WorkspaceItem 字段。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setTaskOverride(ws_id, "rules_paths", '["/tmp/a.yaml", "/tmp/b.yaml"]')
 
         overrides = json.loads(controller.taskOverridesJson(ws_id))
@@ -1821,7 +1784,7 @@ class TestTaskOverrides:
 
     def test_set_task_override_use_builtin(self, controller: WorkspaceController) -> None:
         """use_builtin 覆盖应同步 WorkspaceItem 字段。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         # 默认 use_builtin=True（从全局快照），覆盖为 False
         controller.setTaskOverride(ws_id, "use_builtin", "false")
 
@@ -1837,7 +1800,7 @@ class TestTaskOverrides:
         controller: WorkspaceController,
     ) -> None:
         """rules_paths 非 list[str] 应被拒绝。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         # JSON 123 是 int 不是 list
         controller.setTaskOverride(ws_id, "rules_paths", "123")
 
@@ -1848,7 +1811,7 @@ class TestTaskOverrides:
         controller: WorkspaceController,
     ) -> None:
         """use_builtin 非 bool 应被拒绝。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         # JSON 字符串 "yes" 不是 bool
         controller.setTaskOverride(ws_id, "use_builtin", '"yes"')
 
@@ -1856,21 +1819,21 @@ class TestTaskOverrides:
 
     def test_set_task_override_invalid_key_noop(self, controller: WorkspaceController) -> None:
         """不允许覆盖的字段应被拒绝。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setTaskOverride(ws_id, "backup_dir", '"/custom"')
 
         assert controller.taskOverridesJson(ws_id) == "{}"
 
     def test_set_task_override_invalid_json_noop(self, controller: WorkspaceController) -> None:
         """无效 JSON 应被拒绝。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setTaskOverride(ws_id, "use_builtin", "not a json")
 
         assert controller.taskOverridesJson(ws_id) == "{}"
 
     def test_set_task_override_wrong_type_noop(self, controller: WorkspaceController) -> None:
         """类型不符应被拒绝。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         # use_builtin 应为 bool，传字符串
         controller.setTaskOverride(ws_id, "use_builtin", '"not_bool"')
 
@@ -1881,7 +1844,7 @@ class TestTaskOverrides:
         controller: WorkspaceController,
     ) -> None:
         """setTaskOverride 应同步到对应 ScanController。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setTaskOverride(ws_id, "use_builtin", "false")
 
         sc = controller._ensure_scan_controller(ws_id)  # type: ignore[attr-defined]
@@ -1891,7 +1854,7 @@ class TestTaskOverrides:
 
     def test_task_overrides_persisted(self, controller: WorkspaceController, config_dir: Path) -> None:
         """任务级覆盖应持久化到 workspaces.json。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setTaskOverride(ws_id, "use_builtin", "false")
         controller.setTaskOverride(ws_id, "rules_paths", '["/tmp/x.yaml"]')
 
@@ -1911,7 +1874,7 @@ class TestTaskOverrides:
         cfg1 = ConfigController()
         rules1 = RulesController(cfg1)
         ctrl1 = WorkspaceController(cfg1, rules1)
-        ws_id = ctrl1.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = ctrl1.addWorkspace("t", "folder", "/tmp")
         ctrl1.setTaskOverride(ws_id, "use_builtin", "false")
         ctrl1.setTaskOverride(ws_id, "rules_paths", '["/tmp/y.yaml"]')
         ctrl1.cleanup()
@@ -1952,7 +1915,7 @@ class TestScanControllerTaskOverrides:
             # 此处刷新使其读取 mocked 缓存后的内置规则集（max_workers=expected_workers）
             controller._rules_controller._reload_ruleset()  # type: ignore[attr-defined]
 
-            ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+            ws_id = controller.addWorkspace("t", "folder", "/tmp")
             controller.setCurrentWorkspaceId(ws_id)
             sc = controller.currentScanController
 
@@ -1967,7 +1930,7 @@ class TestScanControllerTaskOverrides:
         controller: WorkspaceController,
     ) -> None:
         """_effective_ignore_dirs 应返回 tuple。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
 
@@ -1978,7 +1941,7 @@ class TestScanControllerTaskOverrides:
         """_effective_max_file_size 应从规则集读取（builtin 默认）。"""
         from fuscan.config import DEFAULT_MAX_FILE_SIZE
 
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
 
@@ -1989,7 +1952,7 @@ class TestScanControllerTaskOverrides:
         controller: WorkspaceController,
     ) -> None:
         """无规则集 max_depth 配置时 _effective_max_depth 应返回 None（无限深度）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
 
@@ -2004,7 +1967,7 @@ class TestTaskOverridesJsonErrorHandling:
         controller: WorkspaceController,
     ) -> None:
         """T19：task_overrides 含非 JSON 可序列化对象时应返回 "{}" 不抛异常。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         # 直接通过 model 注入非可序列化对象（模拟外部代码污染）
         item = controller.workspaceModel.get_workspace(ws_id)
         assert item is not None
@@ -2029,7 +1992,7 @@ class TestTaskOverridesGlobalValueBehavior:
         当前实现选择「无条件存储」语义：用户显式设置的覆盖即使与全局值相同也持久化。
         这样全局值后续变化时，任务级保持用户当时的选择。
         """
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         # use_builtin 全局默认值为 True
         global_value = controller._config_controller.config.use_builtin  # type: ignore[attr-defined]
 
@@ -2052,7 +2015,7 @@ class TestClearTaskOverride:
 
     def test_clear_invalid_key_noop(self, controller: WorkspaceController) -> None:
         """非法 key（不在 TASK_OVERRIDE_KEYS 中）应被拒绝。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setTaskOverride(ws_id, "use_builtin", "false")
 
         controller.clearTaskOverride(ws_id, "backup_dir")  # backup_dir 不在允许列表
@@ -2063,7 +2026,7 @@ class TestClearTaskOverride:
 
     def test_clear_non_existing_override_noop(self, controller: WorkspaceController) -> None:
         """key 在 task_overrides 中不存在时无操作返回。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         # 未设置过任何覆盖，清除 use_builtin 应无操作
         controller.clearTaskOverride(ws_id, "use_builtin")
         assert controller.taskOverridesJson(ws_id) == "{}"
@@ -2073,7 +2036,7 @@ class TestClearTaskOverride:
         controller: WorkspaceController,
     ) -> None:
         """清除已有覆盖时应删除字段并用全局值回填 ScanController。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setTaskOverride(ws_id, "use_builtin", "false")
         # 确认覆盖已设置
         assert json.loads(controller.taskOverridesJson(ws_id)) == {"use_builtin": False}
@@ -2097,7 +2060,7 @@ class TestClearTaskOverride:
         cfg1 = ConfigController()
         rules1 = RulesController(cfg1)
         ctrl1 = WorkspaceController(cfg1, rules1)
-        ws_id = ctrl1.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = ctrl1.addWorkspace("t", "folder", "/tmp")
         ctrl1.setTaskOverride(ws_id, "use_builtin", "false")
         ctrl1.clearTaskOverride(ws_id, "use_builtin")
 
@@ -2109,7 +2072,7 @@ class TestClearTaskOverride:
 
     def test_clear_rules_paths_backfills_global(self, controller: WorkspaceController) -> None:
         """清除 rules_paths 覆盖应回填全局值到 WorkspaceItem 与 ScanController。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setTaskOverride(ws_id, "rules_paths", '["/tmp/x.yaml"]')
         item = controller.get_workspace(ws_id)  # type: ignore[attr-defined]
         assert item is not None
@@ -2129,7 +2092,7 @@ class TestClearTaskOverride:
 
     def test_clear_use_builtin_backfills_global(self, controller: WorkspaceController) -> None:
         """清除 use_builtin 覆盖应回填全局值到 WorkspaceItem。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setTaskOverride(ws_id, "use_builtin", "false")
         item = controller.get_workspace(ws_id)  # type: ignore[attr-defined]
         assert item is not None
@@ -2225,7 +2188,7 @@ class TestScanControllerOverrideSyncContract:
         直接调 ScanController.setTaskOverride 仅影响运行时扫描行为，
         不会持久化也不会更新 WorkspaceItem。
         """
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         item = controller.workspaceModel.get_workspace(ws_id)
@@ -2248,13 +2211,13 @@ class TestWorkspaceHistorySlots:
 
     def test_workspace_history_json_empty(self, controller: WorkspaceController) -> None:
         """无历史时返回 ``"[]"``。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         result = controller.workspaceHistoryJson(ws_id)
         assert result == "[]"
 
     def test_compare_with_previous_scan_empty(self, controller: WorkspaceController) -> None:
         """无历史时对比槽返回 ``"{}"``。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         result = controller.compareWithPreviousScan(ws_id)
         assert result == "{}"
 
@@ -2263,7 +2226,7 @@ class TestWorkspaceHistorySlots:
         controller: WorkspaceController,
     ) -> None:
         """无历史时清空返回 0。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         assert controller.clearWorkspaceHistory(ws_id) == 0
 
     def test_workspace_history_json_after_manual_archive(
@@ -2271,7 +2234,7 @@ class TestWorkspaceHistorySlots:
         controller: WorkspaceController,
     ) -> None:
         """手动注入历史条目后 ``workspaceHistoryJson`` 应返回 JSON 数组。"""
-        ws_id = controller.addWorkspace("任务A", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("任务A", "folder", "/tmp")
         # 直接通过底层 store 注入两条历史
         from fuscan.history import ScanHistoryEntry
 
@@ -2314,7 +2277,7 @@ class TestWorkspaceHistorySlots:
         controller: WorkspaceController,
     ) -> None:
         """两次扫描后对比槽应返回 trend/summary/new_hits 等字段。"""
-        ws_id = controller.addWorkspace("任务B", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("任务B", "folder", "/tmp")
         from fuscan.history import ScanHistoryEntry
 
         controller._history_store.add(  # type: ignore[attr-defined]
@@ -2357,7 +2320,7 @@ class TestWorkspaceHistorySlots:
         controller: WorkspaceController,
     ) -> None:
         """仅一次扫描时 previous 为 ``None``，trend 为「首次」。"""
-        ws_id = controller.addWorkspace("任务C", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("任务C", "folder", "/tmp")
         from fuscan.history import ScanHistoryEntry
 
         controller._history_store.add(  # type: ignore[attr-defined]
@@ -2382,7 +2345,7 @@ class TestWorkspaceHistorySlots:
         controller: WorkspaceController,
     ) -> None:
         """清空历史后 ``workspaceHistoryJson`` 返回 ``"[]"``。"""
-        ws_id = controller.addWorkspace("任务D", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("任务D", "folder", "/tmp")
         from fuscan.history import ScanHistoryEntry
 
         controller._history_store.add(  # type: ignore[attr-defined]
@@ -2411,7 +2374,7 @@ class TestWorkspaceHistorySlots:
         controller: WorkspaceController,
     ) -> None:
         """移除工作区应同时清理对应历史。"""
-        ws_id = controller.addWorkspace("任务E", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("任务E", "folder", "/tmp")
         from fuscan.history import ScanHistoryEntry
 
         controller._history_store.add(  # type: ignore[attr-defined]
@@ -2443,7 +2406,7 @@ class TestWorkspaceHistorySlots:
         controller: WorkspaceController,
     ) -> None:
         """ScanController 无 ``_last_report`` 时归档跳过（不抛异常）。"""
-        ws_id = controller.addWorkspace("任务F", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("任务F", "folder", "/tmp")
         sc = controller.currentScanController
         # ScanController._last_report 默认 None
         controller._archive_scan_history(ws_id, sc)  # type: ignore[attr-defined]
@@ -2452,7 +2415,7 @@ class TestWorkspaceHistorySlots:
 
     def test_scan_trend_json_empty(self, controller: WorkspaceController) -> None:
         """无历史时趋势槽返回 ``"[]"``。"""
-        ws_id = controller.addWorkspace("任务G", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("任务G", "folder", "/tmp")
         assert controller.scanTrendJson(ws_id) == "[]"
 
     def test_scan_trend_json_chronological_order(
@@ -2460,7 +2423,7 @@ class TestWorkspaceHistorySlots:
         controller: WorkspaceController,
     ) -> None:
         """趋势槽返回按时间正序的命中数序列（最旧在前）。"""
-        ws_id = controller.addWorkspace("任务H", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("任务H", "folder", "/tmp")
         from fuscan.history import ScanHistoryEntry
 
         controller._history_store.add(  # type: ignore[attr-defined]
@@ -2493,7 +2456,7 @@ class TestWorkspaceHistorySlots:
         controller: WorkspaceController,
     ) -> None:
         """任意两次对比槽应按 scan_id 定位并返回对比结果。"""
-        ws_id = controller.addWorkspace("任务I", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("任务I", "folder", "/tmp")
         from fuscan.history import ScanHistoryEntry
 
         controller._history_store.add(  # type: ignore[attr-defined]
@@ -2531,7 +2494,7 @@ class TestWorkspaceHistorySlots:
         controller: WorkspaceController,
     ) -> None:
         """两次 scan_id 相同时对比槽返回 ``"{}"``。"""
-        ws_id = controller.addWorkspace("任务J", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("任务J", "folder", "/tmp")
         from fuscan.history import ScanHistoryEntry
 
         controller._history_store.add(  # type: ignore[attr-defined]
@@ -2549,7 +2512,7 @@ class TestWorkspaceHistorySlots:
         controller: WorkspaceController,
     ) -> None:
         """任一 scan_id 未找到时对比槽返回 ``"{}"``。"""
-        ws_id = controller.addWorkspace("任务K", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("任务K", "folder", "/tmp")
         from fuscan.history import ScanHistoryEntry
 
         controller._history_store.add(  # type: ignore[attr-defined]
@@ -2596,7 +2559,7 @@ class TestSaveCachedResults:
         config_dir: Path,
     ) -> None:
         """保存时应自动创建 ``results/`` 目录。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         sc = controller.currentScanController
         # results 目录不应预先存在
         assert not (config_dir / "results").exists()
@@ -2613,7 +2576,7 @@ class TestSaveCachedResults:
         config_dir: Path,
     ) -> None:
         """ScanController 无 _last_report 时跳过保存（不创建文件）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         sc = controller.currentScanController
         # 默认 _last_report 为 None
         controller._save_cached_results(ws_id, sc)  # type: ignore[attr-defined]
@@ -2626,7 +2589,7 @@ class TestSaveCachedResults:
         config_dir: Path,
     ) -> None:
         """保存的文件应为合法 JSON，含 root 与 hits 字段。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         sc = controller.currentScanController
         report = _build_simple_report()
         sc._last_report = report  # type: ignore[attr-defined]
@@ -2644,7 +2607,7 @@ class TestSaveCachedResults:
         config_dir: Path,
     ) -> None:
         """iter-135：本次无命中但缓存已有非空结果时不覆盖。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         sc = controller.currentScanController
         # 先保存有命中的结果
         sc._last_report = _build_simple_report()  # type: ignore[attr-defined]
@@ -2680,7 +2643,7 @@ class TestLoadCachedResults:
         qapp: object,
     ) -> None:
         """异步加载缓存后 ScanController 恢复 _last_report 与 result_model。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
 
@@ -2711,7 +2674,7 @@ class TestLoadCachedResults:
         qapp: object,
     ) -> None:
         """无缓存文件时静默跳过（不抛异常）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         sc = controller.currentScanController
         # 不创建缓存文件
         controller._try_load_cached_results(ws_id)  # type: ignore[attr-defined]
@@ -2727,7 +2690,7 @@ class TestLoadCachedResults:
         qapp: object,
     ) -> None:
         """缓存文件损坏时静默跳过（不抛异常）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         # 写入损坏的 JSON
         results_dir = config_dir / "results"
         results_dir.mkdir(parents=True, exist_ok=True)
@@ -2749,7 +2712,7 @@ class TestLoadCachedResults:
         qapp: object,
     ) -> None:
         """完整重启场景：保存缓存 → 重建 WorkspaceController → 后台恢复缓存。"""
-        ws_id = controller.addWorkspace("任务A", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("任务A", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         sc = controller.currentScanController
         report = _build_simple_report()
@@ -2786,7 +2749,7 @@ class TestDeleteCachedResults:
         config_dir: Path,
     ) -> None:
         """删除工作区时应清理对应缓存文件。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         sc = controller.currentScanController
         sc._last_report = _build_simple_report()  # type: ignore[attr-defined]
         controller._save_cached_results(ws_id, sc)  # type: ignore[attr-defined]
@@ -2811,7 +2774,7 @@ class TestDeleteCachedResults:
         config_dir: Path,
     ) -> None:
         """removeWorkspace 应同时清理缓存结果文件。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         sc = controller.currentScanController
         sc._last_report = _build_simple_report()  # type: ignore[attr-defined]
         controller._save_cached_results(ws_id, sc)  # type: ignore[attr-defined]
@@ -2878,7 +2841,7 @@ class TestIter143CoverageGaps:
         controller: WorkspaceController,
     ) -> None:
         """controller.get_workspace 返回 WorkspaceItem 或 None（iter-143 覆盖行 570）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         item = controller.get_workspace(ws_id)
         assert item is not None
         assert item.workspace_id == ws_id
@@ -2892,7 +2855,7 @@ class TestIter143CoverageGaps:
     ) -> None:
         """_ensure_scan_controller 返回 None 时 currentScanController 返回 fallback（iter-143 覆盖 213->218）。"""
         # 设置一个 _current_workspace_id 但 mock _ensure_scan_controller 返回 None
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setCurrentWorkspaceId(ws_id)
         # mock _ensure_scan_controller 返回 None（模拟工作区刚被移除但 ID 仍保留）
         monkeypatch.setattr(controller, "_ensure_scan_controller", lambda _wid: None)
@@ -2907,7 +2870,7 @@ class TestIter143CoverageGaps:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """ScanController 初始化抛异常时应 cleanup+deleteLater+raise（iter-143 覆盖 429-433）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         # 移除已创建的 ScanController，强制下次 _ensure_scan_controller 重新创建
         existing = controller._scan_controllers.pop(ws_id, None)  # type: ignore[attr-defined]
         if existing is not None:
@@ -2952,7 +2915,7 @@ class TestIter143CoverageGaps:
         controller: WorkspaceController,
     ) -> None:
         """removeWorkspace 时 _scan_controllers 中无对应项应安全跳过（iter-143 覆盖 443->446）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         # addWorkspace 已创建 ScanController，手动移除模拟"未创建"场景
         existing = controller._scan_controllers.pop(ws_id, None)  # type: ignore[attr-defined]
         if existing is not None:
@@ -2976,7 +2939,7 @@ class TestIter143CoverageGaps:
         controller: WorkspaceController,
     ) -> None:
         """updateWorkspaceTarget 时 ScanController 未创建应安全跳过（iter-143 覆盖 554->561）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         # addWorkspace 已创建 ScanController，手动移除模拟"未创建"场景
         existing = controller._scan_controllers.pop(ws_id, None)  # type: ignore[attr-defined]
         if existing is not None:
@@ -3008,7 +2971,7 @@ class TestIter143CoverageGaps:
         controller: WorkspaceController,
     ) -> None:
         """workspaceName 存在的工作区返回其名称。"""
-        ws_id = controller.addWorkspace("我的任务", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("我的任务", "folder", "/tmp")
         assert controller.workspaceName(ws_id) == "我的任务"
 
     def test_set_task_override_when_controller_not_created(
@@ -3016,7 +2979,7 @@ class TestIter143CoverageGaps:
         controller: WorkspaceController,
     ) -> None:
         """setTaskOverride 时 ScanController 未创建应安全跳过同步（iter-143 覆盖 640->642）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         # addWorkspace 已创建 ScanController，手动移除模拟"未创建"场景
         existing = controller._scan_controllers.pop(ws_id, None)  # type: ignore[attr-defined]
         if existing is not None:
@@ -3034,7 +2997,7 @@ class TestIter143CoverageGaps:
         controller: WorkspaceController,
     ) -> None:
         """clearTaskOverride 时 ScanController 未创建应安全跳过（iter-143 覆盖 668->672）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         # 先设置覆盖（会创建 ScanController）
         controller.setTaskOverride(ws_id, "use_builtin", "false")
         # 手动移除 ScanController 模拟"未创建"场景
@@ -3054,7 +3017,7 @@ class TestIter143CoverageGaps:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """clearTaskOverride 时 global_value is None 应跳过 setTaskOverride（iter-143 覆盖 670->672）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         controller.setTaskOverride(ws_id, "use_builtin", "false")
         # 创建 ScanController（通过访问 currentScanController 触发延迟构造）
         _ = controller.currentScanController
@@ -3100,7 +3063,7 @@ class TestIter143CoverageGaps:
         config_dir: Path,
     ) -> None:
         """cleanup 时 _restore_workers 中有运行中 worker 应 quit+wait+terminate（iter-143 覆盖 811-816）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
 
         class FakeRestoreWorker:
             def __init__(self) -> None:
@@ -3281,7 +3244,7 @@ class TestIter143CoverageGaps:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """_try_load_cached_results 时 controller is None 应安全返回（iter-143 覆盖行 1020）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         # 创建 cache 文件使其存在
         cache_file = config_dir / "results" / f"{ws_id}.json"
         cache_file.parent.mkdir(parents=True, exist_ok=True)
@@ -3312,7 +3275,7 @@ class TestIter143CoverageGaps:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """_on_restore_done 时 report 不是 ScanReport 应安全跳过 restoreFromReport（iter-143 覆盖 1038->1042）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         sc = controller.currentScanController  # 创建 ScanController
         restore_called: list[bool] = []
         monkeypatch.setattr(sc, "restoreFromReport", lambda _report: restore_called.append(True))
@@ -3352,7 +3315,7 @@ class TestIter143CoverageGaps:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """_archive_scan_history 时 build_history_entry 抛异常应记录 warning 不传播（iter-143 覆盖 1077-1079）。"""
-        ws_id = controller.addWorkspace("t", "folder", "/tmp", "[]", True)
+        ws_id = controller.addWorkspace("t", "folder", "/tmp")
         sc = controller.currentScanController
 
         # mock build_history_entry 抛异常

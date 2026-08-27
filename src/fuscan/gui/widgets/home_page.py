@@ -1042,7 +1042,7 @@ class HomePage(QWidget):
 
     def _add_drive_workspace(self, letter: str) -> None:
         """一键创建盘符扫描任务。"""
-        self._wc.addWorkspace("", "drive", letter, "[]", True)
+        self._wc.addWorkspace("", "drive", letter)
 
     def _on_progress_pause(self) -> None:
         """进度面板暂停/继续。"""

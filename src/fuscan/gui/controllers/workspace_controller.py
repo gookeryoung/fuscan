@@ -285,30 +285,19 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
 
     # ----------------------------- 视图调用槽 -----------------------------
 
-    @Slot(str, str, str, str, bool, result=str)  # pyrefly: ignore [not-callable]
-    def addWorkspace(
-        self,
-        name: str,
-        mode_str: str,
-        target: str,
-        rules_paths_json: str,  # noqa: ARG002 废弃参数，保留以兼容 视图 调用签名
-        use_builtin: bool,  # noqa: ARG002 废弃参数，保留以兼容 视图 调用签名
-    ) -> str:
+    @Slot(str, str, str, result=str)  # pyrefly: ignore [not-callable]
+    def addWorkspace(self, name: str, mode_str: str, target: str) -> str:
         """新建工作区。
 
         :param name: 工作区名称（空串时自动生成）
         :param mode_str: 扫描模式字符串（``"drive"``/``"folder"``/``"file"``）
         :param target: 扫描目标（盘符、文件夹或文件路径）
-        :param rules_paths_json: 已废弃（规则全局化），保留向后兼容
-        :param use_builtin: 已废弃（规则全局化），保留向后兼容
         :return: 新工作区 ID（``"ws-<8位hex>"`` 格式）
 
         规则配置全局化——所有工作区共享同一规则集，扫描时直接读
         全局 :class:`RulesController`。新工作区的 ``rules_paths``/
         ``use_builtin`` 字段从全局 :class:`RulesController` 同步，使
         :attr:`WorkspaceItem.rules_tags` 标签反映实际扫描时使用的规则。
-        ``rules_paths_json`` 与 ``use_builtin`` 参数保留仅为向后兼容，
-        实际值从全局读取。
         """
         ws_id = f"ws-{secrets.token_hex(4)}"
         # 从全局 RulesController 读取规则配置快照
@@ -347,7 +336,7 @@ class WorkspaceController(QObject):  # pyrefly: ignore [invalid-inheritance]
             return ""
         # 任务名取末段名；根目录等无 name 时由 addWorkspace 内部回退为「任务 N」
         name = path.name or ""
-        return self.addWorkspace(name, mode_str, str(path), "[]", True)
+        return self.addWorkspace(name, mode_str, str(path))
 
     @Slot("QVariantList", result=int)  # pyrefly: ignore [not-callable]
     def addWorkspacesFromPaths(self, paths: list[object]) -> int:
